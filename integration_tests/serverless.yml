@@ -12,8 +12,8 @@ service: integration-tests-lambda-extension
 #      - 'application/x-protobuf'
 # -------------------------------------------------------------------------------------------
 
-resources:
-    Description: "[Serverless] Integration tests application for lambda extension"
+#resources:
+#    Description: "[Serverless] Integration tests application for lambda extension"
 
 provider:
   name: aws
@@ -42,10 +42,10 @@ functions:
       - http:
           path: metricTest
           method: get
-    layers:
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
-    environment:
-      DD_ENHANCED_METRICS: true
+    #layers:
+    #  - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+    #  - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+    #environment:
+    #  DD_ENHANCED_METRICS: true
 
  
