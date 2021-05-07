@@ -36,4 +36,4 @@ jobs:
         working-directory: ./integration_tests/
         run: yarn install
       - name: Run tests
-        run: ./integration_test/run.sh
+        run: ./integration_tests/run.sh
