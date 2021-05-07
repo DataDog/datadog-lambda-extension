@@ -7,7 +7,7 @@ async function myHandler(event, context) {
   invocationCount += 1;
   return {
     statusCode: 200,
-    body: 'hello, dog!'
+    body: 'ok'
   };
 }
 
