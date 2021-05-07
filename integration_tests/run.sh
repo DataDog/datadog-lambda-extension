@@ -33,7 +33,7 @@ trap remove_stack EXIT
 
 # deploying the stack
 LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
-#serverless deploy --stage ${stage}
+serverless deploy --stage ${stage}
 
 # invoking functions
 function_names=("enhancedMetricTest")
@@ -49,7 +49,6 @@ retry_counter=0
 while [ $retry_counter -lt 10 ]; do
     raw_logs=$(LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} serverless logs --stage ${stage} -f $sketchesFunctionName)
     fetch_logs_exit_code=$?
-    echo fetch_logs_exit_code
     if [ $fetch_logs_exit_code -eq 1 ]; then
         echo "Retrying fetch logs for $sketchesFunctionName..."
         retry_counter=$(($retry_counter + 1))
