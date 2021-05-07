@@ -4,8 +4,8 @@ service: integration-tests-lambda-extension
 # this is required to make sure that API Gateway is NOT trying to encode the payload in UTF8
 # which makes the unmarshalling of protobuf impossible
 # API Gateway will watch for this content-type and base64 encode the binary payload
-plugins:
-  - serverless-apigw-binary 
+#plugins:
+#  - serverless-apigw-binary 
 #custom:
 #  apigwBinary:
 #    types:           
