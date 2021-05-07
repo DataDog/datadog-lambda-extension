@@ -6,10 +6,10 @@ service: integration-tests-lambda-extension
 # API Gateway will watch for this content-type and base64 encode the binary payload
 plugins:
   - serverless-apigw-binary 
-custom:
-  apigwBinary:
-    types:           
-      - 'application/x-protobuf'
+#custom:
+#  apigwBinary:
+#    types:           
+#      - 'application/x-protobuf'
 # -------------------------------------------------------------------------------------------
 
 resources:

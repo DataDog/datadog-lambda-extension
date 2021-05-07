@@ -2,6 +2,8 @@
 
 LOGS_WAIT_SECONDS=20
 
+set -e
+
 sketchesFunctionName="sketches"
 metricFunctionName="metricTest"
 
@@ -38,6 +40,7 @@ serverless deploy --stage ${stage}
 # invoking functions
 function_names=("enhancedMetricTest")
 
+set +e # Don't exit this script if an invocation fails or there's a diff
 echo "Invoking ${metricFunctionName} on ${stage}"
 LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
 serverless invoke --stage ${stage} -f ${metricFunctionName}
@@ -66,6 +69,8 @@ echo $raw_logs > file
 cat file
 
 diff_output=$(cat file | grep "sketches" | diff -w - <(sort $function_snapshot_path))
+
+set -e
 if [ $? -eq 1 ]; then
     echo "Failed: Mismatch found between new $function_name logs (first) and snapshot (second):"
     echo "$diff_output"
