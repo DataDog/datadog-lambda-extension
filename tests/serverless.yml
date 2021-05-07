@@ -24,7 +24,7 @@ provider:
         - "lambda:InvokeFunction"
       Resource: "*"
   environment:
-    DD_API_KEY: ${env:DD_API_KEY}
+    DD_API_KEY: NO_NEED_TO_BE_VALID
     DD_LOG_LEVEL: DEBUG
     DD_LOGS_INJECTION: true
     DD_LOGGING_FREQUENCY: 1
@@ -42,33 +42,19 @@ provider:
     DD_DD_URL: https://gigjma0tkk.execute-api.sa-east-1.amazonaws.com/dev/debug-nodejs-12-x
 
 functions:
-  node:
+  #actual testing function
+  metricTests:
     runtime: nodejs12.x
-    handler: handler.hello
+    handler: handler.metricTest
     events:
       - http:
           path: hello-nodejs-12-x
           method: get
     layers:
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${opt:layer-version}
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${opt:ext-version}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:NODE_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
   
-  check_run:
-    runtime: nodejs12.x
-    handler: handlerDebug.dummy200
-    events:
-      - http:
-          path: integration-testing/api/v1/check_run
-          method: POST
-
-  series:
-    runtime: nodejs12.x
-    handler: handlerDebug.dummy200
-    events:
-      - http:
-          path: integration-testing/api/v1/series
-          method: POST
-
+  #function which plays the man-in-the middle role
   sketches:
     runtime: go1.x
     handler: bin/sketches
@@ -76,3 +62,21 @@ functions:
       - http:
           path: integration-testing/api/beta/sketches
           method: POST
+
+  #helpers function to mock other usefull endpoints (will return 200 OK in 100%)
+  check_run:
+    runtime: go1.x
+    handler: bin/alwaysOK
+    events:
+      - http:
+          path: integration-testing/api/v1/check_run
+          method: POST
+  series:
+    runtime: go1.x
+    handler: bin/alwaysOK
+    events:
+      - http:
+          path: integration-testing/api/v1/series
+          method: POST
+
+#NODE_LAYER_VERSION=24 EXTENSION_VERSION=71 aws-vault exec sandbox-account-admin -- sls deploy
