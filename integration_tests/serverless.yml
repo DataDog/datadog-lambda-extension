@@ -1,0 +1,93 @@
+service: integration-tests-lambda-extension
+
+# -------------------------------------------------------------------------------------------
+# this is required to make sure that API Gateway is NOT trying to encode the payload in UTF8
+# which makes the unmarshalling of protobuf impossible
+# API Gateway will watch for this content-type and base64 encode the binary payload
+plugins:
+  - serverless-apigw-binary 
+custom:
+  apigwBinary:
+    types:           
+      - 'application/x-protobuf'
+# -------------------------------------------------------------------------------------------
+
+resources:
+    Description: "[Serverless] Integration tests application for lambda extension"
+
+provider:
+  name: aws
+  lambdaHashingVersion: 20201221
+  tracing:
+    lambda: false
+    apiGateway: false
+  memorySize: 256
+  region: sa-east-1
+  timeout: 900
+  iam:
+    role:
+      statements:
+        - Effect: "Allow"
+          Action:
+            - "lambda:InvokeFunction"
+          Resource: "*"
+  environment:
+    DD_API_KEY: NO_NEED_TO_BE_VALID
+    DD_LOG_LEVEL: DEBUG
+
+functions:
+  #actual testing functions
+  metricTest:
+    name: integration-tests-lambda-extension-${sls:stage}-metricTest
+    runtime: nodejs12.x
+    handler: src/metric.metricTest
+    events:
+      - http:
+          path: metricTest
+          method: get
+    layers:
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+    environment:
+      DD_DD_URL:
+        !Join
+          - ''
+          - - 'https://'
+            - !Ref ApiGatewayRestApi
+            - '.execute-api.'
+            - ${opt:region, self:provider.region}
+            - '.amazonaws.com/'
+            - ${opt:stage, self:provider.stage}
+      DD_ENHANCED_METRICS: true
+
+  #function which plays the man-in-the middle role
+  sketches:
+    name: integration-tests-lambda-extension-${sls:stage}-sketches
+    runtime: go1.x
+    handler: bin/sketches
+    events:
+      - http:
+          path: api/beta/sketches
+          method: POST
+
+  #helpers function to mock other usefull endpoints (will return 200 OK in 100%)
+  checkRun:
+    name: integration-tests-lambda-extension-${sls:stage}-checkRun
+    runtime: go1.x
+    handler: bin/alwaysOK
+    events:
+      - http:
+          path: api/v1/check_run
+          method: POST
+  series:
+    name: integration-tests-lambda-extension-${sls:stage}-series
+    runtime: go1.x
+    handler: bin/alwaysOK
+    events:
+      - http:
+          path: api/v1/series
+          method: POST
+
+#NODE_LAYER_VERSION=24 EXTENSION_VERSION=71 aws-vault exec sandbox-account-admin -- sls deploy
+
+
