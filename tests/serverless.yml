@@ -1,0 +1,78 @@
+service: serverless-lambda-extension-integration-tests
+
+# this is required to make sure that API Gateway is NOT trying to encode the payload in UTF8
+# which makes the unmarshalling of protobuf impossible
+# API Gateway will watch for this content-type and base64 encode the binary payload
+plugins:
+  - serverless-apigw-binary 
+custom:
+  apigwBinary:
+    types:           
+      - 'application/x-protobuf'
+
+provider:
+  name: aws
+  tracing:
+    lambda: false
+    apiGateway: false
+  memorySize: 256
+  region: sa-east-1
+  timeout: 900
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "lambda:InvokeFunction"
+      Resource: "*"
+  environment:
+    DD_API_KEY: ${env:DD_API_KEY}
+    DD_LOG_LEVEL: DEBUG
+    DD_LOGS_INJECTION: true
+    DD_LOGGING_FREQUENCY: 1
+    DD_LOGS_ENABLED: true
+    DD_FLUSH_TO_LOG: false
+    DD_ENHANCED_METRICS: true
+    DD_MERGE_XRAY_TRACES: false
+    DD_TRACING: true
+    DD_ENV: sandbox
+    DD_LOGS_CONFIG_LOGS_DD_URL: https://gigjma0tkk.execute-api.sa-east-1.amazonaws.com/dev/debug-nodejs-12-x
+    DD_LOGS_CONFIG_LOGS_NO_SSL: "true"
+    DD_LOGS_CONFIG_USE_HTTP: "true"
+    DD_TRACE_AGENT_URL: https://gigjma0tkk.execute-api.sa-east-1.amazonaws.com/dev/debug-nodejs-12-x
+    DD_SITE: https://gigjma0tkk.execute-api.sa-east-1.amazonaws.com/dev/debug-nodejs-12-x
+    DD_DD_URL: https://gigjma0tkk.execute-api.sa-east-1.amazonaws.com/dev/debug-nodejs-12-x
+
+functions:
+  node:
+    runtime: nodejs12.x
+    handler: handler.hello
+    events:
+      - http:
+          path: hello-nodejs-12-x
+          method: get
+    layers:
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${opt:layer-version}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${opt:ext-version}
+  
+  check_run:
+    runtime: nodejs12.x
+    handler: handlerDebug.dummy200
+    events:
+      - http:
+          path: integration-testing/api/v1/check_run
+          method: POST
+
+  series:
+    runtime: nodejs12.x
+    handler: handlerDebug.dummy200
+    events:
+      - http:
+          path: integration-testing/api/v1/series
+          method: POST
+
+  sketches:
+    runtime: go1.x
+    handler: bin/sketches
+    events:
+      - http:
+          path: integration-testing/api/beta/sketches
+          method: POST
