@@ -36,4 +36,4 @@ jobs:
         working-directory: ./integration_tests/
         run: yarn install
       - name: Run tests
-        run: ./integration_tests/run.sh
+        run: LAYER_VERSION=24 EXTENSION_VERSION=60 ./integration_tests/run.sh
