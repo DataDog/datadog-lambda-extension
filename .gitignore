@@ -1,2 +1,3 @@
+tests/.serverless
 tests/bin
 tests/node_modules

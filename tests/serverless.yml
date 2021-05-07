@@ -5,7 +5,7 @@ service: integration-tests-lambda-extension
 # which makes the unmarshalling of protobuf impossible
 # API Gateway will watch for this content-type and base64 encode the binary payload
 plugins:
-  - serverless-apigw-binary
+  - serverless-apigw-binary 
 custom:
   apigwBinary:
     types:           
@@ -31,28 +31,9 @@ provider:
   environment:
     DD_API_KEY: NO_NEED_TO_BE_VALID
     DD_LOG_LEVEL: DEBUG
-    #DD_LOGS_INJECTION: true
-    #DD_LOGGING_FREQUENCY: 1
-    #DD_LOGS_ENABLED: true
-    #DD_FLUSH_TO_LOG: false
-    
-    #DD_MERGE_XRAY_TRACES: false
-    #DD_TRACING: true
-    #DD_ENV: sandbox
-    #DD_LOGS_CONFIG_LOGS_NO_SSL: "true"
-    #DD_LOGS_CONFIG_USE_HTTP: "true"
-    DD_DD_URL:
-      !Join
-          - ''
-          - - 'https://'
-            - !Ref ApiGatewayRestApi
-            - '.execute-api.'
-            - ${opt:region, self:provider.region}
-            - '.amazonaws.com/'
-            - ${opt:stage, self:provider.stage}
 
 functions:
-  #actual testing function
+  #actual testing functions
   enhancedMetricTest:
     runtime: nodejs12.x
     handler: src/metric.metricTest
@@ -64,7 +45,39 @@ functions:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:NODE_LAYER_VERSION}
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
     environment:
+      DD_DD_URL:
+        !Join
+          - ''
+          - - 'https://'
+            - !Ref ApiGatewayRestApi
+            - '.execute-api.'
+            - ${opt:region, self:provider.region}
+            - '.amazonaws.com/'
+            - ${opt:stage, self:provider.stage}
       DD_ENHANCED_METRICS: true
+
+  #actual testing functions
+  metricTest:
+    runtime: nodejs12.x
+    handler: src/metric.metricTest
+    events:
+      - http:
+          path: metricTest
+          method: get
+    layers:
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:NODE_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+    environment:
+      DD_DD_URL:
+        !Join
+          - ''
+          - - 'https://'
+            - !Ref ApiGatewayRestApi
+            - '.execute-api.'
+            - ${opt:region, self:provider.region}
+            - '.amazonaws.com/'
+            - ${opt:stage, self:provider.stage}
+      DD_ENHANCED_METRICS: false
   
   #function which plays the man-in-the middle role
   sketches:
@@ -92,3 +105,5 @@ functions:
           method: POST
 
 #NODE_LAYER_VERSION=24 EXTENSION_VERSION=71 aws-vault exec sandbox-account-admin -- sls deploy
+
+

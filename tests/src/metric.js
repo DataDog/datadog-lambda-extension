@@ -1,12 +1,14 @@
-const { sendDistributionMetric } = require("datadog-lambda-js");
+const { datadog, sendDistributionMetric } = require("datadog-lambda-js");
 
 let invocationCount = 0;
-    
-exports.metricTest = (_, __, callback) => {
-    sendDistributionMetric("serverless.lambda-extension.integration-test.count", invocationCount);
-    invocationCount += 1;
-    callback(null, {
-        statusCode: 200, 
-        body: "ok"
-    });
-};
+
+async function myHandler(event, context) {
+  sendDistributionMetric("serverless.lambda-extension.integration-test.count", invocationCount);
+  invocationCount += 1;
+  return {
+    statusCode: 200,
+    body: 'hello, dog!'
+  };
+}
+
+module.exports.metricTest = datadog(myHandler);

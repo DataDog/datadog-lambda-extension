@@ -77,6 +77,12 @@
         "LogGroupName": "/aws/lambda/integration-tests-lambda-extension-dev-enhancedMetricTest"
       }
     },
+    "MetricTestLogGroup": {
+      "Type": "AWS::Logs::LogGroup",
+      "Properties": {
+        "LogGroupName": "/aws/lambda/integration-tests-lambda-extension-dev-metricTest"
+      }
+    },
     "SketchesLogGroup": {
       "Type": "AWS::Logs::LogGroup",
       "Properties": {
@@ -186,7 +192,7 @@
           "S3Bucket": {
             "Ref": "ServerlessDeploymentBucket"
           },
-          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620399865857-2021-05-07T15:04:25.857Z/integration-tests-lambda-extension.zip"
+          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620404174832-2021-05-07T16:16:14.832Z/integration-tests-lambda-extension.zip"
         },
         "Handler": "src/metric.metricTest",
         "Runtime": "nodejs12.x",
@@ -223,25 +229,25 @@
         },
         "Layers": [
           "arn:aws:lambda:sa-east-1:601427279990:layer:Datadog-Node12-x:24",
-          "arn:aws:lambda:sa-east-1:601427279990:layer:Datadog-Extension:71"
+          "arn:aws:lambda:sa-east-1:601427279990:layer:Datadog-Extension:60"
         ]
       },
       "DependsOn": [
         "EnhancedMetricTestLogGroup"
       ]
     },
-    "SketchesLambdaFunction": {
+    "MetricTestLambdaFunction": {
       "Type": "AWS::Lambda::Function",
       "Properties": {
         "Code": {
           "S3Bucket": {
             "Ref": "ServerlessDeploymentBucket"
           },
-          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620399865857-2021-05-07T15:04:25.857Z/integration-tests-lambda-extension.zip"
+          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620404174832-2021-05-07T16:16:14.832Z/integration-tests-lambda-extension.zip"
         },
-        "Handler": "bin/sketches",
-        "Runtime": "go1.x",
-        "FunctionName": "integration-tests-lambda-extension-dev-sketches",
+        "Handler": "src/metric.metricTest",
+        "Runtime": "nodejs12.x",
+        "FunctionName": "integration-tests-lambda-extension-dev-metricTest",
         "MemorySize": 256,
         "Timeout": 900,
         "Environment": {
@@ -262,7 +268,43 @@
                   "dev"
                 ]
               ]
-            }
+            },
+            "DD_ENHANCED_METRICS": "false"
+          }
+        },
+        "Role": {
+          "Fn::GetAtt": [
+            "IamRoleLambdaExecution",
+            "Arn"
+          ]
+        },
+        "Layers": [
+          "arn:aws:lambda:sa-east-1:601427279990:layer:Datadog-Node12-x:24",
+          "arn:aws:lambda:sa-east-1:601427279990:layer:Datadog-Extension:60"
+        ]
+      },
+      "DependsOn": [
+        "MetricTestLogGroup"
+      ]
+    },
+    "SketchesLambdaFunction": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Code": {
+          "S3Bucket": {
+            "Ref": "ServerlessDeploymentBucket"
+          },
+          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620404174832-2021-05-07T16:16:14.832Z/integration-tests-lambda-extension.zip"
+        },
+        "Handler": "bin/sketches",
+        "Runtime": "go1.x",
+        "FunctionName": "integration-tests-lambda-extension-dev-sketches",
+        "MemorySize": 256,
+        "Timeout": 900,
+        "Environment": {
+          "Variables": {
+            "DD_API_KEY": "NO_NEED_TO_BE_VALID",
+            "DD_LOG_LEVEL": "DEBUG"
           }
         },
         "Role": {
@@ -283,7 +325,7 @@
           "S3Bucket": {
             "Ref": "ServerlessDeploymentBucket"
           },
-          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620399865857-2021-05-07T15:04:25.857Z/integration-tests-lambda-extension.zip"
+          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620404174832-2021-05-07T16:16:14.832Z/integration-tests-lambda-extension.zip"
         },
         "Handler": "bin/alwaysOK",
         "Runtime": "go1.x",
@@ -293,22 +335,7 @@
         "Environment": {
           "Variables": {
             "DD_API_KEY": "NO_NEED_TO_BE_VALID",
-            "DD_LOG_LEVEL": "DEBUG",
-            "DD_DD_URL": {
-              "Fn::Join": [
-                "",
-                [
-                  "https://",
-                  {
-                    "Ref": "ApiGatewayRestApi"
-                  },
-                  ".execute-api.",
-                  "sa-east-1",
-                  ".amazonaws.com/",
-                  "dev"
-                ]
-              ]
-            }
+            "DD_LOG_LEVEL": "DEBUG"
           }
         },
         "Role": {
@@ -329,7 +356,7 @@
           "S3Bucket": {
             "Ref": "ServerlessDeploymentBucket"
           },
-          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620399865857-2021-05-07T15:04:25.857Z/integration-tests-lambda-extension.zip"
+          "S3Key": "serverless/integration-tests-lambda-extension/dev/1620404174832-2021-05-07T16:16:14.832Z/integration-tests-lambda-extension.zip"
         },
         "Handler": "bin/alwaysOK",
         "Runtime": "go1.x",
@@ -339,22 +366,7 @@
         "Environment": {
           "Variables": {
             "DD_API_KEY": "NO_NEED_TO_BE_VALID",
-            "DD_LOG_LEVEL": "DEBUG",
-            "DD_DD_URL": {
-              "Fn::Join": [
-                "",
-                [
-                  "https://",
-                  {
-                    "Ref": "ApiGatewayRestApi"
-                  },
-                  ".execute-api.",
-                  "sa-east-1",
-                  ".amazonaws.com/",
-                  "dev"
-                ]
-              ]
-            }
+            "DD_LOG_LEVEL": "DEBUG"
           }
         },
         "Role": {
@@ -368,44 +380,54 @@
         "SeriesLogGroup"
       ]
     },
-    "SketchesLambdaVersionVK3AoYsEFg7EX5HpQl9QDFn8UNDRBYrtLFe8RQc": {
+    "MetricTestLambdaVersionj8gCL6ENRjueKgFWejfRMdZC1JiAXjCMWjaZFZgh0gc": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
-          "Ref": "SketchesLambdaFunction"
+          "Ref": "MetricTestLambdaFunction"
         },
-        "CodeSha256": "pENDWdbNDdMUv+ie+buT9XhywWxy2Hg5LLxgPPmSE0U="
+        "CodeSha256": "UkZhiO1f36Bz+ML83Y82hOxWYmdjfVV5XrYOMpQaIwM="
       }
     },
-    "CheckRunLambdaVersionXI6kyVLJA1KRQuQ7xcfR9EwASZUbiw1GHCsVp5uDs": {
+    "CheckRunLambdaVersionXx0p9SG9OIhjsmgq97zpSJF7XSOyc21LxpvhuIIgMAo": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "CheckRunLambdaFunction"
         },
-        "CodeSha256": "pENDWdbNDdMUv+ie+buT9XhywWxy2Hg5LLxgPPmSE0U="
+        "CodeSha256": "UkZhiO1f36Bz+ML83Y82hOxWYmdjfVV5XrYOMpQaIwM="
       }
     },
-    "EnhancedMetricTestLambdaVersionQQmVMsJuglMFsUn6FvRjT3oOfhDp0f9H2iwPl9o58": {
+    "SketchesLambdaVersionzXpzLf1qXo7yHCOznHy9MU0CE5pR6Qpo693WAk": {
+      "Type": "AWS::Lambda::Version",
+      "DeletionPolicy": "Retain",
+      "Properties": {
+        "FunctionName": {
+          "Ref": "SketchesLambdaFunction"
+        },
+        "CodeSha256": "UkZhiO1f36Bz+ML83Y82hOxWYmdjfVV5XrYOMpQaIwM="
+      }
+    },
+    "EnhancedMetricTestLambdaVersionV955muVpdYjhpEmODtyRQ67iqUm4grOjdYU2Fdr4o4": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "EnhancedMetricTestLambdaFunction"
         },
-        "CodeSha256": "pENDWdbNDdMUv+ie+buT9XhywWxy2Hg5LLxgPPmSE0U="
+        "CodeSha256": "UkZhiO1f36Bz+ML83Y82hOxWYmdjfVV5XrYOMpQaIwM="
       }
     },
-    "SeriesLambdaVersionRfkeW1zgum3vWWfO6knHKXlhauA0h1aafO5stOQR3o8": {
+    "SeriesLambdaVersionZtc1Hm19OrVHus2R3nUpajTeYdUJUaqCMsXzVrBePI": {
       "Type": "AWS::Lambda::Version",
       "DeletionPolicy": "Retain",
       "Properties": {
         "FunctionName": {
           "Ref": "SeriesLambdaFunction"
         },
-        "CodeSha256": "pENDWdbNDdMUv+ie+buT9XhywWxy2Hg5LLxgPPmSE0U="
+        "CodeSha256": "UkZhiO1f36Bz+ML83Y82hOxWYmdjfVV5XrYOMpQaIwM="
       }
     },
     "ApiGatewayRestApi": {
@@ -430,6 +452,21 @@
           ]
         },
         "PathPart": "enhancedMetricTest",
+        "RestApiId": {
+          "Ref": "ApiGatewayRestApi"
+        }
+      }
+    },
+    "ApiGatewayResourceMetrictest": {
+      "Type": "AWS::ApiGateway::Resource",
+      "Properties": {
+        "ParentId": {
+          "Fn::GetAtt": [
+            "ApiGatewayRestApi",
+            "RootResourceId"
+          ]
+        },
+        "PathPart": "metricTest",
         "RestApiId": {
           "Ref": "ApiGatewayRestApi"
         }
@@ -542,6 +579,49 @@
                 {
                   "Fn::GetAtt": [
                     "EnhancedMetricTestLambdaFunction",
+                    "Arn"
+                  ]
+                },
+                "/invocations"
+              ]
+            ]
+          }
+        },
+        "MethodResponses": []
+      }
+    },
+    "ApiGatewayMethodMetrictestGet": {
+      "Type": "AWS::ApiGateway::Method",
+      "Properties": {
+        "HttpMethod": "GET",
+        "RequestParameters": {},
+        "ResourceId": {
+          "Ref": "ApiGatewayResourceMetrictest"
+        },
+        "RestApiId": {
+          "Ref": "ApiGatewayRestApi"
+        },
+        "ApiKeyRequired": false,
+        "AuthorizationType": "NONE",
+        "Integration": {
+          "IntegrationHttpMethod": "POST",
+          "Type": "AWS_PROXY",
+          "Uri": {
+            "Fn::Join": [
+              "",
+              [
+                "arn:",
+                {
+                  "Ref": "AWS::Partition"
+                },
+                ":apigateway:",
+                {
+                  "Ref": "AWS::Region"
+                },
+                ":lambda:path/2015-03-31/functions/",
+                {
+                  "Fn::GetAtt": [
+                    "MetricTestLambdaFunction",
                     "Arn"
                   ]
                 },
@@ -682,7 +762,7 @@
         "MethodResponses": []
       }
     },
-    "ApiGatewayDeployment1620399861540": {
+    "ApiGatewayDeployment1620404170593": {
       "Type": "AWS::ApiGateway::Deployment",
       "Properties": {
         "RestApiId": {
@@ -692,6 +772,7 @@
       },
       "DependsOn": [
         "ApiGatewayMethodEnhancedmetrictestGet",
+        "ApiGatewayMethodMetrictestGet",
         "ApiGatewayMethodApiBetaSketchesPost",
         "ApiGatewayMethodApiV1CheckrunPost",
         "ApiGatewayMethodApiV1SeriesPost"
@@ -703,6 +784,43 @@
         "FunctionName": {
           "Fn::GetAtt": [
             "EnhancedMetricTestLambdaFunction",
+            "Arn"
+          ]
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": "apigateway.amazonaws.com",
+        "SourceArn": {
+          "Fn::Join": [
+            "",
+            [
+              "arn:",
+              {
+                "Ref": "AWS::Partition"
+              },
+              ":execute-api:",
+              {
+                "Ref": "AWS::Region"
+              },
+              ":",
+              {
+                "Ref": "AWS::AccountId"
+              },
+              ":",
+              {
+                "Ref": "ApiGatewayRestApi"
+              },
+              "/*/*"
+            ]
+          ]
+        }
+      }
+    },
+    "MetricTestLambdaPermissionApiGateway": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Fn::GetAtt": [
+            "MetricTestLambdaFunction",
             "Arn"
           ]
         },
@@ -852,28 +970,34 @@
         "Ref": "ServerlessDeploymentBucket"
       }
     },
-    "SketchesLambdaFunctionQualifiedArn": {
+    "MetricTestLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "SketchesLambdaVersionVK3AoYsEFg7EX5HpQl9QDFn8UNDRBYrtLFe8RQc"
+        "Ref": "MetricTestLambdaVersionj8gCL6ENRjueKgFWejfRMdZC1JiAXjCMWjaZFZgh0gc"
       }
     },
     "CheckRunLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "CheckRunLambdaVersionXI6kyVLJA1KRQuQ7xcfR9EwASZUbiw1GHCsVp5uDs"
+        "Ref": "CheckRunLambdaVersionXx0p9SG9OIhjsmgq97zpSJF7XSOyc21LxpvhuIIgMAo"
+      }
+    },
+    "SketchesLambdaFunctionQualifiedArn": {
+      "Description": "Current Lambda function version",
+      "Value": {
+        "Ref": "SketchesLambdaVersionzXpzLf1qXo7yHCOznHy9MU0CE5pR6Qpo693WAk"
       }
     },
     "EnhancedMetricTestLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "EnhancedMetricTestLambdaVersionQQmVMsJuglMFsUn6FvRjT3oOfhDp0f9H2iwPl9o58"
+        "Ref": "EnhancedMetricTestLambdaVersionV955muVpdYjhpEmODtyRQ67iqUm4grOjdYU2Fdr4o4"
       }
     },
     "SeriesLambdaFunctionQualifiedArn": {
       "Description": "Current Lambda function version",
       "Value": {
-        "Ref": "SeriesLambdaVersionRfkeW1zgum3vWWfO6knHKXlhauA0h1aafO5stOQR3o8"
+        "Ref": "SeriesLambdaVersionZtc1Hm19OrVHus2R3nUpajTeYdUJUaqCMsXzVrBePI"
       }
     },
     "ServiceEndpoint": {
