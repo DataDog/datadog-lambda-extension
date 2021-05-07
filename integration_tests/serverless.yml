@@ -46,15 +46,6 @@ functions:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
     environment:
-      DD_DD_URL:
-        !Join
-          - ''
-          - - 'https://'
-            - !Ref ApiGatewayRestApi
-            - '.execute-api.'
-            - ${opt:region, self:provider.region}
-            - '.amazonaws.com/'
-            - ${opt:stage, self:provider.stage}
       DD_ENHANCED_METRICS: true
 
  
