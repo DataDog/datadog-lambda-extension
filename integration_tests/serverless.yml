@@ -17,6 +17,13 @@ resources:
 
 provider:
   name: aws
+  region: sa-east-1
+  tracing:
+    lambda: true
+    apiGateway: true
+  environment:
+    DD_INTEGRATION_TEST: true
+    DD_API_KEY: NO_NEED_TO_BE_VALID
   lambdaHashingVersion: 20201221
   timeout: 15
   deploymentBucket:
@@ -24,14 +31,6 @@ provider:
   iam:
     # IAM permissions require that all functions are deployed with this role
     role: "arn:aws:iam::601427279990:role/serverless-integration-test-lambda-role"
-  tracing:
-    lambda: false
-    apiGateway: false
-  memorySize: 256
-  region: sa-east-1
-  environment:
-    DD_API_KEY: NO_NEED_TO_BE_VALID
-    DD_LOG_LEVEL: DEBUG
 
 functions:
   #actual testing functions
