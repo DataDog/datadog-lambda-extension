@@ -18,19 +18,17 @@ resources:
 provider:
   name: aws
   lambdaHashingVersion: 20201221
+  timeout: 15
+  deploymentBucket:
+    name: integration-tests-deployment-bucket
+  iam:
+    # IAM permissions require that all functions are deployed with this role
+    role: "arn:aws:iam::601427279990:role/serverless-integration-test-lambda-role"
   tracing:
     lambda: false
     apiGateway: false
   memorySize: 256
   region: sa-east-1
-  timeout: 900
-  iam:
-    role:
-      statements:
-        - Effect: "Allow"
-          Action:
-            - "lambda:InvokeFunction"
-          Resource: "*"
   environment:
     DD_API_KEY: NO_NEED_TO_BE_VALID
     DD_LOG_LEVEL: DEBUG
