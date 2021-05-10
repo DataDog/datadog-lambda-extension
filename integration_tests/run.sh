@@ -22,7 +22,7 @@ if [ -z "$EXTENSION_VERSION" ]; then
 fi
 
 # random 8-character ID to avoid collisions with other runs
-stage=it-$(xxd -l 4 -c 4 -p < /dev/random)
+stage=$(xxd -l 4 -c 4 -p < /dev/random)
 
 # always remove the stacks before exiting, no matter what
 function remove_stack() {
