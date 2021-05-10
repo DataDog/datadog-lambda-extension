@@ -48,7 +48,7 @@ set +e # Don't exit this script if an invocation fails or there's a diff
 echo "Invoking ${metricFunctionName} on ${stage}"
 LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
 serverless invoke --stage ${stage} -f ${metricFunctionName}
-# need to double check why two invocation are needed
+# two invocations are needed to get the generated enhanced metrics (for now)
 serverless invoke --stage ${stage} -f ${metricFunctionName}
 
 echo "Sleeping $LOGS_WAIT_SECONDS seconds to wait for logs to appear in CloudWatch..."

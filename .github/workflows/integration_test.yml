@@ -36,6 +36,7 @@ jobs:
         working-directory: ./integration_tests/
         run: yarn install
       - name: Run tests
+        #those verions need to be better parametrized
         run: LAYER_VERSION=24 EXTENSION_VERSION=60 ./integration_tests/run.sh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}

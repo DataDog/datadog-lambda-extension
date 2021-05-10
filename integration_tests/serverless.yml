@@ -57,8 +57,6 @@ functions:
             - '.amazonaws.com/'
             - ${opt:stage, self:provider.stage}
       DD_ENHANCED_METRICS: true
-      #DD_SERVERLESS_DISABLE_ADAPTIVE_FLUSH: true
-      #DD_SERVERLESS_FLUSH_STRATEGY: periodically,1
 
   #function which plays the man-in-the middle role
   sketches:
