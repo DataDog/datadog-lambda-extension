@@ -11,4 +11,4 @@ async function myHandler(event, context) {
   };
 }
 
-module.exports.metricTest = datadog(myHandler);
+module.exports.enhancedMetricTest = datadog(myHandler);

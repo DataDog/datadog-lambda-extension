@@ -4,12 +4,12 @@ service: integration-tests-lambda-extension
 # this is required to make sure that API Gateway is NOT trying to encode the payload in UTF8
 # which makes the unmarshalling of protobuf impossible
 # API Gateway will watch for this content-type and base64 encode the binary payload
-#plugins:
-#  - serverless-apigw-binary 
-#custom:
-#  apigwBinary:
-#    types:           
-#      - 'application/x-protobuf'
+plugins:
+  - serverless-apigw-binary 
+custom:
+  apigwBinary:
+    types:           
+      - 'application/x-protobuf'
 # -------------------------------------------------------------------------------------------
 
 resources:
@@ -24,6 +24,7 @@ provider:
   environment:
     DD_INTEGRATION_TEST: true
     DD_API_KEY: NO_NEED_TO_BE_VALID
+    DD_LOG_LEVEL: DEBUG
   lambdaHashingVersion: 20201221
   timeout: 15
   deploymentBucket:
@@ -34,13 +35,13 @@ provider:
 
 functions:
   #actual testing functions
-  metricTest:
-    name: integration-tests-lambda-extension-${sls:stage}-metricTest
+  enhancedMetricTest:
+    name: integration-tests-lambda-extension-${sls:stage}-enhancedMetricTest
     runtime: nodejs12.x
-    handler: src/metric.metricTest
+    handler: src/metric.enhancedMetricTest
     events:
       - http:
-          path: metricTest
+          path: enhancedMetricTest
           method: get
     layers:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
@@ -56,6 +57,8 @@ functions:
             - '.amazonaws.com/'
             - ${opt:stage, self:provider.stage}
       DD_ENHANCED_METRICS: true
+      #DD_SERVERLESS_DISABLE_ADAPTIVE_FLUSH: true
+      #DD_SERVERLESS_FLUSH_STRATEGY: periodically,1
 
   #function which plays the man-in-the middle role
   sketches:

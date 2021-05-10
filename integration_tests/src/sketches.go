@@ -20,10 +20,13 @@ func handleRequest(ctx context.Context, ev events.APIGatewayProxyRequest) (event
     sketchPayload := &gogen.SketchPayload{}
     err := proto.Unmarshal(payload, sketchPayload)
     if err != nil {
-		fmt.Println("Unmarshaling error: ", err)
+      //log.Println("unmarshaling error: ", err)
     } else {
-		// output the paylaod to be able to retrieve it via cloudwatch
-		fmt.Println(sketchPayload)
+      //log.Println("Successfully created proto struct:", sketchPayload)
+      for _, singleSketch := range sketchPayload.Sketches {
+        fmt.Printf("[sketch] %#v\n", singleSketch)
+      }
+      fmt.Println("[metadata] ", sketchPayload.Metadata)
     }
 	return events.APIGatewayProxyResponse{
 		StatusCode: 200,
