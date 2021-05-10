@@ -10,6 +10,9 @@ script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
 
 cd "./integration_tests"
 
+echo "Building Go binaries"
+make
+
 
 if [ -z "$LAYER_VERSION" ]; then
     echo "LAYER_VERSION not found "
@@ -32,7 +35,7 @@ function remove_stack() {
 }
 
 # making sure the remove_stack function will be called no matter what
-# trap remove_stack EXIT
+trap remove_stack EXIT
 
 # deploying the stack
 LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
