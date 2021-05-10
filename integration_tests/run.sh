@@ -32,7 +32,7 @@ function remove_stack() {
 }
 
 # making sure the remove_stack function will be called no matter what
-trap remove_stack EXIT
+# trap remove_stack EXIT
 
 # deploying the stack
 LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
