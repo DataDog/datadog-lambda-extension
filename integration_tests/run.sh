@@ -4,15 +4,15 @@ LOGS_WAIT_SECONDS=20
 
 set -e
 
-sketchesFunctionName="sketches"
 metricFunctionName="enhancedMetricTest"
 script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
 
 cd "./integration_tests"
 
-echo "Building Go binaries"
-make
-
+#zip extension
+cd man-in-the-middle-extension
+zip -r ext.zip extensions -x ".*" -x "__MACOSX" -x "extensions/.*"
+cd ..
 
 if [ -z "$LAYER_VERSION" ]; then
     echo "LAYER_VERSION not found "
@@ -26,7 +26,7 @@ fi
 
 # random 8-character ID to avoid collisions with other runs
 stage=$(xxd -l 4 -c 4 -p < /dev/random)
-
+stage=12344321
 # always remove the stacks before exiting, no matter what
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"
@@ -56,7 +56,7 @@ sleep $LOGS_WAIT_SECONDS
 
 retry_counter=0
 while [ $retry_counter -lt 10 ]; do
-    raw_logs=$(LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} serverless logs --stage ${stage} -f $sketchesFunctionName --startTime $script_utc_start_time)
+    raw_logs=$(LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} serverless logs --stage ${stage} -f $metricFunctionName --startTime $script_utc_start_time)
     fetch_logs_exit_code=$?
     if [ $fetch_logs_exit_code -eq 1 ]; then
         echo "Retrying fetch logs for $sketchesFunctionName..."
@@ -71,13 +71,13 @@ done
 logs=$(
     echo "$raw_logs" |
     grep "\[sketch\]" | \
-    perl -p -e "s/(Ts:) ?[0-9]{10}/\1XXXXXXXXXX/g" | \
-    perl -p -e "s/(Cnt:) ?[0-9\.e\-]{2,14}/\1XX/g" | \
-    perl -p -e "s/(Min:) ?[0-9\.e\-]{2,14}/\1XX/g" | \
-    perl -p -e "s/(Max:) ?[0-9\.e\-]{2,14}/\1XX/g" | \
-    perl -p -e "s/(Avg:) ?[0-9\.e\-]{2,14}/\1XX/g" | \
-    perl -p -e "s/(Sum:) ?[0-9\.e\-]{2,14}/\1XX/g" | \
-    perl -p -e "s/(int32{) ?[0-9]{2,10}/\1XX/g" | \
+    perl -p -e "s/(ts\":\")[0-9]{10}/\1XXX/g" | \
+    perl -p -e "s/(min\":)[0-9\.]{2,15}/\1XXX/g" | \
+    perl -p -e "s/(max\":)[0-9\.]{2,15}/\1XXX/g" | \
+    perl -p -e "s/(cnt\":)[0-9\.]{2,15}/\1XXX/g" | \
+    perl -p -e "s/(avg\":)[0-9\.]{2,15}/\1XXX/g" | \
+    perl -p -e "s/(sum\":)[0-9\.]{2,15}/\1XXX/g" | \
+    perl -p -e "s/(k\":\[)[0-9\.]{1,15}/\1XXX/g" | \
     perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
     perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
     perl -p -e "s/$stage/XXXXXX/g" | \
@@ -105,7 +105,6 @@ else
         echo "Ok: New logs for $function_name match snapshot"
     fi
 fi
-
 
 if [ "$mismatch_found" = true ]; then
     echo "FAILURE: A mismatch between new data and a snapshot was found and printed above."
