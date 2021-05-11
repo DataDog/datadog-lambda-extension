@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+// file copied from https://github.com/DataDog/agent-payload/blob/master/proto/metrics/agent_payload.proto
+
 package datadog.agentpayload;
 
 message CommonMetadata {
