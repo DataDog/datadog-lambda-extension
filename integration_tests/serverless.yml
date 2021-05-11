@@ -32,10 +32,6 @@ functions:
     name: integration-tests-lambda-extension-${sls:stage}-enhancedMetricTest
     runtime: nodejs12.x
     handler: src/metric.enhancedMetricTest
-    events:
-      - http:
-          path: enhancedMetricTest
-          method: get
     layers:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
