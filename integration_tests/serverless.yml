@@ -40,7 +40,3 @@ functions:
       DD_DD_URL: http://127.0.0.1:3333
       DD_ENHANCED_METRICS: true
 
-
-#NODE_LAYER_VERSION=24 EXTENSION_VERSION=71 aws-vault exec sandbox-account-admin -- sls deploy
-
-
