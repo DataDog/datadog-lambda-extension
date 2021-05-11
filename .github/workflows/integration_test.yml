@@ -28,7 +28,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: ./integration_tests/man-in-the-middle-extension/extensions
+        working-directory: ./integration_tests/man-in-the-middle-extension/extensions/src
         run: yarn install
       - name: Run tests
         #those versions need to be better parametrized
