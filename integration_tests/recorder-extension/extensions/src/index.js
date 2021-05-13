@@ -23,7 +23,7 @@ async function register() {
         }),
         headers: {
             'Content-Type': 'application/json',
-            'Lambda-Extension-Name': 'man-in-the-middle',
+            'Lambda-Extension-Name': 'recorder',
         }
     });
 
@@ -88,7 +88,7 @@ async function next(extensionId) {
     });
 
     app.listen(port, () => {
-        console.log(`Man-in-the-middle extension started on port : ${port}`);
+        console.log(`Recorder extension started on port : ${port}`);
     })
 
     while (true) {

@@ -1,5 +1,5 @@
 {
-  "name": "man-in-the-middle-extension",
+  "name": "recorder-extension",
   "version": "1.0.0",
   "main": "index.js",
   "dependencies": {

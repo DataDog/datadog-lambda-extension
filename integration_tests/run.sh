@@ -10,7 +10,7 @@ script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
 cd "./integration_tests"
 
 #zip extension
-cd man-in-the-middle-extension
+cd recorder-extension
 zip -r ext.zip extensions -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 

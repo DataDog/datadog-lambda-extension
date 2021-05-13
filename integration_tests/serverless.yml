@@ -24,7 +24,7 @@ provider:
 layers:
   manInTheMiddleExtension:
     package:
-      artifact: ./man-in-the-middle-extension/ext.zip
+      artifact: ./recorder-extension/ext.zip
 
 functions:
   #actual testing functions
@@ -38,5 +38,4 @@ functions:
       - {Ref: ManInTheMiddleExtensionLambdaLayer}
     environment:
       DD_DD_URL: http://127.0.0.1:3333
-      DD_ENHANCED_METRICS: true
 
