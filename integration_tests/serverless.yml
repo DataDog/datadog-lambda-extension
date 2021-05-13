@@ -22,7 +22,7 @@ provider:
     role: "arn:aws:iam::601427279990:role/serverless-integration-test-lambda-role"
 
 layers:
-  manInTheMiddleExtension:
+  recorderExtension:
     package:
       artifact: ./recorder-extension/ext.zip
 
@@ -35,7 +35,7 @@ functions:
     layers:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
-      - {Ref: ManInTheMiddleExtensionLambdaLayer}
+      - {Ref: RecorderExtensionLambdaLayer}
     environment:
       DD_DD_URL: http://127.0.0.1:3333
 

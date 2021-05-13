@@ -26,7 +26,7 @@ fi
 
 # random 8-character ID to avoid collisions with other runs
 stage=$(xxd -l 4 -c 4 -p < /dev/random)
-
+stage=12344322
 # always remove the stacks before exiting, no matter what
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"
@@ -35,7 +35,7 @@ function remove_stack() {
 }
 
 # making sure the remove_stack function will be called no matter what
-trap remove_stack EXIT
+#trap remove_stack EXIT
 
 # deploying the stack
 LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
