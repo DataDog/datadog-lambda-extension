@@ -16,6 +16,7 @@ provider:
     DD_LOGS_CONFIG_LOGS_DD_URL: 127.0.0.1:3333
     DD_LOGS_CONFIG_LOGS_NO_SSL: true
     DD_LOG_LEVEL: DEBUG
+    DD_LOGS_ENABLED: false
   lambdaHashingVersion: 20201221
   timeout: 15
   deploymentBucket:
