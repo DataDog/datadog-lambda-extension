@@ -8,8 +8,12 @@ const protobuf = require('protobufjs');
 const BASE_URL = `http://${process.env.AWS_LAMBDA_RUNTIME_API}/2020-01-01/extension`;
 const SHUTDOWN_EVENT = 'SHUTDOWN';
 
-const handleShutdown = (app) => {
-    app.close();
+const handleShutdown = (listeningApp) => {
+    if(listeningApp) {
+        listeningApp.close(() => {
+            console.log('Recorder extension http server closed.');
+        });
+    }
     process.exit(0);
 }
 
@@ -51,6 +55,7 @@ async function next(extensionId) {
 }
 
 (async function main() {
+
     const app = express();
     const options = {
         inflate: true,
@@ -59,9 +64,7 @@ async function next(extensionId) {
     };
 
     app.use(bodyParser.raw(options));
-
-    process.on('SIGINT', () => handleShutdown(app));
-    process.on('SIGTERM', () => handleShutdown(app));
+    app.use(bodyParser.json());
 
     const extensionId = await register();
 
@@ -82,21 +85,33 @@ async function next(extensionId) {
         res.sendStatus(200);
     });
 
+
+    app.post('/v1/input/*', async (req, res) => {
+        if(JSON.stringify(req.body) !== '{}') { // to avoid printing empty logs due to the connectivity test
+            for(let i = 0; i < req.body.length; ++i) {
+                console.log("[log]", JSON.stringify(req.body[i]));
+            }
+        }
+        res.sendStatus(200);
+    });
+
     app.post('/*', (req, res) => {
         //POST catch all
         res.sendStatus(200);
     });
 
-    app.listen(port, () => {
-        console.log(`Recorder extension started on port : ${port}`);
-    })
+    listeningApp = app.listen(port);
+
+    process.on('SIGINT', () => handleShutdown(listeningApp));
+    process.on('SIGTERM', () => handleShutdown(listeningApp));
 
     while (true) {
         const event = await next(extensionId);
         if(event.eventType === SHUTDOWN_EVENT) {
-            handleShutdown(app);
+            handleShutdown(listeningApp);
             break;
         } else {
+            handleShutdown();
             throw new Error('Unexpected event');
         }
     }

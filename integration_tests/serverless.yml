@@ -11,7 +11,10 @@ provider:
     apiGateway: true
   environment:
     DD_INTEGRATION_TEST: true
+    DD_DD_URL: http://127.0.0.1:3333
     DD_API_KEY: NO_NEED_TO_BE_VALID
+    DD_LOGS_CONFIG_LOGS_DD_URL: 127.0.0.1:3333
+    DD_LOGS_CONFIG_LOGS_NO_SSL: true
     DD_LOG_LEVEL: DEBUG
   lambdaHashingVersion: 20201221
   timeout: 15
@@ -27,7 +30,6 @@ layers:
       artifact: ./recorder-extension/ext.zip
 
 functions:
-  #actual testing functions
   enhancedMetricTest:
     name: integration-tests-lambda-extension-${sls:stage}-enhancedMetricTest
     runtime: nodejs12.x
@@ -36,6 +38,25 @@ functions:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
+  noEnhancedMetricTest:
+    name: integration-tests-lambda-extension-${sls:stage}-noEnhancedMetricTest
+    runtime: nodejs12.x
+    handler: src/metric.noEnhancedMetricTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
     environment:
-      DD_DD_URL: http://127.0.0.1:3333
+      DD_ENHANCED_METRICS: false
+  logTest:
+    name: integration-tests-lambda-extension-${sls:stage}-logTest
+    runtime: nodejs12.x
+    handler: src/log.logTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+    environment:
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
 

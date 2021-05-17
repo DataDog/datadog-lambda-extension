@@ -1,10 +1,9 @@
 #!/bin/bash
 
-LOGS_WAIT_SECONDS=20
+LOGS_WAIT_SECONDS=30
 
 set -e
 
-metricFunctionName="enhancedMetricTest"
 script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
 
 cd "./integration_tests"
@@ -42,69 +41,108 @@ LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
 serverless deploy --stage ${stage}
 
 # invoking functions
-function_names=("enhancedMetricTest")
+metric_function_names=("enhancedMetricTest" "noEnhancedMetricTest")
+log_function_names=("logTest")
+
+all_functions=("${metric_function_names[@]}" "${log_function_names[@]}")
 
 set +e # Don't exit this script if an invocation fails or there's a diff
-echo "Invoking ${metricFunctionName} on ${stage}"
-LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
-serverless invoke --stage ${stage} -f ${metricFunctionName}
-# two invocations are needed to get the generated enhanced metrics (for now)
-serverless invoke --stage ${stage} -f ${metricFunctionName}
+
+for function_name in "${all_functions[@]}"; do
+    echo "Invoking ${function_name} on ${stage}"
+    LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
+    serverless invoke --stage ${stage} -f ${function_name}
+    # two invocations are needed to get the generated enhanced metrics for now to avoid waiting for too long
+    return_value=$(serverless invoke --stage ${stage} -f ${function_name})
+
+    # Compare new return value to snapshot
+    diff_output=$(echo "$return_value" | diff - "./snapshots/expectedInvocationResult")
+    if [ $? -eq 1 ]; then
+        echo "Failed: Return value for $function_name does not match snapshot:"
+        echo "$diff_output"
+        mismatch_found=true
+    else
+        echo "Ok: Return value for $function_name with $input_event_name event matches snapshot"
+    fi
+done
 
 echo "Sleeping $LOGS_WAIT_SECONDS seconds to wait for logs to appear in CloudWatch..."
 sleep $LOGS_WAIT_SECONDS
 
-retry_counter=0
-while [ $retry_counter -lt 10 ]; do
-    raw_logs=$(LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} serverless logs --stage ${stage} -f $metricFunctionName --startTime $script_utc_start_time)
-    fetch_logs_exit_code=$?
-    if [ $fetch_logs_exit_code -eq 1 ]; then
-        echo "Retrying fetch logs for $sketchesFunctionName..."
-        retry_counter=$(($retry_counter + 1))
-        sleep 10
-        continue
+for function_name in "${all_functions[@]}"; do
+    echo "Fetching logs for ${function_name} on ${stage}"
+    retry_counter=0
+    while [ $retry_counter -lt 10 ]; do
+        raw_logs=$(LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} serverless logs --stage ${stage} -f $function_name --startTime $script_utc_start_time)
+        fetch_logs_exit_code=$?
+        if [ $fetch_logs_exit_code -eq 1 ]; then
+            echo "Retrying fetch logs for $sketchesFunctionName..."
+            retry_counter=$(($retry_counter + 1))
+            sleep 10
+            continue
+        fi
+        break
+    done
+
+    if [[ " ${metric_function_names[@]} " =~ " ${function_name} " ]]; then
+        # Replace invocation-specific data like timestamps and IDs with XXXX to normalize logs across executions
+        logs=$(
+            echo "$raw_logs" | \
+            grep "\[sketch\]" | \
+            perl -p -e "s/(ts\":\")[0-9]{10}/\1XXX/g" | \
+            perl -p -e "s/(min\":)[0-9\.]{2,20}/\1XXX/g" | \
+            perl -p -e "s/(max\":)[0-9\.]{2,20}/\1XXX/g" | \
+            perl -p -e "s/(cnt\":)[0-9\.]{2,20}/\1XXX/g" | \
+            perl -p -e "s/(avg\":)[0-9\.]{2,20}/\1XXX/g" | \
+            perl -p -e "s/(sum\":)[0-9\.]{2,20}/\1XXX/g" | \
+            perl -p -e "s/(k\":\[)[0-9\.]{1,20}/\1XXX/g" | \
+            perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
+            perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
+            perl -p -e "s/$stage/XXXXXX/g" | \
+            sort | \
+            # strip out second invocation
+            grep -v "cold_start:false" | grep -v "cnt\":\"2\"" | grep -v "serverless\.lambda-extension\.integration-test\.count.*\"sum\":1"
+        )
+    elif [[ " ${log_function_names[@]} " =~ " ${function_name} " ]]; then
+        logs=$(
+            echo "$raw_logs" | \
+            grep "\[log\]" | \
+            perl -p -e "s/(timestamp\":)[0-9]{13}/\1XXX/g" | \
+            perl -p -e "s/(ddtags\":\")[a-zA-Z0-9\:\-,_]+/\1XXX/g" | \
+            perl -p -e "s/(\"REPORT |START |END |HTTP ).*/\1XXX\"}}/g" | \
+            perl -p -e "s/(request_id\":\")[a-zA-Z0-9\-,]+/\1XXX/g"| \
+            perl -p -e "s/$stage/XXXXXX/g" | \
+            perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g"
+        )
+    else #traces are not yet integration-tested
+        logs=$(
+            echo "$raw_logs"
+        )
     fi
-    break
-done
 
-# Replace invocation-specific data like timestamps and IDs with XXXX to normalize logs across executions
-logs=$(
-    echo "$raw_logs" |
-    grep "\[sketch\]" | \
-    perl -p -e "s/(ts\":\")[0-9]{10}/\1XXX/g" | \
-    perl -p -e "s/(min\":)[0-9\.]{2,15}/\1XXX/g" | \
-    perl -p -e "s/(max\":)[0-9\.]{2,15}/\1XXX/g" | \
-    perl -p -e "s/(cnt\":)[0-9\.]{2,15}/\1XXX/g" | \
-    perl -p -e "s/(avg\":)[0-9\.]{2,15}/\1XXX/g" | \
-    perl -p -e "s/(sum\":)[0-9\.]{2,15}/\1XXX/g" | \
-    perl -p -e "s/(k\":\[)[0-9\.]{1,15}/\1XXX/g" | \
-    perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
-    perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
-    perl -p -e "s/$stage/XXXXXX/g" | \
-    sort
-)
+    function_snapshot_path="./snapshots/${function_name}"
 
-function_snapshot_path="./snapshots/metrics/${metricFunctionName}"
-
-if [ ! -f $function_snapshot_path ]; then
-    # If no snapshot file exists yet, we create one
-    echo "Writing logs to $function_snapshot_path because no snapshot exists yet"
-    echo "$logs" >$function_snapshot_path
-elif [ -n "$UPDATE_SNAPSHOTS" ]; then
-    # If $UPDATE_SNAPSHOTS is set to true write the new logs over the current snapshot
-    echo "Overwriting log snapshot for $function_snapshot_path"
-    echo "$logs" >$function_snapshot_path
-else
-    # Compare new logs to snapshots
-    diff_output=$(echo "$logs" | diff - $function_snapshot_path)
-    if [ $? -eq 1 ]; then
-        echo "Failed: Mismatch found between new $function_name logs (first) and snapshot (second):"
-        echo "$diff_output"
-        mismatch_found=true
+    if [ ! -f $function_snapshot_path ]; then
+        # If no snapshot file exists yet, we create one
+        echo "Writing logs to $function_snapshot_path because no snapshot exists yet"
+        echo "$logs" >$function_snapshot_path
+    elif [ -n "$UPDATE_SNAPSHOTS" ]; then
+        # If $UPDATE_SNAPSHOTS is set to true write the new logs over the current snapshot
+        echo "Overwriting log snapshot for $function_snapshot_path"
+        echo "$logs" >$function_snapshot_path
     else
-        echo "Ok: New logs for $function_name match snapshot"
+        # Compare new logs to snapshots
+        diff_output=$(echo "$logs" | diff - $function_snapshot_path)
+        if [ $? -eq 1 ]; then
+            echo "Failed: Mismatch found between new $function_name logs (first) and snapshot (second):"
+            echo "$diff_output"
+            mismatch_found=true
+        else
+            echo "Ok: New logs for $function_name match snapshot"
+        fi
     fi
-fi
+
+done
 
 if [ "$mismatch_found" = true ]; then
     echo "FAILURE: A mismatch between new data and a snapshot was found and printed above."

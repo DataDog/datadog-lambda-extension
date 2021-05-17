@@ -12,3 +12,4 @@ async function myHandler(event, context) {
 }
 
 module.exports.enhancedMetricTest = datadog(myHandler);
+module.exports.noEnhancedMetricTest = datadog(myHandler);
