@@ -1,3 +1,8 @@
+const tracer = require("dd-trace").init({
+  flushInterval: 0,
+  logLevel: "debug",
+});
+
 const { datadog, sendDistributionMetric } = require("datadog-lambda-js");
 
 let invocationCount = 0;

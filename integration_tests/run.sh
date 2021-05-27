@@ -10,7 +10,7 @@ cd "./integration_tests"
 
 #zip extension
 cd recorder-extension
-zip -r ext.zip extensions -x ".*" -x "__MACOSX" -x "extensions/.*"
+zip -rq ext.zip extensions -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 
 if [ -z "$LAYER_VERSION" ]; then
@@ -49,10 +49,9 @@ all_functions=("${metric_function_names[@]}" "${log_function_names[@]}")
 set +e # Don't exit this script if an invocation fails or there's a diff
 
 for function_name in "${all_functions[@]}"; do
-    echo "Invoking ${function_name} on ${stage}"
     LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
     serverless invoke --stage ${stage} -f ${function_name}
-    # two invocations are needed to get the generated enhanced metrics for now to avoid waiting for too long
+    # two invocations are needed since enhanced metrics are computed with the REPORT log line (which is trigered at the end of the first invocation)
     return_value=$(serverless invoke --stage ${stage} -f ${function_name})
 
     # Compare new return value to snapshot
@@ -84,8 +83,6 @@ for function_name in "${all_functions[@]}"; do
         break
     done
 
-    echo $raw_logs > dump$function_name
-
     if [[ " ${metric_function_names[@]} " =~ " ${function_name} " ]]; then
         # Replace invocation-specific data like timestamps and IDs with XXXX to normalize logs across executions
         logs=$(
@@ -101,9 +98,7 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/$stage/XXXXXX/g" | \
-            sort | \
-            # strip out second invocation
-            grep -v "cold_start:false" | grep -v "cnt\":\"2\"" | grep -v "serverless\.lambda-extension\.integration-test\.count.*\"sum\":1"
+            sort
         )
     elif [[ " ${log_function_names[@]} " =~ " ${function_name} " ]]; then
         logs=$(
@@ -114,9 +109,7 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/(\"REPORT |START |END |HTTP ).*/\1XXX\"}}/g" | \
             perl -p -e "s/(request_id\":\")[a-zA-Z0-9\-,]+/\1XXX/g"| \
             perl -p -e "s/$stage/XXXXXX/g" | \
-            perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" | \
-            sort | \
-            uniq
+            perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g"
         )
     else #traces are not yet integration-tested
         logs=$(

@@ -8,13 +8,11 @@ const protobuf = require('protobufjs');
 const BASE_URL = `http://${process.env.AWS_LAMBDA_RUNTIME_API}/2020-01-01/extension`;
 const SHUTDOWN_EVENT = 'SHUTDOWN';
 
-const handleShutdown = (listeningApp) => {
-    if(listeningApp) {
-        listeningApp.close(() => {
-            console.log('Recorder extension http server closed.');
-        });
-    }
-    process.exit(0);
+const handleShutdown = async () => {
+    console.log('SHUTDOWN received in recorder');
+    //making sure that the server won't be closed when the extension will send data
+    await new Promise(r => setTimeout(r, 1000));
+    console.log('SHUTDOWN end');
 }
 
 async function register() {
@@ -59,7 +57,7 @@ async function next(extensionId) {
     const app = express();
     const options = {
         inflate: true,
-        limit: '100kb',
+        limit: '300kb',
         type: 'application/x-protobuf'
     };
 
@@ -71,7 +69,7 @@ async function next(extensionId) {
     const port = 3333;
 
     app.get('/*', (req, res) => {
-        //GET catch all
+        console.log("GET", req.url);
         res.sendStatus(200);
     });
 
@@ -89,29 +87,32 @@ async function next(extensionId) {
     app.post('/v1/input/*', async (req, res) => {
         if(JSON.stringify(req.body) !== '{}') { // to avoid printing empty logs due to the connectivity test
             for(let i = 0; i < req.body.length; ++i) {
-                console.log("[log]", JSON.stringify(req.body[i]));
+                const logString = JSON.stringify(req.body[i]);
+                if(logString.indexOf("[sketch]") === -1 && logString.indexOf("[log]") === -1) { // avoid inception
+                    console.log("[log]", logString);
+                }
             }
         }
         res.sendStatus(200);
     });
 
     app.post('/*', (req, res) => {
-        //POST catch all
+        console.log("POST", req.url);
         res.sendStatus(200);
     });
 
-    listeningApp = app.listen(port);
+    app.listen(port);
 
-    process.on('SIGINT', () => handleShutdown(listeningApp));
-    process.on('SIGTERM', () => handleShutdown(listeningApp));
+    process.on('SIGINT', async () => await handleShutdown());
+    process.on('SIGTERM', async () => await handleShutdown());
 
     while (true) {
         const event = await next(extensionId);
         if(event.eventType === SHUTDOWN_EVENT) {
-            handleShutdown(listeningApp);
+            await handleShutdown();
             break;
         } else {
-            handleShutdown();
+            await handleShutdown();
             throw new Error('Unexpected event');
         }
     }

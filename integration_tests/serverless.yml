@@ -5,7 +5,7 @@ resources:
 
 provider:
   name: aws
-  region: sa-east-1
+  region: us-east-1
   tracing:
     lambda: true
     apiGateway: true
@@ -17,10 +17,14 @@ provider:
     DD_LOGS_CONFIG_LOGS_NO_SSL: true
     DD_LOG_LEVEL: DEBUG
     DD_LOGS_ENABLED: false
+    DD_SERVERLESS_LOGS_ENABLED: false
+    #DD_MERGE_XRAY_TRACES: false
+    DD_TRACE_ENABLED: false
+
   lambdaHashingVersion: 20201221
   timeout: 15
-  deploymentBucket:
-    name: integration-tests-deployment-bucket
+  #deploymentBucket:
+  #  name: integration-tests-deployment-bucket
   iam:
     # IAM permissions require that all functions are deployed with this role
     role: "arn:aws:iam::601427279990:role/serverless-integration-test-lambda-role"
@@ -60,4 +64,5 @@ functions:
     environment:
       DD_LOG_LEVEL: ERROR
       DD_LOGS_ENABLED: true
-
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true
