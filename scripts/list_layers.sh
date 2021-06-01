@@ -3,10 +3,10 @@
 # Unless explicitly stated otherwise all files in this repository are licensed
 # under the Apache License Version 2.0.
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
-# Copyright 2020 Datadog, Inc.
+# Copyright 2021 Datadog, Inc.
 
 # Lists most recent layers ARNs across regions to STDOUT
-# Optionals args: [layer-name] [region]
+# Optional args: [layer-name] [region]
 
 set -e
 
