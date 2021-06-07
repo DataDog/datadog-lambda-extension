@@ -5,7 +5,7 @@ resources:
 
 provider:
   name: aws
-  region: us-east-1
+  region: sa-east-1
   tracing:
     lambda: true
     apiGateway: true
@@ -15,16 +15,16 @@ provider:
     DD_API_KEY: NO_NEED_TO_BE_VALID
     DD_LOGS_CONFIG_LOGS_DD_URL: 127.0.0.1:3333
     DD_LOGS_CONFIG_LOGS_NO_SSL: true
-    DD_LOG_LEVEL: DEBUG
+    DD_LOG_LEVEL: INFO
     DD_LOGS_ENABLED: false
-    DD_SERVERLESS_LOGS_ENABLED: false
-    #DD_MERGE_XRAY_TRACES: false
+    DD_SERVERLESS_LOGS_ENABLED: true
+    DD_MERGE_XRAY_TRACES: false
     DD_TRACE_ENABLED: false
 
   lambdaHashingVersion: 20201221
   timeout: 15
-  #deploymentBucket:
-  #  name: integration-tests-deployment-bucket
+  deploymentBucket:
+    name: integration-tests-deployment-bucket
   iam:
     # IAM permissions require that all functions are deployed with this role
     role: "arn:aws:iam::601427279990:role/serverless-integration-test-lambda-role"
@@ -53,6 +53,14 @@ functions:
       - {Ref: RecorderExtensionLambdaLayer}
     environment:
       DD_ENHANCED_METRICS: false
+  timeoutMetricTest:
+    name: integration-tests-lambda-extension-${sls:stage}-timeoutMetricTest
+    runtime: nodejs12.x
+    handler: src/metric.timeoutMetricTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
   logTest:
     name: integration-tests-lambda-extension-${sls:stage}-logTest
     runtime: nodejs12.x
