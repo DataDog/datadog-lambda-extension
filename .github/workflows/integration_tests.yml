@@ -36,7 +36,7 @@ jobs:
       - name: Checkout the datadog-agent
         uses: actions/checkout@v2
         with:
-          name: DataDog/datadog-agent
+          repository: DataDog/datadog-agent
           ref: refs/heads/release/lambda-extension-v9
           path: ~/dd/datadog-agent/cmd/serverless
 
