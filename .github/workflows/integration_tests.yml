@@ -31,14 +31,14 @@ jobs:
         run: yarn install
 
       - name: Create folder
-        run: mkdir -p ~/dd/datadog-agent/cmd/serverless
+        run: pwd && mkdir -p ./dd/datadog-agent/cmd/serverless
 
       - name: Checkout the datadog-agent
         uses: actions/checkout@v2
         with:
           repository: DataDog/datadog-agent
           ref: refs/heads/release/lambda-extension-v9
-          path: ~/dd/datadog-agent/cmd/serverless
+          path: ./dd/datadog-agent/cmd/serverless
 
       - name: Build the layer
         run: ./scripts/build_binary_and_layer.sh
