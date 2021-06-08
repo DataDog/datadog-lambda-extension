@@ -25,7 +25,7 @@ async function register() {
         }),
         headers: {
             'Content-Type': 'application/json',
-            'Lambda-Extension-Name': 'recorder',
+            'Lambda-Extension-Name': 'a_recorder',
         }
     });
 
