@@ -10,6 +10,9 @@ cd "./integration_tests"
 
 #zip extension
 cd recorder-extension
+mkdir extensions
+mv src extensions
+mv a_recorder extensions
 zip -rq ext.zip extensions -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 

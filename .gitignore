@@ -1,7 +1,7 @@
 integration_tests/.serverless
 integration_tests/bin
 integration_tests/node_modules
-integration_tests/recorder-extension/extensions/src/node_modules
+integration_tests/recorder-extension/src/node_modules/
 integration_tests/recorder-extension/ext.zip
 integration_tests/.DS_Store
 .DS_Store
