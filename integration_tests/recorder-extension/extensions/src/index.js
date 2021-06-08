@@ -63,6 +63,7 @@ async function next(extensionId) {
 
     app.use(bodyParser.raw(options));
     app.use(bodyParser.json());
+    app.listen(port);
 
     const extensionId = await register();
 
@@ -100,8 +101,6 @@ async function next(extensionId) {
         console.log("POST", req.url);
         res.sendStatus(200);
     });
-
-    app.listen(port);
 
     process.on('SIGINT', async () => await handleShutdown());
     process.on('SIGTERM', async () => await handleShutdown());
