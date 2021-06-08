@@ -54,6 +54,7 @@ async function next(extensionId) {
 
 (async function main() {
 
+    const port = 3333;
     const app = express();
     const options = {
         inflate: true,
@@ -67,7 +68,7 @@ async function next(extensionId) {
 
     const extensionId = await register();
 
-    const port = 3333;
+    
 
     app.get('/*', (req, res) => {
         console.log("GET", req.url);
