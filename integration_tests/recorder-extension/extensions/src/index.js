@@ -54,7 +54,6 @@ async function next(extensionId) {
 
 (async function main() {
 
-    const port = 3333;
     const app = express();
     const options = {
         inflate: true,
@@ -64,11 +63,10 @@ async function next(extensionId) {
 
     app.use(bodyParser.raw(options));
     app.use(bodyParser.json());
-    app.listen(port);
 
     const extensionId = await register();
 
-    
+    const port = 3333;
 
     app.get('/*', (req, res) => {
         console.log("GET", req.url);
@@ -102,6 +100,8 @@ async function next(extensionId) {
         console.log("POST", req.url);
         res.sendStatus(200);
     });
+
+    app.listen(port);
 
     process.on('SIGINT', async () => await handleShutdown());
     process.on('SIGTERM', async () => await handleShutdown());
