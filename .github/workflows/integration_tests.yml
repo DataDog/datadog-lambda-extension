@@ -41,7 +41,7 @@ jobs:
           path: "datadog-agent"
 
       - name: Build the layer
-        run: ./scripts/build_binary_and_layer.sh && cd ~/datadog-lambda-extension && pwd
+        run: ./scripts/build_binary_and_layer.sh && cd /home/runner/work/datadog-lambda-extension/datadog-lambda-extension
 
       - name: Run tests
         env:
