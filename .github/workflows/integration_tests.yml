@@ -42,7 +42,8 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: DataDog/datadog-agent
-          ref: refs/heads/release/lambda-extension-v9
+          #ref: refs/heads/release/lambda-extension-v9
+          ref: refs/heads/maxday/integration-test # todo : change after merge of current PRs
           path: "datadog-agent"
 
       - name: Build the layer

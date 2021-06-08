@@ -43,6 +43,7 @@ serverless deploy --stage ${stage}
 # invoking functions
 metric_function_names=("enhancedMetricTest" "noEnhancedMetricTest" "timeoutMetricTest")
 metric_function_names=("enhancedMetricTest" "noEnhancedMetricTest")
+# Todo : timeoutMetricTest
 log_function_names=("logTest")
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}")
