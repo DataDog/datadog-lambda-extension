@@ -3,9 +3,9 @@
 # Unless explicitly stated otherwise all files in this repository are licensed
 # under the Apache License Version 2.0.
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
-# Copyright 2020 Datadog, Inc.
+# Copyright 2021 Datadog, Inc.
 
-# Use with `VERSION=<DESIRED_VERSION> ./build_docker_image.sh`
+# Use with `VERSION=<DESIRED_VERSION> ./publish_prod.sh`
 
 set -e
 
@@ -38,9 +38,9 @@ if [ "$CONT" != "y" ]; then
 fi
 cd -
 
-# Move into the script directory
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd $DIR
+# Move into the scripts directory
+SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+cd $SCRIPTS_DIR
 
 # Manually confirm access
 read -p "Please confirm that you have write access to the datadog-agent repository in GitHub. (y/n)" CONT
@@ -80,11 +80,13 @@ echo "Pushing Docker image to Dockerhub"
 docker push $DOCKER_REPOSITORY_NAME:$VERSION
 docker push $DOCKER_REPOSITORY_NAME:latest
 
-echo "Creating tag for release on GitHub"
-git tag "lambda-extension-$VERSION"
-git push origin "refs/tags/lambda-extension-$VERSION"
+echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
+git tag "v$VERSION"
+git push origin "refs/tags/v$VERSION"
 
 echo "New extension version published to AWS and Dockerhub!"
 echo
-echo "Please create a new GitHub release with the tag lambda-extension-${VERSION}"
-echo "https://github.com/DataDog/datadog-agent/releases/new?tag=lambda-extension-$VERSION&title=lambda-extension-$VERSION"
+echo "IMPORTANT: Please follow the following steps to create release notes:"
+echo "1. Manually create a new tag called lambda-extension-${VERSION} in the datadog-agent repository"
+echo "2. Create a new GitHub release in the datadog-lambda-extension repository using the tag v${VERSION}, and add release notes"
+echo ">>> https://github.com/DataDog/datadog-lambda-extension/releases/new?tag=v${VERSION}&title=v${VERSION}"

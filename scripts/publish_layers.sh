@@ -11,8 +11,8 @@
 set -e
 
 # Move into the root directory, so this script can be called from any directory
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd $DIR/..
+SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+cd $SCRIPTS_DIR/..
 
 LAYER_PATH=".layers/datadog_extension.zip"
 LAYER_NAME="Datadog-Extension"
