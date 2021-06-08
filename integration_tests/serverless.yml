@@ -33,6 +33,9 @@ layers:
   recorderExtension:
     package:
       artifact: ./recorder-extension/ext.zip
+  datadogExtensionIntegrationTest:
+    package:
+      artifact: ../.layers/datadog_extension.zip
 
 functions:
   enhancedMetricTest:
@@ -41,7 +44,7 @@ functions:
     handler: src/metric.enhancedMetricTest
     layers:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
   noEnhancedMetricTest:
     name: integration-tests-lambda-extension-${sls:stage}-noEnhancedMetricTest
@@ -49,7 +52,7 @@ functions:
     handler: src/metric.noEnhancedMetricTest
     layers:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
     environment:
       DD_ENHANCED_METRICS: false
@@ -59,7 +62,7 @@ functions:
     handler: src/metric.timeoutMetricTest
     layers:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
   logTest:
     name: integration-tests-lambda-extension-${sls:stage}-logTest
@@ -67,7 +70,7 @@ functions:
     handler: src/log.logTest
     layers:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Extension:${env:EXTENSION_VERSION}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
     environment:
       DD_LOG_LEVEL: ERROR

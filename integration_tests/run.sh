@@ -18,18 +18,13 @@ if [ -z "$LAYER_VERSION" ]; then
     exit 1
 fi
 
-if [ -z "$EXTENSION_VERSION" ]; then
-    echo "EXTENSION_VERSION not found "
-    exit 1
-fi
-
 # random 8-character ID to avoid collisions with other runs
 stage=$(xxd -l 4 -c 4 -p < /dev/random)
 stage="12341234"
 # always remove the stacks before exiting, no matter what
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"
-    LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
+    LAYER_VERSION=${LAYER_VERSION} \
     serverless remove --stage ${stage} 
 }
 
@@ -37,7 +32,7 @@ function remove_stack() {
 # trap remove_stack EXIT
 
 # deploying the stack
-LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
+LAYER_VERSION=${LAYER_VERSION} \
 serverless deploy --stage ${stage}
 
 # invoking functions
@@ -49,7 +44,7 @@ all_functions=("${metric_function_names[@]}" "${log_function_names[@]}")
 set +e # Don't exit this script if an invocation fails or there's a diff
 
 for function_name in "${all_functions[@]}"; do
-    LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} \
+    LAYER_VERSION=${LAYER_VERSION} \
     serverless invoke --stage ${stage} -f ${function_name}
     # two invocations are needed since enhanced metrics are computed with the REPORT log line (which is trigered at the end of the first invocation)
     return_value=$(serverless invoke --stage ${stage} -f ${function_name})
@@ -72,7 +67,7 @@ for function_name in "${all_functions[@]}"; do
     echo "Fetching logs for ${function_name} on ${stage}"
     retry_counter=0
     while [ $retry_counter -lt 10 ]; do
-        raw_logs=$(LAYER_VERSION=${LAYER_VERSION} EXTENSION_VERSION=${EXTENSION_VERSION} serverless logs --stage ${stage} -f $function_name --startTime $script_utc_start_time)
+        raw_logs=$(LAYER_VERSION=${LAYER_VERSION} serverless logs --stage ${stage} -f $function_name --startTime $script_utc_start_time)
         fetch_logs_exit_code=$?
         if [ $fetch_logs_exit_code -eq 1 ]; then
             echo "Retrying fetch logs for $sketchesFunctionName..."

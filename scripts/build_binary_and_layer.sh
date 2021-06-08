@@ -9,7 +9,7 @@ set -e
 
 
 if [ -z "$CI" ]; then
-    SERVERLESS_CMD_PATH="~/dd/datadog-agent/cmd/serverless"
+    SERVERLESS_CMD_PATH="../datadog-agent/cmd/serverless"
 else
     SERVERLESS_CMD_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent/cmd/serverless"
 fi
@@ -33,6 +33,7 @@ mkdir -p $TMP_DIR
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
 echo "Building Lambda extension binary"
+pwd
 cd $SERVERLESS_CMD_PATH
 GOOS=linux go build -ldflags="-s -w" -tags serverless -o $TARGET_DIR/datadog-agent
 if [ "$COMPRESS" = true ]; then
