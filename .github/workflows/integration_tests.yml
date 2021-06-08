@@ -31,7 +31,7 @@ jobs:
         run: yarn install
 
       - name: Create folder
-        run: pwd && mkdir -p ./dd/datadog-agent/cmd/serverless
+        run: pwd && mkdir -p ./dd/datadog-agent
 
       - name: Checkout the datadog-agent
         uses: actions/checkout@v2
