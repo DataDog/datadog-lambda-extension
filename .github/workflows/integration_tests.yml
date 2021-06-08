@@ -49,4 +49,4 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           LAYER_VERSION: 6
           EXTENSION_VERSION: 176
-        run: pwd && ls -la && ./integration_tests/run.sh
+        run: cp -R ../.layers . && ./integration_tests/run.sh
