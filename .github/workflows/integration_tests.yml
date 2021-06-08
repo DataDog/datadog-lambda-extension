@@ -38,9 +38,10 @@ jobs:
         with:
           repository: DataDog/datadog-agent
           ref: refs/heads/release/lambda-extension-v9
+          path: "datadog-agent"
 
       - name: Build the layer
-        run: ls . && ./scripts/build_binary_and_layer.sh
+        run: ./scripts/build_binary_and_layer.sh
 
       - name: Run tests
         env:
