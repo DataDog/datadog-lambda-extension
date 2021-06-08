@@ -41,7 +41,7 @@ jobs:
           path: ~/dd/datadog-agent/cmd/serverless
 
       - name: Build the layer
-        run: ./script/
+        run: ./scripts/build_binary_and_layer.sh
 
       - name: Run tests
         env:
