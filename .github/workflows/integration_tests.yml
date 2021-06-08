@@ -32,7 +32,7 @@ jobs:
     
       - name: Install dependencies
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
-        working-directory: integration_tests/recorder-extension/src
+        working-directory: integration_tests/recorder-extension/extensions/src
         run: yarn install
 
       - name: Create folder
