@@ -84,7 +84,7 @@ async function next(extensionId) {
     });
 
 
-    app.post('/v1/input/*', async (req, res) => {
+    app.post('/v1/input', async (req, res) => {
         if(JSON.stringify(req.body) !== '{}') { // to avoid printing empty logs due to the connectivity test
             for(let i = 0; i < req.body.length; ++i) {
                 const logString = JSON.stringify(req.body[i]);

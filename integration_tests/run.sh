@@ -10,9 +10,11 @@ cd "./integration_tests"
 
 #zip extension
 cd recorder-extension
-mkdir extensions
-mv src extensions
-mv a_recorder extensions
+yarn install
+mkdir -p extensions
+cp -R src extensions
+cp -R node_modules extensions
+cp a_recorder extensions
 zip -rq ext.zip extensions -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 
@@ -23,7 +25,7 @@ fi
 
 # random 8-character ID to avoid collisions with other runs
 stage=$(xxd -l 4 -c 4 -p < /dev/random)
-stage="12341234"
+
 # always remove the stacks before exiting, no matter what
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"
@@ -32,7 +34,7 @@ function remove_stack() {
 }
 
 # making sure the remove_stack function will be called no matter what
-# trap remove_stack EXIT
+trap remove_stack EXIT
 
 # deploying the stack
 LAYER_VERSION=${LAYER_VERSION} \
@@ -99,8 +101,6 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/$stage/XXXXXX/g" | \
             sort
         )
-        echo $raw_logs > raw_toto_$function_name
-        echo $logs > toto_$function_name
     elif [[ " ${log_function_names[@]} " =~ " ${function_name} " ]]; then
         logs=$(
             echo "$raw_logs" | \
@@ -112,6 +112,8 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/$stage/XXXXXX/g" | \
             perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g"
         )
+        echo $logs > toto
+        echo $raw_logs > toto2
     else #traces are not yet integration-tested
         logs=$(
             echo "$raw_logs"
