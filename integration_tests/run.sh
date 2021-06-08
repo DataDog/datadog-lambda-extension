@@ -100,6 +100,8 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/$stage/XXXXXX/g" | \
             sort
         )
+        echo $raw_logs > raw_toto_$function_name
+        echo $logs > toto_$function_name
     elif [[ " ${log_function_names[@]} " =~ " ${function_name} " ]]; then
         logs=$(
             echo "$raw_logs" | \
