@@ -42,9 +42,8 @@ serverless deploy --stage ${stage}
 
 # invoking functions
 metric_function_names=("enhancedMetricTest" "noEnhancedMetricTest" "timeoutMetricTest")
-metric_function_names=("enhancedMetricTest" "noEnhancedMetricTest")
-# Todo : timeoutMetricTest
 log_function_names=("logTest")
+
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}")
 
@@ -58,7 +57,7 @@ for function_name in "${all_functions[@]}"; do
 
     # Compare new return value to snapshot
     diff_output=$(echo "$return_value" | diff - "./snapshots/expectedInvocationResult")
-    if [ $? -eq 1 ]; then
+    if [ $? -eq 1 ] && [ "$function_name" != "timeoutMetricTest" ]; then
         echo "Failed: Return value for $function_name does not match snapshot:"
         echo "$diff_output"
         mismatch_found=true

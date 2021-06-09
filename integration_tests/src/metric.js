@@ -18,7 +18,7 @@ async function myHandler(event, context) {
 
 async function myTimeoutHandler(event, context) {
   sendDistributionMetric("serverless.lambda-extension.integration-test.count", invocationCount);
-  await new Promise(r => setTimeout(r, 600000)); // 10 min to be sure
+  await new Promise(r => setTimeout(r, 30*1000)); //30 sec to be sure 
   invocationCount += 1;
   return {
     statusCode: 200,

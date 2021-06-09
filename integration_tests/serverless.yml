@@ -17,7 +17,7 @@ provider:
     DD_LOGS_CONFIG_LOGS_NO_SSL: true
     DD_LOG_LEVEL: INFO
     DD_LOGS_ENABLED: false
-    DD_SERVERLESS_LOGS_ENABLED: true
+    DD_SERVERLESS_LOGS_ENABLED: false
     DD_MERGE_XRAY_TRACES: false
     DD_TRACE_ENABLED: false
 
@@ -55,9 +55,9 @@ functions:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
-
     environment:
       DD_ENHANCED_METRICS: false
+
   timeoutMetricTest:
     name: integration-tests-lambda-extension-${sls:stage}-timeoutMetricTest
     runtime: nodejs12.x
@@ -66,6 +66,8 @@ functions:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_LOG_LEVEL: DEBUG
 
   logTest:
     name: integration-tests-lambda-extension-${sls:stage}-logTest
@@ -75,7 +77,6 @@ functions:
       - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
-
     environment:
       DD_LOG_LEVEL: ERROR
       DD_LOGS_ENABLED: true

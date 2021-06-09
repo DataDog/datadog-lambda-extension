@@ -1,8 +1,6 @@
 name: build
 
-on:
-  schedule:
-    - cron: "0 * * * *" # Run every hour for now (to check for flakiness)
+on: push
 
 jobs:
 
