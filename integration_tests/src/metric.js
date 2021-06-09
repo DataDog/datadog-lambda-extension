@@ -18,7 +18,7 @@ async function myHandler(event, context) {
 
 async function myTimeoutHandler(event, context) {
   sendDistributionMetric("serverless.lambda-extension.integration-test.count", invocationCount);
-  for (;;) {}
+  await new Promise(()=> null)
   return {
     statusCode: 200,
     body: 'ok'

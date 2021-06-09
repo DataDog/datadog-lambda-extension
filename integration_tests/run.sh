@@ -76,7 +76,7 @@ for function_name in "${all_functions[@]}"; do
         raw_logs=$(NODE_LAYER_VERSION=${NODE_LAYER_VERSION} serverless logs --stage ${stage} -f $function_name --startTime $script_utc_start_time)
         fetch_logs_exit_code=$?
         if [ $fetch_logs_exit_code -eq 1 ]; then
-            echo "Retrying fetch logs for $sketchesFunctionName..."
+            echo "Retrying fetch logs for $function_name..."
             retry_counter=$(($retry_counter + 1))
             sleep 10
             continue
