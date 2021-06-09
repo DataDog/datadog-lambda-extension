@@ -33,7 +33,6 @@ mkdir -p $TMP_DIR
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
 echo "Building Lambda extension binary"
-pwd
 cd $SERVERLESS_CMD_PATH
 GOOS=linux go build -ldflags="-s -w" -tags serverless -o $TARGET_DIR/datadog-agent
 if [ "$COMPRESS" = true ]; then
