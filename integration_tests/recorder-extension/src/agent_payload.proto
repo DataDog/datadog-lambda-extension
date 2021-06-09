@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-// file copied from https://github.com/DataDog/agent-payload/blob/master/proto/metrics/agent_payload.proto
+// file partially copied from https://github.com/DataDog/agent-payload/blob/master/proto/metrics/agent_payload.proto
 
 package datadog.agentpayload;
 
@@ -11,52 +11,6 @@ message CommonMetadata {
 	string internal_ip = 4;
 	string public_ip = 5;
 	string api_key = 6;
-}
-
-message MetricsPayload {
-	message Sample {
-		message Point {
-			int64 ts = 1;
-			double value = 2;
-		}
-		string metric = 1;
-		string type = 2;
-		string host = 3;
-		repeated Point points = 4;
-		repeated string tags = 5;
-		string source_type_name = 6;
-	}
-	repeated Sample samples = 1;
-	CommonMetadata metadata = 2;
-}
-
-message ServiceChecksPayload {
-	message ServiceCheck {
-		string name = 1;
-		string host = 2;
-		int64 ts = 3;
-		int32 status = 4;
-		string message = 5;
-		repeated string tags = 6;
-	}
-	repeated ServiceCheck service_checks = 1;
-	CommonMetadata metadata = 2;
-}
-
-message EventsPayload {
-	message Event {
-		string title = 1;
-		string text = 2;
-		int64 ts = 3;
-		string priority = 4;
-		string host = 5;
-		repeated string tags = 6;
-		string alert_type = 7;
-		string aggregation_key = 8;
-		string source_type_name = 9;
-	}
-	repeated Event events = 1;
-	CommonMetadata metadata = 2;
 }
 
 message SketchPayload {
@@ -93,93 +47,4 @@ message SketchPayload {
 	}
 	repeated Sketch sketches = 1 [(gogoproto.nullable) = false];
 	CommonMetadata metadata = 2 [(gogoproto.nullable) = false];
-}
-
-message HostMetadataPayload {
-	message TagSet {
-		string type = 1;
-		repeated string tags = 2;
-	}
-	message HostMetadata {
-		string hostname = 1;
-		repeated TagSet tags = 2;
-		repeated string aliases = 3;
-	}
-	repeated HostMetadata hosts_metadata = 1;
-	CommonMetadata metadata = 2;
-}
-
-message KubeMetadataPayload {
-	message Deployment {
-		string uid = 1;
-		string name = 2;
-		string namespace = 3;
-	}
-	message ReplicaSet {
-		string uid = 1;
-		string name = 2;
-		string namespace = 3;
-		string deployment = 4;
-	}
-	message DaemonSet {
-		string uid = 1;
-		string name = 2;
-		string namespace = 3;
-	}
-	message Service {
-		string uid = 1;
-		string name = 2;
-		string namespace = 3;
-		map<string,string> selector = 4;
-		string type = 5;
-	}
-	message Job {
-		string uid = 1;
-		string name = 2;
-		string namespace = 3;
-	}
-	message Pod {
-		string uid = 1;
-		string name = 2;
-		string namespace = 3;
-		string host_ip = 4;
-		string pod_ip = 5;
-		map<string, string> labels = 6;
-		repeated string service_uids = 7;
-		repeated string container_ids = 8;
-		string daemon_set = 9;
-		string replica_set = 10;
-		string replication_controller = 11;
-		string job = 12;
-	}
-	message Container {
-		string id = 1;
-		string name = 2;
-		string image = 3;
-		string image_id = 4;
-	}
-	repeated Deployment deployments = 1;
-	repeated ReplicaSet replica_sets = 2;
-	repeated DaemonSet daemon_sets = 3;
-	repeated Service services = 4;
-	repeated Job jobs = 5;
-	repeated Pod pods = 6;
-	repeated Container containers = 7;
-}
-
-message ECSMetadataPayload {
-	message Task {
-		string arn = 1;
-		string desired_status = 2;
-		string known_status = 3;
-		string family = 4;
-		string version = 5;
-		repeated Container containers = 6;
-	}
-	message Container {
-		string docker_id = 1;
-		string docker_name = 2;
-		string name = 3;
-	}
-	repeated Task tasks = 1;
 }

@@ -43,7 +43,7 @@ functions:
     runtime: nodejs12.x
     handler: src/metric.enhancedMetricTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
 
@@ -52,7 +52,7 @@ functions:
     runtime: nodejs12.x
     handler: src/metric.noEnhancedMetricTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -63,7 +63,7 @@ functions:
     runtime: nodejs12.x
     handler: src/metric.timeoutMetricTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -74,7 +74,7 @@ functions:
     runtime: nodejs12.x
     handler: src/log.logTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node12-x:${env:LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
