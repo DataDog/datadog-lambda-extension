@@ -18,7 +18,8 @@ async function myHandler(event, context) {
 
 async function myTimeoutHandler(event, context) {
   sendDistributionMetric("serverless.lambda-extension.integration-test.count", invocationCount);
-  await new Promise(()=> null)
+  await new Promise(r => setTimeout(r, 15 * 60 * 1000)); // max timeout value allowed by AWS
+  invocationCount += 1;
   return {
     statusCode: 200,
     body: 'ok'
