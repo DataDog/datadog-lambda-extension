@@ -1,0 +1,84 @@
+service: integration-tests-lambda-extension
+
+resources:
+    Description: "[Serverless] Integration tests application for lambda extension"
+
+provider:
+  name: aws
+  region: sa-east-1
+  tracing:
+    lambda: true
+    apiGateway: true
+  environment:
+    DD_INTEGRATION_TEST: true
+    DD_DD_URL: http://127.0.0.1:3333
+    DD_API_KEY: NO_NEED_TO_BE_VALID
+    DD_LOGS_CONFIG_LOGS_DD_URL: 127.0.0.1:3333
+    DD_LOGS_CONFIG_LOGS_NO_SSL: true
+    DD_LOG_LEVEL: INFO
+    DD_LOGS_ENABLED: false
+    DD_SERVERLESS_LOGS_ENABLED: false
+    DD_MERGE_XRAY_TRACES: false
+    DD_TRACE_ENABLED: false
+
+  lambdaHashingVersion: 20201221
+  timeout: 15
+  deploymentBucket:
+    name: integration-tests-deployment-bucket
+  iam:
+    # IAM permissions require that all functions are deployed with this role
+    role: "arn:aws:iam::601427279990:role/serverless-integration-test-lambda-role"
+
+layers:
+  recorderExtension:
+    package:
+      artifact: ./recorder-extension/ext.zip
+  datadogExtensionIntegrationTest:
+    package:
+      artifact: ../.layers/datadog_extension.zip
+
+functions:
+  enhancedMetricTest:
+    name: integration-tests-lambda-extension-${sls:stage}-enhancedMetricTest
+    runtime: nodejs12.x
+    handler: src/metric.enhancedMetricTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+
+  noEnhancedMetricTest:
+    name: integration-tests-lambda-extension-${sls:stage}-noEnhancedMetricTest
+    runtime: nodejs12.x
+    handler: src/metric.noEnhancedMetricTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_ENHANCED_METRICS: false
+
+  timeoutMetricTest:
+    name: integration-tests-lambda-extension-${sls:stage}-timeoutMetricTest
+    runtime: nodejs12.x
+    handler: src/metric.timeoutMetricTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_LOG_LEVEL: DEBUG
+
+  logTest:
+    name: integration-tests-lambda-extension-${sls:stage}-logTest
+    runtime: nodejs12.x
+    handler: src/log.logTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true

@@ -1,0 +1,61 @@
+name: build
+
+on:
+  schedule:
+    - cron: "0 12 * * *" #every day at midday
+
+jobs:
+
+  integration-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Set up Node 14
+        uses: actions/setup-node@v1
+        with:
+          node-version: 14
+
+      - name: Cache Node modules
+        id: cache-node-modules
+        uses: actions/cache@v2
+        with:
+          path: "**/node_modules"
+          key: ${{ runner.os }}-modules-${{ hashFiles('**/yarn.lock') }}
+
+      - name: Install Serverless Framework
+        run: sudo yarn global add serverless --prefix /usr/local
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        working-directory: integration_tests
+        run: yarn install
+    
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        working-directory: integration_tests/recorder-extension/src
+        run: yarn install
+
+      - name: Create folder
+        run: pwd && mkdir -p ~/dd
+
+      - name: Checkout the datadog-agent
+        uses: actions/checkout@v2
+        with:
+          repository: DataDog/datadog-agent
+          #ref: refs/heads/release/lambda-extension-v9
+          ref: refs/heads/maxday/integration-test # todo : change after merge of current PRs
+          path: "datadog-agent"
+
+      - name: Build the layer
+        run: ./scripts/build_binary_and_layer.sh
+
+
+      - name: Run tests
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # Todo : retrieve this layer version automatically from AWS
+          NODE_LAYER_VERSION: 55
+        run: cp -R ../.layers . && ./integration_tests/run.sh
