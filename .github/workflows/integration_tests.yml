@@ -1,6 +1,8 @@
 name: build
 
-on: push
+on:
+  schedule:
+    - cron: "0 12 * * *" #every day at midday
 
 jobs:
 
