@@ -106,7 +106,6 @@ for function_name in "${all_functions[@]}"; do
             echo "$raw_logs" | \
             grep "\[log\]" | \
             perl -p -e "s/(timestamp\":)[0-9]{13}/\1XXX/g" | \
-            perl -p -e "s/(ddtags\":\")[a-zA-Z0-9\:\-,_]+/\1XXX/g" | \
             perl -p -e "s/(\"REPORT |START |END |HTTP ).*/\1XXX\"}}/g" | \
             perl -p -e "s/(request_id\":\")[a-zA-Z0-9\-,]+/\1XXX/g"| \
             perl -p -e "s/$stage/XXXXXX/g" | \
