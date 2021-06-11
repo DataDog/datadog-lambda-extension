@@ -87,8 +87,15 @@ async function next(extensionId) {
     app.post('/v1/input', async (req, res) => {
         if(JSON.stringify(req.body) !== '{}') { // to avoid printing empty logs due to the connectivity test
             for(let i = 0; i < req.body.length; ++i) {
+                //sort tags to avoid flaky tests
+                const originalTags = req.body[i].ddtags;
+                const sortedTags = originalTags.split(",");
+                sortedTags.sort();
+                // reset tags once sorted
+                req.body[i].ddtags = sortedTags.join(",")
                 const logString = JSON.stringify(req.body[i]);
-                if(logString.indexOf("[sketch]") === -1 && logString.indexOf("[log]") === -1) { // avoid inception
+                if(logString.indexOf("[sketch]") === -1 && logString.indexOf("[log]") === -1) { // if we log an unwanted log, it will be availble in the next log api payload -> infinite loop
+                    const tags = logString
                     console.log("[log]", logString);
                 }
             }

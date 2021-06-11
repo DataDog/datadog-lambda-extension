@@ -2,7 +2,10 @@ name: build
 
 on:
   schedule:
-    - cron: "0 12 * * *" #every day at midday
+    - cron: "0 12 * * *" #every day at midday (UTC)
+  push:
+    paths:
+    - 'integration_tests/**'
 
 jobs:
 

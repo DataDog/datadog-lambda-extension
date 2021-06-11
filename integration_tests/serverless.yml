@@ -46,6 +46,9 @@ functions:
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
 
   noEnhancedMetricTest:
     name: integration-tests-lambda-extension-${sls:stage}-noEnhancedMetricTest
@@ -82,3 +85,5 @@ functions:
       DD_LOGS_ENABLED: true
       DD_SERVERLESS_LOGS_ENABLED: true
       DD_LOGS_INJECTION: true
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
