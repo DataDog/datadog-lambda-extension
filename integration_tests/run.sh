@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LOGS_WAIT_SECONDS=30
+LOGS_WAIT_SECONDS=45
 
 set -e
 
