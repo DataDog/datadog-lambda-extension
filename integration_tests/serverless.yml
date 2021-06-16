@@ -1,4 +1,4 @@
-service: integration-tests-lambda-extension
+service: integration-tests-extension
 
 resources:
     Description: "[Serverless] Integration tests application for lambda extension"
@@ -38,9 +38,9 @@ layers:
       artifact: ../.layers/datadog_extension.zip
 
 functions:
-  enhancedMetricTest:
-    name: integration-tests-lambda-extension-${sls:stage}-enhancedMetricTest
-    runtime: nodejs12.x
+
+  enhanced-metric-node:
+    runtime: nodejs14.x
     handler: src/metric.enhancedMetricTest
     layers:
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
@@ -50,9 +50,20 @@ functions:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
 
-  noEnhancedMetricTest:
-    name: integration-tests-lambda-extension-${sls:stage}-noEnhancedMetricTest
-    runtime: nodejs12.x
+  enhanced-metric-python:
+    runtime: python3.8
+    handler: datadog_lambda.handler.handler
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+      DD_LAMBDA_HANDLER: src/metricPython.metric
+
+  no-enhanced-metric-node:
+    runtime: nodejs14.x
     handler: src/metric.noEnhancedMetricTest
     layers:
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
@@ -61,9 +72,19 @@ functions:
     environment:
       DD_ENHANCED_METRICS: false
 
-  timeoutMetricTest:
-    name: integration-tests-lambda-extension-${sls:stage}-timeoutMetricTest
-    runtime: nodejs12.x
+  no-enhanced-metric-python:
+    runtime: python3.8
+    handler: datadog_lambda.handler.handler
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_ENHANCED_METRICS: false
+      DD_LAMBDA_HANDLER: src/metricPython.metric
+
+  timeout-node:
+    runtime: nodejs14.x
     handler: src/metric.timeoutMetricTest
     layers:
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
@@ -72,18 +93,48 @@ functions:
     environment:
       DD_LOG_LEVEL: DEBUG
 
-  logTest:
-    name: integration-tests-lambda-extension-${sls:stage}-logTest
-    runtime: nodejs12.x
+  timeout-python:
+    runtime: python3.8
+    handler: datadog_lambda.handler.handler
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_LOG_LEVEL: DEBUG
+      DD_LAMBDA_HANDLER: src/metricPython.timeout
+      
+  log-node:
+    runtime: nodejs14.x
     handler: src/log.logTest
     layers:
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
+      DD_ENHANCED_METRICS: false
       DD_LOG_LEVEL: ERROR
       DD_LOGS_ENABLED: true
       DD_SERVERLESS_LOGS_ENABLED: true
       DD_LOGS_INJECTION: true
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+      DD_SERVICE: integration-test-service
+
+  log-python:
+    runtime: python3.8
+    handler: datadog_lambda.handler.handler
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_ENHANCED_METRICS: false
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+      DD_LAMBDA_HANDLER: src/logPython.log
+      DD_SERVICE: integration-test-service
