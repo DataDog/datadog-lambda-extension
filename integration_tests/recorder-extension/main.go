@@ -64,7 +64,7 @@ func processEvents(ctx context.Context) {
 				return
 			}
 			if res.EventType == Shutdown {
-				time.Sleep(1 * time.Second)
+				time.Sleep(1900 * time.Millisecond)
 				return
 			}
 		}
