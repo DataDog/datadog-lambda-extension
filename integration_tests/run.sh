@@ -8,7 +8,7 @@ script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
 
 cd "./integration_tests"
 
-#zip extension
+#build and zip extension
 cd recorder-extension
     GOOS=linux GOARCH=amd64 go build -o extensions/recorder-extension main.go
     zip -rq ext.zip extensions/* -x ".*" -x "__MACOSX" -x "extensions/.*"
