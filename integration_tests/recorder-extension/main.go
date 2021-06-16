@@ -13,7 +13,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
@@ -184,25 +183,7 @@ func (e *Client) NextEvent(ctx context.Context) (*NextEventResponse, error) {
 
 // Start begins running the sidecar
 func Start(port string) {
-	writeToFileSystem("/tmp/test.txt", "Hello I'm a temp file")
 	go startHTTPServer(port)
-}
-
-func writeToFileSystem(filename string, data string) {
-	file, err := os.Create(filename)
-	if err != nil {
-		panic(err)
-	}
-	defer file.Close()
-
-	_, err = io.WriteString(file, data)
-	if err != nil {
-		panic(err)
-	}
-	err = file.Sync()
-	if err != nil {
-		panic(err)
-	}
 }
 
 func startHTTPServer(port string) {
