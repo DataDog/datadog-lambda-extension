@@ -27,13 +27,13 @@ function getLatestLayerVersion() {
 
 if [ -z "$NODE_LAYER_VERSION" ]; then
    echo "NODE_LAYER_VERSION not found, getting the latest one"
-   NODE_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Node14-x")
+   export NODE_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Node14-x")
    echo "NODE_LAYER_VERSION set to : $NODE_LAYER_VERSION"
 fi
 
 if [ -z "$PYTHON_LAYER_VERSION" ]; then
    echo "PYTHON_LAYER_VERSION not found, getting the latest one"
-   PYTHON_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Python38")
+   export PYTHON_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Python38")
    echo "PYTHON_LAYER_VERSION set to : $PYTHON_LAYER_VERSION"
 fi
 
