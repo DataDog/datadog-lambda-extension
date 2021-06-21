@@ -35,7 +35,7 @@ function remove_stack() {
 }
 
 # making sure the remove_stack function will be called no matter what
-# trap remove_stack EXIT
+trap remove_stack EXIT
 
 # deploying the stack
 NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
@@ -131,8 +131,6 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/$stage/XXXXXX/g" | \
             sort
         )
-        echo $logs > coucou
-        echo $raw_logs > coucouRaw
     fi
 
     function_snapshot_path="./snapshots/${function_name}"
