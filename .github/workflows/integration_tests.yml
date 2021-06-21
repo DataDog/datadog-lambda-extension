@@ -60,5 +60,5 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           # Todo : retrieve this layer version automatically from AWS
           NODE_LAYER_VERSION: 55
-          PYTHON_LAYER_VERSION: 40
+          PYTHON_LAYER_VERSION: 41
         run: cp -R ../.layers . && ./integration_tests/run.sh
