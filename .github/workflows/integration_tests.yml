@@ -6,6 +6,7 @@ on:
   push:
     paths:
     - 'integration_tests/**'
+    - '.github/**'
 
 jobs:
 
@@ -52,7 +53,6 @@ jobs:
 
       - name: Build the layer
         run: ./scripts/build_binary_and_layer.sh
-
 
       - name: Run tests
         env:
