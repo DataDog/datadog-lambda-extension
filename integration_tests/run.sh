@@ -26,7 +26,6 @@ fi
 
 # random 8-character ID to avoid collisions with other runs
 stage=$(xxd -l 4 -c 4 -p < /dev/random)
-
 # always remove the stacks before exiting, no matter what
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"
@@ -36,7 +35,7 @@ function remove_stack() {
 }
 
 # making sure the remove_stack function will be called no matter what
-trap remove_stack EXIT
+# trap remove_stack EXIT
 
 # deploying the stack
 NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
@@ -46,7 +45,7 @@ serverless deploy --stage ${stage}
 # invoking functions
 metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-node" "timeout-python")
 log_function_names=("log-node" "log-python")
-trace_function_names=()
+trace_function_names=("simple-trace-node" "simple-trace-python")
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
 
@@ -121,8 +120,19 @@ for function_name in "${all_functions[@]}"; do
         )
     else #traces are not yet integration-tested
         logs=$(
-            echo "$raw_logs"
+            echo "$raw_logs" | \
+            grep "\[trace\]" | \
+            perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" | \
+            perl -p -e "s/((startTime|endTime|traceID|trace_id|span_id|parent_id|start|system.pid)\":)[0-9]+/\1XXX/g" | \
+            perl -p -e "s/(duration\":)[0-9]+/\1XXX/g" | \
+            perl -p -e "s/((datadog_lambda|dd_trace)\":\")[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
+            perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
+            perl -p -e "s/(,\"runtime-id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
+            perl -p -e "s/$stage/XXXXXX/g" | \
+            sort
         )
+        echo $logs > coucou
+        echo $raw_logs > coucouRaw
     fi
 
     function_snapshot_path="./snapshots/${function_name}"

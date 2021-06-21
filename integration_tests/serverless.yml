@@ -36,6 +36,9 @@ layers:
   datadogExtensionIntegrationTest:
     package:
       artifact: ../.layers/datadog_extension.zip
+  customPythonMdv:
+    package:
+      artifact: /Users/maxime.david/dd/datadog-lambda-python/.layers/datadog_lambda_py3.8.zip
 
 functions:
 
@@ -54,7 +57,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:sa-east-1:601427279990:layer:customPythonMdv:3
+      - {Ref: CustomPythonMdvLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -76,7 +79,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:sa-east-1:601427279990:layer:customPythonMdv:3
+      - {Ref: CustomPythonMdvLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -97,7 +100,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:sa-east-1:601427279990:layer:customPythonMdv:3
+      - {Ref: CustomPythonMdvLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -125,7 +128,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:sa-east-1:601427279990:layer:customPythonMdv:3
+      - {Ref: CustomPythonMdvLambdaLayer}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -137,4 +140,38 @@ functions:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/logPython.log
+      DD_SERVICE: integration-test-service
+
+  simple-trace-node:
+    runtime: nodejs14.x
+    handler: /opt/nodejs/node_modules/datadog-lambda-js/handler.handler
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_LAMBDA_HANDLER: src/trace.simpleTest
+      DD_LOG_LEVEL: DEBUG
+      DD_TRACE_ENABLED: true
+      DD_APM_DD_URL: http://127.0.0.1:3333
+      DD_ENHANCED_METRICS: false
+      DD_TAGS: tagA:valueA,tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC,tagD:valueD
+      DD_SERVICE: integration-test-service
+
+  simple-trace-python:
+    runtime: python3.8
+    handler: datadog_lambda.handler.handler
+    layers:
+      - {Ref: CustomPythonMdvLambdaLayer}
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_LAMBDA_HANDLER: src/tracePython.simple_test
+      DD_LOG_LEVEL: DEBUG
+      DD_TRACE_ENABLED: true
+      DD_APM_DD_URL: http://127.0.0.1:3333
+      DD_ENHANCED_METRICS: false
+      DD_TAGS: tagA:valueA,tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC,tagD:valueD
       DD_SERVICE: integration-test-service

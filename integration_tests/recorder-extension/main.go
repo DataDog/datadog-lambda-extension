@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/DataDog/agent-payload/gogen"
+	"github.com/DataDog/datadog-agent/pkg/trace/pb"
 )
 
 var (
@@ -30,7 +31,24 @@ var (
 	extensionClient = NewClient(os.Getenv("AWS_LAMBDA_RUNTIME_API"))
 )
 
+// Span specifies the common Datadog API and trace agent span.
+type Span struct {
+	Service  string             `protobuf:"bytes,1,opt,name=service,proto3" json:"service" msg:"service"`
+	Name     string             `protobuf:"bytes,2,opt,name=name,proto3" json:"name" msg:"name"`
+	Resource string             `protobuf:"bytes,3,opt,name=resource,proto3" json:"resource" msg:"resource"`
+	TraceID  uint64             `protobuf:"varint,4,opt,name=traceID,proto3" json:"trace_id" msg:"trace_id"`
+	SpanID   uint64             `protobuf:"varint,5,opt,name=spanID,proto3" json:"span_id" msg:"span_id"`
+	ParentID uint64             `protobuf:"varint,6,opt,name=parentID,proto3" json:"parent_id" msg:"parent_id"`
+	Start    int64              `protobuf:"varint,7,opt,name=start,proto3" json:"start" msg:"start"`
+	Duration int64              `protobuf:"varint,8,opt,name=duration,proto3" json:"duration" msg:"duration"`
+	Error    int32              `protobuf:"varint,9,opt,name=error,proto3" json:"error" msg:"error"`
+	Meta     map[string]string  `protobuf:"bytes,10,rep,name=meta" json:"meta" msg:"meta" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	Metrics  map[string]float64 `protobuf:"bytes,11,rep,name=metrics" json:"metrics" msg:"metrics" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"fixed64,2,opt,name=value,proto3"`
+	Type     string             `protobuf:"bytes,12,opt,name=type,proto3" json:"type" msg:"type"`
+}
+
 func main() {
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	sigs := make(chan os.Signal, 1)
@@ -187,6 +205,11 @@ func Start(port string) {
 }
 
 func startHTTPServer(port string) {
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Printf("%s\n", r.RequestURI)
+	})
+
 	http.HandleFunc("/api/beta/sketches", func(w http.ResponseWriter, r *http.Request) {
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
@@ -234,6 +257,30 @@ func startHTTPServer(port string) {
 			if !strings.Contains(stringJsonLog, "[log]") && !strings.Contains(stringJsonLog, "[metric]") {
 				fmt.Printf("[log] %s\n", stringJsonLog)
 			}
+		}
+	})
+
+	http.HandleFunc("/api/v0.2/traces", func(w http.ResponseWriter, r *http.Request) {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return
+		}
+		decompressedBody, err := decompress(body)
+		if err != nil {
+			return
+		}
+
+		pl := new(pb.TracePayload)
+		if err := pl.Unmarshal(decompressedBody); err != nil {
+			fmt.Printf("Error while unmarshalling traces %s \n", err)
+			return
+		}
+		for _, trace := range pl.Traces {
+			jsonTrace, err := json.Marshal(trace)
+			if err != nil {
+				return
+			}
+			fmt.Printf("[trace] %s\n", string(jsonTrace))
 		}
 	})
 
