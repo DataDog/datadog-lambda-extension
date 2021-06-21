@@ -36,9 +36,6 @@ layers:
   datadogExtensionIntegrationTest:
     package:
       artifact: ../.layers/datadog_extension.zip
-  customPythonMdv:
-    package:
-      artifact: /Users/maxime.david/dd/datadog-lambda-python/.layers/datadog_lambda_py3.8.zip
 
 functions:
 
