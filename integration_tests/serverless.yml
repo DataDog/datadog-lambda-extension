@@ -57,11 +57,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-<<<<<<< HEAD
-      - {Ref: CustomPythonMdvLambdaLayer}
-=======
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
->>>>>>> maxday/add-python-support
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -83,11 +79,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-<<<<<<< HEAD
-      - {Ref: CustomPythonMdvLambdaLayer}
-=======
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
->>>>>>> maxday/add-python-support
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -108,11 +100,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-<<<<<<< HEAD
-      - {Ref: CustomPythonMdvLambdaLayer}
-=======
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
->>>>>>> maxday/add-python-support
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -140,11 +128,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-<<<<<<< HEAD
-      - {Ref: CustomPythonMdvLambdaLayer}
-=======
       - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
->>>>>>> maxday/add-python-support
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
