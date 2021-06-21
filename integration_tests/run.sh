@@ -26,6 +26,7 @@ fi
 
 # random 8-character ID to avoid collisions with other runs
 stage=$(xxd -l 4 -c 4 -p < /dev/random)
+
 # always remove the stacks before exiting, no matter what
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"

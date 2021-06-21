@@ -188,11 +188,6 @@ func Start(port string) {
 }
 
 func startHTTPServer(port string) {
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Printf("%s\n", r.RequestURI)
-	})
-
 	http.HandleFunc("/api/beta/sketches", func(w http.ResponseWriter, r *http.Request) {
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
