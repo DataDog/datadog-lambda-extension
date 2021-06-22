@@ -26,10 +26,8 @@ import (
 	"github.com/DataDog/datadog-agent/pkg/trace/pb"
 )
 
-var (
-	extensionName   = "recorder-extension" // extension name has to match the filename
-	extensionClient = NewClient(os.Getenv("AWS_LAMBDA_RUNTIME_API"))
-)
+const extensionName = "recorder-extension" // extension name has to match the filename
+var extensionClient = NewClient(os.Getenv("AWS_LAMBDA_RUNTIME_API"))
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -46,6 +44,7 @@ func main() {
 		panic(err)
 	}
 
+	// port 8080 is used by the Lambda Invoke API
 	port := "3333"
 	Start(port)
 
@@ -182,7 +181,7 @@ func (e *Client) NextEvent(ctx context.Context) (*NextEventResponse, error) {
 	return &res, nil
 }
 
-// Start begins running the sidecar
+// Start is starting the http server to receive logs, traces and metrics
 func Start(port string) {
 	go startHTTPServer(port)
 }
@@ -231,7 +230,7 @@ func startHTTPServer(port string) {
 				fmt.Printf("Error while JSON encoding the Log")
 			}
 			stringJsonLog := string(jsonLog)
-			// if we log an unwanted log, it will be availble in the next log api payload -> infinite loop
+			// if we log an unwanted log, it will be available in the next log api payload -> infinite loop
 			if !strings.Contains(stringJsonLog, "[log]") && !strings.Contains(stringJsonLog, "[metric]") {
 				fmt.Printf("[log] %s\n", stringJsonLog)
 			}
@@ -268,7 +267,6 @@ func startHTTPServer(port string) {
 	http.HandleFunc("/api/v1/check_run", func(w http.ResponseWriter, r *http.Request) {
 	})
 
-	// port 8080 is used by the Lambda Invoke API
 	err := http.ListenAndServe(":"+port, nil)
 	if err != nil {
 		panic(err)
