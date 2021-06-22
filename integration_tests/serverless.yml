@@ -43,7 +43,7 @@ functions:
     runtime: nodejs14.x
     handler: src/metric.enhancedMetricTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -54,7 +54,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -66,7 +66,7 @@ functions:
     runtime: nodejs14.x
     handler: src/metric.noEnhancedMetricTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -76,7 +76,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -87,7 +87,7 @@ functions:
     runtime: nodejs14.x
     handler: src/metric.timeoutMetricTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -97,7 +97,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -108,7 +108,7 @@ functions:
     runtime: nodejs14.x
     handler: src/log.logTest
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -125,7 +125,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -143,7 +143,7 @@ functions:
     runtime: nodejs14.x
     handler: /opt/nodejs/node_modules/datadog-lambda-js/handler.handler
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
@@ -160,7 +160,7 @@ functions:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
     layers:
-      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - arn:aws:lambda:${self:provider.region}:601427279990:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
       - {Ref: RecorderExtensionLambdaLayer}
       - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
     environment:
