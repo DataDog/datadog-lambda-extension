@@ -6,6 +6,7 @@ on:
   push:
     paths:
     - 'integration_tests/**'
+    - '.github/**'
 
 jobs:
 
@@ -47,18 +48,14 @@ jobs:
         uses: actions/checkout@v2
         with:
           repository: DataDog/datadog-agent
-          #ref: refs/heads/release/lambda-extension-v9
-          ref: refs/heads/maxday/integration-test # todo : change after merge of current PRs
+          ref: refs/heads/release/lambda-extension-v9 # todo : change after merge of current PRs
           path: "datadog-agent"
 
       - name: Build the layer
         run: ./scripts/build_binary_and_layer.sh
 
-
       - name: Run tests
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          # Todo : retrieve this layer version automatically from AWS
-          NODE_LAYER_VERSION: 55
         run: cp -R ../.layers . && ./integration_tests/run.sh
