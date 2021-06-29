@@ -3,14 +3,20 @@
 # Unless explicitly stated otherwise all files in this repository are licensed
 # under the Apache License Version 2.0.
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
-# Copyright 2020 Datadog, Inc.
+# Copyright 2021 Datadog, Inc.
 
-# Builds Datadogpy layers for lambda functions, using Docker
 set -e
 
+
+if [ -z "$CI" ]; then
+    SERVERLESS_CMD_PATH="../datadog-agent/cmd/serverless"
+else
+    SERVERLESS_CMD_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent/cmd/serverless"
+fi
+
 # Move into the root directory, so this script can be called from any directory
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd $DIR/..
+SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+cd $SCRIPTS_DIR/..
 
 LAYER_DIR=".layers"
 LAYER_FILE="datadog_extension"
@@ -27,7 +33,7 @@ mkdir -p $TMP_DIR
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
 echo "Building Lambda extension binary"
-cd ~/dd/datadog-agent/cmd/serverless
+cd $SERVERLESS_CMD_PATH
 
 LD_FLAGS=""
 
@@ -36,6 +42,7 @@ if [ "$COMPRESS" = true ]; then
 fi
 
 GOOS=linux go build -ldflags="${LD_FLAGS}" -tags serverless -o $TARGET_DIR/datadog-agent
+
 if [ "$COMPRESS" = true ]; then
     upx --brute $TARGET_DIR/datadog-agent
 fi
