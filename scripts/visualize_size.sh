@@ -14,12 +14,12 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $DIR/..
 
-./serverless/build_binary_and_layer.sh
+./scripts/build_binary_and_layer.sh
 cd ./extensions/
 
 echo "Analyzing go binary"
-go tool nm -size datadog-agent | c++filt > ../go-binsize-viz/agent.txt
-cd ../go-binsize-viz/
+go tool nm -size datadog-agent | c++filt > ../scripts/go-binsize-viz/agent.txt
+cd ../scripts/go-binsize-viz/
 
 echo "Converting data to json"
 python3 tab2pydic.py agent.txt > out.py
