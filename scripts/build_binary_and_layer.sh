@@ -34,7 +34,15 @@ TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
 echo "Building Lambda extension binary"
 cd $SERVERLESS_CMD_PATH
-GOOS=linux go build -ldflags="-s -w" -tags serverless -o $TARGET_DIR/datadog-agent
+
+LD_FLAGS=""
+
+if [ "$COMPRESS" = true ]; then
+    LD_FLAGS="-s -w"
+fi
+
+GOOS=linux go build -ldflags="${LD_FLAGS}" -tags serverless -o $TARGET_DIR/datadog-agent
+
 if [ "$COMPRESS" = true ]; then
     upx --brute $TARGET_DIR/datadog-agent
 fi
