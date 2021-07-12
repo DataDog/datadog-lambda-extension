@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/DataDog/agent-payload/gogen"
+	"github.com/DataDog/datadog-agent/pkg/trace/pb"
 )
 
 const extensionName = "recorder-extension" // extension name has to match the filename
@@ -233,6 +234,30 @@ func startHTTPServer(port string) {
 			if !strings.Contains(stringJsonLog, "[log]") && !strings.Contains(stringJsonLog, "[metric]") {
 				fmt.Printf("[log] %s\n", stringJsonLog)
 			}
+		}
+	})
+
+	http.HandleFunc("/api/v0.2/traces", func(w http.ResponseWriter, r *http.Request) {
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return
+		}
+		decompressedBody, err := decompress(body)
+		if err != nil {
+			return
+		}
+
+		pl := new(pb.TracePayload)
+		if err := pl.Unmarshal(decompressedBody); err != nil {
+			fmt.Printf("Error while unmarshalling traces %s \n", err)
+			return
+		}
+		for _, trace := range pl.Traces {
+			jsonTrace, err := json.Marshal(trace)
+			if err != nil {
+				return
+			}
+			fmt.Printf("[trace] %s\n", string(jsonTrace))
 		}
 	})
 
