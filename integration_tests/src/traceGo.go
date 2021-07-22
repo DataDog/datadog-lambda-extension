@@ -13,7 +13,12 @@ import (
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 )
 
-func handleRequest(ctx context.Context, ev events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+type TestResponse struct {
+	body       string `json:"body"`
+	statusCode int    `json:"statusCode"`
+}
+
+func handleRequest(ctx context.Context, ev events.APIGatewayProxyRequest) (TestResponse, error) {
 
 	req, _ := http.NewRequestWithContext(ctx, "GET", "https://www.datadoghq.com", nil)
 	client := http.Client{}
@@ -25,10 +30,12 @@ func handleRequest(ctx context.Context, ev events.APIGatewayProxyRequest) (event
 	time.Sleep(100 * time.Millisecond)
 	s.Finish()
 
-	return events.APIGatewayProxyResponse{
-		StatusCode: 200,
-		Body:       "hello, dog!",
-	}, nil
+	resp := TestResponse{
+		statusCode: 200,
+		body:       "ok",
+	}
+
+	return resp, nil
 }
 
 func main() {
