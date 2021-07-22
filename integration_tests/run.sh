@@ -14,6 +14,11 @@ cd recorder-extension
     zip -rq ext.zip extensions/* -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 
+#buid go
+cd src
+env GOOS=linux go build -ldflags="-s -w" -o ../bootstrap traceGo.go
+cd ..
+
 #get the latest layer vesion number
 function getLatestLayerVersion() {
     layerName=$1
@@ -59,7 +64,7 @@ serverless deploy --stage ${stage}
 # invoking functions
 metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-node" "timeout-python")
 log_function_names=("log-node" "log-python")
-trace_function_names=("simple-trace-node" "simple-trace-python")
+trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
 
@@ -142,6 +147,7 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/((datadog_lambda|dd_trace)\":\")[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
             perl -p -e "s/(,\"runtime-id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
+            perl -p -e "s/(,\"system.pid\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
             perl -p -e "s/$stage/XXXXXX/g" | \
             sort
         )
