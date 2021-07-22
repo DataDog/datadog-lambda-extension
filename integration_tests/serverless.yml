@@ -172,3 +172,16 @@ functions:
       DD_TAGS: tagA:valueA,tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC,tagD:valueD
       DD_SERVICE: integration-test-service
+
+  simple-trace-go:
+    runtime: provided.al2
+    handler: bootstrap
+    layers:
+      - {Ref: RecorderExtensionLambdaLayer}
+      - {Ref: DatadogExtensionIntegrationTestLambdaLayer}
+    environment:
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+      DD_SERVICE: integration-test-service
+      DD_TRACE_ENABLED: true
+      DD_APM_DD_URL: http://127.0.0.1:3333
