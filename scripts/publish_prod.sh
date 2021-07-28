@@ -63,7 +63,7 @@ echo "Checking that you have access to the GovCloud AWS account"
 saml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
-COMPRESS=true ./build_binary_and_layer.sh
+PRODUCTION=true ./build_binary_and_layer.sh
 ./build_docker_image.sh
 
 echo "Signing the layer"
