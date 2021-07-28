@@ -52,7 +52,8 @@ jobs:
           path: "datadog-agent"
 
       - name: Build the layer
-        run: ./scripts/build_binary_and_layer.sh
+        # This version number is injected into the binary but not used in AWS 
+        run: VERSION=123 ./scripts/build_binary_and_layer.sh
 
       - name: Run tests
         env:

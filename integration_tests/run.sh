@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Usage - run commands from repo root:
+# To check if new changes to the extension cause changes to any snapshots:
+#   aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
+# To regenerate snapshots:
+#   UPDATE_SNAPSHOTS=true aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
+
 LOGS_WAIT_SECONDS=45
 
 set -e
