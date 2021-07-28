@@ -51,12 +51,9 @@ jobs:
           ref: refs/heads/release/lambda-extension-v9 # todo : change after merge of current PRs
           path: "datadog-agent"
 
-      - name: Build the layer
-        # This version number is arbitrary and won't be used by AWS
-        run: VERSION=123 ./scripts/build_binary_and_layer.sh
-
       - name: Run tests
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        run: cp -R ../.layers . && ./integration_tests/run.sh
+          BUILD_EXTENSION: true
+        run: ./integration_tests/run.sh
