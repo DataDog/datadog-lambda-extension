@@ -2,7 +2,7 @@
 
 # Usage - run commands from repo root:
 # To check if new changes to the extension cause changes to any snapshots:
-#   aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
+#   BUILD_EXTENSION=true aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
 # To regenerate snapshots:
 #   UPDATE_SNAPSHOTS=true aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
 
@@ -16,6 +16,14 @@ if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     echo "No AWS credentials were found in the environment."
     echo "Note that only Datadog employees can run these integration tests."
     exit 1
+fi
+
+if [ -n "$BUILD_EXTENSION" ]; then
+    echo "Building extension that will be deployed with our test functions"
+    # This version number is arbitrary and won't be used by AWS
+    VERSION=123 ./scripts/build_binary_and_layer.sh
+else
+    echo "Not building extension, ensure it has already been built or re-run with 'BUILD_EXTENSION=true'"
 fi
 
 cd "./integration_tests"
