@@ -1,25 +1,44 @@
 #!/bin/bash
 
+# Usage - run commands from repo root:
+# To check if new changes to the extension cause changes to any snapshots:
+#   BUILD_EXTENSION=true aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
+# To regenerate snapshots:
+#   UPDATE_SNAPSHOTS=true aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
+
 LOGS_WAIT_SECONDS=45
 
 set -e
 
 script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
 
+if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+    echo "No AWS credentials were found in the environment."
+    echo "Note that only Datadog employees can run these integration tests."
+    exit 1
+fi
+
+if [ -n "$BUILD_EXTENSION" ]; then
+    echo "Building extension that will be deployed with our test functions"
+    # This version number is arbitrary and won't be used by AWS
+    VERSION=123 ./scripts/build_binary_and_layer.sh
+else
+    echo "Not building extension, ensure it has already been built or re-run with 'BUILD_EXTENSION=true'"
+fi
+
 cd "./integration_tests"
 
-#build and zip extension
+# build and zip recorder extension
 cd recorder-extension
     GOOS=linux GOARCH=amd64 go build -o extensions/recorder-extension main.go
     zip -rq ext.zip extensions/* -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 
-#buid go
+# build Go Lambda function
 cd src
 env GOOS=linux go build -ldflags="-s -w" -o ../bootstrap traceGo.go
 cd ..
 
-#get the latest layer vesion number
 function getLatestLayerVersion() {
     layerName=$1
     lastVersion=$(aws lambda list-layer-versions --layer-name $layerName --region sa-east-1 | jq -r ".LayerVersions | .[0] |  .Version")
@@ -33,13 +52,13 @@ function getLatestLayerVersion() {
 if [ -z "$NODE_LAYER_VERSION" ]; then
    echo "NODE_LAYER_VERSION not found, getting the latest one"
    export NODE_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Node14-x")
-   echo "NODE_LAYER_VERSION set to : $NODE_LAYER_VERSION"
+   echo "NODE_LAYER_VERSION set to: $NODE_LAYER_VERSION"
 fi
 
 if [ -z "$PYTHON_LAYER_VERSION" ]; then
    echo "PYTHON_LAYER_VERSION not found, getting the latest one"
    export PYTHON_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Python38")
-   echo "PYTHON_LAYER_VERSION set to : $PYTHON_LAYER_VERSION"
+   echo "PYTHON_LAYER_VERSION set to: $PYTHON_LAYER_VERSION"
 fi
 
 # random 8-character ID to avoid collisions with other runs
@@ -106,8 +125,9 @@ for function_name in "${all_functions[@]}"; do
         break
     done
 
+    # Replace invocation-specific data like timestamps and IDs with XXX to normalize across executions
     if [[ " ${metric_function_names[@]} " =~ " ${function_name} " ]]; then
-        # Replace invocation-specific data like timestamps and IDs with XXXX to normalize logs across executions
+        # Normalize metrics
         logs=$(
             echo "$raw_logs" | \
             grep "\[sketch\]" | \
@@ -120,12 +140,14 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/(k\":\[)[0-9\.e\-]{1,20}/\1XXX/g" | \
             perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
+            perl -p -e "s/(extension_version:)[0-9]+/\1XXX/g" | \
             perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(serverless.lambda-extension.integration-test.count)[0-9\.]+/\1/g" | \
             perl -p -e "s/$stage/XXXXXX/g" | \
             sort
         )
     elif [[ " ${log_function_names[@]} " =~ " ${function_name} " ]]; then
+        # Normalize logs
         logs=$(
             echo "$raw_logs" | \
             grep "\[log\]" | \
@@ -133,11 +155,13 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/(\"REPORT |START |END ).*/\1XXX\"}}/g" | \
             perl -p -e "s/(\"HTTP ).*/\1\"}}/g" | \
             perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"//g" | \
+            perl -p -e "s/(extension_version:)[0-9]+/\1XXX/g" | \
             perl -p -e "s/$stage/STAGE/g" | \
             perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" | \
             grep XXX
         )
-    else #traces are not yet integration-tested
+    else
+        # Normalize traces
         logs=$(
             echo "$raw_logs" | \
             grep "\[trace\]" | \
@@ -147,6 +171,7 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/((datadog_lambda|dd_trace)\":\")[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
             perl -p -e "s/(,\"runtime-id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
+            perl -p -e "s/(,\"extension_version\":\")[0-9]+\"/\1XXX\"/g" | \
             perl -p -e "s/(,\"system.pid\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
             perl -p -e "s/$stage/XXXXXX/g" | \
             sort

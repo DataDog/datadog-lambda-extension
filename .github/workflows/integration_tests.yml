@@ -52,7 +52,8 @@ jobs:
           path: "datadog-agent"
 
       - name: Build the layer
-        run: ./scripts/build_binary_and_layer.sh
+        # This version number is arbitrary and won't be used by AWS
+        run: VERSION=123 ./scripts/build_binary_and_layer.sh
 
       - name: Run tests
         env:

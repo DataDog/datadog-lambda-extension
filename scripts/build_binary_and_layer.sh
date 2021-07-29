@@ -8,6 +8,14 @@
 set -e
 
 
+# Ensure the target extension version is defined
+if [ -z "$VERSION" ]; then
+    echo "Extension version not specified"
+    echo ""
+    echo "EXITING SCRIPT."
+    exit 1
+fi
+
 if [ -z "$CI" ]; then
     SERVERLESS_CMD_PATH="../datadog-agent/cmd/serverless"
 else
@@ -35,19 +43,11 @@ TARGET_DIR=$(pwd)/$EXTENSION_DIR
 echo "Building Lambda extension binary"
 cd $SERVERLESS_CMD_PATH
 
-LD_FLAGS=""
-
-if [ "$COMPRESS" = true ]; then
-    LD_FLAGS="-s -w"
-fi
-
+# Add the current version number to the tags package before compilation
+LD_FLAGS="-s -w -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=${VERSION}"
 GOOS=linux go build -ldflags="${LD_FLAGS}" -tags serverless -o $TARGET_DIR/datadog-agent
 
-if [ "$COMPRESS" = true ]; then
-    upx --brute $TARGET_DIR/datadog-agent
-fi
-
-cd -
+cd $SCRIPTS_DIR/..
 rm -rf "./var"
 
 echo "Building Lambda layer"
