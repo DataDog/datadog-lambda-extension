@@ -140,7 +140,7 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/(k\":\[)[0-9\.e\-]{1,20}/\1XXX/g" | \
             perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
-            perl -p -e "s/(extension_version:)[0-9]+/\1XXX/g" | \
+            perl -p -e "s/(dd_extension_version:)[0-9]+/\1XXX/g" | \
             perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(serverless.lambda-extension.integration-test.count)[0-9\.]+/\1/g" | \
             perl -p -e "s/$stage/XXXXXX/g" | \
@@ -155,7 +155,7 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/(\"REPORT |START |END ).*/\1XXX\"}}/g" | \
             perl -p -e "s/(\"HTTP ).*/\1\"}}/g" | \
             perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"//g" | \
-            perl -p -e "s/(extension_version:)[0-9]+/\1XXX/g" | \
+            perl -p -e "s/(dd_extension_version:)[0-9]+/\1XXX/g" | \
             perl -p -e "s/$stage/STAGE/g" | \
             perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" | \
             grep XXX
@@ -171,7 +171,7 @@ for function_name in "${all_functions[@]}"; do
             perl -p -e "s/((datadog_lambda|dd_trace)\":\")[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
             perl -p -e "s/(,\"runtime-id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
-            perl -p -e "s/(,\"extension_version\":\")[0-9]+\"/\1XXX\"/g" | \
+            perl -p -e "s/(,\"dd_extension_version\":\")[0-9]+\"/\1XXX\"/g" | \
             perl -p -e "s/(,\"system.pid\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
             perl -p -e "s/$stage/XXXXXX/g" | \
             sort
