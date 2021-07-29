@@ -44,12 +44,7 @@ echo "Building Lambda extension binary"
 cd $SERVERLESS_CMD_PATH
 
 # Add the current version number to the tags package before compilation
-LD_FLAGS="-X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=${VERSION}"
-
-if [ "$PRODUCTION" = true ]; then
-    LD_FLAGS+=" -s -w"
-fi
-
+LD_FLAGS="-s -w -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=${VERSION}"
 GOOS=linux go build -ldflags="${LD_FLAGS}" -tags serverless -o $TARGET_DIR/datadog-agent
 
 cd $SCRIPTS_DIR/..
