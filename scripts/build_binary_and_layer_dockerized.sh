@@ -37,7 +37,7 @@ echo "Compressing all files to speed up docker copy"
 tar --exclude=$SERVERLESS_CMD_PATH/.git -czf ./scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
 
 docker build -t datadog/build-lambda-extension:$VERSION \
-    -f scripts/Dockerfile.build \
+    -f $TARGET_DIR/../scripts/Dockerfile.build \
     --build-arg VERSION=$VERSION .
 
 dockerId=$(docker create datadog/build-lambda-extension:$VERSION)
