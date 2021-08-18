@@ -35,6 +35,7 @@ cp $SERVERLESS_CMD_PATH/go.sum ./scripts/.cache
 
 pwd
 ls -la 
+ls -la ./scripts 
 
 echo "Compressing all files to speed up docker copy"
 tar --exclude=$SERVERLESS_CMD_PATH/.git -czfv ./scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
