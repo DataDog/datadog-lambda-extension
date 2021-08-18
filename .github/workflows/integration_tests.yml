@@ -6,6 +6,7 @@ on:
   push:
     paths:
     - 'integration_tests/**'
+    - 'scripts/**'
     - '.github/**'
 
 jobs:
