@@ -53,7 +53,7 @@ jobs:
 
       - name: Build the layer
         # This version number is arbitrary and won't be used by AWS
-        run: VERSION=123 ./scripts/build_binary_and_layer.sh
+        run: VERSION=123 ./scripts/build_binary_and_layer_dockerized.sh
 
       - name: Run tests
         env:
