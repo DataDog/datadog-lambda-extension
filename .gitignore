@@ -8,3 +8,6 @@ integration_tests/bootstrap
 .DS_Store
 .layers
 extensions
+scripts/.cache
+scripts/.src
+scripts/.layers
