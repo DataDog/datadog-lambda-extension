@@ -34,6 +34,7 @@ cp $SERVERLESS_CMD_PATH/go.mod ./scripts/.cache
 cp $SERVERLESS_CMD_PATH/go.sum ./scripts/.cache
 
 echo "Compressing all files to speed up docker copy"
+echo "Target : $TARGET_DIR/../scripts/.src/datadog-agent.tgz"
 tar --exclude=$SERVERLESS_CMD_PATH/.git -czf $TARGET_DIR/../scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
 
 DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
