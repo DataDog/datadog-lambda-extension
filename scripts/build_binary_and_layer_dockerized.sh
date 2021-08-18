@@ -5,8 +5,6 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2021 Datadog, Inc.
 
-set -e
-
 if [ -z "$VERSION" ]; then
     echo "Extension version not specified"
     echo ""
@@ -14,9 +12,16 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-AGENT_PATH="../datadog-agent"
+if [ -z "$CI" ]; then
+    SERVERLESS_CMD_PATH="../datadog-agent"
+else
+    SERVERLESS_CMD_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent"
+fi
+
 EXTENSION_DIR=".layers"
-TARGET_DIR=$(pwd)/../$EXTENSION_DIR
+TARGET_DIR=$(pwd)/$EXTENSION_DIR
+
+mkdir -p $EXTENSION_DIR
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -25,11 +30,11 @@ cd $SCRIPTS_DIR/..
 # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
 mkdir -p ./scripts/.src ./scripts/.cache
 echo "Copy mod files to build a cache"
-find $AGENT_PATH -name "go.mod" | cpio -p -dumv ./scripts/.cache/datadog-agent
-find $AGENT_PATH -name "go.sum" | cpio -p -dumv ./scripts/.cache/datadog-agent
+find $SERVERLESS_CMD_PATH -name "go.mod" | cpio -p -dumv ./scripts/.cache/datadog-agent
+find $SERVERLESS_CMD_PATH -name "go.sum" | cpio -p -dumv ./scripts/.cache/datadog-agent
 
 echo "Compressing all files to speed up docker copy"
-tar --exclude=$AGENT_PATH/.git -czf ./scripts/.src/datadog-agent.tgz $AGENT_PATH
+tar --exclude=$SERVERLESS_CMD_PATH/.git -czf ./scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
 
 docker build -t datadog/build-lambda-extension:$VERSION \
     -f scripts/Dockerfile.build \
@@ -37,3 +42,4 @@ docker build -t datadog/build-lambda-extension:$VERSION \
 
 dockerId=$(docker create datadog/build-lambda-extension:$VERSION)
 docker cp $dockerId:/datadog_extension.zip $TARGET_DIR
+echo $TARGET_DIR
