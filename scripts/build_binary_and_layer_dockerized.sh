@@ -28,7 +28,7 @@ SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
 # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
-mkdir -p $TARGET_DIR/../scripts/.src $TARGET_DIR/../scripts/.cache
+mkdir -p ./scripts/.src ./scripts/.cache
 echo "Copy mod files to build a cache"
 cp $SERVERLESS_CMD_PATH/go.mod ./scripts/.cache
 cp $SERVERLESS_CMD_PATH/go.sum ./scripts/.cache
