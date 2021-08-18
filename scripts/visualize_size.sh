@@ -14,7 +14,7 @@ set -e
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $DIR/..
 
-./scripts/build_binary_and_layer.sh
+./scripts/build_binary_and_layer_dockerized.sh
 cd ./extensions/
 
 echo "Analyzing go binary"

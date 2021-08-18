@@ -35,9 +35,9 @@ RUN apt-get install -y zip
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
-RUN  zip -r datadog_agent.zip /extensions
+RUN  zip -r datadog_extension.zip /extensions
 
 # keep the smallest possible docker image
 FROM scratch
-COPY --from=compresser /extensions/datadog_agent.zip /
-ENTRYPOINT ["/datadog_agent.zip"]
+COPY --from=compresser /extensions/datadog_extension.zip /
+ENTRYPOINT ["/datadog_extension.zip"]
