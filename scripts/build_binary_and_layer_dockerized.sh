@@ -33,6 +33,9 @@ echo "Copy mod files to build a cache"
 cp $SERVERLESS_CMD_PATH/go.mod ./scripts/.cache
 cp $SERVERLESS_CMD_PATH/go.sum ./scripts/.cache
 
+pwd
+ls -la 
+
 echo "Compressing all files to speed up docker copy"
 tar --exclude=$SERVERLESS_CMD_PATH/.git -czfv ./scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
 tar -ztvf ./scripts/.src/datadog-agent.tgz
