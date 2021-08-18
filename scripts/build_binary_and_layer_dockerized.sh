@@ -30,8 +30,8 @@ cd $SCRIPTS_DIR/..
 # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
 mkdir -p ./scripts/.src ./scripts/.cache
 echo "Copy mod files to build a cache"
-find $SERVERLESS_CMD_PATH -name "go.mod" | cpio -p -dumv ./scripts/.cache/datadog-agent
-find $SERVERLESS_CMD_PATH -name "go.sum" | cpio -p -dumv ./scripts/.cache/datadog-agent
+cp $SERVERLESS_CMD_PATH/go.mod ./scripts/.cache
+cp $SERVERLESS_CMD_PATH/go.sum ./scripts/.cache
 
 echo "Compressing all files to speed up docker copy"
 tar --exclude=$SERVERLESS_CMD_PATH/.git -czf $TARGET_DIR/../scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH

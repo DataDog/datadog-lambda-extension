@@ -5,7 +5,8 @@ FROM golang:1.16.5 as builder
 RUN mkdir -p /tmp/dd/datadog-agent
 
 # cache dependencies
-COPY ./scripts/.cache/datadog-agent /tmp/dd/datadog-agent
+COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
+COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
 WORKDIR /tmp/dd/datadog-agent
 
 # copy source files (/tgz gets unzip automatically by Docker)
