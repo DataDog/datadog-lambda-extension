@@ -29,8 +29,9 @@ WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 RUN go build -ldflags=LD_FLAGS="-s -w -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=${VERSION}" -tags serverless -o datadog-agent
 
 # zip the extension
-FROM alpine as compresser
-RUN apk add -u zip
+FROM ubuntu:latest as compresser
+RUN apt-get update
+RUN apt-get install -y zip
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
