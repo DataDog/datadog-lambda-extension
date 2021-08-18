@@ -34,7 +34,7 @@ find $SERVERLESS_CMD_PATH -name "go.mod" | cpio -p -dumv ./scripts/.cache/datado
 find $SERVERLESS_CMD_PATH -name "go.sum" | cpio -p -dumv ./scripts/.cache/datadog-agent
 
 echo "Compressing all files to speed up docker copy"
-tar --exclude=$SERVERLESS_CMD_PATH/.git -czf ./scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
+tar --exclude=$SERVERLESS_CMD_PATH/.git -czf $TARGET_DIR/../scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
 
 DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
     -f $TARGET_DIR/../scripts/Dockerfile.build \
