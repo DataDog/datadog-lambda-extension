@@ -1,0 +1,35 @@
+# syntax = docker/dockerfile:experimental
+
+ARG VERSION
+FROM golang:1.16.5 as builder
+RUN mkdir -p /tmp/dd/datadog-agent
+
+# cache dependencies
+COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
+COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
+WORKDIR /tmp/dd/datadog-agent
+
+# copy source files (/tgz gets unzip automatically by Docker)
+ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
+
+# build the extension
+WORKDIR /tmp/dd/datadog-agent/cmd/serverless
+# add the current version number to the tags package before compilation
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -ldflags=LD_FLAGS="-s -w -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=${VERSION}" -v -tags serverless -o datadog-agent
+
+# zip the extension
+FROM ubuntu:latest as compresser
+RUN apt-get update
+RUN apt-get install -y zip
+RUN mkdir /extensions
+WORKDIR /extensions
+COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
+RUN  zip -r datadog_extension.zip /extensions
+
+# keep the smallest possible docker image
+FROM scratch
+COPY --from=compresser /extensions/datadog_extension.zip /
+ENTRYPOINT ["/datadog_extension.zip"]
