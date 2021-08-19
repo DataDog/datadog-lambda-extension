@@ -34,8 +34,9 @@ cp $AGENT_PATH/go.sum $BASE_PATH/scripts/.cache
 
 echo "Compressing all files to speed up docker copy"
 touch $BASE_PATH/scripts/.src/datadog-agent.tgz
-tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz $AGENT_PATH
-
+cd $AGENT_PATH/..
+tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz datadog-agent
+cd $BASE_PATH
 ls -la $BASE_PATH/scripts/.src
 ls -la $BASE_PATH/scripts/.cache
 
