@@ -39,6 +39,8 @@ tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz $AGENT_PATH
 ls -la $BASE_PATH/scripts/.src
 ls -la $BASE_PATH/scripts/.cache
 
+tar --list --verbose --file=$BASE_PATH/scripts/.src/datadog-agent.tgz
+
 DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
     -f ./scripts/Dockerfile.build \
     --build-arg VERSION=$VERSION .
