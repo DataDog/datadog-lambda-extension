@@ -13,38 +13,32 @@ if [ -z "$VERSION" ]; then
 fi
 
 if [ -z "$CI" ]; then
-    SERVERLESS_CMD_PATH="../datadog-agent"
+    AGENT_PATH="../datadog-agent"
 else
-    SERVERLESS_CMD_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent"
+    AGENT_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent"
 fi
 
+BASE_PATH=$(pwd)
 EXTENSION_DIR=".layers"
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
 mkdir -p $EXTENSION_DIR
 
-# Move into the root directory, so this script can be called from any directory
-SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd $SCRIPTS_DIR/..
+echo $BASE_PATH
 
 # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
-mkdir -p ./scripts/.src ./scripts/.cache
+mkdir -p $BASE_PATH/scripts/.src $BASE_PATH/scripts/.cache
 echo "Copy mod files to build a cache"
-cp $SERVERLESS_CMD_PATH/go.mod ./scripts/.cache
-cp $SERVERLESS_CMD_PATH/go.sum ./scripts/.cache
-
-pwd
-ls -la 
-ls -la ./scripts 
+cp $AGENT_PATH/go.mod $BASE_PATH/scripts/.cache
+cp $AGENT_PATH/go.sum $BASE_PATH/scripts/.cache
 
 echo "Compressing all files to speed up docker copy"
-tar --exclude=$SERVERLESS_CMD_PATH/.git -czfv ./scripts/.src/datadog-agent.tgz $SERVERLESS_CMD_PATH
-tar -ztvf ./scripts/.src/datadog-agent.tgz
+touch $BASE_PATH/scripts/.src/datadog-agent.tgz
+tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz $AGENT_PATH
 
 DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
-    -f $TARGET_DIR/../scripts/Dockerfile.build \
+    -f ./scripts/Dockerfile.build \
     --build-arg VERSION=$VERSION .
 
 dockerId=$(docker create datadog/build-lambda-extension:$VERSION)
 docker cp $dockerId:/datadog_extension.zip $TARGET_DIR
-echo $TARGET_DIR
