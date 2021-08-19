@@ -21,7 +21,7 @@ fi
 if [ -n "$BUILD_EXTENSION" ]; then
     echo "Building extension that will be deployed with our test functions"
     # This version number is arbitrary and won't be used by AWS
-    VERSION=123 ./scripts/build_binary_and_layer.sh
+    VERSION=123 ./scripts/build_binary_and_layer_dockerized.sh
 else
     echo "Not building extension, ensure it has already been built or re-run with 'BUILD_EXTENSION=true'"
 fi
