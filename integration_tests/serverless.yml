@@ -21,6 +21,8 @@ provider:
     DD_SERVERLESS_LOGS_ENABLED: false
     DD_MERGE_XRAY_TRACES: false
     DD_TRACE_ENABLED: false
+    DD_ENV: integration-tests-env
+    DD_VERSION: integration-tests-version
 
   lambdaHashingVersion: 20201221
   timeout: 15
