@@ -36,9 +36,6 @@ echo "Compressing all files to speed up docker copy"
 touch $BASE_PATH/scripts/.src/datadog-agent.tgz
 tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz $AGENT_PATH
 
-ls -la $BASE_PATH/scripts/.src
-ls -la $BASE_PATH/scripts/.cache
-
 DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
     -f ./scripts/Dockerfile.build \
     --build-arg VERSION=$VERSION .
