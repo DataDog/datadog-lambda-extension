@@ -200,6 +200,7 @@ func startHTTPServer(port string) {
 		}
 
 		for _, sketch := range pl.Sketches {
+			sort.Strings(sketch.Tags)
 			jsonSketch, err := json.Marshal(sketch)
 			if err != nil {
 				fmt.Printf("Error while JSON encoding the sketch")
