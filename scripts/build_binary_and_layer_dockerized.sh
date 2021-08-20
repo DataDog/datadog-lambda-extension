@@ -42,7 +42,7 @@ ls -la $BASE_PATH/scripts/.cache
 
 DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
     -f ./scripts/Dockerfile.build \
-    --build-arg VERSION=$VERSION .
+    --build-arg EXTENSION_VERSION="${VERSION}" .
 
 dockerId=$(docker create datadog/build-lambda-extension:$VERSION)
 docker cp $dockerId:/datadog_extension.zip $TARGET_DIR
