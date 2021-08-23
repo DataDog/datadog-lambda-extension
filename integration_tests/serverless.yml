@@ -23,6 +23,7 @@ provider:
     DD_TRACE_ENABLED: false
     DD_ENV: integration-tests-env
     DD_VERSION: integration-tests-version
+    DD_SERVICE: integration-tests-service
 
   lambdaHashingVersion: 20201221
   timeout: 15
@@ -122,7 +123,6 @@ functions:
       DD_LOGS_INJECTION: true
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
-      DD_SERVICE: integration-test-service
 
   log-python:
     runtime: python3.8
@@ -140,7 +140,6 @@ functions:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/logPython.log
-      DD_SERVICE: integration-test-service
 
   simple-trace-node:
     runtime: nodejs14.x
@@ -157,7 +156,6 @@ functions:
       DD_ENHANCED_METRICS: false
       DD_TAGS: tagA:valueA,tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC,tagD:valueD
-      DD_SERVICE: integration-test-service
 
   simple-trace-python:
     runtime: python3.8
@@ -174,7 +172,6 @@ functions:
       DD_ENHANCED_METRICS: false
       DD_TAGS: tagA:valueA,tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC,tagD:valueD
-      DD_SERVICE: integration-test-service
 
   simple-trace-go:
     runtime: provided.al2
@@ -185,6 +182,5 @@ functions:
     environment:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
-      DD_SERVICE: integration-test-service
       DD_TRACE_ENABLED: true
       DD_APM_DD_URL: http://127.0.0.1:3333
