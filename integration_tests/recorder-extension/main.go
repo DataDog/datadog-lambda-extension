@@ -209,7 +209,7 @@ func startHTTPServer(port string) {
 		}
 	})
 
-	http.HandleFunc("/v1/input", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/api/v0.2/traces", func(w http.ResponseWriter, r *http.Request) {
 		body, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			return
