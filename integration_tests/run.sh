@@ -73,7 +73,7 @@ function remove_stack() {
 }
 
 # making sure the remove_stack function will be called no matter what
-trap remove_stack EXIT
+#trap remove_stack EXIT
 
 # deploying the stack
 NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
