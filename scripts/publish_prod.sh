@@ -40,7 +40,7 @@ cd -
 
 # Move into the scripts directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd $SCRIPTS_DIR
+cd $SCRIPTS_DIR/..
 
 # Manually confirm access
 read -p "Please confirm that you have write access to the datadog-agent repository in GitHub. (y/n)" CONT
@@ -63,18 +63,18 @@ echo "Checking that you have access to the GovCloud AWS account"
 saml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
-./build_binary_and_layer_dockerized.sh
-./build_docker_image.sh
+VERSION=$VERSION ./scripts/build_binary_and_layer_dockerized.sh
+./scripts/build_docker_image.sh
 
 echo "Signing the layer"
-aws-vault exec prod-engineering -- ./sign_layers.sh prod
+aws-vault exec prod-engineering -- ./scripts/sign_layers.sh prod
 
 echo "Publishing layers to commercial AWS regions"
-aws-vault exec prod-engineering --no-session -- ./publish_layers.sh
+aws-vault exec prod-engineering --no-session -- ./scripts/publish_layers.sh
 
 echo "Publishing layers to GovCloud AWS regions"
 saml2aws login -a govcloud-us1-fed-human-engineering
-AWS_PROFILE=govcloud-us1-fed-human-engineering ./publish_layers.sh
+AWS_PROFILE=govcloud-us1-fed-human-engineering ./scripts/publish_layers.sh
 
 echo "Pushing Docker image to Dockerhub"
 docker push $DOCKER_REPOSITORY_NAME:$VERSION

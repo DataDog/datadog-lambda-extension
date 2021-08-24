@@ -37,8 +37,6 @@ touch $BASE_PATH/scripts/.src/datadog-agent.tgz
 cd $AGENT_PATH/..
 tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz datadog-agent
 cd $BASE_PATH
-ls -la $BASE_PATH/scripts/.src
-ls -la $BASE_PATH/scripts/.cache
 
 DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
     -f ./scripts/Dockerfile.build \
