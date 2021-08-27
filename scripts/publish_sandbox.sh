@@ -13,4 +13,4 @@ SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR
 
 ./build_binary_and_layer_dockerized.sh
-REGIONS=ap-southeast-2 aws-vault exec sandbox-account-admin -- ./publish_layers.sh
+REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./publish_layers.sh
