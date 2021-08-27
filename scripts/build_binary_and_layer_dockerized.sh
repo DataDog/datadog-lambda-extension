@@ -12,12 +12,12 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# Move into the root directory
-SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-cd $SCRIPTS_DIR/..
-
 if [ -z "$CI" ]; then
     AGENT_PATH="../datadog-agent"
+
+    # Move into the root directory
+    SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+    cd $SCRIPTS_DIR/..
 else
     AGENT_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent"
 fi
