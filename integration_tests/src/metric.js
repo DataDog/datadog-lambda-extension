@@ -5,11 +5,13 @@ const tracer = require("dd-trace").init({
 
 const { datadog, sendDistributionMetric } = require("datadog-lambda-js");
 
-let invocationCount = 0;
+let shouldSendMetric = true;
 
 async function myHandler(event, context) {
-  sendDistributionMetric("serverless.lambda-extension.integration-test.count", invocationCount);
-  invocationCount += 1;
+  if(shouldSendMetric) {
+    sendDistributionMetric("serverless.lambda-extension.integration-test.count", 1);
+    shouldSendMetric = false;
+  }
   return {
     statusCode: 200,
     body: 'ok'
@@ -17,7 +19,10 @@ async function myHandler(event, context) {
 }
 
 async function myTimeoutHandler(event, context) {
-  sendDistributionMetric("serverless.lambda-extension.integration-test.count", invocationCount);
+  if(shouldSendMetric) {
+    sendDistributionMetric("serverless.lambda-extension.integration-test.count", 1);
+    shouldSendMetric = false;
+  }
   await new Promise(r => setTimeout(r, 15 * 60 * 1000)); // max timeout value allowed by AWS
   invocationCount += 1;
   return {
