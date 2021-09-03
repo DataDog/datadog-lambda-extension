@@ -40,9 +40,19 @@ cd $BASE_PATH
 ls -la $BASE_PATH/scripts/.src
 ls -la $BASE_PATH/scripts/.cache
 
-DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
-    -f ./scripts/Dockerfile.build \
-    --build-arg EXTENSION_VERSION="${VERSION}" .
+function docker_build_zip {
+    arch=$1
 
-dockerId=$(docker create datadog/build-lambda-extension:$VERSION)
-docker cp $dockerId:/datadog_extension.zip $TARGET_DIR
+    DOCKER_BUILDKIT=1 docker buildx build --platform linux/${arch} \
+        -t datadog/build-lambda-extension-${arch}:$VERSION \
+        -f ./scripts/Dockerfile.build \
+        --build-arg EXTENSION_VERSION="${VERSION}" . \
+        --load
+    dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
+    docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}.zip
+}
+
+docker_build_zip amd64
+docker_build_zip arm64
+
+

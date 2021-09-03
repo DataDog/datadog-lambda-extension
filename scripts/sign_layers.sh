@@ -12,7 +12,7 @@ SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
 LAYER_DIR=".layers"
-LAYER_FILES=("datadog_extension.zip")
+LAYER_FILES=("datadog_extension-amd64.zip" "datadog_extension-arm64.zip")
 SIGNING_PROFILE_NAME="DatadogLambdaSigningProfile"
 
 # Check account parameter
