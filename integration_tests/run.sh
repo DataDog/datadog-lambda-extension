@@ -132,12 +132,12 @@ for function_name in "${all_functions[@]}"; do
             echo "$raw_logs" | \
             grep "\[sketch\]" | \
             perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" | \
-            perl -p -e "s/(min\":)[0-9\.e\-]{2,20}/\1XXX/g" | \
-            perl -p -e "s/(max\":)[0-9\.e\-]{2,20}/\1XXX/g" | \
-            perl -p -e "s/(cnt\":)[0-9\.e\-]{2,20}/\1XXX/g" | \
-            perl -p -e "s/(avg\":)[0-9\.e\-]{2,20}/\1XXX/g" | \
-            perl -p -e "s/(sum\":)[0-9\.e\-]{2,20}/\1XXX/g" | \
-            perl -p -e "s/(k\":\[)[0-9\.e\-]{1,20}/\1XXX/g" | \
+            perl -p -e "s/(min\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
+            perl -p -e "s/(max\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
+            perl -p -e "s/(cnt\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
+            perl -p -e "s/(avg\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
+            perl -p -e "s/(sum\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
+            perl -p -e "s/(k\":\[)[0-9\.e\-]{1,30}/\1XXX/g" | \
             perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
             perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
