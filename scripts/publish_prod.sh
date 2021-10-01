@@ -64,7 +64,6 @@ saml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
 ./build_binary_and_layer_dockerized.sh
-./build_docker_image.sh
 
 echo "Signing the layer"
 aws-vault exec prod-engineering -- ./sign_layers.sh prod
@@ -77,8 +76,7 @@ saml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering ./publish_layers.sh
 
 echo "Pushing Docker image to Dockerhub"
-docker push $DOCKER_REPOSITORY_NAME:$VERSION
-docker push $DOCKER_REPOSITORY_NAME:latest
+./build_docker_image.sh
 
 echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
 git tag "v$VERSION"

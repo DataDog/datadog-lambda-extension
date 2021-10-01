@@ -14,4 +14,4 @@ cd $SCRIPTS_DIR/..
 
 ./scripts/build_binary_and_layer_dockerized.sh
 aws-vault exec sandbox-account-admin -- ./scripts/sign_layers.sh sandbox
-REGIONS=us-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh
+REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh

@@ -25,10 +25,10 @@ fi
 
 # Build the image, tagged with the version
 echo "Building the Docker image"
-docker build extensions \
-  -f $DOCKERFILE_LOCATION \
-  -t $DOCKER_REPOSITORY_NAME:$VERSION \
-  --no-cache
 
-# Also tag the image with :latest
-docker tag $DOCKER_REPOSITORY_NAME:$VERSION $DOCKER_REPOSITORY_NAME:latest
+DOCKER_BUILDKIT=1 docker buildx build --platform linux/amd64,linux/arm64 \
+  -t $DOCKER_REPOSITORY_NAME:$VERSION \
+  -t $DOCKER_REPOSITORY_NAME:latest \
+  -f ./scripts/Dockerfile.build \
+  --build-arg EXTENSION_VERSION="${VERSION}" . \
+  --push
