@@ -41,13 +41,14 @@ cd $BASE_PATH
 function docker_build_zip {
     arch=$1
 
-    DOCKER_BUILDKIT=1 docker buildx build --platform linux/${arch} \
+    docker buildx build --platform linux/${arch} \
         -t datadog/build-lambda-extension-${arch}:$VERSION \
         -f ./scripts/Dockerfile.build \
         --build-arg EXTENSION_VERSION="${VERSION}" . \
         --load
     dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
     docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}.zip
+    unzip $TARGET_DIR/datadog_extension-${arch}.zip -d $TARGET_DIR/datadog_extension-${arch}
 }
 
 docker_build_zip amd64
