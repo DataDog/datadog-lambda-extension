@@ -23,6 +23,8 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
+unzip .layers/datadog_extension.zip
+
 # Build the image, tagged with the version
 echo "Building the Docker image"
 

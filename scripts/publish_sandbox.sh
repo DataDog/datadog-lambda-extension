@@ -8,10 +8,9 @@
 #!/bin/bash
 set -e
 
-# Move into the scripts directory
+# Move into the root directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
 ./scripts/build_binary_and_layer_dockerized.sh
-aws-vault exec sandbox-account-admin -- ./scripts/sign_layers.sh sandbox
 REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh
