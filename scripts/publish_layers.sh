@@ -15,7 +15,9 @@ SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
 LAYER_PATH=".layers/datadog_extension.zip"
-LAYER_NAME="Datadog-Extension"
+if [ -z $LAYER_NAME ]; then
+    LAYER_NAME="Datadog-Extension"
+fi
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
 
 # Check that the layer files exist
@@ -92,7 +94,7 @@ do
 
         # This shouldn't happen unless someone manually deleted the latest version, say 28, and
         # then tries to republish 28 again. The published version would actually be 29, because
-        # Lambda layers are immutable and AWS will skip deleted version and use the next number. 
+        # Lambda layers are immutable and AWS will skip deleted version and use the next number.
         if [ $latest_version -gt $VERSION ]; then
             echo "ERROR: Published version $latest_version is greater than the desired version $VERSION!"
             echo "Exiting"
