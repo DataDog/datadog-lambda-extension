@@ -10,7 +10,7 @@
 
 set -e
 
-LAYERS=("Datadog-Extension")
+LAYERS=("Datadog-Extension" "Datadog-Extension-ARM")
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
 LAYERS_MISSING_REGIONS=()
 

@@ -23,14 +23,11 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-unzip .layers/datadog_extension.zip
-
 # Build the image, tagged with the version
-echo "Building the Docker image"
-docker build extensions \
-  -f $DOCKERFILE_LOCATION \
+echo "Building the Docker image, and pushing to Dockerhub"
+docker buildx build --platform linux/arm64,linux/amd64 \
   -t $DOCKER_REPOSITORY_NAME:$VERSION \
-  --no-cache
-
-# Also tag the image with :latest
-docker tag $DOCKER_REPOSITORY_NAME:$VERSION $DOCKER_REPOSITORY_NAME:latest
+  -t $DOCKER_REPOSITORY_NAME:latest \
+  -f ./scripts/Dockerfile \
+  --build-arg EXTENSION_VERSION="${VERSION}" . \
+  --push

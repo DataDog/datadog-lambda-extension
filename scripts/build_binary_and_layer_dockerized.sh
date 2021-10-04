@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 # Unless explicitly stated otherwise all files in this repository are licensed
 # under the Apache License Version 2.0.
@@ -38,9 +38,20 @@ cd $AGENT_PATH/..
 tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz datadog-agent
 cd $BASE_PATH
 
-DOCKER_BUILDKIT=1 docker build -t datadog/build-lambda-extension:$VERSION \
-    -f ./scripts/Dockerfile.build \
-    --build-arg EXTENSION_VERSION="${VERSION}" .
+function docker_build_zip {
+    arch=$1
 
-dockerId=$(docker create datadog/build-lambda-extension:$VERSION)
-docker cp $dockerId:/datadog_extension.zip $TARGET_DIR
+    docker buildx build --platform linux/${arch} \
+        -t datadog/build-lambda-extension-${arch}:$VERSION \
+        -f ./scripts/Dockerfile.build \
+        --build-arg EXTENSION_VERSION="${VERSION}" . \
+        --load
+    dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
+    docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}.zip
+    unzip $TARGET_DIR/datadog_extension-${arch}.zip -d $TARGET_DIR/datadog_extension-${arch}
+}
+
+docker_build_zip amd64
+docker_build_zip arm64
+
+
