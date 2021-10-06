@@ -18,4 +18,4 @@ REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_laye
 
 # Automatically create PR against github.com/DataDog/documentation
 # If you'd like to test, please uncomment the below line
-# VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
+VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
