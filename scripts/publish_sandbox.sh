@@ -5,7 +5,8 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2021 Datadog, Inc.
 
-#!/bin/bash
+# Usage: VERSION=5 ./scripts/publish_sandbox.sh
+
 set -e
 
 # Move into the root directory
@@ -14,3 +15,7 @@ cd $SCRIPTS_DIR/..
 
 ./scripts/build_binary_and_layer_dockerized.sh
 REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh
+
+# Automatically create PR against github.com/DataDog/documentation
+# If you'd like to test, please uncomment the below line
+# VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
