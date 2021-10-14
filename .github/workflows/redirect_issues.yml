@@ -1,0 +1,20 @@
+name: redirect
+
+on:
+  schedule:
+    - cron: "0 12 * * *"
+
+  workflow_dispatch: # should be deleted after manual test
+    
+jobs:
+  redirect-issues:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Ping on slack issues related to serverless in the datadog-agent repo
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: ./scripts/redirect_issues.sh
