@@ -21,7 +21,7 @@ The Datadog API Key must be defined by setting one of the following environment 
 
 ### DD_SITE
 
-Possible values are `datadoghq.com`, `datadoghq.eu`, `us3.datadoghq.com` and `ddog-gov.com`. The default is `datadoghq.com`.
+Possible values are `datadoghq.com`, `datadoghq.eu`, `us3.datadoghq.com`, `us5.datadoghq.com`, and `ddog-gov.com`. The default is `datadoghq.com`.
 
 ### DD_LOG_LEVEL
 
