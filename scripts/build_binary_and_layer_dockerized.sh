@@ -59,10 +59,10 @@ function docker_build_zip {
 }
 
 
-if [ $ARCHITECTURE = "amd64" ]; then
+if [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64
-elif [ $ARCHITECTURE = "arm64" ]; then
+elif [ "$ARCHITECTURE" == "arm64" ]; then
     echo "Building for arm64 only"
     docker_build_zip arm64
 else

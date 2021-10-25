@@ -18,7 +18,7 @@ if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     exit 1
 fi
 
-if [ $BUILD_EXTENSION = "true" ]; then
+if [ "$BUILD_EXTENSION" == "true" ]; then
     echo "Building extension that will be deployed with our test functions"
     
     # This version number is arbitrary and won't be used by AWS
@@ -172,7 +172,7 @@ for function_name in "${all_functions[@]}"; do
         # If no snapshot file exists yet, we create one
         echo "Writing logs to $function_snapshot_path because no snapshot exists yet"
         echo "$logs" >$function_snapshot_path
-    elif [ $UPDATE_SNAPSHOTS = "true" ]; then
+    elif [ "$UPDATE_SNAPSHOTS" == "true" ]; then
         # If $UPDATE_SNAPSHOTS is set to true write the new logs over the current snapshot
         echo "Overwriting log snapshot for $function_snapshot_path"
         echo "$logs" >$function_snapshot_path
