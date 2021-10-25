@@ -38,7 +38,7 @@ if [ "$CONT" != "y" ]; then
 fi
 cd -
 
-# Move into the scripts directory
+# Move into the root directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
@@ -63,7 +63,7 @@ echo "Checking that you have access to the GovCloud AWS account"
 saml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
-VERSION=$VERSION ./build_binary_and_layer_dockerized.sh
+VERSION=$VERSION ./scripts/build_binary_and_layer_dockerized.sh
 
 echo "Signing the layer"
 aws-vault exec prod-engineering -- ./scripts/sign_layers.sh prod
@@ -75,7 +75,7 @@ echo "Publishing layers to GovCloud AWS regions"
 saml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering ./scripts/publish_layers.sh
 
-./build_and_push_docker_image.sh
+./scripts/build_and_push_docker_image.sh
 
 echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
 git tag "v$VERSION"
