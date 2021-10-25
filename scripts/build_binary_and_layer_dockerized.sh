@@ -59,14 +59,14 @@ function docker_build_zip {
 }
 
 
-if [ $ARCHITECTURE == "amd64" ]; then
+if [ $ARCHITECTURE = "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64
-elif [ $ARCHITECTURE == "arm64" ]; then
+elif [ $ARCHITECTURE = "arm64" ]; then
     echo "Building for arm64 only"
     docker_build_zip arm64
 else
-    echo "No valid ARCHITECTURE variable found (allowed values are : arm64, amd64), building for both amd64 and arm64"
+    echo "No valid ARCHITECTURE variable found (allowed values are: amd64, arm64), building for both amd64 and arm64"
     docker_build_zip amd64
     docker_build_zip arm64
 fi
