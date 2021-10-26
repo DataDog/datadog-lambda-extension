@@ -8,6 +8,9 @@
 
 LOGS_WAIT_SECONDS=45
 
+DEFAULT_NODE_LAYER_VERSION=64
+DEFAULT_PYTHON_LAYER_VERSION=49
+
 set -e
 
 script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
@@ -42,13 +45,11 @@ cd src
 env GOOS=linux go build -ldflags="-s -w" -o ../bootstrap traceGo.go
 cd ..
 
-DEFAULT_NODE_LAYER_VERSION=64
 if [ -z "$NODE_LAYER_VERSION" ]; then
    echo "NODE_LAYER_VERSION not found, using the default"
    export NODE_LAYER_VERSION=$DEFAULT_NODE_LAYER_VERSION
 fi
 
-DEFAULT_PYTHON_LAYER_VERSION=49
 if [ -z "$PYTHON_LAYER_VERSION" ]; then
    echo "PYTHON_LAYER_VERSION not found, using the default"
    export PYTHON_LAYER_VERSION=$DEFAULT_PYTHON_LAYER_VERSION
