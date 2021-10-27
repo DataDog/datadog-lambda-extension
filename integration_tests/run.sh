@@ -8,6 +8,9 @@
 
 LOGS_WAIT_SECONDS=45
 
+DEFAULT_NODE_LAYER_VERSION=64
+DEFAULT_PYTHON_LAYER_VERSION=49
+
 set -e
 
 script_utc_start_time=$(date -u +"%Y%m%dT%H%M%S")
@@ -18,10 +21,13 @@ if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
     exit 1
 fi
 
-if [ -n "$BUILD_EXTENSION" ]; then
+if [ "$BUILD_EXTENSION" == "true" ]; then
     echo "Building extension that will be deployed with our test functions"
+    
     # This version number is arbitrary and won't be used by AWS
-    VERSION=123 ./scripts/build_binary_and_layer_dockerized.sh
+    PLACEHOLDER_EXTENSION_VERSION=123
+
+    ARCHITECTURE=amd64 VERSION=$PLACEHOLDER_EXTENSION_VERSION ./scripts/build_binary_and_layer_dockerized.sh
 else
     echo "Not building extension, ensure it has already been built or re-run with 'BUILD_EXTENSION=true'"
 fi
@@ -39,48 +45,36 @@ cd src
 env GOOS=linux go build -ldflags="-s -w" -o ../bootstrap traceGo.go
 cd ..
 
-function getLatestLayerVersion() {
-    layerName=$1
-    lastVersion=$(aws lambda list-layer-versions --layer-name $layerName --region sa-east-1 | jq -r ".LayerVersions | .[0] |  .Version")
-    if [ lastVersion == "null" ]; then
-        exit 1
-    else
-        echo $lastVersion
-    fi
-}
-
 if [ -z "$NODE_LAYER_VERSION" ]; then
-   echo "NODE_LAYER_VERSION not found, getting the latest one"
-   export NODE_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Node14-x")
-   echo "NODE_LAYER_VERSION set to: $NODE_LAYER_VERSION"
+   echo "NODE_LAYER_VERSION not found, using the default"
+   export NODE_LAYER_VERSION=$DEFAULT_NODE_LAYER_VERSION
 fi
 
 if [ -z "$PYTHON_LAYER_VERSION" ]; then
-   echo "PYTHON_LAYER_VERSION not found, getting the latest one"
-   export PYTHON_LAYER_VERSION=$(getLatestLayerVersion "Datadog-Python38")
-   echo "PYTHON_LAYER_VERSION set to: $PYTHON_LAYER_VERSION"
+   echo "PYTHON_LAYER_VERSION not found, using the default"
+   export PYTHON_LAYER_VERSION=$DEFAULT_PYTHON_LAYER_VERSION
 fi
+
+echo "NODE_LAYER_VERSION set to: $NODE_LAYER_VERSION"
+echo "PYTHON_LAYER_VERSION set to: $PYTHON_LAYER_VERSION"
 
 # random 8-character ID to avoid collisions with other runs
 stage=$(xxd -l 4 -c 4 -p < /dev/random)
 
-# always remove the stacks before exiting, no matter what
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"
-    NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
-    PYTHON_LAYER_VERSION=${PYTHON_LAYER_VERSION} \
     serverless remove --stage ${stage} 
 }
 
-# making sure the remove_stack function will be called no matter what
+# always remove the stacks before exiting, no matter what
 trap remove_stack EXIT
 
-# deploying the stack
+# deploy the stack
 NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
 PYTHON_LAYER_VERSION=${PYTHON_LAYER_VERSION} \
 serverless deploy --stage ${stage}
 
-# invoking functions
+# invoke functions
 metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-node" "timeout-python")
 log_function_names=("log-node" "log-python")
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
@@ -90,10 +84,8 @@ all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace
 set +e # Don't exit this script if an invocation fails or there's a diff
 
 for function_name in "${all_functions[@]}"; do
-    NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
-    PYTHON_LAYER_VERSION=${PYTHON_LAYER_VERSION} \
     serverless invoke --stage ${stage} -f ${function_name}
-    # two invocations are needed since enhanced metrics are computed with the REPORT log line (which is trigered at the end of the first invocation)
+    # two invocations are needed since enhanced metrics are computed with the REPORT log line (which is created at the end of the first invocation)
     return_value=$(serverless invoke --stage ${stage} -f ${function_name})
 
     # Compare new return value to snapshot
@@ -181,7 +173,7 @@ for function_name in "${all_functions[@]}"; do
         # If no snapshot file exists yet, we create one
         echo "Writing logs to $function_snapshot_path because no snapshot exists yet"
         echo "$logs" >$function_snapshot_path
-    elif [ -n "$UPDATE_SNAPSHOTS" ]; then
+    elif [ "$UPDATE_SNAPSHOTS" == "true" ]; then
         # If $UPDATE_SNAPSHOTS is set to true write the new logs over the current snapshot
         echo "Overwriting log snapshot for $function_snapshot_path"
         echo "$logs" >$function_snapshot_path
