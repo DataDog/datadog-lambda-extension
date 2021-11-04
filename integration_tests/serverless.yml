@@ -65,6 +65,16 @@ functions:
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/metricPython.metric
 
+  enhanced-metric-go:
+    runtime: provided.al2
+    handler: src/bin/with-ddlambda
+    layers:
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+
   no-enhanced-metric-node:
     runtime: nodejs14.x
     handler: src/metric.noEnhancedMetricTest
@@ -86,6 +96,15 @@ functions:
       DD_ENHANCED_METRICS: false
       DD_LAMBDA_HANDLER: src/metricPython.metric
 
+  no-enhanced-metric-go:
+    runtime: provided.al2
+    handler: src/bin/without-ddlambda
+    layers:
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_ENHANCED_METRICS: false
+
   timeout-node:
     runtime: nodejs14.x
     handler: src/metric.timeoutMetricTest
@@ -106,6 +125,16 @@ functions:
     environment:
       DD_LOG_LEVEL: DEBUG
       DD_LAMBDA_HANDLER: src/metricPython.timeout
+
+  timeout-go:
+    runtime: provided.al2
+    timeout: 3
+    handler: src/bin/timeout
+    layers:
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_LOG_LEVEL: DEBUG
 
   log-node:
     runtime: nodejs14.x
@@ -139,6 +168,21 @@ functions:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/logPython.log
+
+  log-go:
+    runtime: provided.al2
+    handler: src/bin/log
+    layers:
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_ENHANCED_METRICS: false
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
 
   simple-trace-node:
     runtime: nodejs14.x
@@ -174,7 +218,7 @@ functions:
 
   simple-trace-go:
     runtime: provided.al2
-    handler: bootstrap
+    handler: src/bin/trace
     layers:
       - { Ref: RecorderExtensionLambdaLayer }
       - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
