@@ -14,8 +14,8 @@ set -e
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
-LAYER_PATHS=(".layers/datadog_extension-amd64.zip" ".layers/datadog_extension-arm64.zip")
-LAYER_NAMES=("Datadog-Extension" "Datadog-Extension-ARM")
+LAYER_PATHS=(".layers/datadog_extension-amd64.zip")
+LAYER_NAMES=("Datadog-Extension")
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
 
 # Check that the layer files exist

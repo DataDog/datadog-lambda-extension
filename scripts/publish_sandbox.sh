@@ -13,7 +13,7 @@ set -e
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
-./scripts/build_binary_and_layer_dockerized.sh
+ARCHITECTURE=amd64 ./scripts/build_binary_and_layer_dockerized.sh
 REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh
 
 # Automatically create PR against github.com/DataDog/documentation

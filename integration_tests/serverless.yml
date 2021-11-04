@@ -53,6 +53,17 @@ functions:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
 
+  error-node:
+    runtime: nodejs14.x
+    handler: src/metric.errorTest
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Node14-x:${env:NODE_LAYER_VERSION}
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+
   enhanced-metric-python:
     runtime: python3.8
     handler: datadog_lambda.handler.handler
@@ -64,6 +75,18 @@ functions:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/metricPython.metric
+
+  error-python:
+    runtime: python3.8
+    handler: datadog_lambda.handler.handler
+    layers:
+      - arn:aws:lambda:${self:provider.region}:464622532012:layer:Datadog-Python38:${env:PYTHON_LAYER_VERSION}
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+      DD_LAMBDA_HANDLER: src/metricPython.error
 
   no-enhanced-metric-node:
     runtime: nodejs14.x
