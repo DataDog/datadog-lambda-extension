@@ -107,7 +107,6 @@ functions:
       - { Ref: RecorderExtensionLambdaLayer }
       - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
     environment:
-      DD_ENHANCED_METRICS: false
       DD_LOG_LEVEL: ERROR
       DD_LOGS_ENABLED: true
       DD_SERVERLESS_LOGS_ENABLED: true
