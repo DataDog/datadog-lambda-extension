@@ -65,13 +65,17 @@ functions:
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/metricPython.metric
 
-  enhanced-metric-go:
+  with-ddlambda-go:
     runtime: provided.al2
     handler: src/bin/with-ddlambda
     layers:
       - { Ref: RecorderExtensionLambdaLayer }
       - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
     environment:
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
 
@@ -96,7 +100,7 @@ functions:
       DD_ENHANCED_METRICS: false
       DD_LAMBDA_HANDLER: src/metricPython.metric
 
-  no-enhanced-metric-go:
+  without-ddlambda-go:
     runtime: provided.al2
     handler: src/bin/without-ddlambda
     layers:
@@ -104,6 +108,12 @@ functions:
       - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
     environment:
       DD_ENHANCED_METRICS: false
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
 
   timeout-node:
     runtime: nodejs14.x
@@ -133,8 +143,6 @@ functions:
     layers:
       - { Ref: RecorderExtensionLambdaLayer }
       - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
-    environment:
-      DD_LOG_LEVEL: DEBUG
 
   log-node:
     runtime: nodejs14.x
@@ -168,21 +176,6 @@ functions:
       DD_TAGS: tagA:valueA tagB:valueB
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/logPython.log
-
-  log-go:
-    runtime: provided.al2
-    handler: src/bin/log
-    layers:
-      - { Ref: RecorderExtensionLambdaLayer }
-      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
-    environment:
-      DD_ENHANCED_METRICS: false
-      DD_LOG_LEVEL: ERROR
-      DD_LOGS_ENABLED: true
-      DD_SERVERLESS_LOGS_ENABLED: true
-      DD_LOGS_INJECTION: true
-      DD_TAGS: tagA:valueA tagB:valueB
-      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
 
   simple-trace-node:
     runtime: nodejs14.x

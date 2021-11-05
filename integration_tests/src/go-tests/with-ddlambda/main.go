@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	ddlambda "github.com/DataDog/datadog-lambda-go"
 	"github.com/aws/aws-lambda-go/events"
@@ -14,6 +15,9 @@ type testResponse struct {
 }
 
 func testHandler(ctx context.Context, ev events.APIGatewayProxyRequest) (testResponse, error) {
+	fmt.Printf("XXX LOG 0 XXX\n")
+	fmt.Printf("XXX LOG 1 XXX\n")
+	fmt.Printf("XXX LOG 2 XXX\n")
 	ddlambda.Metric("serverless.lambda-extension.integration-test.count", 1.0)
 	return testResponse{
 		StatusCode: 200,

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -13,6 +14,9 @@ type testResponse struct {
 }
 
 func PingHandler(ctx context.Context, ev events.APIGatewayProxyRequest) (testResponse, error) {
+	fmt.Printf("XXX LOG 0 XXX\n")
+	fmt.Printf("XXX LOG 1 XXX\n")
+	fmt.Printf("XXX LOG 2 XXX\n")
 	return testResponse{
 		StatusCode: 200,
 		Body:       "ok",

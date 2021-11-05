@@ -40,7 +40,7 @@ GOOS=linux GOARCH=amd64 go build -o extensions/recorder-extension main.go
 zip -rq ext.zip extensions/* -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 
-go_test_dirs=("with-ddlambda" "without-ddlambda" "timeout" "log" "trace")
+go_test_dirs=("with-ddlambda" "without-ddlambda" "timeout" "trace")
 
 # build Go Lambda function
 cd src
@@ -71,7 +71,7 @@ function remove_stack() {
 }
 
 # always remove the stacks before exiting, no matter what
-# trap remove_stack EXIT
+trap remove_stack EXIT
 
 # deploy the stack
 NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
@@ -79,11 +79,15 @@ NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
     serverless deploy --stage ${stage}
 
 # invoke functions
-metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "enhanced-metric-go" "no-enhanced-metric-node" "no-enhanced-metric-python" "no-enhanced-metric-go" "timeout-node" "timeout-python" "timeout-go")
-log_function_names=("log-node" "log-python" "log-go")
+
+python_node_function_names=("enhanced-metric-node" "enhanced-metric-python" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-python" "timeout-node")
+python_node_log_function_names=("log-node" "log-python")
+
+go_function_names=("with-ddlambda-go" "without-ddlambda-go" "timeout-go")
+
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
-all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
+all_functions=("${python_node_function_names[@]}" "${python_node_log_function_names[@]}" "${go_function_names[@]}" "${trace_function_names[@]}")
 
 set +e # Don't exit this script if an invocation fails or there's a diff
 
@@ -122,7 +126,7 @@ for function_name in "${all_functions[@]}"; do
     done
 
     # Replace invocation-specific data like timestamps and IDs with XXX to normalize across executions
-    if [[ " ${metric_function_names[@]} " =~ " ${function_name} " ]]; then
+    if [[ " ${python_node_function_names[@]} " =~ " ${function_name} " ]]; then
         # Normalize metrics
         logs=$(
             echo "$raw_logs" |
@@ -141,7 +145,7 @@ for function_name in "${all_functions[@]}"; do
                 perl -p -e "s/$stage/XXXXXX/g" |
                 sort
         )
-    elif [[ " ${log_function_names[@]} " =~ " ${function_name} " ]]; then
+    elif [[ " ${python_node_log_function_names[@]} " =~ " ${function_name} " ]]; then
         # Normalize logs
         logs=$(
             echo "$raw_logs" |
@@ -153,6 +157,31 @@ for function_name in "${all_functions[@]}"; do
                 perl -p -e "s/$stage/STAGE/g" |
                 perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" |
                 grep XXX
+        )
+    elif [[ " ${go_function_names[@]} " =~ " ${function_name} " ]]; then
+        logs=$(
+            echo "$raw_logs" |
+                grep -E "\[sketch\]|\[log\]" |
+                perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
+                perl -p -e "s/(min\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(max\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(cnt\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(avg\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(sum\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(k\":\[)[0-9\.e\-]{1,30}/\1XXX/g" |
+                perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(serverless.lambda-extension.integration-test.count)[0-9\.]+/\1/g" |
+                perl -p -e "s/$stage/XXXXXX/g" |
+                perl -p -e "s/(timestamp\":)[0-9]{13}/\1TIMESTAMP/g" |
+                perl -p -e "s/(\"REPORT |START |END ).*/\1XXX\"}}/g" |
+                perl -p -e "s/(\"HTTP ).*/\1\"}}/g" |
+                perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"//g" |
+                perl -p -e "s/$stage/STAGE/g" |
+                perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" |
+                grep XXX
+
         )
     else
         # Normalize traces
