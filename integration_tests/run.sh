@@ -23,7 +23,7 @@ fi
 
 if [ "$BUILD_EXTENSION" == "true" ]; then
     echo "Building extension that will be deployed with our test functions"
-    
+
     # This version number is arbitrary and won't be used by AWS
     PLACEHOLDER_EXTENSION_VERSION=123
 
@@ -36,34 +36,38 @@ cd "./integration_tests"
 
 # build and zip recorder extension
 cd recorder-extension
-    GOOS=linux GOARCH=amd64 go build -o extensions/recorder-extension main.go
-    zip -rq ext.zip extensions/* -x ".*" -x "__MACOSX" -x "extensions/.*"
+GOOS=linux GOARCH=amd64 go build -o extensions/recorder-extension main.go
+zip -rq ext.zip extensions/* -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
+
+go_test_dirs=("with-ddlambda" "without-ddlambda" "timeout" "trace")
 
 # build Go Lambda function
 cd src
-env GOOS=linux go build -ldflags="-s -w" -o ../bootstrap traceGo.go
+for go_dir in "${go_test_dirs[@]}"; do
+    env GOOS=linux go build -ldflags="-s -w" -o bin/"$go_dir" go-tests/"$go_dir"/main.go
+done
 cd ..
 
 if [ -z "$NODE_LAYER_VERSION" ]; then
-   echo "NODE_LAYER_VERSION not found, using the default"
-   export NODE_LAYER_VERSION=$DEFAULT_NODE_LAYER_VERSION
+    echo "NODE_LAYER_VERSION not found, using the default"
+    export NODE_LAYER_VERSION=$DEFAULT_NODE_LAYER_VERSION
 fi
 
 if [ -z "$PYTHON_LAYER_VERSION" ]; then
-   echo "PYTHON_LAYER_VERSION not found, using the default"
-   export PYTHON_LAYER_VERSION=$DEFAULT_PYTHON_LAYER_VERSION
+    echo "PYTHON_LAYER_VERSION not found, using the default"
+    export PYTHON_LAYER_VERSION=$DEFAULT_PYTHON_LAYER_VERSION
 fi
 
 echo "NODE_LAYER_VERSION set to: $NODE_LAYER_VERSION"
 echo "PYTHON_LAYER_VERSION set to: $PYTHON_LAYER_VERSION"
 
 # random 8-character ID to avoid collisions with other runs
-stage=$(xxd -l 4 -c 4 -p < /dev/random)
+stage=$(xxd -l 4 -c 4 -p </dev/random)
 
 function remove_stack() {
     echo "Removing stack for stage : ${stage}"
-    serverless remove --stage ${stage} 
+    serverless remove --stage ${stage}
 }
 
 # always remove the stacks before exiting, no matter what
@@ -71,15 +75,19 @@ trap remove_stack EXIT
 
 # deploy the stack
 NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
-PYTHON_LAYER_VERSION=${PYTHON_LAYER_VERSION} \
-serverless deploy --stage ${stage}
+    PYTHON_LAYER_VERSION=${PYTHON_LAYER_VERSION} \
+    serverless deploy --stage ${stage}
 
 # invoke functions
-metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-node" "timeout-python")
-log_function_names=("log-node" "log-python")
+
+python_node_function_names=("enhanced-metric-node" "enhanced-metric-python" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-python" "timeout-node")
+python_node_log_function_names=("log-node" "log-python")
+
+go_function_names=("with-ddlambda-go" "without-ddlambda-go" "timeout-go")
+
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
-all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
+all_functions=("${python_node_function_names[@]}" "${python_node_log_function_names[@]}" "${go_function_names[@]}" "${trace_function_names[@]}")
 
 set +e # Don't exit this script if an invocation fails or there's a diff
 
@@ -118,52 +126,77 @@ for function_name in "${all_functions[@]}"; do
     done
 
     # Replace invocation-specific data like timestamps and IDs with XXX to normalize across executions
-    if [[ " ${metric_function_names[@]} " =~ " ${function_name} " ]]; then
+    if [[ " ${python_node_function_names[@]} " =~ " ${function_name} " ]]; then
         # Normalize metrics
         logs=$(
-            echo "$raw_logs" | \
-            grep "\[sketch\]" | \
-            perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" | \
-            perl -p -e "s/(min\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
-            perl -p -e "s/(max\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
-            perl -p -e "s/(cnt\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
-            perl -p -e "s/(avg\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
-            perl -p -e "s/(sum\":)[0-9\.e\-]{2,30}/\1XXX/g" | \
-            perl -p -e "s/(k\":\[)[0-9\.e\-]{1,30}/\1XXX/g" | \
-            perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
-            perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
-            perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
-            perl -p -e "s/(serverless.lambda-extension.integration-test.count)[0-9\.]+/\1/g" | \
-            perl -p -e "s/$stage/XXXXXX/g" | \
-            sort
+            echo "$raw_logs" |
+                grep "\[sketch\]" |
+                perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
+                perl -p -e "s/(min\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(max\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(cnt\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(avg\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(sum\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(k\":\[)[0-9\.e\-]{1,30}/\1XXX/g" |
+                perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(serverless.lambda-extension.integration-test.count)[0-9\.]+/\1/g" |
+                perl -p -e "s/$stage/XXXXXX/g" |
+                sort
         )
-    elif [[ " ${log_function_names[@]} " =~ " ${function_name} " ]]; then
+    elif [[ " ${python_node_log_function_names[@]} " =~ " ${function_name} " ]]; then
         # Normalize logs
         logs=$(
-            echo "$raw_logs" | \
-            grep "\[log\]" | \
-            perl -p -e "s/(timestamp\":)[0-9]{13}/\1TIMESTAMP/g" | \
-            perl -p -e "s/(\"REPORT |START |END ).*/\1XXX\"}}/g" | \
-            perl -p -e "s/(\"HTTP ).*/\1\"}}/g" | \
-            perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"//g" | \
-            perl -p -e "s/$stage/STAGE/g" | \
-            perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" | \
-            grep XXX
+            echo "$raw_logs" |
+                grep "\[log\]" |
+                perl -p -e "s/(timestamp\":)[0-9]{13}/\1TIMESTAMP/g" |
+                perl -p -e "s/(\"REPORT |START |END ).*/\1XXX\"}}/g" |
+                perl -p -e "s/(\"HTTP ).*/\1\"}}/g" |
+                perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"//g" |
+                perl -p -e "s/$stage/STAGE/g" |
+                perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" |
+                grep XXX
+        )
+    elif [[ " ${go_function_names[@]} " =~ " ${function_name} " ]]; then
+        logs=$(
+            echo "$raw_logs" |
+                grep -E "\[sketch\]|\[log\]" |
+                perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
+                perl -p -e "s/(min\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(max\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(cnt\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(avg\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(sum\":)[0-9\.e\-]{2,30}/\1XXX/g" |
+                perl -p -e "s/(k\":\[)[0-9\.e\-]{1,30}/\1XXX/g" |
+                perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(serverless.lambda-extension.integration-test.count)[0-9\.]+/\1/g" |
+                perl -p -e "s/$stage/XXXXXX/g" |
+                perl -p -e "s/(timestamp\":)[0-9]{13}/\1TIMESTAMP/g" |
+                perl -p -e "s/(\"REPORT |START |END ).*/\1XXX\"}}/g" |
+                perl -p -e "s/(\"HTTP ).*/\1\"}}/g" |
+                perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"//g" |
+                perl -p -e "s/$stage/STAGE/g" |
+                perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" |
+                grep XXX
+
         )
     else
         # Normalize traces
         logs=$(
-            echo "$raw_logs" | \
-            grep "\[trace\]" | \
-            perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" | \
-            perl -p -e "s/((startTime|endTime|traceID|trace_id|span_id|parent_id|start|system.pid)\":)[0-9]+/\1XXX/g" | \
-            perl -p -e "s/(duration\":)[0-9]+/\1XXX/g" | \
-            perl -p -e "s/((datadog_lambda|dd_trace)\":\")[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" | \
-            perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
-            perl -p -e "s/(,\"runtime-id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
-            perl -p -e "s/(,\"system.pid\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" | \
-            perl -p -e "s/$stage/XXXXXX/g" | \
-            sort
+            echo "$raw_logs" |
+                grep "\[trace\]" |
+                perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
+                perl -p -e "s/((startTime|endTime|traceID|trace_id|span_id|parent_id|start|system.pid)\":)[0-9]+/\1XXX/g" |
+                perl -p -e "s/(duration\":)[0-9]+/\1XXX/g" |
+                perl -p -e "s/((datadog_lambda|dd_trace)\":\")[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
+                perl -p -e "s/(,\"request_id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" |
+                perl -p -e "s/(,\"runtime-id\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" |
+                perl -p -e "s/(,\"system.pid\":\")[a-zA-Z0-9\-,]+\"/\1XXX\"/g" |
+                perl -p -e "s/$stage/XXXXXX/g" |
+                sort
         )
     fi
 
