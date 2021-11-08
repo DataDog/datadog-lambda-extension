@@ -5,13 +5,18 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2021 Datadog, Inc.
 
-# Usage: VERSION=5 ./scripts/publish_sandbox.sh
+# Usage: VERSION=5 ARCHITECTURE=amd64 ./scripts/publish_sandbox.sh
 
 set -e
 
 # Move into the root directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
+
+if [ "$ARCHITECTURE" != "amd64" -a "$ARCHITECTURE" != "arm64" ]; then
+    echo "ERROR: For sandbox deploys, you must specify an architecture (amd64 or arm64)"
+    exit 1
+fi
 
 ./scripts/build_binary_and_layer_dockerized.sh
 REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh

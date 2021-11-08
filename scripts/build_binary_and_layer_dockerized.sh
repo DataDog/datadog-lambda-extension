@@ -66,7 +66,7 @@ elif [ "$ARCHITECTURE" == "arm64" ]; then
     echo "Building for arm64 only"
     docker_build_zip arm64
 else
-    echo "No valid ARCHITECTURE variable found (allowed values are: amd64, arm64), building for both amd64 and arm64"
+    echo "Building for both amd64 and arm64"
     docker_build_zip amd64
     docker_build_zip arm64
 fi
