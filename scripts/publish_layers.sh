@@ -6,16 +6,32 @@
 # Copyright 2020 Datadog, Inc.
 
 # Publish the datadog lambda layer across regions, using the AWS CLI
-# Usage: VERSION=5 REGIONS=us-east-1 publish_layers.sh
+# Usage: VERSION=5 REGIONS=us-east-1 ARCHITECTURE=amd64 publish_layers.sh
+
 # VERSION is required.
+# REGIONS is optional. By default, publish to all regions.
+# ARCHITECTURE is optional. By default, publish both architectures.
+
 set -e
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
-LAYER_PATHS=(".layers/datadog_extension-amd64.zip" ".layers/datadog_extension-arm64.zip")
-LAYER_NAMES=("Datadog-Extension" "Datadog-Extension-ARM")
+if [ "$ARCHITECTURE" == "amd64" ]; then
+    echo "Publishing for amd64 only"
+    LAYER_PATHS=(".layers/datadog_extension-amd64.zip")
+    LAYER_NAMES=("Datadog-Extension")
+elif [ "$ARCHITECTURE" == "arm64" ]; then
+    echo "Publishing for arm64 only"
+    LAYER_PATHS=(".layers/datadog_extension-arm64.zip")
+    LAYER_NAMES=("Datadog-Extension-ARM")
+else
+    echo "Publishing for both amd64 and arm64"
+    LAYER_PATHS=(".layers/datadog_extension-amd64.zip" ".layers/datadog_extension-arm64.zip")
+    LAYER_NAMES=("Datadog-Extension" "Datadog-Extension-ARM")
+fi
+
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
 
 # Check that the layer files exist
@@ -41,19 +57,7 @@ else
     fi
 fi
 
-# Determine the target layers
-if [ -z "$LAYERS" ]; then
-    echo "Layer not specified, running for all layers."
-    LAYERS=("${LAYER_NAMES[@]}")
-else
-    echo "Layer specified: $LAYERS"
-    if [[ ! " ${LAYER_NAMES[@]} " =~ " ${LAYERS} " ]]; then
-        echo "Could not find $LAYERS in available layers: ${LAYER_NAMES[@]}"
-        echo ""
-        echo "EXITING SCRIPT."
-        exit 1
-    fi
-fi
+LAYERS=("${LAYER_NAMES[@]}")
 
 # Determine the target layer version
 if [ -z "$VERSION" ]; then
@@ -65,7 +69,15 @@ else
     echo "Layer version specified: $VERSION"
 fi
 
-read -p "Ready to publish layer $LAYER_NAME version $VERSION to regions ${REGIONS[*]} (y/n)?" CONT
+if [ "$ARCHITECTURE" == "amd64" ]; then
+    ARCHITECTURE_MESSAGE="amd64 only"
+elif [ "$ARCHITECTURE" == "arm64" ]; then
+    ARCHITECTURE_MESSAGE="arm64 only"
+else
+    ARCHITECTURE_MESSAGE="both architectures"
+fi
+read -p "Ready to publish Lambda Extension version $VERSION (for $ARCHITECTURE_MESSAGE) to regions ${REGIONS[*]} (y/n)?" CONT
+
 if [ "$CONT" != "y" ]; then
     echo "Exiting"
     exit 1
