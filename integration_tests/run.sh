@@ -40,7 +40,7 @@ GOOS=linux GOARCH=amd64 go build -o extensions/recorder-extension main.go
 zip -rq ext.zip extensions/* -x ".*" -x "__MACOSX" -x "extensions/.*"
 cd ..
 
-go_test_dirs=("with-ddlambda" "without-ddlambda" "log" "timeout" "trace")
+go_test_dirs=("with-ddlambda" "without-ddlambda" "log-with-ddlambda" "log-without-ddlambda" "timeout" "trace")
 
 # build Go Lambda functions
 cd src
@@ -88,7 +88,7 @@ NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
 
 # invoke functions
 metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "metric-csharp" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-python" "timeout-node" "timeout-go" "with-ddlambda-go" "without-ddlambda-go")
-log_function_names=("log-node" "log-python" "log-csharp" "log-go")
+log_function_names=("log-node" "log-python" "log-csharp" "log-go-with-ddlambda" "log-go-without-ddlambda")
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
@@ -101,7 +101,7 @@ for function_name in "${all_functions[@]}"; do
 
     # Compare new return value to snapshot
     diff_output=$(echo "$return_value" | diff - "./snapshots/expectedInvocationResult")
-    if [ "$?" -eq 1 ] && [ [ "${function_name:0:7}" != timeout ] || [ "${function_name:0:5}" != error ] ]; then
+    if [ "$?" -eq 1 ] && ([ "${function_name:0:7}" != timeout ] || [ "${function_name:0:5}" != error ]); then
         echo "Failed: Return value for $function_name does not match snapshot:"
         echo "$diff_output"
         mismatch_found=true
