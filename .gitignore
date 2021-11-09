@@ -13,4 +13,3 @@ integration_tests/src/csharp-tests/obj
 extensions
 scripts/.cache
 scripts/.src
-scripts/.layers
