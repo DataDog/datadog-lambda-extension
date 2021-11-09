@@ -24,3 +24,6 @@ def timeout(event, context):
         "statusCode": 200,
         "body": "ok"
     }
+
+def error(event, context):
+    raise Exception

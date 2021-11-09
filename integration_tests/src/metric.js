@@ -26,6 +26,11 @@ async function myTimeoutHandler(event, context) {
   };
 }
 
+async function myErrorHandler(event, context) {
+  throw new Error("Something went wrong");
+}
+
 module.exports.enhancedMetricTest = datadog(myHandler);
 module.exports.noEnhancedMetricTest = datadog(myHandler);
 module.exports.timeoutMetricTest = datadog(myTimeoutHandler);
+module.exports.errorTest = datadog(myErrorHandler);

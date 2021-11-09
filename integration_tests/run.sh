@@ -8,7 +8,7 @@
 
 LOGS_WAIT_SECONDS=45
 
-DEFAULT_NODE_LAYER_VERSION=64
+DEFAULT_NODE_LAYER_VERSION=66
 DEFAULT_PYTHON_LAYER_VERSION=49
 
 set -e
@@ -87,7 +87,6 @@ NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
     serverless deploy --stage ${stage}
 
 # invoke functions
-
 metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "metric-csharp" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-python" "timeout-node")
 log_function_names=("log-node" "log-python" "log-csharp")
 
@@ -105,7 +104,7 @@ for function_name in "${all_functions[@]}"; do
 
     # Compare new return value to snapshot
     diff_output=$(echo "$return_value" | diff - "./snapshots/expectedInvocationResult")
-    if [ $? -eq 1 ] && [ ${function_name:0:7} != timeout ]; then
+    if [ "$?" -eq 1 ] && [ [ "${function_name:0:7}" != timeout ] || [ "${function_name:0:5}" != error ] ]; then
         echo "Failed: Return value for $function_name does not match snapshot:"
         echo "$diff_output"
         mismatch_found=true
@@ -231,9 +230,14 @@ for function_name in "${all_functions[@]}"; do
 
 done
 
-if [ "$mismatch_found" = true ]; then
+echo
+if [ "$UPDATE_SNAPSHOTS" == "true" ]; then
+    echo "DONE: Snapshots were updated for all functions."
+    exit 0
+elif [ "$mismatch_found" == true ]; then
     echo "FAILURE: A mismatch between new data and a snapshot was found and printed above."
     exit 1
 fi
 
 echo "SUCCESS: No difference found between snapshots and new return values or logs"
+echo
