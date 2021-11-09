@@ -6,9 +6,10 @@ integration_tests/recorder-extension/ext.zip
 integration_tests/.DS_Store
 integration_tests/bootstrap
 integration_tests/src/bin
+integration_tests/src/csharp-tests/bin
+integration_tests/src/csharp-tests/obj
 .DS_Store
 .layers
 extensions
 scripts/.cache
 scripts/.src
-scripts/.layers

@@ -47,7 +47,15 @@ cd src
 for go_dir in "${go_test_dirs[@]}"; do
     env GOOS=linux go build -ldflags="-s -w" -o bin/"$go_dir" go-tests/"$go_dir"/main.go
 done
-cd ..
+
+#build .NET function
+cd csharp-tests
+dotnet restore
+set +e #set this so we don't exit if the tools are already installed
+dotnet tool install -g Amazon.Lambda.Tools --framework netcoreapp3.1
+dotnet lambda package --configuration Release --framework netcoreapp3.1 --output-package bin/Release/netcoreapp3.1/handler.zip
+set -e
+cd ../../
 
 if [ -z "$NODE_LAYER_VERSION" ]; then
     echo "NODE_LAYER_VERSION not found, using the default"
@@ -79,12 +87,13 @@ NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
     serverless deploy --stage ${stage}
 
 # invoke functions
-python_node_function_names=("enhanced-metric-node" "enhanced-metric-python" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-python" "timeout-node" "error-node" "error-python")
-python_node_log_function_names=("log-node" "log-python")
+metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "metric-csharp" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-python" "timeout-node")
+log_function_names=("log-node" "log-python" "log-csharp")
+
 go_function_names=("with-ddlambda-go" "without-ddlambda-go" "timeout-go")
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
-all_functions=("${python_node_function_names[@]}" "${python_node_log_function_names[@]}" "${go_function_names[@]}" "${trace_function_names[@]}")
+all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${go_function_names[@]}" "${trace_function_names[@]}")
 
 set +e # Don't exit this script if an invocation fails or there's a diff
 
@@ -123,7 +132,7 @@ for function_name in "${all_functions[@]}"; do
     done
 
     # Replace invocation-specific data like timestamps and IDs with XXX to normalize across executions
-    if [[ " ${python_node_function_names[@]} " =~ " ${function_name} " ]]; then
+    if [[ " ${metric_function_names[*]} " =~ " ${function_name} " ]]; then
         # Normalize metrics
         logs=$(
             echo "$raw_logs" |
@@ -142,7 +151,7 @@ for function_name in "${all_functions[@]}"; do
                 perl -p -e "s/$stage/XXXXXX/g" |
                 sort
         )
-    elif [[ " ${python_node_log_function_names[@]} " =~ " ${function_name} " ]]; then
+    elif [[ " ${log_function_names[*]} " =~ " ${function_name} " ]]; then
         # Normalize logs
         logs=$(
             echo "$raw_logs" |
@@ -155,7 +164,7 @@ for function_name in "${all_functions[@]}"; do
                 perl -p -e "s/(\"message\":\").*(XXX LOG)/\1\2\3/g" |
                 grep XXX
         )
-    elif [[ " ${go_function_names[@]} " =~ " ${function_name} " ]]; then
+    elif [[ " ${go_function_names[*]} " =~ " ${function_name} " ]]; then
         logs=$(
             echo "$raw_logs" |
                 grep -E "\[sketch\]|\[log\]" |
