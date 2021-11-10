@@ -93,7 +93,6 @@ log_function_names=("log-node" "log-python" "log-csharp" "log-go-with-ddlambda" 
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
-all_functions=("timeout-python")
 
 set +e # Don't exit this script if an invocation fails or there's a diff
 
