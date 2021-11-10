@@ -87,21 +87,23 @@ NODE_LAYER_VERSION=${NODE_LAYER_VERSION} \
     serverless deploy --stage ${stage}
 
 # invoke functions
-metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "metric-csharp" "no-enhanced-metric-node" "no-enhanced-metric-python" "timeout-python" "timeout-node" "timeout-go" "with-ddlambda-go" "without-ddlambda-go")
+
+metric_function_names=("enhanced-metric-node" "enhanced-metric-python" "metric-csharp" "no-enhanced-metric-node" "no-enhanced-metric-python" "with-ddlambda-go" "without-ddlambda-go" "timeout-python" "timeout-node" "timeout-go" "error-python" "error-node")
 log_function_names=("log-node" "log-python" "log-csharp" "log-go-with-ddlambda" "log-go-without-ddlambda")
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
+all_functions=("timeout-python")
+
 set +e # Don't exit this script if an invocation fails or there's a diff
 
 for function_name in "${all_functions[@]}"; do
     serverless invoke --stage ${stage} -f ${function_name}
     # two invocations are needed since enhanced metrics are computed with the REPORT log line (which is created at the end of the first invocation)
     return_value=$(serverless invoke --stage ${stage} -f ${function_name})
-
     # Compare new return value to snapshot
     diff_output=$(echo "$return_value" | diff - "./snapshots/expectedInvocationResult")
-    if [ "$?" -eq 1 ] && ([ "${function_name:0:7}" != timeout ] || [ "${function_name:0:5}" != error ]); then
+    if [ "$?" -eq 1 ] && { [ "${function_name:0:7}" != timeout ] && [ "${function_name:0:5}" != error ]; }; then
         echo "Failed: Return value for $function_name does not match snapshot:"
         echo "$diff_output"
         mismatch_found=true
