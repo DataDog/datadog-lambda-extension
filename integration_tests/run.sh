@@ -6,7 +6,7 @@
 # To regenerate snapshots:
 #   UPDATE_SNAPSHOTS=true aws-vault exec sandbox-account-admin -- ./integration_tests/run.sh
 
-LOGS_WAIT_SECONDS=45
+LOGS_WAIT_SECONDS=600
 
 DEFAULT_NODE_LAYER_VERSION=66
 DEFAULT_PYTHON_LAYER_VERSION=49
