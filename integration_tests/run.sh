@@ -136,6 +136,7 @@ for function_name in "${all_functions[@]}"; do
             echo "$raw_logs" |
                 grep "\[sketch\]" |
                 grep -v "\[log\]" |
+                perl -p -e "s/    raise Exception//g" |
                 perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
                 perl -p -e "s/(min\":)[0-9\.e\-]{1,30}/\1XXX/g" |
                 perl -p -e "s/(max\":)[0-9\.e\-]{1,30}/\1XXX/g" |
