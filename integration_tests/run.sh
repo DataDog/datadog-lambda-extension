@@ -93,7 +93,6 @@ log_function_names=("log-node" "log-python" "log-csharp" "log-go-with-ddlambda" 
 trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go")
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
-
 set +e # Don't exit this script if an invocation fails or there's a diff
 
 for function_name in "${all_functions[@]}"; do
@@ -134,9 +133,9 @@ for function_name in "${all_functions[@]}"; do
         # Normalize metrics
         logs=$(
             echo "$raw_logs" |
-                grep "\[sketch\]" |
                 grep -v "\[log\]" |
-                perl -p -e "s/    raise Exception//g" |
+                grep "\[sketch\].*" |
+                perl -p -e "s/\s{4}raise Exception//g" |
                 perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
                 perl -p -e "s/(min\":)[0-9\.e\-]{1,30}/\1XXX/g" |
                 perl -p -e "s/(max\":)[0-9\.e\-]{1,30}/\1XXX/g" |
