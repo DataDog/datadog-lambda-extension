@@ -23,7 +23,11 @@ else
     AGENT_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent"
 fi
 
-BASE_PATH=$(pwd)
+# Move into the root directory, so this script can be called from any directory
+SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+ROOT_DIR=$SCRIPTS_DIR/..
+cd $ROOT_DIR
+
 EXTENSION_DIR=".layers"
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
@@ -31,19 +35,18 @@ TARGET_DIR=$(pwd)/$EXTENSION_DIR
 rm -rf $EXTENSION_DIR 2> /dev/null
 
 mkdir -p $EXTENSION_DIR
-echo $BASE_PATH
 
 # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
-mkdir -p $BASE_PATH/scripts/.src $BASE_PATH/scripts/.cache
+mkdir -p $ROOT_DIR/scripts/.src $ROOT_DIR/scripts/.cache
 echo "Copy mod files to build a cache"
-cp $AGENT_PATH/go.mod $BASE_PATH/scripts/.cache
-cp $AGENT_PATH/go.sum $BASE_PATH/scripts/.cache
+cp $AGENT_PATH/go.mod $ROOT_DIR/scripts/.cache
+cp $AGENT_PATH/go.sum $ROOT_DIR/scripts/.cache
 
 echo "Compressing all files to speed up docker copy"
-touch $BASE_PATH/scripts/.src/datadog-agent.tgz
+touch $ROOT_DIR/scripts/.src/datadog-agent.tgz
 cd $AGENT_PATH/..
-tar --exclude=.git -czf $BASE_PATH/scripts/.src/datadog-agent.tgz datadog-agent
-cd $BASE_PATH
+tar --exclude=.git -czf $ROOT_DIR/scripts/.src/datadog-agent.tgz datadog-agent
+cd $ROOT_DIR
 
 function docker_build_zip {
     arch=$1
