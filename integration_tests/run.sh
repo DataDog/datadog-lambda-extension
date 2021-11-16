@@ -97,6 +97,7 @@ set +e # Don't exit this script if an invocation fails or there's a diff
 
 for function_name in "${all_functions[@]}"; do
     serverless invoke --stage ${stage} -f ${function_name}
+    sleep 10
     # two invocations are needed since enhanced metrics are computed with the REPORT log line (which is created at the end of the first invocation)
     return_value=$(serverless invoke --stage ${stage} -f ${function_name})
     # Compare new return value to snapshot
