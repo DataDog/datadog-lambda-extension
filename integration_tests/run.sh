@@ -94,7 +94,7 @@ trace_function_names=("simple-trace-node" "simple-trace-python" "simple-trace-go
 
 all_functions=("${metric_function_names[@]}" "${log_function_names[@]}" "${trace_function_names[@]}")
 set +e # Don't exit this script if an invocation fails or there's a diff
-
+all_functions=("error-python")
 for function_name in "${all_functions[@]}"; do
     serverless invoke --stage ${stage} -f ${function_name}
     sleep 10
@@ -136,6 +136,7 @@ for function_name in "${all_functions[@]}"; do
             echo "$raw_logs" |
                 grep -v "\[log\]" |
                 grep "\[sketch\].*" |
+                perl -p -e "s/\xc2/\xa0/g" |
                 perl -p -e "s/\s{4}raise Exception//g" |
                 perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
                 perl -p -e "s/(min\":)[0-9\.e\-]{1,30}/\1XXX/g" |
