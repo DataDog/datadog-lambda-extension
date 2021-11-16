@@ -97,7 +97,7 @@ set +e # Don't exit this script if an invocation fails or there's a diff
 all_functions=("error-python")
 for function_name in "${all_functions[@]}"; do
     serverless invoke --stage ${stage} -f ${function_name}
-    sleep 10
+    sleep 30
     # two invocations are needed since enhanced metrics are computed with the REPORT log line (which is created at the end of the first invocation)
     return_value=$(serverless invoke --stage ${stage} -f ${function_name})
     # Compare new return value to snapshot
@@ -134,10 +134,9 @@ for function_name in "${all_functions[@]}"; do
         # Normalize metrics
         logs=$(
             echo "$raw_logs" |
+                perl -p -e "s/raise Exception/\n/g" |
                 grep -v "\[log\]" |
                 grep "\[sketch\].*" |
-                perl -p -e "s/\xc2/\xa0/g" |
-                perl -p -e "s/\s{4}raise Exception//g" |
                 perl -p -e "s/(ts\":)[0-9]{10}/\1XXX/g" |
                 perl -p -e "s/(min\":)[0-9\.e\-]{1,30}/\1XXX/g" |
                 perl -p -e "s/(max\":)[0-9\.e\-]{1,30}/\1XXX/g" |
