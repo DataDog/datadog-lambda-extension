@@ -110,7 +110,10 @@ for function_name in "${all_functions[@]}"; do
     fi
 done
 
+now=$(date +"%r")
 echo "Sleeping $LOGS_WAIT_SECONDS seconds to wait for logs to appear in CloudWatch..."
+echo "This should be done in 10 minutes from $now"
+
 sleep $LOGS_WAIT_SECONDS
 
 for function_name in "${all_functions[@]}"; do
