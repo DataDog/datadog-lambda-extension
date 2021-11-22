@@ -148,7 +148,7 @@ for function_name in "${all_functions[@]}"; do
                 perl -p -e "s/(k\":\[)[0-9\.e\-]{1,30}/\1XXX/g" |
                 perl -p -e "s/(datadog-nodev)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
                 perl -p -e "s/(datadog_lambda:v)[0-9]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
-                perl -p -e "s/dd_lambda_layer:datadog-go[0-9]{1,}\.[0-9]{1,}+/dd_lambda_layer:datadog-gox.x/g" |
+                perl -p -e "s/dd_lambda_layer:datadog-go[0-9]{1,}\.[0-9]{1,}\.[0-9]{1,}/dd_lambda_layer:datadog-gox.x.x/g" |
                 perl -p -e "s/(dd_lambda_layer:datadog-python)[0-9_]+\.[0-9]+\.[0-9]+/\1X\.X\.X/g" |
                 perl -p -e "s/(serverless.lambda-extension.integration-test.count)[0-9\.]+/\1/g" |
                 perl -p -e "s/$stage/XXXXXX/g" |
