@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 
+	ddlambda "github.com/DataDog/datadog-lambda-go"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
 )
@@ -12,7 +14,10 @@ type testResponse struct {
 	Body       string `json:"body"`
 }
 
-func PingHandler(ctx context.Context, ev events.APIGatewayProxyRequest) (testResponse, error) {
+func testHandler(ctx context.Context, ev events.APIGatewayProxyRequest) (testResponse, error) {
+	fmt.Printf("XXX LOG 0 XXX\n")
+	fmt.Printf("XXX LOG 1 XXX\n")
+	fmt.Printf("XXX LOG 2 XXX\n")
 	return testResponse{
 		StatusCode: 200,
 		Body:       "ok",
@@ -20,5 +25,5 @@ func PingHandler(ctx context.Context, ev events.APIGatewayProxyRequest) (testRes
 }
 
 func main() {
-	lambda.Start(PingHandler)
+	lambda.Start(ddlambda.WrapHandler(testHandler, nil))
 }

@@ -199,6 +199,36 @@ functions:
       DD_EXTRA_TAGS: tagC:valueC tagD:valueD
       DD_LAMBDA_HANDLER: src/logPython.log
 
+  log-go-with-ddlambda:
+    runtime: provided.al2
+    handler: src/bin/log-with-ddlambda
+    layers:
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_ENHANCED_METRICS: false
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+
+  log-go-without-ddlambda:
+    runtime: provided.al2
+    handler: src/bin/log-without-ddlambda
+    layers:
+      - { Ref: RecorderExtensionLambdaLayer }
+      - { Ref: DatadogExtensionIntegrationTestLambdaLayer }
+    environment:
+      DD_ENHANCED_METRICS: false
+      DD_LOG_LEVEL: ERROR
+      DD_LOGS_ENABLED: true
+      DD_SERVERLESS_LOGS_ENABLED: true
+      DD_LOGS_INJECTION: true
+      DD_TAGS: tagA:valueA tagB:valueB
+      DD_EXTRA_TAGS: tagC:valueC tagD:valueD
+
   simple-trace-node:
     runtime: nodejs14.x
     handler: /opt/nodejs/node_modules/datadog-lambda-js/handler.handler
