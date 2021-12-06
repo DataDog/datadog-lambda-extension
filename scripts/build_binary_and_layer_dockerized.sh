@@ -17,11 +17,7 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-if [ -z "$CI" ]; then
-    AGENT_PATH="../datadog-agent"
-else
-    AGENT_PATH="/home/runner/work/datadog-lambda-extension/datadog-lambda-extension/datadog-agent"
-fi
+AGENT_PATH="../datadog-agent"
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
