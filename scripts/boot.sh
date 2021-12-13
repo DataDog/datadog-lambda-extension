@@ -10,7 +10,7 @@ then
 
   export AWS_LAMBDA_RUNTIME_API="127.0.0.1:9000"
 
-  if [ fgrep -ix "$DD_LOG_LEVEL" <<< "debug" ]
+  if [ grep -ix "$DD_LOG_LEVEL" <<< "debug" ]
   then
     echo "[bootstrap] rerouting AWS_LAMBDA_RUNTIME_API to $AWS_LAMBDA_RUNTIME_API"
   fi
