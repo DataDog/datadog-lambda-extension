@@ -1,6 +1,6 @@
 FROM public.ecr.aws/lambda/python:3.9
 
-# Add Datadog librairies
+# Add Datadog library
 COPY python /opt/python
 
 # Copy customer code
