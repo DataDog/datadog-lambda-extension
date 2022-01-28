@@ -7,8 +7,10 @@
 
 # Usage: VERSION=5 ARCHITECTURE=[amd64|arm64] ./scripts/publish_sandbox.sh
 
-# VERSION is optional. By default, increment the version by 1.
-# ARCHITECTURE is optional. The default is amd64.
+# Optional environment variables:
+# VERSION - Use a specific version number. By default, increment the version by 1.
+# ARCHITECTURE - Which architecture to build for (amd64 or arm64). The default is amd64.
+# RELEASE_CANDIDATE - If true, publish as a release candidate to us-east-1. The default is false.
 
 set -e
 
@@ -27,6 +29,12 @@ if [ "$ARCHITECTURE" == "amd64" ]; then
 fi
 if [ "$ARCHITECTURE" == "arm64" ]; then
     LAYER_NAME="Datadog-Extension-ARM"
+fi
+
+REGION="sa-east-1"
+if [ "$RELEASE_CANDIDATE" == "true" ]; then
+    echo "Will publish as a release candidate to us-east-1"
+    REGION="us-east-1"
 fi
 
 if [ -z $VERSION ]; then
@@ -53,4 +61,4 @@ SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
 VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE ./scripts/build_binary_and_layer_dockerized.sh
-VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE REGIONS=sa-east-1 aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh
+VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE REGIONS=$REGION aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh
