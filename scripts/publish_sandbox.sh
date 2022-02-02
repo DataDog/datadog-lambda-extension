@@ -44,7 +44,7 @@ if [ -z $VERSION ]; then
         aws-vault exec sandbox-account-admin -- \
         aws lambda list-layer-versions \
             --layer-name $LAYER_NAME \
-            --region sa-east-1 \
+            --region $REGION \
         | jq -r ".LayerVersions | .[0] |  .Version" \
     )
     if [ "$LAST_LAYER_VERSION" == "null" ]; then
