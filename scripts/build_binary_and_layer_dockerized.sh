@@ -44,7 +44,6 @@ cd $AGENT_PATH/..
 tar --exclude=.git -czf $ROOT_DIR/scripts/.src/datadog-agent.tgz datadog-agent
 cd $ROOT_DIR
 
-# Make sure to use the right build file if we want race detection enabled
 BUILD_FILE=Dockerfile.build
 if [ "$RACE_DETECTION_ENABLED" = "true" ]; then
     BUILD_FILE=Dockerfile.race.build
