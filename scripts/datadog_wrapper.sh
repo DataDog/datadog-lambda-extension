@@ -1,8 +1,10 @@
 #!/bin/bash
 args=("$@")
 
-# lowercase DD_LOG_LEVEL
+# lowercase environment variables
 DD_LOG_LEVEL=$(echo "$DD_LOG_LEVEL" | tr '[:upper:]' '[:lower:]')
+DD_EXPERIMENTAL_ENABLE_PROXY=$(echo "$DD_EXPERIMENTAL_ENABLE_PROXY" | tr '[:upper:]' '[:lower:]')
+DD_OPTIMIZE_COLD_START=$(echo "$DD_OPTIMIZE_COLD_START" | tr '[:upper:]' '[:lower:]')
 
 if [ "$DD_EXPERIMENTAL_ENABLE_PROXY" == "true" ]
 then
@@ -19,4 +21,12 @@ then
     echo "[bootstrap] rerouting AWS_LAMBDA_RUNTIME_API to $AWS_LAMBDA_RUNTIME_API"
   fi
 fi
+
+# Optimize cold start performance for Java functions
+if [ "$DD_OPTIMIZE_COLD_START" != "false" ]
+then
+  # Stopping tiered compilation at level 1 reduces the time the JVM spends optimizing code
+  export _JAVA_OPTIONS="-XX:+TieredCompilation -XX:TieredStopAtLevel=1"
+fi
+
 exec "${args[@]}"
