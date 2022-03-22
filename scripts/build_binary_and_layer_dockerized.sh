@@ -10,6 +10,8 @@
 # or
 # VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
 
+set -e
+
 if [ -z "$VERSION" ]; then
     echo "Extension version not specified"
     echo ""
