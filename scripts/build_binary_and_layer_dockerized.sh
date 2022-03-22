@@ -17,15 +17,6 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-if [ -z "$AGENT_VERSION" ]; then
-    echo "No agent version set, agentVersionDefault will be used instead (for the metrics log intake endpoint)."
-    read -p "This should only be done when building for staging or testing. Continue (y/n)?" CONT
-    if [ "$CONT" != "y" ]; then
-        echo "Exiting"
-        exit 1
-    fi
-fi
-
 AGENT_PATH="../datadog-agent"
 
 # Move into the root directory, so this script can be called from any directory

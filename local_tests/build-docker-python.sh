@@ -6,7 +6,7 @@ set -e
 CURRENT_PATH=$(pwd)
 
 # Build the extension
-ARCHITECTURE=amd64 VERSION=1 AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
+ARCHITECTURE=amd64 VERSION=1 ./scripts/build_binary_and_layer_dockerized.sh
 
 # Move to the local_tests repo
 cd ./local_tests
