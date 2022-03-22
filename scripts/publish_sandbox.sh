@@ -60,5 +60,5 @@ fi
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
-VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE ./scripts/build_binary_and_layer_dockerized.sh
+VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
 VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE REGIONS=$REGION aws-vault exec sandbox-account-admin -- ./scripts/publish_layers.sh

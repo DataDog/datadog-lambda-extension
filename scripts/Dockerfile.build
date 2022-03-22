@@ -2,6 +2,7 @@
 
 FROM golang:1.17 as builder
 ARG EXTENSION_VERSION
+ARG AGENT_VERSION
 RUN mkdir -p /tmp/dd/datadog-agent
 
 # cache dependencies
@@ -17,10 +18,17 @@ WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 # add the current version number to the tags package before compilation
 
 RUN --mount=type=cache,target=/go/pkg/mod \
-  --mount=type=cache,target=/root/.cache/go-build \
-  go build -ldflags="-w -s \
-  -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
-  -tags serverless -o datadog-agent
+    --mount=type=cache,target=/root/.cache/go-build \ 
+    if [ -z "$AGENT_VERSION" ]; then \
+        go build -ldflags="-w -s \
+        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
+        -tags serverless -o datadog-agent; \
+    else \
+        go build -ldflags="-w -s \
+        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
+        -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
+        -tags serverless -o datadog-agent; \
+    fi
 
 # zip the extension
 FROM ubuntu:latest as compresser

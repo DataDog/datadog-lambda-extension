@@ -5,7 +5,7 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2021 Datadog, Inc.
 
-# Use with `VERSION=<DESIRED_VERSION> ./publish_prod.sh`
+# Use with `VERSION=<DESIRED_EXTENSION_VERSION> AGENT_VERSION=<CURRENT_AGENT_VERSION> ./publish_prod.sh`
 
 set -e
 
@@ -14,6 +14,13 @@ DOCKER_REPOSITORY_NAME="datadog/lambda-extension"
 # Ensure the target extension version is defined
 if [ -z "$VERSION" ]; then
     echo "Extension version not specified"
+    echo ""
+    echo "EXITING SCRIPT."
+    exit 1
+fi
+
+if [ -z "$AGENT_VERSION" ]; then
+    echo "Agent version not specified"
     echo ""
     echo "EXITING SCRIPT."
     exit 1
@@ -63,7 +70,7 @@ echo "Checking that you have access to the GovCloud AWS account"
 saml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
-VERSION=$VERSION ./scripts/build_binary_and_layer_dockerized.sh
+VERSION=$VERSION AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
 
 echo "Signing the layer"
 aws-vault exec prod-engineering -- ./scripts/sign_layers.sh prod

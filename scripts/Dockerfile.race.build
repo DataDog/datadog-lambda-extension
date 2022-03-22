@@ -3,6 +3,7 @@
 FROM golang:1.16.5 as builder
 ARG EXTENSION_VERSION
 ARG ENABLE_RACE_DETECTION
+ARG AGENT_VERSION
 RUN mkdir -p /tmp/dd/datadog-agent
 
 # cache dependsencies
@@ -19,9 +20,16 @@ WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go build -race -ldflags="-w -s \
-    -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
-    -tags serverless -o datadog-agent
+    if [ -z "$AGENT_VERSION" ]; then \
+        go build -race -ldflags="-w -s \
+        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
+        -tags serverless -o datadog-agent; \
+    else \
+        go build -race -ldflags="-w -s \
+        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
+        -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
+        -tags serverless -o datadog-agent; \
+    fi
 
 # zip the extension
 FROM ubuntu:latest as compresser
