@@ -8,7 +8,9 @@
 # Usage examples :
 # ARCHITECTURE=amd64 VERSION=100 RACE_DETECTION_ENABLED=true ./scripts/build_binary_and_layer_dockerized.sh
 # or
-# VERSION=100 ./scripts/build_binary_and_layer_dockerized.sh
+# VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
+
+set -e
 
 if [ -z "$VERSION" ]; then
     echo "Extension version not specified"
@@ -55,8 +57,9 @@ function docker_build_zip {
     docker buildx build --platform linux/${arch} \
         -t datadog/build-lambda-extension-${arch}:$VERSION \
         -f ./scripts/$BUILD_FILE \
-        --build-arg EXTENSION_VERSION="${VERSION}" . \
-        --load
+        --build-arg EXTENSION_VERSION="${VERSION}" \
+        --build-arg AGENT_VERSION="${AGENT_VERSION}" \
+        . --load
     dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
     docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}.zip
     unzip $TARGET_DIR/datadog_extension-${arch}.zip -d $TARGET_DIR/datadog_extension-${arch}

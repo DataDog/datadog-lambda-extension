@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Save the current path
 CURRENT_PATH=$(pwd)
 
