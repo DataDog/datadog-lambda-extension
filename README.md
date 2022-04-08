@@ -4,50 +4,21 @@
 
 > :information_source: **Note:** This repository contains release notes, issues, instructions, and scripts related to the Datadog Lambda Extension. The extension is a special build of the Datadog Agent. The source code can be found [here](https://github.com/DataDog/datadog-agent/tree/main/cmd/serverless). 
 
-The Datadog Lambda Extension is an AWS Lambda Extension that supports submitting custom metrics, traces, and logs synchronously while your AWS Lambda function executes. 
+The Datadog Lambda Extension is an AWS Lambda Extension that supports submitting custom metrics, traces, and logs asynchronously while your AWS Lambda function executes.
 
 ## Installation
 
-Follow the [installation instructions](https://docs.datadoghq.com/serverless/datadog_lambda_library/extension/), and view your function's enhanced metrics, traces and logs in Datadog.
+Follow the [installation instructions](https://docs.datadoghq.com/serverless/installation), and view your function's enhanced metrics, traces and logs in Datadog.
 
-## Environment Variables
+## Configurations
 
-### DD_API_KEY
-
-The Datadog API Key must be defined by setting one of the following environment variables:
-
-- DD_API_KEY - the Datadog API Key in plain-text, NOT recommended
-- DD_KMS_API_KEY - the KMS-encrypted API Key, requires the `kms:Decrypt` permission
-
-### DD_SITE
-
-Possible values are `datadoghq.com`, `datadoghq.eu`, `us3.datadoghq.com`, `us5.datadoghq.com`, and `ddog-gov.com`. The default is `datadoghq.com`.
-
-### DD_LOG_LEVEL
-
-Set to `debug` enable debug logs from the Datadog Lambda Extension. Defaults to `info`.
-
-## Configuration file
-
-Using a configuration file is supported (note that environment variable settings
-override the value from the configuration file): you only have to create a [`datadog.yaml`](https://docs.datadoghq.com/agent/guide/agent-configuration-files/?tab=agentv6v7)
-file in the root of your lambda function.
-
-### Logs filtering and scrubbing support
-
-The Datadog Lambda Extension supports using the different logs filtering / scrubbing features of the Datadog Agent. All you have to do is to set `processing_rules` in the `logs_config`
-field of your configuration.
-
-Please refer to the public documentation for all filtering and scrubbing features:
-
-* https://docs.datadoghq.com/agent/logs/advanced_log_collection/?tab=configurationfile#global-processing-rules
-* https://docs.datadoghq.com/agent/logs/advanced_log_collection/?tab=configurationfile#filter-logs
+Follow the [configuration instructions][https://docs.datadoghq.com/serverless/configuration] to tag your telemetry, capture request/response payloads, filter or scrub sensitive information from logs or traces, and more.
 
 ## Opening Issues
 
 If you encounter a bug with this package, we want to hear about it. Before opening a new issue, search the existing issues to avoid duplicates.
 
-When opening an issue, include the Datadog Lambda Layer version, and stack trace if available. In addition, include the steps to reproduce when appropriate.
+When opening an issue, include the Extension version, and stack trace if available. In addition, include the steps to reproduce when appropriate.
 
 You can also open an issue for a feature request.
 
