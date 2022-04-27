@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.2
+# syntax = docker/dockerfile:experimental
 
 FROM golang:1.17 as builder
 ARG EXTENSION_VERSION
