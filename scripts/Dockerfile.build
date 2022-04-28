@@ -41,6 +41,7 @@ RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
 COPY ./scripts/boot.sh /boot.sh
+RUN chmod +x /boot.sh
 RUN  zip -r datadog_extension.zip /extensions /boot.sh
 
 # keep the smallest possible docker image
