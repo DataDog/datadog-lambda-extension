@@ -2,52 +2,33 @@
 [![Slack](https://chat.datadoghq.com/badge.svg?bg=632CA6)](https://chat.datadoghq.com/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/DataDog/datadog-agent/blob/master/LICENSE)
 
-> :information_source: **Note:** This repository contains release notes, issues, instructions, and scripts related to the Datadog Lambda Extension. The extension is a special build of the Datadog Agent. The source code can be found [here](https://github.com/DataDog/datadog-agent/tree/main/cmd/serverless). 
+**Note:** This repository contains release notes, issues, instructions, and scripts related to the Datadog Lambda Extension. The extension is a special build of the Datadog Agent. The source code can be found [here](https://github.com/DataDog/datadog-agent/tree/main/cmd/serverless). 
 
-The Datadog Lambda Extension is an AWS Lambda Extension that supports submitting custom metrics, traces, and logs synchronously while your AWS Lambda function executes. 
+The Datadog Lambda Extension is an AWS Lambda Extension that supports submitting custom metrics, traces, and logs asynchronously while your AWS Lambda function executes.
 
 ## Installation
 
-Follow the [installation instructions](https://docs.datadoghq.com/serverless/datadog_lambda_library/extension/), and view your function's enhanced metrics, traces and logs in Datadog.
+Follow the [installation instructions](https://docs.datadoghq.com/serverless/installation), and view your function's enhanced metrics, traces and logs in Datadog.
 
-## Environment Variables
+## Configurations
 
-### DD_API_KEY
+Follow the [configuration instructions](https://docs.datadoghq.com/serverless/configuration) to tag your telemetry, capture request/response payloads, filter or scrub sensitive information from logs or traces, and more.
 
-The Datadog API Key must be defined by setting one of the following environment variables:
+## Overhead
 
-- DD_API_KEY - the Datadog API Key in plain-text, NOT recommended
-- DD_KMS_API_KEY - the KMS-encrypted API Key, requires the `kms:Decrypt` permission
+The Datadog Lambda Extension introduces a small amount of overhead to your Lambda function's cold starts (that is, the higher init duration), as the Extension needs to initialize. Datadog is continuously optimizing the Lambda extension performance and recommend always using the latest release.
 
-### DD_SITE
+You may notice an increase of your Lambda function's reported duration. This is because the Datadog Lambda Extension needs to flush data back to the Datadog API. Although the time spent by the extension flushing data is reported as part of the duration, it's done *after* AWS returns your function's response back to the client. In other words, the added duration does not slow down your Lambda function. See this [AWS blog post](https://aws.amazon.com/blogs/compute/performance-and-functionality-improvements-for-aws-lambda-extensions/) for more technical information. To monitor your function's actual performance and exclude the duration added by the Datadog extension, use the metric `aws.lambda.enhanced.runtime_duration`.
 
-Possible values are `datadoghq.com`, `datadoghq.eu`, `us3.datadoghq.com`, `us5.datadoghq.com`, and `ddog-gov.com`. The default is `datadoghq.com`.
+By default, the Extension sends data back to Datadog at the end of each invocation. This avoids delays of data arrival for sporadic invocations from low-traffic applications, cron jobs, and manual tests. Once the Extension detects a steady and frequent invocation pattern (more than once per minute), it batches data from multiple invocations and flushes periodically at the beginning of the invocation when it's due. This means that *the busier your function is, the lower the average duration overhead per invocation*. 
 
-### DD_LOG_LEVEL
-
-Set to `debug` enable debug logs from the Datadog Lambda Extension. Defaults to `info`.
-
-## Configuration file
-
-Using a configuration file is supported (note that environment variable settings
-override the value from the configuration file): you only have to create a [`datadog.yaml`](https://docs.datadoghq.com/agent/guide/agent-configuration-files/?tab=agentv6v7)
-file in the root of your lambda function.
-
-### Logs filtering and scrubbing support
-
-The Datadog Lambda Extension supports using the different logs filtering / scrubbing features of the Datadog Agent. All you have to do is to set `processing_rules` in the `logs_config`
-field of your configuration.
-
-Please refer to the public documentation for all filtering and scrubbing features:
-
-* https://docs.datadoghq.com/agent/logs/advanced_log_collection/?tab=configurationfile#global-processing-rules
-* https://docs.datadoghq.com/agent/logs/advanced_log_collection/?tab=configurationfile#filter-logs
+For Lambda functions deployed in a region that is far from the Datadog site, for example, a Lambda function deployed in eu-west-1 reporting data to the US1 Datadog site, can observe a higher duration overhead due to the network latency.
 
 ## Opening Issues
 
 If you encounter a bug with this package, we want to hear about it. Before opening a new issue, search the existing issues to avoid duplicates.
 
-When opening an issue, include the Datadog Lambda Layer version, and stack trace if available. In addition, include the steps to reproduce when appropriate.
+When opening an issue, include the Extension version, and stack trace if available. In addition, include the steps to reproduce when appropriate.
 
 You can also open an issue for a feature request.
 
