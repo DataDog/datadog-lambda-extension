@@ -40,9 +40,11 @@ RUN apt-get install -y zip
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
-COPY ./scripts/boot.sh /boot.sh
-RUN chmod +x /boot.sh
-RUN  zip -r datadog_extension.zip /extensions /boot.sh
+
+DATADOG_WRAPPER = "datadog_wrapper"
+COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
+RUN chmod +x /$DATADOG_WRAPPER
+RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER
 
 # keep the smallest possible docker image
 FROM scratch
