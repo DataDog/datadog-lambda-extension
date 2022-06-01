@@ -24,7 +24,7 @@ fi
 echo "The runtime is $AWS_EXECUTION_ENV"
 if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]];
 then
-  echo "It's the .NET runtime!"
+  echo "Configuring for the .NET runtime!"
   export CORECLR_ENABLE_PROFILING="1"
   export CORECLR_PROFILER="{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"
   export CORECLR_PROFILER_PATH="/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
@@ -34,10 +34,9 @@ fi
 # if it is java
 if [[ "$AWS_EXECUTION_ENV" == *"java"* ]];
 then
-  echo "It's the Java runtime!"
+  echo "Configuring for the Java runtime!"
   export DD_JMXFETCH_ENABLED="false"
-  # DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
-  DD_Agent_Jar=/opt/dd-java-agent-0.90.0-SNAPSHOT.jar
+  DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
   if [ -f "$DD_Agent_Jar" ]; 
   then
     export JAVA_TOOL_OPTIONS="-javaagent:$DD_Agent_Jar -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
