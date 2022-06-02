@@ -41,7 +41,7 @@ RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
 
-ARG DATADOG_WRAPPER=datadog_wrapper.sh
+ARG DATADOG_WRAPPER=datadog_wrapper
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
 RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER
