@@ -36,10 +36,11 @@ RUN go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/ver
 # zip the extension
 FROM ubuntu:latest as compresser
 RUN apt-get update
-RUN apt-get install -y zip
+RUN apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
+RUN strip /extensions/datadog-agent
 
 ARG DATADOG_WRAPPER=datadog_wrapper
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
