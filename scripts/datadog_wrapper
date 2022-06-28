@@ -32,9 +32,30 @@ then
   then
     echo "Configuring for the .NET runtime!"
   fi
+  # Handle the CORECLR_PROFILER_PATH
+  DEFAULT_PATH=/opt/datadog/Datadog.Trace.ClrProfiler.Native.so
+  ARM64_PATH=/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so
+  X64_PATH=/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so
+  MUSL_X64_PATH=/opt/datadog/linux-musl-x64/Datadog.Trace.ClrProfiler.Native.so
+  PROFILER_PATHS=("${DEFAULT_PATH}" "${ARM64_PATH}" "${X64_PATH}" "${MUSL_X64_PATH}")
+  PROFILER_FOUND=false
+  ## Search from all possible places
+  for PROFILER_PATH in "${PROFILER_PATHS[@]}"
+  do
+  if [ -f "$PROFILER_PATH" ]
+  then
+    export CORECLR_PROFILER_PATH="$PROFILER_PATH"
+    PROFILER_FOUND=true
+    break
+  fi
+  done
+  if [ $PROFILER_FOUND == false ]
+  then
+    echo "CLR Profiler file not found. Function profiling may not work correctly"
+  fi
+  # Other env variables for .NET
   export CORECLR_ENABLE_PROFILING="1"
   export CORECLR_PROFILER="{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"
-  export CORECLR_PROFILER_PATH="/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
   export DD_DOTNET_TRACER_HOME="/opt/datadog"
 fi
 
