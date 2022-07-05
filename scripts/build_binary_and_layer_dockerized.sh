@@ -19,6 +19,12 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
+if [ -z "$CLOUD_RUN" ]; then
+    CMD_PATH="cmd/serverless"
+else
+    CMD_PATH="cmd/serverless-init"
+fi
+
 AGENT_PATH="../datadog-agent"
 
 # Move into the root directory, so this script can be called from any directory
@@ -53,19 +59,29 @@ fi
 
 function docker_build_zip {
     arch=$1
+    suffix=$2
 
+    DOCKER_BUILDKIT=1
     docker buildx build --platform linux/${arch} \
         -t datadog/build-lambda-extension-${arch}:$VERSION \
         -f ./scripts/$BUILD_FILE \
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
+        --build-arg CMD_PATH="${CMD_PATH}" \
         . --load
     dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
-    docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}.zip
-    unzip $TARGET_DIR/datadog_extension-${arch}.zip -d $TARGET_DIR/datadog_extension-${arch}
+    docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip
+    unzip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip -d $TARGET_DIR/datadog_extension-${arch}${suffix}
 }
 
-if [ "$ARCHITECTURE" == "amd64" ]; then
+if [ "$CLOUD_RUN" == "true" ]; then
+    echo "Building for cloud run (both arch + alpine)"
+    docker_build_zip amd64
+    docker_build_zip arm64
+    BUILD_FILE=Dockerfile.alpine.build
+    docker_build_zip amd64 -alpine
+    docker_build_zip arm64 -alpine
+elif [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64
 elif [ "$ARCHITECTURE" == "arm64" ]; then
