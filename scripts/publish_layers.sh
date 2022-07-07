@@ -101,17 +101,17 @@ publish_layer() {
     else
       architecture="--compatible-architectures x86_64"
     fi
-    if [ "$region" == "ap-south-1" || \
-         "$region" == "ap-southeast-1" || \
-         "$region" == "ap-southeast-2" || \
-         "$region" == "ap-northeast-1" || \
-         "$region" == "eu-central-1" || \
-         "$region" == "eu-central-1" || \
-         "$region" == "eu-west-1" || \
-         "$region" == "eu-west-2" || \
-         "$region" == "us-east-1" || \
-         "$region" == "us-east-2" || \
-         "$region" =="us-west-2"]; then
+    if [ "$region" == "ap-south-1" ] || \
+         ["$region" == "ap-southeast-1"] || \
+         ["$region" == "ap-southeast-2"] || \
+         ["$region" == "ap-northeast-1"] || \
+         ["$region" == "eu-central-1"] || \
+         ["$region" == "eu-central-1"] || \
+         ["$region" == "eu-west-1"] || \
+         ["$region" == "eu-west-2"] || \
+         ["$region" == "us-east-1"] || \
+         ["$region" == "us-east-2"] || \
+         ["$region" == "us-west-2"]; then
         version_nbr=$(aws lambda publish-layer-version --layer-name "${layer}" \
             --description "Datadog Lambda Extension" \
             $architecture \
