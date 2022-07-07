@@ -97,16 +97,32 @@ publish_layer() {
     layer=$2
     file=$3
     if [ "$layer" == "Datadog-Extension-ARM" ]; then
-      architecture="arm64"
+      architecture="--compatible-architectures arm64"
     else
-      architecture="x86_64"
+      architecture="--compatible-architectures x86_64"
     fi
-    version_nbr=$(aws lambda publish-layer-version --layer-name "${layer}" \
-        --description "Datadog Lambda Extension" \
-        --compatible-architectures $architecture \
-        --zip-file "fileb://${file}" \
-        --region $region | jq -r '.Version')
-
+    if [ "$region" == "ap-south-1" || \
+         "$region" == "ap-southeast-1" || \
+         "$region" == "ap-southeast-2" || \
+         "$region" == "ap-northeast-1" || \
+         "$region" == "eu-central-1" || \
+         "$region" == "eu-central-1" || \
+         "$region" == "eu-west-1" || \
+         "$region" == "eu-west-2" || \
+         "$region" == "us-east-1" || \
+         "$region" == "us-east-2" || \
+         "$region" =="us-west-2"]; then
+        version_nbr=$(aws lambda publish-layer-version --layer-name "${layer}" \
+            --description "Datadog Lambda Extension" \
+            $architecture \
+            --zip-file "fileb://${file}" \
+            --region $region | jq -r '.Version')
+    else
+        version_nbr=$(aws lambda publish-layer-version --layer-name "${layer}" \
+            --description "Datadog Lambda Extension" \
+            --zip-file "fileb://${file}" \
+            --region $region | jq -r '.Version')
+    fi
     permission=$(aws lambda add-layer-version-permission --layer-name $layer \
         --version-number $version_nbr \
         --statement-id "release-$version_nbr" \
