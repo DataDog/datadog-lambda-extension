@@ -11,7 +11,7 @@ The Datadog Lambda Extension is an AWS Lambda Extension that supports submitting
 Follow the [installation instructions](https://docs.datadoghq.com/serverless/installation), and view your function's enhanced metrics, traces and logs in Datadog.
 
 ## Upgrading
-Upgrading is as easy as bumping up the Datadog Extension version in your Lambda layer configurations or Dockerfile (for Lambda functions deployed as container images). View the latest [releases](https://github.com/DataDog/datadog-lambda-extension/releases) for changelog before upgrading.
+To upgrade, update the Datadog Extension version in your Lambda layer configurations or Dockerfile (for Lambda functions deployed as container images). View the latest [releases](https://github.com/DataDog/datadog-lambda-extension/releases) and corresponding changelogs before upgrading.
 
 ## Configurations
 
