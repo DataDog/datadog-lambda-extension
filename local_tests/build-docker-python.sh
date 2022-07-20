@@ -15,7 +15,7 @@ fi
 CURRENT_PATH=$(pwd)
 
 # Build the extension
-VERSION=1 ./scripts/build_binary_and_layer_dockerized.sh
+ARCHITECTURE=$ARCHITECTURE VERSION=1 ./scripts/build_binary_and_layer_dockerized.sh
 
 # Move to the local_tests repo
 cd ./local_tests
