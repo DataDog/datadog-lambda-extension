@@ -7,7 +7,7 @@ dockerId=$(docker run -d -p 9000:8080 datadog/extension-local-tests)
 
 # Curl it!
 i=0
-while true; do 
+while true; do
     i=$((i+1))
     echo "Invoke # $i"
     curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{}' ; echo
@@ -15,7 +15,7 @@ while true; do
     then
         echo "Saving logs to logs.txt"
         docker logs $dockerId >./local_tests/logs.txt 2>&1
-        echo "Stoping"
+        echo "Stopping"
         docker stop $dockerId
         exit 0
     fi

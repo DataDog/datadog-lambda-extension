@@ -9,3 +9,4 @@ local_tests/python
 local_tests/datadog-agent
 local_tests/recorder-extension
 local_tests/layer-*.zip
+local_tests/nodejs
