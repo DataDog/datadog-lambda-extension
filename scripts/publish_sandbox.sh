@@ -32,7 +32,7 @@ if [ "$ARCHITECTURE" == "arm64" ]; then
 fi
 
 if [ ! -z "$SUFFIX" ]; then
-   LAYER_NAME+="$SUFFIX"
+   LAYER_NAME+="-$SUFFIX"
 fi
 
 REGION="sa-east-1"
