@@ -31,6 +31,10 @@ if [ "$ARCHITECTURE" == "arm64" ]; then
     LAYER_NAME="Datadog-Extension-ARM"
 fi
 
+if [ ! -z "$SUFFIX" ]; then
+   LAYER_NAME+="-$SUFFIX"
+fi
+
 REGION="sa-east-1"
 if [ "$RELEASE_CANDIDATE" == "true" ]; then
     echo "Will publish as a release candidate to us-east-1"
