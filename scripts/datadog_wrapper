@@ -68,9 +68,9 @@ then
   export DD_JMXFETCH_ENABLED="false"
   export DD_RUNTIME_METRICS_ENABLED="false"
   DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
-  if [ -f "$DD_Agent_Jar" ] 
+  if [ -f "$DD_Agent_Jar" ]
   then
-    export JAVA_TOOL_OPTIONS="-javaagent:$DD_Agent_Jar -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
+    export JAVA_TOOL_OPTIONS="$JAVA_TOOL_OPTIONS -javaagent:$DD_Agent_Jar -XX:+TieredCompilation -XX:TieredStopAtLevel=1"
   else
     echo "File $DD_Agent_Jar does not exist!"
   fi
