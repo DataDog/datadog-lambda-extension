@@ -15,8 +15,6 @@ COPY datadog-agent /opt/extensions/
 
 # Make sure that the extension will send the payload to the man in the middle
 # (recorder extension is listenning on 3333)
-ENV DD_UNIVERSAL_INSTRUMENTATION=true
-ENV DD_API_KEY=538c103f578af492d6e141d79b3dc941
 #ENV DD_APM_DD_URL=http://127.0.0.1:3333
 #ENV DD_DD_URL=http://127.0.0.1:3333
 #ENV DD_LOGS_CONFIG_LOGS_DD_URL=127.0.0.1:3333
