@@ -100,7 +100,7 @@ fn build_image(args: &Args, cmd_path: &str, dockerfile_path: &str) -> Result<Str
         "--load",
     ];
 
-    println!("dockers args = {:?}", args);
+    println!("dockers args = {:?}", docker_args);
 
     let output = Command::new("docker").args(docker_args).output()?;
     let string_output = std::str::from_utf8(&output.stderr);
