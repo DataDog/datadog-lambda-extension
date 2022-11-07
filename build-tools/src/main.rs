@@ -1,5 +1,3 @@
-use core::panic;
-
 use clap::Parser;
 use std::env;
 use std::io::Result;
@@ -67,7 +65,7 @@ fn build_extension(args: &Args) -> Result<()> {
     println!("building the extension");
     let destination_path = &args.destination_path;
     let dockerfile_path = format!("{}/scripts/Dockerfile.build", args.context_path);
-    let image_name = build_image(&args, "cmd/serverless", dockerfile_path.as_str())?;
+    let image_name = build_image(args, "cmd/serverless", dockerfile_path.as_str())?;
     let docker_container_id = create_container(image_name.as_str())?;
     copy_zip_file(docker_container_id.as_str(), destination_path)?;
     remove_container(&docker_container_id)?;
@@ -133,9 +131,7 @@ fn copy_zip_file(container_id: &str, destination_path: &str) -> Result<()> {
 }
 
 fn remove_container(container_id: &str) -> Result<()> {
-    let output = Command::new("docker")
-        .args(["rm", container_id])
-        .output()?;
+    let output = Command::new("docker").args(["rm", container_id]).output()?;
     match output.status.success() {
         true => Ok(()),
         false => panic!("could not stop the container"),
