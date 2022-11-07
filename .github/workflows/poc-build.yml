@@ -24,7 +24,9 @@ jobs:
           path: datadog-agent
       - run: pwd
       - run: ls
-      - run: cd build-tools && cargo run --release -- --version 1 --context-path "$(pwd)/.." --destination-path $GITHUB_WORKSPACE/tmp
+      - run: echo "${GITHUB_WORKSPACE}"
+      - run: ls "${GITHUB_WORKSPACE}"/datadog-agent
+      - run: cd build-tools && cargo run --release -- --version 1 --context-path "$GITHUB_WORKSPACE" --destination-path $GITHUB_WORKSPACE/tmp
       - uses: actions/upload-artifact@v3
         with:
           name: datadog-extension

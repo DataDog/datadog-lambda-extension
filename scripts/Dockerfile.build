@@ -5,10 +5,7 @@ ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG CMD_PATH
 ARG GITHUB_WORKSPACE
-RUN mkdir -p /tmp/dd/datadog-agent
 
-
-# copy source files (/tgz gets unzip automatically by Docker)
 COPY "${GITHUB_WORKSPACE}"/datadog-agent /tmp/dd
 
 # build the extension
