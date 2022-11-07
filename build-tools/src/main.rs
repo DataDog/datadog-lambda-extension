@@ -81,26 +81,28 @@ fn build_image(args: &Args, cmd_path: &str, dockerfile_path: &str) -> Result<Str
     let agent_version_build_arg = format!("AGENT_VERSION={}", args.agent_version);
     let cmd_path_build_arg = format!("CMD_PATH={}", cmd_path);
 
-    let output = Command::new("docker")
-        .args([
-            "buildx",
-            "build",
-            "--platform",
-            docker_architecture.as_str(),
-            "-f",
-            dockerfile_path,
-            "-t",
-            docker_image_name.as_str(),
-            "--build-arg",
-            extension_version_build_arg.as_str(),
-            "--build-arg",
-            agent_version_build_arg.as_str(),
-            "--build-arg",
-            cmd_path_build_arg.as_str(),
-            args.context_path.as_str(),
-            "--load",
-        ])
-        .output()?;
+    let docker_args = [
+        "buildx",
+        "build",
+        "--platform",
+        docker_architecture.as_str(),
+        "-f",
+        dockerfile_path,
+        "-t",
+        docker_image_name.as_str(),
+        "--build-arg",
+        extension_version_build_arg.as_str(),
+        "--build-arg",
+        agent_version_build_arg.as_str(),
+        "--build-arg",
+        cmd_path_build_arg.as_str(),
+        args.context_path.as_str(),
+        "--load",
+    ];
+
+    println!("dockers args = {:?}", args);
+
+    let output = Command::new("docker").args(docker_args).output()?;
     let string_output = std::str::from_utf8(&output.stderr);
     println!("{}", string_output.expect("could not read stderr"));
     match output.status.success() {
