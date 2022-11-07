@@ -17,4 +17,4 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - run: pwd
+      - run: cd build-tools && cargo run --release
