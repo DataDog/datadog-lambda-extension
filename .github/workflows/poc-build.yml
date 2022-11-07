@@ -22,6 +22,8 @@ jobs:
           repository: DataDog/datadog-agent
           ref: refs/tags/lambda-extension-32
       - run: pwd
+      - run: ls
+      - run: git --no-pager log --decorate=short --pretty=oneline -n1
       - run: cd build-tools && cargo run --release -- --version 1 --context-path "$(pwd)/.." --destination-path /tmp
       - uses: actions/upload-artifact@v3
         with:
