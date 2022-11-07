@@ -8,7 +8,7 @@ RUN mkdir -p /tmp/dd/datadog-agent
 
 
 # copy source files (/tgz gets unzip automatically by Docker)
-COPY datadog-agent /tmp/dd
+COPY /tmp/datadog-agent /tmp/dd
 
 # build the extension
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
