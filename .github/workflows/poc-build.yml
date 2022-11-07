@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - run: pwd
+      - run: ls
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -21,6 +23,7 @@ jobs:
         with:
           repository: DataDog/datadog-agent
           ref: refs/tags/lambda-extension-32
+          path: datadog-agent
       - run: pwd
       - run: ls
       - run: git --no-pager log --decorate=short --pretty=oneline -n1
