@@ -4,9 +4,8 @@ FROM golang:1.17 as builder
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG CMD_PATH
-ARG GITHUB_WORKSPACE
 
-COPY "${GITHUB_WORKSPACE}"/datadog-agent /tmp/dd
+COPY datadog-agent /tmp/dd
 
 # build the extension
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
