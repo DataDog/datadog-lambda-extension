@@ -17,9 +17,9 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v2
         with:
-          name: DataDog/datadog-agent
+          repository: DataDog/datadog-agent
           ref: refs/heads/lambda-extension-32
       - run: cd build-tools && cargo run --release -- --version 1 --context-path "$(pwd)/.." --destination-path /tmp
       - uses: actions/upload-artifact@v3
