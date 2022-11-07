@@ -79,6 +79,8 @@ fn build_image(args: &Args, cmd_path: &str, dockerfile_path: &str) -> Result<Str
     let extension_version_build_arg = format!("EXTENSION_VERSION={}", args.version);
     let agent_version_build_arg = format!("AGENT_VERSION={}", args.agent_version);
     let cmd_path_build_arg = format!("CMD_PATH={}", cmd_path);
+    let github_workspace = env::var("GITHUB_WORKSPACE").expect("could not find GITHUB_WORKSPACE env var");
+    let github_workspace_build_arg = format!("GITHUB_WORKSPACE={}", github_workspace);
 
     let output = Command::new("docker")
         .args([
@@ -96,6 +98,8 @@ fn build_image(args: &Args, cmd_path: &str, dockerfile_path: &str) -> Result<Str
             agent_version_build_arg.as_str(),
             "--build-arg",
             cmd_path_build_arg.as_str(),
+            "--build-arg",
+            github_workspace_build_arg.as_str(),
             args.context_path.as_str(),
             "--load",
         ])
