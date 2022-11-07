@@ -1,6 +1,8 @@
 name: Poc Build
 
 on:
+  push:
+    branches: [ maxday/release-extension-github-actions ]
   workflow_dispatch:
     inputs:
       release_candidate:
