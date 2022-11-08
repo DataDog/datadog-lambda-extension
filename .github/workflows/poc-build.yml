@@ -5,9 +5,10 @@ on:
     branches: [ maxday/release-extension-github-actions ]
   workflow_dispatch:
     inputs:
-      release_candidate:
-        type: boolean
-        description: Publish a new release candidate
+      mfaCode:
+        type: string
+        description: MFA Code
+        required: true
 
 jobs:
   build-extension-zip:
@@ -21,6 +22,7 @@ jobs:
           path: datadog-agent
       - run: |
          ./build-tools/bin/build_tools \
+         build \
          --version 1 \
          --agent-version 1 \
          --context-path "${GITHUB_WORKSPACE}" \
@@ -28,4 +30,16 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: datadog-extension
-          path: ./tmp/datadog_extension.zip  
+          path: ./tmp/datadog_extension.zi
+      - id: deploy
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
+        run: |
+          ./build-tools/bin/build_tools \
+          deploy \
+          --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
+          --layer-path ./tmp/datadog_extension.zip \
+          --layer-name "maxday-test-Datadog-Extension" \
+          --mfa-code ${{ inputs.mfaCode }}
+          --region sa-east-1
