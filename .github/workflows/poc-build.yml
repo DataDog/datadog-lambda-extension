@@ -15,6 +15,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+      - id: auth
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
+        run: |
+          ./build-tools/bin/build_tools \
+          auth \
+          --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
+          --mfa-code ${{ inputs.mfaCode }}
       - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent
@@ -33,14 +42,12 @@ jobs:
           path: ./tmp/datadog_extension.zi
       - id: deploy
         env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: us-east-1
+          AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
         run: |
           ./build-tools/bin/build_tools \
           deploy \
-          --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
           --layer-path ./tmp/datadog_extension.zip \
           --layer-name "maxday-test-Datadog-Extension" \
-          --mfa-code ${{ inputs.mfaCode }}
           --region sa-east-1

@@ -4,43 +4,21 @@ use std::fs::File;
 use std::io::Read;
 
 use aws_sdk_lambda as lambda;
-use aws_sdk_sts as sts;
 
 #[derive(Debug,StructOpt)]
 pub struct DeployOptions {
     #[structopt(long)]
-    mfa_arn: String,
-    #[structopt(long)]
     layer_path: String,
     #[structopt(long)]
     layer_name: String,
-    #[structopt(long)]
-    mfa_code: String,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
 }
 
 pub async fn deploy(args: &DeployOptions)-> Result<()> {
     println!("hello in deploy");
-    let config = aws_config::load_from_env().await;
-
-    // get AWS credentials from MFA
-    let sts_client = sts::Client::new(&config);
-    let command = sts_client.get_session_token();
-    let sts_response = command
-    .set_serial_number(Some(args.mfa_arn.clone()))
-    .set_token_code(Some(args.mfa_code.clone()))
-    .send();
-    
-    let credentials = sts_response.await.expect("could not get credentials from MFA");
-    let credentials= credentials.credentials().expect("could not locate credentials");
-
-    
-
-    std::env::set_var("AWS_ACCESS_KEY_ID", credentials.access_key_id().expect("could not find access key"));
-    std::env::set_var("AWS_SECRET_ACCESS_KEY", credentials.secret_access_key().expect("could not find access key"));
-    std::env::set_var("AWS_SESSION_TOKEN", credentials.session_token().expect("could not find session token"));
-    std::env::set_var("AWS_REGION", String::from(args.region.clone()));
+  
+    std::env::set_var("AWS_REGION", args.region.clone());
 
     let config = aws_config::load_from_env().await;
     let lambda_client = lambda::Client::new(&config);
