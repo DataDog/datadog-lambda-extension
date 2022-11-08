@@ -24,6 +24,11 @@ jobs:
           auth \
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
           --mfa-code ${{ inputs.mfaCode }}
+      - name: Add mask
+        run: |
+          echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
+          echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
+          echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
       - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent
@@ -41,10 +46,6 @@ jobs:
           name: datadog-extension
           path: ./tmp/datadog_extension.zi
       - id: deploy
-        #env:
-          #AWS_ACCESS_KEY_ID: ${{ env.AWS_ACCESS_KEY_ID }}
-          #AWS_SECRET_ACCESS_KEY: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          #AWS_SESSION_TOKEN: ${{ env.AWS_SESSION_TOKEN }}
         run: |
           ./build-tools/bin/build_tools \
           deploy \
