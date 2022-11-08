@@ -23,7 +23,7 @@ jobs:
          ./build-tools/bin/build_tools \
          --version 1 \
          --agent-version 1 \
-         --context-path "${GITHUB_WORKSPACE}"\
+         --context-path "${GITHUB_WORKSPACE}" \
          --destination-path "${GITHUB_WORKSPACE}/tmp"
       - uses: actions/upload-artifact@v3
         with:
