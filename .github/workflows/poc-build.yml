@@ -1,8 +1,8 @@
 name: Poc Build
 
 on:
-  push:
-    branches: [ maxday/release-extension-github-actions ]
+  #push:
+  #  branches: [ maxday/release-extension-github-actions ]
   workflow_dispatch:
     inputs:
       mfaCode:
@@ -35,6 +35,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-east-1
         run: |
           ./build-tools/bin/build_tools \
           deploy \
