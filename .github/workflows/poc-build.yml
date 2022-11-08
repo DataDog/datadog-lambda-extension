@@ -6,28 +6,25 @@ on:
   workflow_dispatch:
     inputs:
       release_candidate:
-        type: bool
+        type: boolean
         description: Publish a new release candidate
 
 jobs:
   build-extension-zip:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent
           ref: refs/tags/lambda-extension-32
           path: datadog-agent
-      - run: pwd
-      - run: ls
-      - run: echo "${GITHUB_WORKSPACE}"
-      - run: ls "${GITHUB_WORKSPACE}"/datadog-agent
-      - run: ./build-tools/bin/build_tools --version 1 --agent-version 1 --context-path "${GITHUB_WORKSPACE}" --destination-path "${GITHUB_WORKSPACE}/tmp"
-      - run: pwd
+      - run: |
+         ./build-tools/bin/build_tools \
+         --version 1 \
+         --agent-version 1 \
+         --context-path "${GITHUB_WORKSPACE}"\
+         --destination-path "${GITHUB_WORKSPACE}/tmp"
       - uses: actions/upload-artifact@v3
         with:
           name: datadog-extension
