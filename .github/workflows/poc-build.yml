@@ -1,8 +1,6 @@
 name: Poc Build
 
 on:
-  #push:
-  #  branches: [ maxday/release-extension-github-actions ]
   workflow_dispatch:
     inputs:
       mfaCode:
@@ -44,7 +42,7 @@ jobs:
       - uses: actions/upload-artifact@v3
         with:
           name: datadog-extension
-          path: ./tmp/datadog_extension.zi
+          path: ./tmp/datadog_extension.zip
       - id: deploy
         run: |
           ./build-tools/bin/build_tools \
