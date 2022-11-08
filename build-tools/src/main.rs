@@ -28,6 +28,7 @@ struct Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
+
     println!("sandbox = {}", args.sandbox);
     println!("architecture = {}", args.architecture);
     println!("suffix = {}", args.suffix);
@@ -62,12 +63,12 @@ fn build_cloud_run() -> Result<()> {
 }
 
 fn build_extension(args: &Args) -> Result<()> {
-    println!("building the extension");
     let github_workspace = env::var("GITHUB_WORKSPACE").expect("could not find GITHUB_WORKSPACE env var");
     let destination_path = &args.destination_path;
     let dockerfile_path = format!("{}/scripts/Dockerfile.build", github_workspace);
     let image_name = build_image(args, "cmd/serverless", dockerfile_path.as_str())?;
     let docker_container_id = create_container(image_name.as_str())?;
+    std::fs::create_dir(destination_path)?;
     copy_zip_file(docker_container_id.as_str(), destination_path)?;
     remove_container(&docker_container_id)?;
     Ok(())
@@ -99,8 +100,6 @@ fn build_image(args: &Args, cmd_path: &str, dockerfile_path: &str) -> Result<Str
         args.context_path.as_str(),
         "--load",
     ];
-
-    println!("dockers args = {:?}", docker_args);
 
     let output = Command::new("docker").args(docker_args).output()?;
     let string_output = std::str::from_utf8(&output.stderr);
