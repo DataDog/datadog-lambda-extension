@@ -28,5 +28,5 @@ func handleRequest(ctx context.Context, event events.APIGatewayProxyRequest) (ev
 		fmt.Printf("    %s: %s\n", key, value)
 	}
 
-	return events.APIGatewayProxyResponse{Body: event.Body, StatusCode: 200}, nil
+	return events.APIGatewayProxyResponse{Body: event.Body, StatusCode: 200, Headers: map[string]string{"Context-Type": "plain/text", "Content-Length": fmt.Sprintf("%d", len(event.Body))}}, nil
 }
