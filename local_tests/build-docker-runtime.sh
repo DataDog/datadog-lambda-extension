@@ -30,7 +30,7 @@ case "$RUNTIME" in
       DOCKERFILE=Dockerfile.Go
       ;;
 
-    node | *)
+    node)
         LAYER_NAME=Datadog-Node16-x
         DOCKERFILE=Dockerfile.Node
         ;;
@@ -83,4 +83,4 @@ elif [ -n "$LAYER_PATH" ]; then
 fi
 
 # Build the image
-docker build -t datadog/extension-local-tests --no-cache -f $DOCKERFILE .
+docker build --platform=linux/$ARCHITECTURE -t datadog/extension-local-tests --no-cache -f $DOCKERFILE .
