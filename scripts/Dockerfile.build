@@ -5,7 +5,9 @@ ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG CMD_PATH
 
-COPY ./datadog-agent /tmp/dd
+RUN mkdir -p /tmp/dd
+
+COPY ./datadog-agent /tmp/dd/datadog-agent
 
 # build the extension
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
