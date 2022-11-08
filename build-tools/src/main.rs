@@ -21,14 +21,14 @@ enum SubCommand {
     author = "Team Serverless",
     about = "build-tools - Let's you build and release layers"
 )]
-struct CLI {
+struct BuildTools {
     #[structopt(subcommand)]
     cmd: SubCommand,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = CLI::from_args();
+    let args = BuildTools::from_args();
     match args.cmd {
         SubCommand::Auth(opt) => auth(&opt).await,
         SubCommand::Build(opt) => build(&opt),

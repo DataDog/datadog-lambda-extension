@@ -37,9 +37,9 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
 }
 
 fn get_file_as_vec(filename: &String) -> Vec<u8> {
-    let mut f = File::open(&filename).expect("could not find the zip");
-    let metadata = std::fs::metadata(&filename).expect("unable to read metadata");
+    let mut f = File::open(filename).expect("could not find the zip");
+    let metadata = std::fs::metadata(filename).expect("unable to read metadata");
     let mut buffer = vec![0; metadata.len() as usize];
-    f.read(&mut buffer).expect("buffer error");
+    f.read_exact(&mut buffer).expect("buffer error");
     buffer
 }

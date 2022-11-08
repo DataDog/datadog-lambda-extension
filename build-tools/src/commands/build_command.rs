@@ -20,10 +20,10 @@ pub struct BuildOptions {
 }
 
 pub fn build(args: &BuildOptions) -> Result<()> {
-    validate_args(&args);
+    validate_args(args);
     match args.cloudrun {
         true => build_cloud_run(),
-        false => build_extension("cmd/serverless", &args),
+        false => build_extension("cmd/serverless", args),
     }
 }
 
