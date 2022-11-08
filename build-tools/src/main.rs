@@ -67,10 +67,15 @@ fn build_extension(args: &Args) -> Result<()> {
     let destination_path = &args.destination_path;
     let dockerfile_path = format!("{}/scripts/Dockerfile.build", github_workspace);
     let image_name = build_image(args, "cmd/serverless", dockerfile_path.as_str())?;
+    println!("image built");
     let docker_container_id = create_container(image_name.as_str())?;
+    println!("container created");
     std::fs::create_dir(destination_path)?;
+    println!("folder created at : {}", destination_path);
     copy_zip_file(docker_container_id.as_str(), destination_path)?;
+    println!("zip copied");
     remove_container(&docker_container_id)?;
+    println!("container removed");
     Ok(())
 }
 
