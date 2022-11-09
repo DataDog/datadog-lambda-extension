@@ -15,7 +15,6 @@ on:
         type: string
         description: suffix to be appended to the layer name (default empty)
         default: ""
-  push:
 
 jobs:
   deploy-sandbox:
