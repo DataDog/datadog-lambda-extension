@@ -11,6 +11,8 @@ pub struct DeployOptions {
     layer_path: String,
     #[structopt(long)]
     layer_name: String,
+    #[structopt(long)]
+    layer_suffix: String,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
 }
@@ -25,10 +27,12 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
     let blob = get_file_as_vec(&args.layer_path);
     let lambda_blob = aws_sdk_lambda::types::Blob::new(blob);
 
+    let layer_name = build_layer_name(&args.layer_name, &args.layer_suffix);
+
     // publish layer
     let builder = lambda_client.publish_layer_version();
     builder
-        .set_layer_name(Some(args.layer_name.clone()))
+        .set_layer_name(Some(layer_name))
         .set_content(Some(content.set_zip_file(Some(lambda_blob)).build()))
         .send()
         .await
@@ -42,4 +46,11 @@ fn get_file_as_vec(filename: &String) -> Vec<u8> {
     let mut buffer = vec![0; metadata.len() as usize];
     f.read_exact(&mut buffer).expect("buffer error");
     buffer
+}
+
+fn build_layer_name(layer_name: &str, layer_suffix: &str) -> String {
+    match layer_suffix.len() {
+        0 => String::from(layer_name),
+        _ => String::from(layer_name) + "-" + layer_suffix
+    }
 }

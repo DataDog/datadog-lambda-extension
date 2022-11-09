@@ -7,6 +7,14 @@ on:
         type: string
         description: MFA Code
         required: true
+      agentBranch:
+        type: string
+        description: datadog agent branch name (default main)
+        default: "main"
+      layerSuffix:
+        type: string
+        description: suffix to be appended to the layer name (default empty)
+        default: ""
 
 jobs:
   build-extension-zip:
@@ -30,7 +38,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent
-          ref: refs/tags/lambda-extension-32
+          ref: refs/heads/${{ inputs.agentBranch }}
           path: datadog-agent
       - run: |
          ./build-tools/bin/build_tools \
@@ -49,4 +57,5 @@ jobs:
           deploy \
           --layer-path ./tmp/datadog_extension.zip \
           --layer-name "maxday-test-Datadog-Extension" \
+          --layer-suffix ${{ inputs.layerSuffix }}
           --region sa-east-1
