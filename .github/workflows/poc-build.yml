@@ -57,5 +57,5 @@ jobs:
           deploy \
           --layer-path ./tmp/datadog_extension.zip \
           --layer-name "maxday-test-Datadog-Extension" \
-          --layer-suffix ${{ inputs.layerSuffix }}
+          --layer-suffix "${{ inputs.layerSuffix }}"
           --region sa-east-1
