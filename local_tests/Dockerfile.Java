@@ -1,10 +1,22 @@
+FROM public.ecr.aws/lambda/java:11 as builder
+RUN yum install -y unzip
+RUN curl -k -L -v -X GET https\://services.gradle.org/distributions/gradle-7.5.1-bin.zip > gradle-7.5.1-bin.zip
+RUN unzip -d /opt/gradle gradle-7.5.1-bin.zip
+
+WORKDIR /tmpBuild
+COPY java/src ./src
+COPY java/build.gradle .
+
+RUN JAVA_HOME=/var/lang /opt/gradle/gradle-7.5.1/bin/gradle :buildZip
+RUN unzip /tmpBuild/build/distributions/hello.zip -d /tmp
+
 FROM public.ecr.aws/lambda/java:11
 
 # Add Datadog library
 COPY java/lib/dd-java-agent.jar /opt/dd-java-agent.jar
 
 # Copy customer code
-COPY java/out /var/task/
+COPY --from=builder /tmp /var/task/
 
 # Copy both the datadog extension and the recorder one
 RUN mkdir -p /opt/extensions

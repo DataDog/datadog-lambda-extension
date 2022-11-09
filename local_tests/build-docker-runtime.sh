@@ -31,15 +31,6 @@ case "$RUNTIME" in
       ;;
 
     java)
-      # Build java
-      cd local_tests/java
-      gradle buildZip
-      cd ../..
-      # Unzip source
-      mkdir -p local_tests/java/out
-      rm -rf local_tests/java/out
-      mkdir -p local_tests/java/out
-      unzip "local_tests/java/build/distributions/hello.zip" -d "local_tests/java/out"
       DOCKERFILE=Dockerfile.Java
       LAYER_NAME=dd-trace-java
       ;;
