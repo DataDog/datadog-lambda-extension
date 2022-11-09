@@ -21,7 +21,6 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
 
 	@Override
 	public APIGatewayV2ProxyResponseEvent handleRequest(APIGatewayProxyRequestEvent input, Context context) {
-		System.out.println("in HANDLE REQUEST");
 		doRequest();
 		Map<String, String> headers = new HashMap<>();
         headers.put("Content-Type", "application/json");
@@ -34,8 +33,6 @@ public class Handler implements RequestHandler<APIGatewayProxyRequestEvent, APIG
 
 	public void doRequest() {
 		final String urlToFetch = System.getenv("URL_TO_FETCH");
-		System.out.println("in do POST, url to fetch");
-		System.out.println(urlToFetch);
 		if(null != urlToFetch) {
 			try {
 				HttpURLConnection connection = null;
