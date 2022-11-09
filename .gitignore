@@ -10,3 +10,7 @@ local_tests/datadog-agent
 local_tests/recorder-extension
 local_tests/layer-*.zip
 local_tests/nodejs
+local_tests/java/build/
+local_tests/java/lib/
+local_tests/java/out/
+local_tests/java/.gradle/
