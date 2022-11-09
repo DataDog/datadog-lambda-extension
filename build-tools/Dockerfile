@@ -23,7 +23,7 @@ RUN apt-get install -y binutils
 COPY --from=builder /usr/src/app/target/release/build_tools /bin
 RUN strip /bin/build_tools
 
-# zip the extension
+# strip the binary and zip it
 FROM amd64/ubuntu:bionic as compresser
 RUN apt-get update
 RUN apt-get install -y zip

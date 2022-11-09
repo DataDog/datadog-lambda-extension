@@ -5,8 +5,7 @@ on:
     branches: [ main ]
   pull_request:
     # The branches below must be a subset of the branches above
-    # todo uncomment 
-    # branches: [ main ]
+    branches: [ main ]
 
 jobs:
   analyze:
