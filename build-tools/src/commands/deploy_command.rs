@@ -12,7 +12,7 @@ pub struct DeployOptions {
     #[structopt(long)]
     layer_name: String,
     #[structopt(long)]
-    layer_suffix: String,
+    layer_suffix: Option<String>,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
 }
@@ -48,9 +48,9 @@ fn get_file_as_vec(filename: &String) -> Vec<u8> {
     buffer
 }
 
-fn build_layer_name(layer_name: &str, layer_suffix: &str) -> String {
-    match layer_suffix.len() {
-        0 => String::from(layer_name),
-        _ => String::from(layer_name) + "-" + layer_suffix
+fn build_layer_name(layer_name: &str, layer_suffix: &Option<String>) -> String {
+    match layer_suffix {
+        None => String::from(layer_name),
+        Some(layer_suffix) => String::from(layer_name) + "-" + layer_suffix
     }
 }
