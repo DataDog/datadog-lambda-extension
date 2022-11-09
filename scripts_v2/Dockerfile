@@ -4,15 +4,10 @@ FROM golang:1.17 as builder
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG CMD_PATH
-RUN mkdir -p /tmp/dd/datadog-agent
 
-# cache dependencies
-COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
-COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
-WORKDIR /tmp/dd/datadog-agent
+RUN mkdir -p /tmp/dd
 
-# copy source files (/tgz gets unzip automatically by Docker)
-ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
+COPY ./datadog-agent /tmp/dd/datadog-agent
 
 # build the extension
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
