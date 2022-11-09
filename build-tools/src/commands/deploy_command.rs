@@ -40,17 +40,17 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
     Ok(())
 }
 
+fn build_layer_name(layer_name: &str, layer_suffix: &Option<String>) -> String {
+    match layer_suffix {
+        None => String::from(layer_name),
+        Some(layer_suffix) => String::from(layer_name) + "-" + layer_suffix
+    }
+}
+
 fn get_file_as_vec(filename: &String) -> Vec<u8> {
     let mut f = File::open(filename).expect("could not find the zip");
     let metadata = std::fs::metadata(filename).expect("unable to read metadata");
     let mut buffer = vec![0; metadata.len() as usize];
     f.read_exact(&mut buffer).expect("buffer error");
     buffer
-}
-
-fn build_layer_name(layer_name: &str, layer_suffix: &Option<String>) -> String {
-    match layer_suffix {
-        None => String::from(layer_name),
-        Some(layer_suffix) => String::from(layer_name) + "-" + layer_suffix
-    }
 }
