@@ -8,23 +8,33 @@ if [ -z $RUNTIME ]; then
 fi
 
 # Determine architecture, M1 requires arm64 while Intel chip requires amd64
-if [ `uname -m` == "arm64" ]; then
-    ARCHITECTURE=arm64
-else
-    ARCHITECTURE=amd64
+if [ -z "$ARCHITECTURE" ]; then
+  if [ `uname -m` == "arm64" ]; then
+      ARCHITECTURE=arm64
+  else
+      ARCHITECTURE=amd64
+  fi
 fi
 
-if [ "$RUNTIME" == "python" ]; then
-    if [ "$ARCHITECTURE" == "amd64" ]; then
-        LAYER_NAME=Datadog-Python39-ARM
-    else
-        LAYER_NAME=Datadog-Python39
-    fi
-    DOCKERFILE=Dockerfile.Python
-else
-    LAYER_NAME=Datadog-Node16-x
-    DOCKERFILE=Dockerfile.Node
-fi
+case "$RUNTIME" in
+    python)
+        if [ "$ARCHITECTURE" == "amd64" ]; then
+            LAYER_NAME=Datadog-Python39-ARM
+        else
+            LAYER_NAME=Datadog-Python39
+        fi
+        DOCKERFILE=Dockerfile.Python
+        ;;
+
+    go)
+      DOCKERFILE=Dockerfile.Go
+      ;;
+
+    node)
+        LAYER_NAME=Datadog-Node16-x
+        DOCKERFILE=Dockerfile.Node
+        ;;
+esac
 
 # Save the current path
 CURRENT_PATH=$(pwd)
@@ -42,7 +52,7 @@ cp ../.layers/datadog_extension-$ARCHITECTURE/extensions/datadog-agent .
 cd ../../datadog-agent/test/integration/serverless/recorder-extension
 GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
 cd "$CURRENT_PATH/local_tests"
-if [ -z "$LAYER_PATH" ]; then
+if [ -z "$LAYER_PATH" ] && [ -n "$LAYER_NAME" ]; then
     # Get the latest available version
     LATEST_AVAILABLE_VERSION=$(aws-vault exec sandbox-account-admin \
     -- aws lambda list-layer-versions --layer-name $LAYER_NAME --region sa-east-1 --max-items 1 \
@@ -63,7 +73,7 @@ if [ -z "$LAYER_PATH" ]; then
         rm -rf $CURRENT_PATH/local_tests/python
         unzip "$LAYER"
     fi
-else
+elif [ -n "$LAYER_PATH" ]; then
     echo "Using $LAYER_PATH instead of fetching from AWS"
     if test -d "$CURRENT_PATH/local_tests/$RUNTIME"; then
         echo "Removing and rebuilding from local path"
@@ -71,5 +81,6 @@ else
     fi
     unzip $LAYER_PATH -d $CURRENT_PATH/local_tests/
 fi
+
 # Build the image
-docker build -t datadog/extension-local-tests --no-cache -f $DOCKERFILE .
+docker build --platform=linux/$ARCHITECTURE -t datadog/extension-local-tests --no-cache -f $DOCKERFILE .
