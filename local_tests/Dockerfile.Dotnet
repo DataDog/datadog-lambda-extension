@@ -1,0 +1,35 @@
+FROM mcr.microsoft.com/dotnet/sdk:3.1 as build
+
+WORKDIR /src
+
+COPY dotnet/ServerlessTest.csproj ./
+RUN dotnet restore
+
+COPY dotnet .
+RUN dotnet publish -c Release -o out
+
+FROM public.ecr.aws/lambda/dotnet:core3.1 as final
+
+WORKDIR /src
+COPY --from=build /src/out /var/task
+
+# Copy both the datadog extension and the recorder one
+RUN mkdir -p /opt/extensions
+COPY recorder-extension /opt/extensions/
+COPY datadog-agent /opt/extensions/
+
+# Make sure that the extension will send the payload to the man in the middle
+# (recorder extension is listening on 3333)
+ENV DD_APM_DD_URL=http://127.0.0.1:3333
+ENV DD_DD_URL=http://127.0.0.1:3333
+ENV DD_LOGS_CONFIG_LOGS_DD_URL=127.0.0.1:3333
+ENV DD_LOGS_CONFIG_LOGS_NO_SSL=true
+ENV DD_LOGS_ENABLED=false
+ENV DD_LOG_LEVEL=DEBUG
+ENV DD_MERGE_XRAY_TRACES=false
+ENV DD_SERVERLESS_LOGS_ENABLED=false
+ENV DD_SERVICE=asm-serverless-test
+ENV DD_TRACE_ENABLED=true
+ENV DD_LOCAL_TEST=1
+
+CMD ["ServerlessTest::Serverless.Function::Handler"]
