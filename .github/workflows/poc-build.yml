@@ -1,4 +1,4 @@
-name: Poc Build
+name: Deploy Sandbox
 
 on:
   workflow_dispatch:
@@ -15,9 +15,10 @@ on:
         type: string
         description: suffix to be appended to the layer name (default empty)
         default: ""
+  push:
 
 jobs:
-  build-extension-zip:
+  deploy-sandbox:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -56,6 +57,6 @@ jobs:
           ./build-tools/bin/build_tools \
           deploy \
           --layer-path ./tmp/datadog_extension.zip \
-          --layer-name "maxday-test-Datadog-Extension" \
+          --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
           --region sa-east-1
