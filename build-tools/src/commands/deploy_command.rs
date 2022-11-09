@@ -41,9 +41,13 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
 }
 
 fn build_layer_name(layer_name: &str, layer_suffix: &Option<String>) -> String {
-    match layer_suffix {
-        None => String::from(layer_name),
-        Some(layer_suffix) => String::from(layer_name) + "-" + layer_suffix
+    if let Some(suffix) = layer_suffix {
+        match suffix.len() {
+            0 => String::from(layer_name),
+            _ => String::from(layer_name) + "-" + suffix,
+        }
+    } else {
+        String::from(layer_name)
     }
 }
 
