@@ -21,7 +21,7 @@ while true; do
     sleep 1
     if [[ $i -gt $NB_INVOKE ]]
     then
-        echo "\nSaving logs to logs.txt"
+        echo "Saving logs to logs.txt"
         docker logs $dockerId >./local_tests/logs.txt 2>&1
         echo "Stopping"
         docker stop $dockerId
