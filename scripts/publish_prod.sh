@@ -88,12 +88,15 @@ echo "Creating tag in the datadog-lambda-extension repository for release on Git
 git tag "v$VERSION"
 git push origin "refs/tags/v$VERSION"
 
-echo "New extension version published to AWS and Dockerhub!"
-echo
-echo "IMPORTANT: Please follow the following steps to create release notes:"
-echo "1. Manually create a new tag called lambda-extension-${VERSION} in the datadog-agent repository"
-echo "2. Create a new GitHub release in the datadog-lambda-extension repository using the tag v${VERSION}, and add release notes"
-echo ">>> https://github.com/DataDog/datadog-lambda-extension/releases/new?tag=v${VERSION}&title=v${VERSION}"
+echo "Creating tag in the datadog-agent repository for release on GitHub"
+cd $SCRIPTS_DIR/../../datadog-agent
+AGENT_TAG_NAME="lambda-extension-$VERSION"
+git tag $AGENT_TAG_NAME
+git push origin "refs/tags/$AGENT_TAG_NAME"
+cd $SCRIPTS_DIR/..
 
 # Open a PR to the documentation repo to automatically bump layer version
 VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
+
+echo "Manually create a new GitHub release in the datadog-lambda-extension repository using the tag v${VERSION}, and add release notes"
+open "https://github.com/DataDog/datadog-lambda-extension/releases/new?tag=v${VERSION}&title=v${VERSION}"
