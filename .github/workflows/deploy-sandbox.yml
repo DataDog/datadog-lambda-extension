@@ -1,0 +1,61 @@
+name: Deploy Sandbox
+
+on:
+  workflow_dispatch:
+    inputs:
+      mfaCode:
+        type: string
+        description: MFA Code
+        required: true
+      agentBranch:
+        type: string
+        description: datadog agent branch name (default main)
+        default: "main"
+      layerSuffix:
+        type: string
+        description: suffix to be appended to the layer name (default empty)
+        default: ""
+
+jobs:
+  deploy-sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - id: auth
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
+        run: |
+          ./build-tools/bin/build_tools \
+          auth \
+          --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
+          --mfa-code ${{ inputs.mfaCode }}
+      - name: Add mask
+        run: |
+          echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
+          echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
+          echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
+      - uses: actions/checkout@v3
+        with:
+          repository: DataDog/datadog-agent
+          ref: refs/heads/${{ inputs.agentBranch }}
+          path: datadog-agent
+      - run: |
+         ./build-tools/bin/build_tools \
+         build \
+         --version 1 \
+         --agent-version 1 \
+         --context-path "${GITHUB_WORKSPACE}" \
+         --destination-path "${GITHUB_WORKSPACE}/tmp"
+      - uses: actions/upload-artifact@v3
+        with:
+          name: datadog-extension
+          path: ./tmp/datadog_extension.zip
+      - id: deploy
+        run: |
+          ./build-tools/bin/build_tools \
+          deploy \
+          --layer-path ./tmp/datadog_extension.zip \
+          --layer-name "Datadog-Extension" \
+          --layer-suffix "${{ inputs.layerSuffix }}" \
+          --region sa-east-1

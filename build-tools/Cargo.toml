@@ -1,0 +1,12 @@
+[package]
+name = "build_tools"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+structopt = "0.3.23"
+
+aws-config = "0.51.0"
+aws-sdk-lambda = "0.21.0"
+aws-sdk-sts = "0.21.0"
+tokio = { version = "1", features = ["full"] }
