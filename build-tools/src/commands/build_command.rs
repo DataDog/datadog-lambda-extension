@@ -54,10 +54,11 @@ fn build_extension(cmd_path: &str, args: &BuildOptions) -> Result<()> {
 
 fn build_image(args: &BuildOptions, cmd_path: &str, dockerfile_path: &str) -> Result<String> {
     env::set_var("DOCKER_BUILDKIT", "1");
-    let docker_architecture = format!("linux/{}", args.architecture);
+    let architecture = args.architecture.to_string().to_ascii_lowercase();
+    let docker_architecture = format!("linux/{}", architecture);
     let docker_image_name = format!(
         "datadog/build-lambda-extension-{}:{}",
-        args.architecture, args.version
+        architecture, args.version
     );
     let extension_version_build_arg = format!("EXTENSION_VERSION={}", args.version);
     let agent_version_build_arg = format!("AGENT_VERSION={}", args.agent_version);
