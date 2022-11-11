@@ -2,11 +2,20 @@ use std::env;
 use std::io::Result;
 use std::process::Command;
 use structopt::StructOpt;
+use structopt::clap::arg_enum;
+
+arg_enum! {
+    #[derive(Debug)]
+    enum BuildArchitecture {
+        Arm64,
+        Amd64
+    }
+}
 
 #[derive(Debug, StructOpt)]
 pub struct BuildOptions {
-    #[structopt(long, default_value = "amd64")]
-    architecture: String,
+    #[structopt(long, possible_values = &BuildArchitecture::variants(), case_insensitive = true, default_value = "amd64")]
+    architecture: BuildArchitecture,
     #[structopt(long, default_value = "123")]
     agent_version: String,
     #[structopt(long, default_value = "123")]
@@ -20,22 +29,9 @@ pub struct BuildOptions {
 }
 
 pub fn build(args: &BuildOptions) -> Result<()> {
-    validate_args(args);
     match args.cloudrun {
         true => build_cloud_run(),
         false => build_extension("cmd/serverless", args),
-    }
-}
-
-fn validate_args(args: &BuildOptions) {
-    validate_architecture_from_string(args.architecture.as_str());
-}
-
-fn validate_architecture_from_string(arch: &str) -> bool {
-    match arch {
-        "arm64" => true,
-        "amd64" => true,
-        _ => panic!("invalid architecture"),
     }
 }
 
