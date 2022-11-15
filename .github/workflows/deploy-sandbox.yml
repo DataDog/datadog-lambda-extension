@@ -53,6 +53,7 @@ jobs:
          build \
          --version 1 \
          --agent-version 1 \
+         --architecture "${{ inputs.architecture }}" \
          --context-path "${GITHUB_WORKSPACE}" \
          --destination-path "${GITHUB_WORKSPACE}/tmp"
       - uses: actions/upload-artifact@v3
@@ -64,7 +65,7 @@ jobs:
           ./build-tools/bin/build_tools \
           deploy \
           --layer-path ./tmp/datadog_extension.zip \
+          --architecture "${{ inputs.architecture }}" \
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
-          --architecture "${{ inputs.architecture }}" \
           --region sa-east-1
