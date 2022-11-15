@@ -7,6 +7,14 @@ on:
         type: string
         description: MFA Code
         required: true
+      architecture:
+        description: 'Architecture'
+        required: true
+        default: 'amd64' 
+        type: choice
+        options:
+        - amd64
+        - arm64
       agentBranch:
         type: string
         description: datadog agent branch name (default main)
@@ -58,4 +66,5 @@ jobs:
           --layer-path ./tmp/datadog_extension.zip \
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
+          --architecture "${{ inputs.architecture }}" \
           --region sa-east-1
