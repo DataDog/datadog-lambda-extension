@@ -1,6 +1,6 @@
 use commands::{auth_command::auth, build_command::build, deploy_command::deploy};
-use structopt::StructOpt;
 use std::io::Result;
+use structopt::StructOpt;
 
 mod commands;
 

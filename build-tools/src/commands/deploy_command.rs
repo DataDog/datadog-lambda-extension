@@ -44,7 +44,11 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
     Ok(())
 }
 
-fn build_layer_name(layer_name: &str, architecture: &BuildArchitecture, layer_suffix: &Option<String>) -> String {
+fn build_layer_name(
+    layer_name: &str,
+    architecture: &BuildArchitecture,
+    layer_suffix: &Option<String>,
+) -> String {
     let layer_with_suffix = if let Some(suffix) = layer_suffix {
         match suffix.len() {
             0 => String::from(layer_name),
@@ -55,7 +59,7 @@ fn build_layer_name(layer_name: &str, architecture: &BuildArchitecture, layer_su
     };
     match architecture {
         BuildArchitecture::Amd64 => layer_with_suffix,
-        BuildArchitecture::Arm64 => String::from(layer_with_suffix) + "-ARM",
+        BuildArchitecture::Arm64 => layer_with_suffix + "-ARM",
     }
 }
 
@@ -76,28 +80,36 @@ mod tests {
     fn build_layer_name_test() {
         //ARM64
         assert_eq!(
-            "layer-suffix-ARM", 
-            build_layer_name("layer", &BuildArchitecture::Arm64, &Some("suffix".to_string()))
+            "layer-suffix-ARM",
+            build_layer_name(
+                "layer",
+                &BuildArchitecture::Arm64,
+                &Some("suffix".to_string())
+            )
         );
         assert_eq!(
-            "layer-ARM", 
+            "layer-ARM",
             build_layer_name("layer", &BuildArchitecture::Arm64, &Some("".to_string()))
         );
         assert_eq!(
-            "layer-ARM", 
+            "layer-ARM",
             build_layer_name("layer", &BuildArchitecture::Arm64, &None)
         );
         //AMD64
         assert_eq!(
-            "layer-suffix", 
-            build_layer_name("layer", &BuildArchitecture::Amd64, &Some("suffix".to_string()))
+            "layer-suffix",
+            build_layer_name(
+                "layer",
+                &BuildArchitecture::Amd64,
+                &Some("suffix".to_string())
+            )
         );
         assert_eq!(
-            "layer", 
+            "layer",
             build_layer_name("layer", &BuildArchitecture::Amd64, &Some("".to_string()))
         );
         assert_eq!(
-            "layer", 
+            "layer",
             build_layer_name("layer", &BuildArchitecture::Amd64, &None)
         );
     }
