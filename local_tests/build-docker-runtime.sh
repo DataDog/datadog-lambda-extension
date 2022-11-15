@@ -30,6 +30,11 @@ case "$RUNTIME" in
       DOCKERFILE=Dockerfile.Go
       ;;
 
+    java)
+      DOCKERFILE=Dockerfile.Java
+      LAYER_NAME=dd-trace-java
+      ;;
+
     node)
         LAYER_NAME=Datadog-Node16-x
         DOCKERFILE=Dockerfile.Node
