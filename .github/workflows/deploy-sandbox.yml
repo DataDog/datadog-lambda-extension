@@ -48,6 +48,8 @@ jobs:
           repository: DataDog/datadog-agent
           ref: refs/heads/${{ inputs.agentBranch }}
           path: datadog-agent
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
       - run: |
          ./build-tools/bin/build_tools \
          build \
