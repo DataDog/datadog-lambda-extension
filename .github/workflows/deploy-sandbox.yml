@@ -7,6 +7,14 @@ on:
         type: string
         description: MFA Code
         required: true
+      architecture:
+        description: 'Architecture'
+        required: true
+        default: 'amd64' 
+        type: choice
+        options:
+        - amd64
+        - arm64
       agentBranch:
         type: string
         description: datadog agent branch name (default main)
@@ -40,11 +48,14 @@ jobs:
           repository: DataDog/datadog-agent
           ref: refs/heads/${{ inputs.agentBranch }}
           path: datadog-agent
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
       - run: |
          ./build-tools/bin/build_tools \
          build \
          --version 1 \
          --agent-version 1 \
+         --architecture "${{ inputs.architecture }}" \
          --context-path "${GITHUB_WORKSPACE}" \
          --destination-path "${GITHUB_WORKSPACE}/tmp"
       - uses: actions/upload-artifact@v3
@@ -56,6 +67,7 @@ jobs:
           ./build-tools/bin/build_tools \
           deploy \
           --layer-path ./tmp/datadog_extension.zip \
+          --architecture "${{ inputs.architecture }}" \
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
           --region sa-east-1

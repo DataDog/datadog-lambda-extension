@@ -2,15 +2,8 @@ use std::env;
 use std::io::Result;
 use std::process::Command;
 use structopt::StructOpt;
-use structopt::clap::arg_enum;
 
-arg_enum! {
-    #[derive(Debug)]
-    enum BuildArchitecture {
-        Arm64,
-        Amd64
-    }
-}
+use super::common::BuildArchitecture;
 
 #[derive(Debug, StructOpt)]
 pub struct BuildOptions {
