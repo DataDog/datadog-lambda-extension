@@ -58,15 +58,21 @@ jobs:
          --architecture "${{ inputs.architecture }}" \
          --context-path "${GITHUB_WORKSPACE}" \
          --destination-path "${GITHUB_WORKSPACE}/tmp"
+      - name: Sign the layer
+        run: |
+         ./build-tools/bin/build_tools \
+         sign \
+         --layer-path ./tmp/datadog_extension.zip \
+         --destination-path ./tmp/datadog_extension_signed.zip \
       - uses: actions/upload-artifact@v3
         with:
           name: datadog-extension
-          path: ./tmp/datadog_extension.zip
+          path: ./tmp/datadog_extension_signed.zip
       - id: deploy
         run: |
           ./build-tools/bin/build_tools \
           deploy \
-          --layer-path ./tmp/datadog_extension.zip \
+          --layer-path ./tmp/datadog_extension_signed.zip \
           --architecture "${{ inputs.architecture }}" \
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
