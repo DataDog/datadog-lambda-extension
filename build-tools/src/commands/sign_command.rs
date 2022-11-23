@@ -71,7 +71,7 @@ fn random_string() -> String {
 }
 
 fn build_s3_key() -> String {
-    random_string() + &".zip".to_string()
+    random_string() + ".zip"
 }
 
 fn build_source(key: &str) -> Source {
