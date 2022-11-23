@@ -5,7 +5,8 @@ use core::time;
 use rand::{distributions::Alphanumeric, Rng};
 use signer::model::{Destination, S3Destination, S3Source, SigningStatus, Source};
 use std::{
-    io::{Error, ErrorKind, Result},
+    fs::File,
+    io::{Error, ErrorKind, Result, Write},
     path::Path,
     thread,
 };
@@ -18,6 +19,8 @@ const SIGNING_PROFILE_NAME: &str = "DatadogLambdaSigningProfile";
 pub struct SignOptions {
     #[structopt(long)]
     layer_path: String,
+    #[structopt(long)]
+    destination_path: String,
 }
 
 pub async fn sign(args: &SignOptions) -> Result<()> {
@@ -29,6 +32,9 @@ pub async fn sign(args: &SignOptions) -> Result<()> {
     upload_object(args, &key, &s3_client).await?;
     let job_id = sign_object(&key, &signer_client).await?;
     verify(&job_id, &signer_client).await?;
+    download_object(args, &job_id, &s3_client).await?;
+    delete_object(&job_id, &s3_client).await?;
+    delete_object(&key, &s3_client).await?;
     Ok(())
 }
 
@@ -44,6 +50,21 @@ async fn upload_object(args: &SignOptions, key: &str, s3_client: &s3::Client) ->
         .send()
         .await
         .expect("error while uploading the layer");
+    Ok(())
+}
+
+async fn download_object(args: &SignOptions, job_id: &str, s3_client: &s3::Client) -> Result<()> {
+    let response = s3_client
+        .get_object()
+        .bucket(BUCKET_NAME)
+        .key(job_id.to_string() + ".zip")
+        .send()
+        .await
+        .expect("error while download the signed layer");
+    let data = response.body.collect().await?.into_bytes();
+    let buffer = Vec::from(data);
+    let mut file = File::create(args.destination_path.clone())?;
+    file.write_all(&buffer)?;
     Ok(())
 }
 
@@ -64,29 +85,42 @@ async fn sign_object(key: &str, signer_client: &signer::Client) -> Result<String
     }
 }
 
+async fn delete_object(key: &str, s3_client: &s3::Client) -> Result<()> {
+    s3_client.delete_object()
+    .key(key)
+    .bucket(BUCKET_NAME)
+    .send()
+    .await
+    .expect("could not delete the object");
+    Ok(())
+}
+
 fn is_job_completed(status: Option<&SigningStatus>) -> Result<bool> {
     match status {
         Some(SigningStatus::InProgress) => Ok(false),
         Some(SigningStatus::Succeeded) => Ok(true),
-        _ => Err(Error::new(ErrorKind::InvalidData, "job has failed")),
+        Some(err) => Err(Error::new(ErrorKind::InvalidData, err.as_str())),
+        None => Err(Error::new(
+            ErrorKind::InvalidData,
+            "could not find the status",
+        )),
     }
 }
 
 async fn verify(job_id: &str, signer_client: &signer::Client) -> Result<()> {
-    let result = signer_client
-        .describe_signing_job()
-        .job_id(job_id)
-        .send()
-        .await
-        .expect("could not verify the job id");
-
-    let delay = time::Duration::from_secs(15);
-
+    let delay = time::Duration::from_secs(30);
     for _ in 0..5 {
+        let result = signer_client
+            .describe_signing_job()
+            .job_id(job_id)
+            .send()
+            .await
+            .expect("could not verify the job id");
         let result = is_job_completed(result.status())?;
         if result {
             return Ok(());
         }
+        println!("Job is still running waiting for 30 seconds to try checking the status again");
         thread::sleep(delay);
     }
     Err(Error::new(ErrorKind::TimedOut, "the signing job timeouts"))
