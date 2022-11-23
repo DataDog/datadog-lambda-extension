@@ -1,8 +1,9 @@
-use aws_sdk_lambda::types::ByteStream;
+use aws_sdk_lambda::types::{ByteStream, SdkError};
 use aws_sdk_s3 as s3;
 use aws_sdk_signer as signer;
 use core::time;
 use rand::{distributions::Alphanumeric, Rng};
+use s3::{error::DeleteObjectError, output::DeleteObjectOutput};
 use signer::model::{Destination, S3Destination, S3Source, SigningStatus, Source};
 use std::{
     fs::File,
@@ -24,7 +25,7 @@ pub struct SignOptions {
 }
 
 pub async fn sign(args: &SignOptions) -> Result<()> {
-    std::env::set_var("AWS_REGION", "sa-east-1");
+    std::env::set_var("AWS_REGION", "sa-east-1"); // TODO fixeme when ready for production
     let config = aws_config::load_from_env().await;
     let s3_client = s3::Client::new(&config);
     let signer_client = signer::Client::new(&config);
@@ -96,18 +97,6 @@ async fn delete_object(key: &str, s3_client: &s3::Client) -> Result<()> {
     Ok(())
 }
 
-fn is_job_completed(status: Option<&SigningStatus>) -> Result<bool> {
-    match status {
-        Some(SigningStatus::InProgress) => Ok(false),
-        Some(SigningStatus::Succeeded) => Ok(true),
-        Some(err) => Err(Error::new(ErrorKind::InvalidData, err.as_str())),
-        None => Err(Error::new(
-            ErrorKind::InvalidData,
-            "could not find the status",
-        )),
-    }
-}
-
 async fn verify(job_id: &str, signer_client: &signer::Client) -> Result<()> {
     let delay = time::Duration::from_secs(30);
     for _ in 0..5 {
@@ -151,4 +140,16 @@ fn build_source(key: &str) -> Source {
 fn build_destination() -> Destination {
     let s3_destination = S3Destination::builder().bucket_name(BUCKET_NAME).build();
     Destination::builder().s3(s3_destination).build()
+}
+
+fn is_job_completed(status: Option<&SigningStatus>) -> Result<bool> {
+    match status {
+        Some(SigningStatus::InProgress) => Ok(false),
+        Some(SigningStatus::Succeeded) => Ok(true),
+        Some(err) => Err(Error::new(ErrorKind::InvalidData, err.as_str())),
+        None => Err(Error::new(
+            ErrorKind::InvalidData,
+            "could not find the status",
+        )),
+    }
 }

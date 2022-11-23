@@ -1,4 +1,4 @@
-FROM amd64/rust as builder
+FROM rust as builder
 WORKDIR /usr/src/app
 COPY Cargo.toml .
 COPY Cargo.lock .
@@ -9,7 +9,7 @@ COPY src ./src
 RUN touch -a -m ./src/main.rs
 RUN cargo build --release
 
-FROM amd64/ubuntu:bionic as compresser
+FROM ubuntu:bionic as compresser
 RUN apt-get update
 RUN apt-get install -y zip
 RUN mkdir -p /bin
