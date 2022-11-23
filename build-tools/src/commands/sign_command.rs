@@ -1,10 +1,10 @@
 use aws_sdk_lambda::types::{ByteStream};
 use aws_sdk_s3 as s3;
 use aws_sdk_signer as signer;
-use core::time;
 use rand::{distributions::Alphanumeric, Rng};
 
 use signer::model::{Destination, S3Destination, S3Source, SigningStatus, Source};
+use core::time;
 use std::{
     fs::File,
     io::{Error, ErrorKind, Result, Write},
@@ -13,7 +13,7 @@ use std::{
 };
 use structopt::StructOpt;
 
-const BUCKET_NAME: &str = "dd-lambda-signing-bucket-sandbox";
+const BUCKET_NAME: &str = "dd-lambda-signing-bucket-serverless-sandbox";
 const SIGNING_PROFILE_NAME: &str = "DatadogLambdaSigningProfile";
 
 #[derive(Debug, StructOpt)]
