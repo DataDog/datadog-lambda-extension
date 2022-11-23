@@ -1,4 +1,6 @@
-use commands::{auth_command::auth, build_command::build, deploy_command::deploy, sign_command::sign};
+use commands::{
+    auth_command::auth, build_command::build, deploy_command::deploy, sign_command::sign,
+};
 use std::io::Result;
 use structopt::StructOpt;
 
