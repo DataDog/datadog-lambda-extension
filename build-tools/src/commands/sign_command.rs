@@ -86,12 +86,13 @@ async fn sign_object(key: &str, signer_client: &signer::Client) -> Result<String
 }
 
 async fn delete_object(key: &str, s3_client: &s3::Client) -> Result<()> {
-    s3_client.delete_object()
-    .key(key)
-    .bucket(BUCKET_NAME)
-    .send()
-    .await
-    .expect("could not delete the object");
+    s3_client
+        .delete_object()
+        .key(key)
+        .bucket(BUCKET_NAME)
+        .send()
+        .await
+        .expect("could not delete the object");
     Ok(())
 }
 
