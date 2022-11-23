@@ -1,4 +1,4 @@
-use commands::{auth_command::auth, build_command::build, deploy_command::deploy};
+use commands::{auth_command::auth, build_command::build, deploy_command::deploy, sign_command::sign};
 use std::io::Result;
 use structopt::StructOpt;
 
@@ -12,6 +12,8 @@ enum SubCommand {
     Auth(commands::auth_command::AuthOptions),
     #[structopt(name = "deploy", about = "Deploy to AWS")]
     Deploy(commands::deploy_command::DeployOptions),
+    #[structopt(name = "sign", about = "Sign Layer")]
+    Sign(commands::sign_command::SignOptions),
 }
 
 #[derive(Debug, StructOpt)]
@@ -32,5 +34,6 @@ async fn main() -> Result<()> {
         SubCommand::Auth(opt) => auth(&opt).await,
         SubCommand::Build(opt) => build(&opt),
         SubCommand::Deploy(opt) => deploy(&opt).await,
+        SubCommand::Sign(opt) => sign(&opt).await,
     }
 }
