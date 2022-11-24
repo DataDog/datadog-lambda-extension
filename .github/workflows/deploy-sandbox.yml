@@ -96,4 +96,3 @@ jobs:
       - name: echo region
         run: |
           echo ${{ needs.prepare-artifact.outputs.AWS_REGIONS }}
-          echo ${{ prepare-artifact.outputs.AWS_REGIONS }}
