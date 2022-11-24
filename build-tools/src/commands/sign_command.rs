@@ -98,7 +98,7 @@ async fn delete_object(key: &str, s3_client: &s3::Client) -> Result<()> {
 }
 
 async fn verify(job_id: &str, signer_client: &signer::Client) -> Result<()> {
-    let delay = time::Duration::from_secs(30);
+    let delay = time::Duration::from_secs(10);
     for _ in 0..5 {
         let result = signer_client
             .describe_signing_job()
@@ -110,7 +110,7 @@ async fn verify(job_id: &str, signer_client: &signer::Client) -> Result<()> {
         if result {
             return Ok(());
         }
-        println!("Job is still running waiting for 30 seconds to try checking the status again");
+        println!("Job is still running waiting for 10 seconds to try checking the status again");
         thread::sleep(delay);
     }
     Err(Error::new(ErrorKind::TimedOut, "the signing job timeouts"))
