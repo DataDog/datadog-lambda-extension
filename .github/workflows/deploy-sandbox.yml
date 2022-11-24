@@ -27,6 +27,8 @@ on:
 jobs:
   prepare-artifact:
     runs-on: ubuntu-latest
+    outputs:
+      AWS_REGIONS: ${{ steps.list_region.outputs.AWS_REGIONS }}
     steps:
       - uses: actions/checkout@v3
       - id: auth
@@ -71,7 +73,8 @@ jobs:
       #     name: datadog-extension
       #     path: ./tmp/datadog_extension_signed.zip
       #     retention-days: 5
-      - name: Build list of regions
+      - id: list_region
+        name: Build list of regions
         run: |
          ./build-tools/bin/build_tools \
          list_region
