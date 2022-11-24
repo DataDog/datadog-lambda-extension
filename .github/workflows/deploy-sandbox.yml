@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       AWS_REGIONS: ${{ steps.list_region.outputs.AWS_REGIONS }}
+      AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
     steps:
       - uses: actions/checkout@v3
       - id: auth
@@ -99,3 +100,4 @@ jobs:
       - name: echo region
         run: |
           echo ${{ matrix.aws_region }}
+          echo ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
