@@ -5,6 +5,8 @@ use std::io::{Error, ErrorKind};
 use aws_sdk_ec2 as ec2;
 
 pub async fn list_region() -> Result<()> {
+    // set a random AWS_REGION as ec2:DescribeRgions in region-agnostic
+    std::env::set_var("AWS_REGION", "us-east-1");
     let config = aws_config::load_from_env().await;
     let ec2_client = ec2::Client::new(&config);
     let regions = get_list(&ec2_client).await?;
