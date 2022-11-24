@@ -92,10 +92,10 @@ jobs:
     needs: 
       - prepare-artifact
     runs-on: ubuntu-latest
-    # strategy:
-    #   matrix:
-    #     aws_region: ${{ needs.prepare-artifact.outputs.AWS_REGIONS }}
+    strategy:
+      matrix:
+        aws_region: ${{ needs.prepare-artifact.outputs.AWS_REGIONS }}
     steps:
       - name: echo region
         run: |
-          echo ${{ needs.prepare-artifact.outputs.AWS_REGIONS }}
+          echo ${{ matrix.aws_region }}
