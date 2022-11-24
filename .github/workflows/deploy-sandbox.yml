@@ -43,7 +43,6 @@ jobs:
           --mfa-code ${{ inputs.mfaCode }}
       - name: Add mask
         run: |
-          echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
           echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
           echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
       # - uses: actions/checkout@v3
