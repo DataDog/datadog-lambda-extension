@@ -94,7 +94,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        aws_region: ${{ needs.prepare-artifact.outputs.AWS_REGIONS }}
+        aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
       - name: echo region
         run: |
