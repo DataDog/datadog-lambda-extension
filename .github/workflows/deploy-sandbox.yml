@@ -64,10 +64,10 @@ jobs:
          sign \
          --layer-path ./tmp/datadog_extension.zip \
          --destination-path ./tmp/datadog_extension_signed.zip \
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3.1.1
         with:
-          name: datadog-extension
           path: ./tmp/datadog_extension_signed.zip
+          retention-days: 5
       - id: deploy
         run: |
           ./build-tools/bin/build_tools \
