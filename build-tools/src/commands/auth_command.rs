@@ -31,13 +31,13 @@ pub async fn auth(args: &AuthOptions) -> Result<()> {
         .credentials()
         .expect("could not load credentials");
 
-    let github_env_file = std::env::var("GITHUB_ENV").expect("could not find GITHUB_ENV file");
+    let github_env_file = std::env::var("GITHUB_OUTPUT").expect("could not find GITHUB_OUTPUT file");
 
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .append(true)
         .open(github_env_file)
-        .expect("could not open GITHUB_ENV file");
+        .expect("could not open GITHUB_OUTPUT file");
 
     // write new credentials to ENV var
     // this is needed as MFA will have expired after the build process
