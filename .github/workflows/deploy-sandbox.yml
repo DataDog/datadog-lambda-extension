@@ -50,34 +50,34 @@ jobs:
           echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
           echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
           echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
-      # - uses: actions/checkout@v3
-      #   with:
-      #     repository: DataDog/datadog-agent
-      #     ref: refs/heads/${{ inputs.agentBranch }}
-      #     path: datadog-agent
-      # - name: Set up QEMU
-      #   uses: docker/setup-qemu-action@v2.1.0
-      # - run: |
-      #    ./build-tools/bin/build_tools \
-      #    build \
-      #    --version 1 \
-      #    --agent-version 1 \
-      #    --architecture "${{ inputs.architecture }}" \
-      #    --context-path "${GITHUB_WORKSPACE}" \
-      #    --destination-path "${GITHUB_WORKSPACE}/tmp" \
-      #    --docker-path "scripts_v2/Dockerfile.build" \
-      #    --artifact-name "datadog_extension.zip"
-      # - name: Sign the layer
-      #   run: |
-      #    ./build-tools/bin/build_tools \
-      #    sign \
-      #    --layer-path ./tmp/datadog_extension.zip \
-      #    --destination-path ./tmp/datadog_extension_signed.zip
-      # - uses: actions/upload-artifact@v3.1.1
-      #   with:
-      #     name: datadog-extension
-      #     path: ./tmp/datadog_extension_signed.zip
-      #     retention-days: 5
+      - uses: actions/checkout@v3
+        with:
+          repository: DataDog/datadog-agent
+          ref: refs/heads/${{ inputs.agentBranch }}
+          path: datadog-agent
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2.1.0
+      - run: |
+         ./build-tools/bin/build_tools \
+         build \
+         --version 1 \
+         --agent-version 1 \
+         --architecture "${{ inputs.architecture }}" \
+         --context-path "${GITHUB_WORKSPACE}" \
+         --destination-path "${GITHUB_WORKSPACE}/tmp" \
+         --docker-path "scripts_v2/Dockerfile.build" \
+         --artifact-name "datadog_extension.zip"
+      - name: Sign the layer
+        run: |
+         ./build-tools/bin/build_tools \
+         sign \
+         --layer-path ./tmp/datadog_extension.zip \
+         --destination-path ./tmp/datadog_extension_signed.zip
+      - uses: actions/upload-artifact@v3.1.1
+        with:
+          name: datadog-extension
+          path: ./tmp/datadog_extension_signed.zip
+          retention-days: 5
       - id: list_region
         name: Build list of regions
         run: |
@@ -102,6 +102,10 @@ jobs:
     #     aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
       - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: datadog-extension
+          path: ./tmp/datadog_extension_signed.zip
       - id: deploy
         env:
           AWS_ACCESS_KEY_ID: ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
