@@ -13,6 +13,8 @@ use std::{
 };
 use structopt::StructOpt;
 
+use crate::security::build_config;
+
 const BUCKET_NAME: &str = "dd-lambda-signing-bucket-serverless-sandbox";
 const SIGNING_PROFILE_NAME: &str = "DatadogLambdaSigningProfile";
 
@@ -22,11 +24,12 @@ pub struct SignOptions {
     layer_path: String,
     #[structopt(long)]
     destination_path: String,
+    #[structopt(long)]
+    key: String,
 }
 
 pub async fn sign(args: &SignOptions) -> Result<()> {
-    std::env::set_var("AWS_REGION", "sa-east-1"); // TODO fixeme when ready for production
-    let config = aws_config::load_from_env().await;
+    let config = build_config(&args.key, "sa-east-1").await; // TODO fixeme when ready for production
     let s3_client = s3::Client::new(&config);
     let signer_client = signer::Client::new(&config);
     let key = build_s3_key();

@@ -66,7 +66,8 @@ jobs:
          ./build-tools/bin/build_tools \
          sign \
          --layer-path ./tmp/datadog_extension.zip \
-         --destination-path ./tmp/datadog_extension_signed.zip
+         --destination-path ./tmp/datadog_extension_signed.zip \
+         --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - uses: actions/upload-artifact@v3.1.1
         with:
           name: datadog-extension
@@ -76,7 +77,8 @@ jobs:
         name: Build list of regions
         run: |
          ./build-tools/bin/build_tools \
-         list_region
+         list_region \
+         --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       # - id: deploy
       #   run: |
       #     ./build-tools/bin/build_tools \
