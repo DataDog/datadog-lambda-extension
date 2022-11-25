@@ -22,7 +22,6 @@ pub fn decrypt_env_var(key: &str, env_name: &str) -> String {
 }
 
 pub fn encrypt_credentials_to_output(key: &str, credentials: &Credentials) -> Result<()> {
-    println!("encrypt_credentials_to_output");
     let github_env_file =
         std::env::var("GITHUB_OUTPUT").expect("could not find GITHUB_OUTPUT file");
     let mut file = std::fs::OpenOptions::new()
@@ -45,21 +44,15 @@ pub async fn build_config(key: &str, region: &str) -> SdkConfig{
 }
 
 fn encrypt_to_ouput(key: &str, file: &mut File, env_name: &str, data: Option<&str>) -> Result<()> {
-    println!("encrypt_to_ouput");
     let nonce = build_nonce();
-    println!("after build_nonce {}", nonce);
     let nonce = Nonce::from_slice(nonce.as_ref());
-    println!("after build_nonce 2 {:?}", nonce);
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
         .expect("could not create a key");
-    println!("after cipher");
     let aws_access_key_id = data.expect("could not find data");
     let ciphertext = cipher
         .encrypt(nonce, aws_access_key_id.as_bytes())
         .expect("could not create the ciphertext");
-    println!("AAA");
     writeln!(file, "{}", friendly_env_cipher(&env_name, &ciphertext))?;
-    println!("BBB");
     Ok(())
 }
 

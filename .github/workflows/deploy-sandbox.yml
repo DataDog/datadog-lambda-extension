@@ -62,6 +62,10 @@ jobs:
          --docker-path "scripts_v2/Dockerfile.build" \
          --artifact-name "datadog_extension.zip"
       - name: Sign the layer
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         run: |
          ./build-tools/bin/build_tools \
          sign \
