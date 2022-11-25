@@ -1,10 +1,10 @@
-use aws_sdk_lambda::types::{ByteStream};
+use aws_sdk_lambda::types::ByteStream;
 use aws_sdk_s3 as s3;
 use aws_sdk_signer as signer;
 use rand::{distributions::Alphanumeric, Rng};
 
-use signer::model::{Destination, S3Destination, S3Source, SigningStatus, Source};
 use core::time;
+use signer::model::{Destination, S3Destination, S3Source, SigningStatus, Source};
 use std::{
     fs::File,
     io::{Error, ErrorKind, Result, Write},

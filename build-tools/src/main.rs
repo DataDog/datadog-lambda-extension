@@ -1,9 +1,6 @@
 use commands::{
-    auth_command::auth, 
-    build_command::build, 
-    deploy_command::deploy, 
-    sign_command::sign,
-    list_region_command::list_region,
+    auth_command::auth, build_command::build, deploy_command::deploy,
+    list_region_command::list_region, sign_command::sign,
 };
 use std::io::Result;
 use structopt::StructOpt;

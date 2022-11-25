@@ -43,6 +43,7 @@ jobs:
           --mfa-code ${{ inputs.mfaCode }}
       - name: Add mask
         run: |
+          echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
           echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
           echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
       # - uses: actions/checkout@v3
@@ -92,11 +93,10 @@ jobs:
     needs: 
       - prepare-artifact
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
+    # strategy:
+    #   matrix:
+    #     aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
       - name: echo region
         run: |
-          echo ${{ matrix.aws_region }}
           echo ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
