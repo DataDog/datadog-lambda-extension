@@ -81,11 +81,13 @@ fn encrypt_credentials_to_output(credentials: &Credentials) -> Result<()> {
         .append(true)
         .open(github_env_file)
         .expect("could not open GITHUB_OUTPUT file");
-    encrypt_to_ouput(&mut file, "AWS_ACCESS_KEY_ID=", credentials.access_key_id())?;
+    encrypt_to_ouput(&mut file, "AWS_ACCESS_KEY_ID", credentials.access_key_id())?;
+    encrypt_to_ouput(&mut file, "AWS_SECRET_ACCESS_KEY", credentials.secret_access_key())?;
+    encrypt_to_ouput(&mut file, "AWS_SESSION_TOKEN", credentials.session_token())?;
     Ok(())
 }
 
-fn encrypt_to_ouput(file: &mut File, prefix: &str, data: Option<&str>) -> Result<()> {
+fn encrypt_to_ouput(file: &mut File, env_name: &str, data: Option<&str>) -> Result<()> {
     let cipher = Aes256Gcm::new_from_slice("oooooooooooooooooooooooooooooooo".as_bytes())
         .expect("could not create a key");
     let nonce = Nonce::from_slice(b"unique nonce");
@@ -93,13 +95,19 @@ fn encrypt_to_ouput(file: &mut File, prefix: &str, data: Option<&str>) -> Result
     let ciphertext = cipher
         .encrypt(nonce, aws_access_key_id.as_bytes())
         .expect("could not create the ciphertext");
-    let mut buffer_modified = Vec::new();
-    for value in prefix.as_bytes().iter().copied() {
-        buffer_modified.push(value);
-    }
-    for value in ciphertext {
-        buffer_modified.push(value);
-    }
-    file.write_all(buffer_modified.as_slice())?;
+    writeln!(file, "{}", friendly_env_cipher(&env_name, &ciphertext))?;
     Ok(())
+}
+
+fn friendly_env_cipher(env_name: &str, ciphertext: &Vec<u8>) -> String {
+    let mut final_env = String::new();
+    let mut i = 0;
+    for value in ciphertext {
+        if i!=0 {
+            final_env.push_str("|");
+        }
+        final_env.push_str(&value.to_string());
+        i = i+1;
+    }
+    env_name.to_string() + &"=" + &final_env
 }

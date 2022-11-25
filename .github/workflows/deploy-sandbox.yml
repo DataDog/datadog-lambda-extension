@@ -100,3 +100,5 @@ jobs:
       - name: echo region
         run: |
           echo ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
+          echo ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
+          echo ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
