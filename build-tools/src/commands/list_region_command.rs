@@ -8,7 +8,9 @@ pub async fn list_region() -> Result<()> {
     // set a random AWS_REGION as ec2:DescribeRgions in region-agnostic
     std::env::set_var("AWS_REGION", "us-east-1");
 
-    println!("ACCESS_KEY_ID={:?}", std::env::var("AWS_ACCESS_KEY_ID"));
+    println!("AWS_ACCESS_KEY_ID={:?}", std::env::var("AWS_ACCESS_KEY_ID"));
+    println!("AWS_SECRET_ACCESS_KEY={:?}", std::env::var("AWS_SECRET_ACCESS_KEY"));
+    println!("AWS_SESSION_TOKEN={:?}", std::env::var("AWS_SESSION_TOKEN"));
 
 
     let config = aws_config::load_from_env().await;
