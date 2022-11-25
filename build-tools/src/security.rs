@@ -38,8 +38,9 @@ pub fn encrypt_credentials_to_output(key: &str, credentials: &Credentials) -> Re
 fn encrypt_to_ouput(key: &str, file: &mut File, env_name: &str, data: Option<&str>) -> Result<()> {
     println!("encrypt_to_ouput");
     let nonce = build_nonce();
-    println!("after build_nonce");
+    println!("after build_nonce {}", nonce);
     let nonce = Nonce::from_slice(nonce.as_ref());
+    println!("after build_nonce 2 {:?}", nonce);
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
         .expect("could not create a key");
     println!("after cipher");
