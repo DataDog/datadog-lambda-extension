@@ -6,7 +6,7 @@ use structopt::StructOpt;
 use aws_sdk_sts as sts;
 use sts::model::Credentials;
 
-use crate::security::encrypt_to_ouput;
+use crate::security::encrypt_credentials_to_output;
 
 #[derive(Debug, StructOpt)]
 pub struct AuthOptions {
@@ -44,7 +44,7 @@ pub async fn auth(args: &AuthOptions) -> Result<()> {
     // write new crendials to OUTPUT
     // this is needed as matrix job will run on an other machine
     // need to be encrypted
-    encrypt_credentials_to_output(&args, credentials)?;
+    encrypt_credentials_to_output(&args.key, credentials)?;
     Ok(())
 }
 
@@ -69,19 +69,5 @@ fn write_credentials_to_env_var(credentials: &Credentials) -> Result<()> {
 fn write_to_env(file: &mut File, prefix: &str, data: Option<&str>) -> Result<()> {
     let data = data.expect("could not write env");
     writeln!(file,"{}={}",prefix,data)?;
-    Ok(())
-}
-
-fn encrypt_credentials_to_output(args: &AuthOptions, credentials: &Credentials) -> Result<()> {
-    let github_env_file =
-        std::env::var("GITHUB_OUTPUT").expect("could not find GITHUB_OUTPUT file");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open(github_env_file)
-        .expect("could not open GITHUB_OUTPUT file");
-    encrypt_to_ouput(&args.key, &mut file, "AWS_ACCESS_KEY_ID", credentials.access_key_id())?;
-    encrypt_to_ouput(&args.key, &mut file, "AWS_SECRET_ACCESS_KEY", credentials.secret_access_key())?;
-    encrypt_to_ouput(&args.key, &mut file, "AWS_SESSION_TOKEN", credentials.session_token())?;
     Ok(())
 }

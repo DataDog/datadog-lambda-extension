@@ -3,6 +3,7 @@ use std::io::Result;
 use std::io::Write;
 
 use aes_gcm::{Nonce, Aes256Gcm, KeyInit, aead::Aead};
+use aws_sdk_sts::model::Credentials;
 
 pub fn decrypt_env_var(key: &str, env_name: &str) -> String {
     let value = std::env::var(env_name).expect("could not find env var");
@@ -10,7 +11,7 @@ pub fn decrypt_env_var(key: &str, env_name: &str) -> String {
     .split('|')
     .map(|str| str.parse::<u8>().expect("could not read env var"))
     .collect();
-    let nonce = build_nounce();
+    let nonce = build_nonce();
     let nonce = Nonce::from_slice(nonce.as_ref());
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
         .expect("could not create a key");
@@ -19,20 +20,40 @@ pub fn decrypt_env_var(key: &str, env_name: &str) -> String {
     String::from(plaintext)
 }
 
-pub fn encrypt_to_ouput(key: &str, file: &mut File, env_name: &str, data: Option<&str>) -> Result<()> {
-    let nonce = build_nounce();
+pub fn encrypt_credentials_to_output(key: &str, credentials: &Credentials) -> Result<()> {
+    println!("encrypt_credentials_to_output");
+    let github_env_file =
+        std::env::var("GITHUB_OUTPUT").expect("could not find GITHUB_OUTPUT file");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open(github_env_file)
+        .expect("could not open GITHUB_OUTPUT file");
+    encrypt_to_ouput(&key, &mut file, "AWS_ACCESS_KEY_ID", credentials.access_key_id())?;
+    encrypt_to_ouput(&key, &mut file, "AWS_SECRET_ACCESS_KEY", credentials.secret_access_key())?;
+    encrypt_to_ouput(&key, &mut file, "AWS_SESSION_TOKEN", credentials.session_token())?;
+    Ok(())
+}
+
+fn encrypt_to_ouput(key: &str, file: &mut File, env_name: &str, data: Option<&str>) -> Result<()> {
+    println!("encrypt_to_ouput");
+    let nonce = build_nonce();
+    println!("after build_nonce");
     let nonce = Nonce::from_slice(nonce.as_ref());
     let cipher = Aes256Gcm::new_from_slice(key.as_bytes())
         .expect("could not create a key");
+    println!("after cipher");
     let aws_access_key_id = data.expect("could not find data");
     let ciphertext = cipher
         .encrypt(nonce, aws_access_key_id.as_bytes())
         .expect("could not create the ciphertext");
+    println!("AAA");
     writeln!(file, "{}", friendly_env_cipher(&env_name, &ciphertext))?;
+    println!("BBB");
     Ok(())
 }
 
-fn build_nounce() -> String {
+fn build_nonce() -> String {
     std::env::var("GITHUB_RUN_ID").expect("could not find run id")
 }
 
