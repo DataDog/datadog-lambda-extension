@@ -68,8 +68,8 @@ fn write_credentials_to_env_var(credentials: &Credentials) -> Result<()> {
 }
 
 fn write_to_env(file: &mut File, prefix: &str, data: Option<&str>) -> Result<()> {
-    let to_write = format!("{}={}", prefix, data.expect("could not write env"));
-    file.write_all(to_write.as_bytes())?;
+    let data = data.expect("could not write env");
+    writeln!(file,"{}={}",prefix,data)?;
     Ok(())
 }
 
