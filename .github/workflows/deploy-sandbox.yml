@@ -38,15 +38,12 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
-          RUST_BACKTRACE: 1
         run: |
           ./build-tools/bin/build_tools \
           auth \
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
           --mfa-code ${{ inputs.mfaCode }} \
           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
-      - name: Add mask
-        run: |
           echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
           echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
           echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
@@ -111,6 +108,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
+          RUST_BACKTRACE: 1
         run: |
           ./build-tools/bin/build_tools \
           deploy \
