@@ -23,6 +23,10 @@ on:
         type: string
         description: suffix to be appended to the layer name (default empty)
         default: ""
+      saEastOnly:
+        type: boolean
+        description: deploy to sa-east-1 only
+        default: true
 
 jobs:
   prepare-artifact:
@@ -101,9 +105,9 @@ jobs:
     needs: 
       - prepare-artifact
     runs-on: ubuntu-latest
-    # strategy:
-    #   matrix:
-    #     aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
+    strategy:
+      matrix:
+        aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
       - uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
@@ -115,14 +119,12 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
-          RUST_BACKTRACE: 1
         run: |
-          ls ./tmp
           ./build-tools/bin/build_tools \
           deploy \
           --layer-path ./tmp/datadog_extension_signed.zip \
           --architecture "${{ inputs.architecture }}" \
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
-          --region sa-east-1 \
+          --region ${{ matrix.aws_region }} \
           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
