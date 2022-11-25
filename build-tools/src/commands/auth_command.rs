@@ -4,12 +4,9 @@ use std::io::Write;
 use structopt::StructOpt;
 
 use aws_sdk_sts as sts;
-
-use aes_gcm::{
-    aead::{Aead, KeyInit},
-    Aes256Gcm, Nonce,
-};
 use sts::model::Credentials;
+
+use crate::security::encrypt_to_ouput;
 
 #[derive(Debug, StructOpt)]
 pub struct AuthOptions {
@@ -17,6 +14,8 @@ pub struct AuthOptions {
     mfa_arn: String,
     #[structopt(long)]
     mfa_code: String,
+    #[structopt(long)]
+    key: String,
 }
 
 pub async fn auth(args: &AuthOptions) -> Result<()> {
@@ -45,7 +44,7 @@ pub async fn auth(args: &AuthOptions) -> Result<()> {
     // write new crendials to OUTPUT
     // this is needed as matrix job will run on an other machine
     // need to be encrypted
-    encrypt_credentials_to_output(credentials)?;
+    encrypt_credentials_to_output(&args, credentials)?;
     Ok(())
 }
 
@@ -73,7 +72,7 @@ fn write_to_env(file: &mut File, prefix: &str, data: Option<&str>) -> Result<()>
     Ok(())
 }
 
-fn encrypt_credentials_to_output(credentials: &Credentials) -> Result<()> {
+fn encrypt_credentials_to_output(args: &AuthOptions, credentials: &Credentials) -> Result<()> {
     let github_env_file =
         std::env::var("GITHUB_OUTPUT").expect("could not find GITHUB_OUTPUT file");
     let mut file = std::fs::OpenOptions::new()
@@ -81,33 +80,8 @@ fn encrypt_credentials_to_output(credentials: &Credentials) -> Result<()> {
         .append(true)
         .open(github_env_file)
         .expect("could not open GITHUB_OUTPUT file");
-    encrypt_to_ouput(&mut file, "AWS_ACCESS_KEY_ID", credentials.access_key_id())?;
-    encrypt_to_ouput(&mut file, "AWS_SECRET_ACCESS_KEY", credentials.secret_access_key())?;
-    encrypt_to_ouput(&mut file, "AWS_SESSION_TOKEN", credentials.session_token())?;
+    encrypt_to_ouput(&args.key, &mut file, "AWS_ACCESS_KEY_ID", credentials.access_key_id())?;
+    encrypt_to_ouput(&args.key, &mut file, "AWS_SECRET_ACCESS_KEY", credentials.secret_access_key())?;
+    encrypt_to_ouput(&args.key, &mut file, "AWS_SESSION_TOKEN", credentials.session_token())?;
     Ok(())
-}
-
-fn encrypt_to_ouput(file: &mut File, env_name: &str, data: Option<&str>) -> Result<()> {
-    let cipher = Aes256Gcm::new_from_slice("oooooooooooooooooooooooooooooooo".as_bytes())
-        .expect("could not create a key");
-    let nonce = Nonce::from_slice(b"unique nonce");
-    let aws_access_key_id = data.expect("could not find data");
-    let ciphertext = cipher
-        .encrypt(nonce, aws_access_key_id.as_bytes())
-        .expect("could not create the ciphertext");
-    writeln!(file, "{}", friendly_env_cipher(&env_name, &ciphertext))?;
-    Ok(())
-}
-
-fn friendly_env_cipher(env_name: &str, ciphertext: &Vec<u8>) -> String {
-    let mut final_env = String::new();
-    let mut i = 0;
-    for value in ciphertext {
-        if i!=0 {
-            final_env.push_str("|");
-        }
-        final_env.push_str(&value.to_string());
-        i = i+1;
-    }
-    env_name.to_string() + &"=" + &final_env
 }

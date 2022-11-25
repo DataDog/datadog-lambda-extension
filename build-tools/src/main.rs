@@ -6,6 +6,7 @@ use std::io::Result;
 use structopt::StructOpt;
 
 mod commands;
+mod security;
 
 #[derive(Debug, StructOpt)]
 enum SubCommand {

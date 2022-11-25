@@ -40,7 +40,8 @@ jobs:
           ./build-tools/bin/build_tools \
           auth \
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
-          --mfa-code ${{ inputs.mfaCode }}
+          --mfa-code ${{ inputs.mfaCode }} \
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - name: Add mask
         run: |
           echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
@@ -97,8 +98,14 @@ jobs:
     #   matrix:
     #     aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
-      - name: echo region
+      - id: deploy
         run: |
-          echo ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
-          echo ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
-          echo ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
+          ./build-tools/bin/build_tools \
+          deploy \
+          --layer-path ./tmp/datadog_extension_signed.zip \
+          --architecture "${{ inputs.architecture }}" \
+          --layer-name "Datadog-Extension" \
+          --layer-suffix "${{ inputs.layerSuffix }}" \
+          --region sa-east-1 \
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }} \
+          --encrypted_credentials
