@@ -7,6 +7,10 @@ on:
         type: string
         description: MFA Code
         required: true
+      saEast1Only:
+        type: boolean
+        description: deploy to sa-east-1 only
+        default: true
       architecture:
         description: 'Architecture'
         required: true
@@ -23,10 +27,6 @@ on:
         type: string
         description: suffix to be appended to the layer name (default empty)
         default: ""
-      saEast1Only:
-        type: boolean
-        description: deploy to sa-east-1 only
-        default: true
 
 jobs:
   prepare-artifact:
