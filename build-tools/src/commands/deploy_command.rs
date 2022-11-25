@@ -1,12 +1,11 @@
 use std::fs::File;
 use std::io::Read;
 use std::io::Result;
-use aws_config::SdkConfig;
 use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
 
-use crate::security::decrypt_env_var;
+use crate::security::build_config;
 
 use super::common::BuildArchitecture;
 
@@ -21,15 +20,13 @@ pub struct DeployOptions {
     #[structopt(long)]
     layer_suffix: Option<String>,
     #[structopt(long)]
-    encrypted_credentials: bool,
-    #[structopt(long)]
-    key: Option<String>,
+    key: String,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
 }
 
 pub async fn deploy(args: &DeployOptions) -> Result<()> {
-    let config = build_config(&args).await;
+    let config = build_config(&args.key, &args.region).await;
     let lambda_client = lambda::Client::new(&config);
 
     // build the content object
@@ -78,17 +75,6 @@ fn get_file_as_vec(filename: &String) -> Vec<u8> {
     let mut buffer = vec![0; metadata.len() as usize];
     f.read_exact(&mut buffer).expect("buffer error");
     buffer
-}
-
-async fn build_config(args: &DeployOptions) -> SdkConfig{
-    if args.encrypted_credentials {
-        let key = args.key.clone().expect("need to decrypt but no key was provided");
-        std::env::set_var("AWS_ACCESS_KEY_ID", decrypt_env_var(&key, "AWS_ACCESS_KEY_ID"));
-        std::env::set_var("AWS_SECRET_ACCESS_KEY", decrypt_env_var(&key, "AWS_SECRET_ACCESS_KEY"));
-        std::env::set_var("AWS_SESSION_TOKEN", decrypt_env_var(&key, "AWS_SESSION_TOKEN"));
-    } 
-    std::env::set_var("AWS_REGION", args.region.clone());
-    aws_config::load_from_env().await
 }
 
 #[cfg(test)]

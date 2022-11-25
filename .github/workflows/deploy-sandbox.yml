@@ -44,9 +44,6 @@ jobs:
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
           --mfa-code ${{ inputs.mfaCode }} \
           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
-          echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
-          echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
-          echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
       - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent

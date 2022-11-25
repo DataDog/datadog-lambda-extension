@@ -3,6 +3,7 @@ use std::io::Result;
 use std::io::Write;
 
 use aes_gcm::{Nonce, Aes256Gcm, KeyInit, aead::Aead};
+use aws_config::SdkConfig;
 use aws_sdk_sts::model::Credentials;
 
 pub fn decrypt_env_var(key: &str, env_name: &str) -> String {
@@ -33,6 +34,14 @@ pub fn encrypt_credentials_to_output(key: &str, credentials: &Credentials) -> Re
     encrypt_to_ouput(&key, &mut file, "AWS_SECRET_ACCESS_KEY", credentials.secret_access_key())?;
     encrypt_to_ouput(&key, &mut file, "AWS_SESSION_TOKEN", credentials.session_token())?;
     Ok(())
+}
+
+pub async fn build_config(key: &str, region: &str) -> SdkConfig{
+    std::env::set_var("AWS_ACCESS_KEY_ID", decrypt_env_var(&key, "AWS_ACCESS_KEY_ID"));
+    std::env::set_var("AWS_SECRET_ACCESS_KEY", decrypt_env_var(&key, "AWS_SECRET_ACCESS_KEY"));
+    std::env::set_var("AWS_SESSION_TOKEN", decrypt_env_var(&key, "AWS_SESSION_TOKEN"));
+    std::env::set_var("AWS_REGION", region);
+    aws_config::load_from_env().await
 }
 
 fn encrypt_to_ouput(key: &str, file: &mut File, env_name: &str, data: Option<&str>) -> Result<()> {

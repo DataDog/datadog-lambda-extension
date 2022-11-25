@@ -1,13 +1,21 @@
 use std::io::Result;
 use std::io::Write;
 use std::io::{Error, ErrorKind};
+use structopt::StructOpt;
 
 use aws_sdk_ec2 as ec2;
 
-pub async fn list_region() -> Result<()> {
+use crate::security::build_config;
+
+#[derive(Debug, StructOpt)]
+pub struct ListRegionOptions {
+    #[structopt(long)]
+    key: String,
+}
+
+pub async fn list_region(args: &ListRegionOptions) -> Result<()> {
     // set a random AWS_REGION as ec2:DescribeRgions in region-agnostic
-    std::env::set_var("AWS_REGION", "us-east-1");
-    let config = aws_config::load_from_env().await;
+    let config = build_config(&args.key, "us-east-1").await;
     let ec2_client = ec2::Client::new(&config);
     let regions = get_list(&ec2_client).await?;
     write_region(&regions)?;

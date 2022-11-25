@@ -19,7 +19,7 @@ enum SubCommand {
     #[structopt(name = "sign", about = "Sign Layer")]
     Sign(commands::sign_command::SignOptions),
     #[structopt(name = "list_region", about = "List AWS Region")]
-    ListRegion {},
+    ListRegion(commands::list_region_command::ListRegionOptions),
 }
 
 #[derive(Debug, StructOpt)]
@@ -41,6 +41,6 @@ async fn main() -> Result<()> {
         SubCommand::Build(opt) => build(&opt),
         SubCommand::Deploy(opt) => deploy(&opt).await,
         SubCommand::Sign(opt) => sign(&opt).await,
-        SubCommand::ListRegion {} => list_region().await,
+        SubCommand::ListRegion(opt) => list_region(&opt).await,
     }
 }
