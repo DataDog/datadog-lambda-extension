@@ -114,5 +114,4 @@ jobs:
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
           --region sa-east-1 \
-          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }} \
-          --encrypted-credentials
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
