@@ -55,7 +55,8 @@ fn encrypt_to_ouput(key: &str, file: &mut File, env_name: &str, data: Option<&st
 }
 
 fn build_nonce() -> String {
-    std::env::var("GITHUB_RUN_ID").expect("could not find run id")
+    //need extactly 12 chars (10 with RUN_ID + 2)
+    std::env::var("GITHUB_RUN_ID").expect("could not find run id").to_string() + &"XX"
 }
 
 fn friendly_env_cipher(env_name: &str, ciphertext: &Vec<u8>) -> String {
