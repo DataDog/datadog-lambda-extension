@@ -99,6 +99,7 @@ jobs:
     #   matrix:
     #     aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
+      - uses: actions/checkout@v3
       - id: deploy
         run: |
           ./build-tools/bin/build_tools \
