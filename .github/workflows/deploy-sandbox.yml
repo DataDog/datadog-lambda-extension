@@ -36,6 +36,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
+          RUST_BACKTRACE: 1
         run: |
           ./build-tools/bin/build_tools \
           auth \
