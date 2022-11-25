@@ -29,19 +29,19 @@ pub fn encrypt_credentials_to_output(key: &str, credentials: &Credentials) -> Re
         .open(github_env_file)
         .expect("could not open GITHUB_OUTPUT file");
     encrypt_to_ouput(
-        &key,
+        key,
         &mut file,
         "AWS_ACCESS_KEY_ID",
         credentials.access_key_id(),
     )?;
     encrypt_to_ouput(
-        &key,
+        key,
         &mut file,
         "AWS_SECRET_ACCESS_KEY",
         credentials.secret_access_key(),
     )?;
     encrypt_to_ouput(
-        &key,
+        key,
         &mut file,
         "AWS_SESSION_TOKEN",
         credentials.session_token(),
@@ -52,15 +52,15 @@ pub fn encrypt_credentials_to_output(key: &str, credentials: &Credentials) -> Re
 pub async fn build_config(key: &str, region: &str) -> SdkConfig {
     std::env::set_var(
         "AWS_ACCESS_KEY_ID",
-        decrypt_env_var(&key, "AWS_ACCESS_KEY_ID"),
+        decrypt_env_var(key, "AWS_ACCESS_KEY_ID"),
     );
     std::env::set_var(
         "AWS_SECRET_ACCESS_KEY",
-        decrypt_env_var(&key, "AWS_SECRET_ACCESS_KEY"),
+        decrypt_env_var(key, "AWS_SECRET_ACCESS_KEY"),
     );
     std::env::set_var(
         "AWS_SESSION_TOKEN",
-        decrypt_env_var(&key, "AWS_SESSION_TOKEN"),
+        decrypt_env_var(key, "AWS_SESSION_TOKEN"),
     );
     std::env::set_var("AWS_REGION", region);
     aws_config::load_from_env().await
@@ -74,27 +74,22 @@ fn encrypt_to_ouput(key: &str, file: &mut File, env_name: &str, data: Option<&st
     let ciphertext = cipher
         .encrypt(nonce, aws_access_key_id.as_bytes())
         .expect("could not create the ciphertext");
-    writeln!(file, "{}", friendly_env_cipher(&env_name, &ciphertext))?;
+    writeln!(file, "{}", friendly_env_cipher(env_name, &ciphertext))?;
     Ok(())
 }
 
 fn build_nonce() -> String {
     //need extactly 12 chars (10 with RUN_ID + 2)
-    std::env::var("GITHUB_RUN_ID")
-        .expect("could not find run id")
-        .to_string()
-        + &"XX"
+    std::env::var("GITHUB_RUN_ID").expect("could not find run id") + "XX"
 }
 
 fn friendly_env_cipher(env_name: &str, ciphertext: &Vec<u8>) -> String {
     let mut final_env = String::new();
-    let mut i = 0;
-    for value in ciphertext {
+    for (i, value) in ciphertext.iter().enumerate() {
         if i != 0 {
-            final_env.push_str("|");
+            final_env.push('|');
         }
         final_env.push_str(&value.to_string());
-        i = i + 1;
     }
-    env_name.to_string() + &"=" + &final_env
+    env_name.to_string() + "=" + &final_env
 }

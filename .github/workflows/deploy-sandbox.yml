@@ -92,7 +92,7 @@ jobs:
          list_region \
          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - id: deploy
-        if: ${{ github.event.inputs.saEast1Only == true }}
+        if: ${{ github.event.inputs.saEast1Only == "true" }}
         env:
           AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
@@ -108,7 +108,7 @@ jobs:
           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
 
   deploy-artifact:
-    if: ${{ github.event.inputs.saEast1Only == false }}
+    if: ${{ github.event.inputs.saEast1Only == "false" }}
     needs: 
       - prepare-artifact
     runs-on: ubuntu-latest
