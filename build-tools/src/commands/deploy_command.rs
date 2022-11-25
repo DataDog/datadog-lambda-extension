@@ -70,8 +70,11 @@ fn build_layer_name(
 }
 
 fn get_file_as_vec(filename: &String) -> Vec<u8> {
+    println!("filename = {}", filename);
     let mut f = File::open(filename).expect("could not find the zip");
+    println!("file has been found");
     let metadata = std::fs::metadata(filename).expect("unable to read metadata");
+    println!("metadata = {:?}", metadata);
     let mut buffer = vec![0; metadata.len() as usize];
     f.read_exact(&mut buffer).expect("buffer error");
     buffer
