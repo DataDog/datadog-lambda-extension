@@ -101,6 +101,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - id: deploy
+        env:
+          AWS_ACCESS_KEY_ID: ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
         run: |
           ./build-tools/bin/build_tools \
           deploy \
