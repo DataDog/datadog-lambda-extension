@@ -21,15 +21,15 @@ cd $SCRIPTS_DIR/..
 if [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Publishing for amd64 only"
     LAYER_PATHS=(".layers/datadog_extension-amd64.zip")
-    LAYER_NAMES=("Datadog-Extension")
+    LAYER_NAMES=("Datadog-Extension-OTEL")
 elif [ "$ARCHITECTURE" == "arm64" ]; then
     echo "Publishing for arm64 only"
     LAYER_PATHS=(".layers/datadog_extension-arm64.zip")
-    LAYER_NAMES=("Datadog-Extension-ARM")
+    LAYER_NAMES=("Datadog-Extension-OTEL-ARM")
 else
     echo "Publishing for both amd64 and arm64"
     LAYER_PATHS=(".layers/datadog_extension-amd64.zip" ".layers/datadog_extension-arm64.zip")
-    LAYER_NAMES=("Datadog-Extension" "Datadog-Extension-ARM")
+    LAYER_NAMES=("Datadog-Extension-OTEL" "Datadog-Extension-OTEL-ARM")
 fi
 
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')

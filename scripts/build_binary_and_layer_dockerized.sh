@@ -12,17 +12,20 @@
 
 set -e
 
-if [ -z "$VERSION" ]; then
+if [ -z "$OTEL_EXTENSION" ]; then
     echo "Extension version not specified"
     echo ""
     echo "EXITING SCRIPT."
     exit 1
 fi
 
-if [ -z "$CLOUD_RUN" ]; then
-    CMD_PATH="cmd/serverless"
-else
+if [ ! -z "$OTEL_EXTENSION" ]; then
+    echo "Running in Vercel environment"
+    CMD_PATH="cmd/vercel"
+elif [ ! -z "$CLOUD_RUN" ]; then
     CMD_PATH="cmd/serverless-init"
+else
+    CMD_PATH="cmd/serverless"
 fi
 
 AGENT_PATH="../datadog-agent"
@@ -74,7 +77,14 @@ function docker_build_zip {
     unzip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip -d $TARGET_DIR/datadog_extension-${arch}${suffix}
 }
 
-if [ "$CLOUD_RUN" == "true" ]; then
+if [ "$VERCEL" == "true" ]; then
+    echo "Building for vercel (both arch + alpine)"
+    docker_build_zip amd64
+    docker_build_zip arm64
+    BUILD_FILE=Dockerfile.alpine.build
+    docker_build_zip amd64 -alpine
+    docker_build_zip arm64 -alpine
+elif [ "$CLOUD_RUN" == "true" ]; then
     echo "Building for cloud run (both arch + alpine)"
     docker_build_zip amd64
     docker_build_zip arm64
