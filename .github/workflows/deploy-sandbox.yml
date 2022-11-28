@@ -11,8 +11,8 @@ on:
         type: choice
         description: 'Which region?'
         options:
-          - sa-east-1 (dev)
-          - us-east-1 (RC)
+          - sa-east-1
+          - us-east-1
           - all
       architecture:
         description: 'Architecture'
