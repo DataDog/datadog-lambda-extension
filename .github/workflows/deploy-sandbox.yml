@@ -108,7 +108,7 @@ jobs:
           --architecture "${{ inputs.architecture }}" \
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
-          --region ${{ github.event.inputs.regions }} \
+          --region ${{ github.event.inputs.region }} \
           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
 
   deploy-artifact:
