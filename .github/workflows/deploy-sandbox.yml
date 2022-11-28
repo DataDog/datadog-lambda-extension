@@ -11,9 +11,9 @@ on:
         type: choice
         description: 'Which region? (use us-east-1 for RC)'
         options:
-          - "sa-east-1"
-          - "us-east-1"
-          - "all"
+          - sa-east-1
+          - us-east-1
+          - all
       architecture:
         description: 'Architecture'
         required: true
