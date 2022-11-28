@@ -19,6 +19,10 @@ pub struct BuildOptions {
     destination_path: String,
     #[structopt(long)]
     cloudrun: bool,
+    #[structopt(long)]
+    artifact_name: String,
+    #[structopt(long)]
+    docker_path: String,
 }
 
 pub fn build(args: &BuildOptions) -> Result<()> {
@@ -36,11 +40,11 @@ fn build_extension(cmd_path: &str, args: &BuildOptions) -> Result<()> {
     let github_workspace =
         env::var("GITHUB_WORKSPACE").expect("could not find GITHUB_WORKSPACE env var");
     let destination_path = &args.destination_path;
-    let dockerfile_path = format!("{}/scripts_v2/Dockerfile.build", github_workspace);
+    let dockerfile_path = format!("{}/{}", github_workspace, args.docker_path);
     let image_name = build_image(args, cmd_path, dockerfile_path.as_str())?;
     let docker_container_id = create_container(image_name.as_str())?;
     std::fs::create_dir(destination_path)?;
-    copy_zip_file(docker_container_id.as_str(), destination_path)?;
+    copy_zip_file(args, docker_container_id.as_str(), destination_path)?;
     remove_container(&docker_container_id)?;
     Ok(())
 }
@@ -97,8 +101,8 @@ fn create_container(image_name: &str) -> Result<String> {
     }
 }
 
-fn copy_zip_file(container_id: &str, destination_path: &str) -> Result<()> {
-    let source = format!("{}:/datadog_extension.zip", container_id);
+fn copy_zip_file(args: &BuildOptions, container_id: &str, destination_path: &str) -> Result<()> {
+    let source = format!("{}:/{}", container_id, args.artifact_name);
     let output = Command::new("docker")
         .args(["cp", source.as_str(), destination_path])
         .output()?;

@@ -5,6 +5,8 @@ use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
 
+use crate::security::build_config;
+
 use super::common::BuildArchitecture;
 
 #[derive(Debug, StructOpt)]
@@ -17,13 +19,14 @@ pub struct DeployOptions {
     architecture: BuildArchitecture,
     #[structopt(long)]
     layer_suffix: Option<String>,
+    #[structopt(long)]
+    key: String,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
 }
 
 pub async fn deploy(args: &DeployOptions) -> Result<()> {
-    std::env::set_var("AWS_REGION", args.region.clone());
-    let config = aws_config::load_from_env().await;
+    let config = build_config(&args.key, &args.region).await;
     let lambda_client = lambda::Client::new(&config);
 
     // build the content object

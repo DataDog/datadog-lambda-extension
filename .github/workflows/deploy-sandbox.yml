@@ -7,6 +7,13 @@ on:
         type: string
         description: MFA Code
         required: true
+      region:
+        type: choice
+        description: 'Which region? (use us-east-1 for RC)'
+        options:
+          - sa-east-1
+          - us-east-1
+          - all
       architecture:
         description: 'Architecture'
         required: true
@@ -17,16 +24,21 @@ on:
         - arm64
       agentBranch:
         type: string
-        description: datadog agent branch name (default main)
+        description: Datadog agent branch name (default main)
         default: "main"
       layerSuffix:
         type: string
-        description: suffix to be appended to the layer name (default empty)
+        description: Suffix to be appended to the layer name (default empty)
         default: ""
 
 jobs:
-  deploy-sandbox:
+  prepare-artifact:
     runs-on: ubuntu-latest
+    outputs:
+      AWS_REGIONS: ${{ steps.list_region.outputs.AWS_REGIONS }}
+      AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
     steps:
       - uses: actions/checkout@v3
       - id: auth
@@ -37,19 +49,15 @@ jobs:
           ./build-tools/bin/build_tools \
           auth \
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
-          --mfa-code ${{ inputs.mfaCode }}
-      - name: Add mask
-        run: |
-          echo "::add-mask::${{ env.AWS_ACCESS_KEY_ID }}" 
-          echo "::add-mask::${{ env.AWS_SECRET_ACCESS_KEY }}" 
-          echo "::add-mask::${{ env.AWS_SESSION_TOKEN }}" 
+          --mfa-code ${{ inputs.mfaCode }} \
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent
           ref: refs/heads/${{ inputs.agentBranch }}
           path: datadog-agent
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v2.1.0
       - run: |
          ./build-tools/bin/build_tools \
          build \
@@ -57,17 +65,77 @@ jobs:
          --agent-version 1 \
          --architecture "${{ inputs.architecture }}" \
          --context-path "${GITHUB_WORKSPACE}" \
-         --destination-path "${GITHUB_WORKSPACE}/tmp"
-      - uses: actions/upload-artifact@v3
+         --destination-path "${GITHUB_WORKSPACE}/tmp" \
+         --docker-path "scripts_v2/Dockerfile.build" \
+         --artifact-name "datadog_extension.zip"
+      - name: Sign the layer
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
+        run: |
+         ./build-tools/bin/build_tools \
+         sign \
+         --layer-path ./tmp/datadog_extension.zip \
+         --destination-path ./tmp/datadog_extension_signed.zip \
+         --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
+      - uses: actions/upload-artifact@v3.1.1
         with:
           name: datadog-extension
-          path: ./tmp/datadog_extension.zip
+          path: ./tmp/datadog_extension_signed.zip
+          retention-days: 5
+      - id: list_region
+        if: ${{ github.event.inputs.region == 'all' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
+        name: Build list of regions
+        run: |
+         ./build-tools/bin/build_tools \
+         list_region \
+         --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - id: deploy
+        if: ${{ github.event.inputs.region != 'all' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         run: |
           ./build-tools/bin/build_tools \
           deploy \
-          --layer-path ./tmp/datadog_extension.zip \
+          --layer-path ./tmp/datadog_extension_signed.zip \
           --architecture "${{ inputs.architecture }}" \
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
-          --region sa-east-1
+          --region ${{ github.event.inputs.region }} \
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
+
+  deploy-artifact:
+    if: ${{ github.event.inputs.region == 'all' }}
+    needs: 
+      - prepare-artifact
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/download-artifact@v3
+        with:
+          name: datadog-extension
+          path: ./tmp
+      - id: deploy
+        env:
+          AWS_ACCESS_KEY_ID: ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
+        run: |
+          ./build-tools/bin/build_tools \
+          deploy \
+          --layer-path ./tmp/datadog_extension_signed.zip \
+          --architecture "${{ inputs.architecture }}" \
+          --layer-name "Datadog-Extension" \
+          --layer-suffix "${{ inputs.layerSuffix }}" \
+          --region ${{ matrix.aws_region }} \
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}

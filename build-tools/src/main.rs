@@ -1,8 +1,12 @@
-use commands::{auth_command::auth, build_command::build, deploy_command::deploy};
+use commands::{
+    auth_command::auth, build_command::build, deploy_command::deploy,
+    list_region_command::list_region, sign_command::sign,
+};
 use std::io::Result;
 use structopt::StructOpt;
 
 mod commands;
+mod security;
 
 #[derive(Debug, StructOpt)]
 enum SubCommand {
@@ -12,6 +16,10 @@ enum SubCommand {
     Auth(commands::auth_command::AuthOptions),
     #[structopt(name = "deploy", about = "Deploy to AWS")]
     Deploy(commands::deploy_command::DeployOptions),
+    #[structopt(name = "sign", about = "Sign Layer")]
+    Sign(commands::sign_command::SignOptions),
+    #[structopt(name = "list_region", about = "List AWS Region")]
+    ListRegion(commands::list_region_command::ListRegionOptions),
 }
 
 #[derive(Debug, StructOpt)]
@@ -32,5 +40,7 @@ async fn main() -> Result<()> {
         SubCommand::Auth(opt) => auth(&opt).await,
         SubCommand::Build(opt) => build(&opt),
         SubCommand::Deploy(opt) => deploy(&opt).await,
+        SubCommand::Sign(opt) => sign(&opt).await,
+        SubCommand::ListRegion(opt) => list_region(&opt).await,
     }
 }

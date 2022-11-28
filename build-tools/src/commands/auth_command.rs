@@ -1,8 +1,9 @@
 use std::io::Result;
-use std::io::Write;
 use structopt::StructOpt;
 
 use aws_sdk_sts as sts;
+
+use crate::security::encrypt_credentials_to_output;
 
 #[derive(Debug, StructOpt)]
 pub struct AuthOptions {
@@ -10,6 +11,8 @@ pub struct AuthOptions {
     mfa_arn: String,
     #[structopt(long)]
     mfa_code: String,
+    #[structopt(long)]
+    key: String,
 }
 
 pub async fn auth(args: &AuthOptions) -> Result<()> {
@@ -31,37 +34,8 @@ pub async fn auth(args: &AuthOptions) -> Result<()> {
         .credentials()
         .expect("could not load credentials");
 
-    let github_env_file = std::env::var("GITHUB_ENV").expect("could not find GITHUB_ENV file");
-
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open(github_env_file)
-        .expect("could not open GITHUB_ENV file");
-
-    // write new credentials to ENV var
-    // this is needed as MFA will have expired after the build process
-    writeln!(
-        file,
-        "AWS_ACCESS_KEY_ID={}",
-        credentials
-            .access_key_id()
-            .expect("could not find access key")
-    )?;
-    writeln!(
-        file,
-        "AWS_SECRET_ACCESS_KEY={}",
-        credentials
-            .secret_access_key()
-            .expect("could not find secret access key")
-    )?;
-    writeln!(
-        file,
-        "AWS_SESSION_TOKEN={}",
-        credentials
-            .session_token()
-            .expect("could not find session token")
-    )?;
-
+    // write new crendials to GITHUB_OUTPUT (encrypted)
+    // so that other steps/jobs could reuse them
+    encrypt_credentials_to_output(&args.key, credentials)?;
     Ok(())
 }
