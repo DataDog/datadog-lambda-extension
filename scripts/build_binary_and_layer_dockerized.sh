@@ -24,6 +24,7 @@ if [ -z "$CLOUD_RUN" ]; then
 else
     CMD_PATH="cmd/serverless-init"
 fi
+CMD_PATH="cmd/otel-extension"
 
 AGENT_PATH="../datadog-agent"
 

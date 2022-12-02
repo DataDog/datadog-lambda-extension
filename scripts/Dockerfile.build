@@ -23,15 +23,15 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     if [ -z "$AGENT_VERSION" ]; then \
         go build -ldflags="-w \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
-        -tags serverless -o datadog-agent; \
+        -tags serverless -o datadog-agent-open-telemetry; \
     else \
         go build -ldflags="-w \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
         -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
-        -tags serverless -o datadog-agent; \
+        -tags serverless -o datadog-agent-open-telemetry; \
     fi
 
-RUN go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
+RUN go tool nm datadog-agent-open-telemetry | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension
@@ -43,8 +43,8 @@ RUN apt-get update
 RUN apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
-COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
-RUN strip /extensions/datadog-agent
+COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent-open-telemetry /extensions/datadog-agent-open-telemetry
+RUN strip /extensions/datadog-agent-open-telemetry
 
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
