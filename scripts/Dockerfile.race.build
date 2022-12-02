@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile:experimental
 
-FROM golang:1.16.5 as builder
+FROM golang:1.18 as builder
 ARG EXTENSION_VERSION
 ARG ENABLE_RACE_DETECTION
 ARG AGENT_VERSION
