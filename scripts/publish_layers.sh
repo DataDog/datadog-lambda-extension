@@ -133,6 +133,11 @@ publish_layer() {
         --statement-id "release-otel-$version_nbr-2" \
         --action lambda:GetLayerVersion --principal "147553070075" \
         --region $region)
+    permission=$(aws lambda add-layer-version-permission --layer-name $layer \
+        --version-number $version_nbr \
+        --statement-id "release-otel-$version_nbr-3" \
+        --action lambda:GetLayerVersion --principal "412554278814" \
+        --region $region)
 
     echo $version_nbr
 }
