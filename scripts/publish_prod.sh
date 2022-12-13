@@ -66,9 +66,9 @@ docker login
 echo "Checking that you have access to the commercial AWS account"
 aws-vault exec prod-engineering -- aws sts get-caller-identity
 
-echo "Checking that you have access to the GovCloud AWS account"
-saml2aws login -a govcloud-us1-fed-human-engineering
-AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
+#echo "Checking that you have access to the GovCloud AWS account"
+#saml2aws login -a govcloud-us1-fed-human-engineering
+#AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
 VERSION=$VERSION AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
 
@@ -78,15 +78,15 @@ aws-vault exec prod-engineering -- ./scripts/sign_layers.sh prod
 echo "Publishing layers to commercial AWS regions"
 aws-vault exec prod-engineering --no-session -- ./scripts/publish_layers.sh
 
-echo "Publishing layers to GovCloud AWS regions"
-saml2aws login -a govcloud-us1-fed-human-engineering
-AWS_PROFILE=govcloud-us1-fed-human-engineering ./scripts/publish_layers.sh
+#echo "Publishing layers to GovCloud AWS regions"
+#saml2aws login -a govcloud-us1-fed-human-engineering
+#AWS_PROFILE=govcloud-us1-fed-human-engineering ./scripts/publish_layers.sh
 
-./scripts/build_and_push_docker_image.sh
+#./scripts/build_and_push_docker_image.sh
 
-echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
-git tag "v$VERSION"
-git push origin "refs/tags/v$VERSION"
+#echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
+#git tag "v$VERSION"
+#git push origin "refs/tags/v$VERSION"
 
 echo "New extension version published to AWS and Dockerhub!"
 echo
@@ -96,4 +96,4 @@ echo "2. Create a new GitHub release in the datadog-lambda-extension repository 
 echo ">>> https://github.com/DataDog/datadog-lambda-extension/releases/new?tag=v${VERSION}&title=v${VERSION}"
 
 # Open a PR to the documentation repo to automatically bump layer version
-VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
+#VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
