@@ -76,12 +76,12 @@ elif [ "$ARCHITECTURE" == "arm64" ]; then
 else
     ARCHITECTURE_MESSAGE="both architectures"
 fi
-read -p "Ready to publish Lambda Extension version $VERSION (for $ARCHITECTURE_MESSAGE) to regions ${REGIONS[*]} (y/n)?" CONT
+# read -p "Ready to publish Lambda Extension version $VERSION (for $ARCHITECTURE_MESSAGE) to regions ${REGIONS[*]} (y/n)?" CONT
 
-if [ "$CONT" != "y" ]; then
-    echo "Exiting"
-    exit 1
-fi
+# if [ "$CONT" != "y" ]; then
+#     echo "Exiting"
+#     exit 1
+# fi
 
 index_of_layer() {
     layer_name=$1
