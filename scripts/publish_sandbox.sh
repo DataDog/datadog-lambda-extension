@@ -14,6 +14,8 @@
 
 set -e
 
+unset AWS_VAULT
+
 if [ -z $ARCHITECTURE ]; then
     echo "No architecture specified, defaulting to amd64"
     ARCHITECTURE="amd64"
