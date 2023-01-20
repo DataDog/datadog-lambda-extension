@@ -49,19 +49,22 @@ pub fn encrypt_credentials_to_output(key: &str, credentials: &Credentials) -> Re
     Ok(())
 }
 
-pub async fn build_config(key: &str, region: &str) -> SdkConfig {
-    std::env::set_var(
-        "AWS_ACCESS_KEY_ID",
-        decrypt_env_var(key, "AWS_ACCESS_KEY_ID"),
-    );
-    std::env::set_var(
-        "AWS_SECRET_ACCESS_KEY",
-        decrypt_env_var(key, "AWS_SECRET_ACCESS_KEY"),
-    );
-    std::env::set_var(
-        "AWS_SESSION_TOKEN",
-        decrypt_env_var(key, "AWS_SESSION_TOKEN"),
-    );
+pub async fn build_config(key: &Option<String>, region: &str) -> SdkConfig {
+    // if the key is not set, AWS_* env vars have to be set
+    if let Some(key) = key {
+        std::env::set_var(
+            "AWS_ACCESS_KEY_ID",
+            decrypt_env_var(key, "AWS_ACCESS_KEY_ID"),
+        );
+        std::env::set_var(
+            "AWS_SECRET_ACCESS_KEY",
+            decrypt_env_var(key, "AWS_SECRET_ACCESS_KEY"),
+        );
+        std::env::set_var(
+            "AWS_SESSION_TOKEN",
+            decrypt_env_var(key, "AWS_SESSION_TOKEN"),
+        );
+    }
     std::env::set_var("AWS_REGION", region);
     aws_config::load_from_env().await
 }

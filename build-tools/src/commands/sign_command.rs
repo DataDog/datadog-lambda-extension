@@ -25,7 +25,7 @@ pub struct SignOptions {
     #[structopt(long)]
     destination_path: String,
     #[structopt(long)]
-    key: String,
+    key: Option<String>,
 }
 
 pub async fn sign(args: &SignOptions) -> Result<()> {

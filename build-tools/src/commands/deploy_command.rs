@@ -20,7 +20,7 @@ pub struct DeployOptions {
     #[structopt(long)]
     layer_suffix: Option<String>,
     #[structopt(long)]
-    key: String,
+    key: Option<String>,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
 }

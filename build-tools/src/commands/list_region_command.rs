@@ -10,7 +10,7 @@ use crate::security::build_config;
 #[derive(Debug, StructOpt)]
 pub struct ListRegionOptions {
     #[structopt(long)]
-    key: String,
+    key: Option<String>,
 }
 
 pub async fn list_region(args: &ListRegionOptions) -> Result<()> {
