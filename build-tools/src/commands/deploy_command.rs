@@ -1,5 +1,3 @@
-use std::fs::File;
-use std::io::Read;
 use std::io::Result;
 use structopt::StructOpt;
 
@@ -7,6 +5,7 @@ use aws_sdk_lambda as lambda;
 
 use crate::security::build_config;
 
+use super::common::get_file_as_vec;
 use super::common::BuildArchitecture;
 
 #[derive(Debug, StructOpt)]
@@ -31,8 +30,7 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
 
     // build the content object
     let content = aws_sdk_lambda::model::LayerVersionContentInput::builder();
-    let blob = get_file_as_vec(&args.layer_path);
-    let lambda_blob = aws_sdk_lambda::types::Blob::new(blob);
+    let lambda_blob = get_file_as_vec(&args.layer_path);
 
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
 
@@ -65,14 +63,6 @@ fn build_layer_name(
         BuildArchitecture::Arm64 => layer_with_suffix + "-ARM",
     };
     layer.replace(".", "") //layer cannot contain dots
-}
-
-fn get_file_as_vec(filename: &String) -> Vec<u8> {
-    let mut f = File::open(filename).expect("could not find the zip");
-    let metadata = std::fs::metadata(filename).expect("unable to read metadata");
-    let mut buffer = vec![0; metadata.len() as usize];
-    f.read_exact(&mut buffer).expect("buffer error");
-    buffer
 }
 
 #[cfg(test)]
