@@ -62,7 +62,7 @@ fn build_layer_name(
         BuildArchitecture::Amd64 => layer_with_suffix,
         BuildArchitecture::Arm64 => layer_with_suffix + "-ARM",
     };
-    layer.replace(".", "") //layer cannot contain dots
+    layer.replace('.', "") //layer cannot contain dots
 }
 
 #[cfg(test)]

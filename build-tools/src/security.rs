@@ -86,7 +86,7 @@ fn build_nonce() -> String {
     std::env::var("GITHUB_RUN_ID").expect("could not find run id") + "XX"
 }
 
-fn friendly_env_cipher(env_name: &str, ciphertext: &Vec<u8>) -> String {
+fn friendly_env_cipher(env_name: &str, ciphertext: &[u8]) -> String {
     let mut final_env = String::new();
     for (i, value) in ciphertext.iter().enumerate() {
         if i != 0 {

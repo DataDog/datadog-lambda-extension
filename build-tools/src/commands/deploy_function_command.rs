@@ -58,7 +58,7 @@ pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
     let config = aws_config::load_from_env().await;
     let lambda_client = lambda::Client::new(&config);
     let layer_arn = get_latest_arn(&lambda_client, &args.layer_name).await?;
-    create_function(&lambda_client, &args, layer_arn).await?;
+    create_function(&lambda_client, args, layer_arn).await?;
     Ok(())
 }
 
@@ -124,12 +124,10 @@ async fn get_latest_arn(client: &lambda::Client, layer_name: &str) -> Result<Str
     };
     match latest_version {
         Some(version) => Ok(version.to_string()),
-        None => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "could not get layer versions",
-            ))
-        }
+        None => Err(Error::new(
+            ErrorKind::InvalidData,
+            "could not get layer versions",
+        )),
     }
 }
 
