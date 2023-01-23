@@ -60,10 +60,11 @@ fn build_layer_name(
     } else {
         String::from(layer_name)
     };
-    match architecture {
+    let layer = match architecture {
         BuildArchitecture::Amd64 => layer_with_suffix,
         BuildArchitecture::Arm64 => layer_with_suffix + "-ARM",
-    }
+    };
+    layer.replace(".", "") //layer cannot contain dots
 }
 
 fn get_file_as_vec(filename: &String) -> Vec<u8> {

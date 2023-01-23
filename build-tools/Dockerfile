@@ -9,7 +9,7 @@ COPY src ./src
 RUN touch -a -m ./src/main.rs
 RUN cargo build --release
 
-FROM ubuntu:bionic as compresser
+FROM ubuntu:jammy as compresser
 RUN apt-get update
 RUN apt-get install -y zip
 RUN mkdir -p /bin

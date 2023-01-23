@@ -1,6 +1,7 @@
 use commands::{
     auth_command::auth, build_command::build, deploy_command::deploy,
-    list_region_command::list_region, sign_command::sign,
+    list_region_command::list_region, sign_command::sign, deploy_function_command::deploy_function,
+
 };
 use std::io::Result;
 use structopt::StructOpt;
@@ -20,6 +21,8 @@ enum SubCommand {
     Sign(commands::sign_command::SignOptions),
     #[structopt(name = "list_region", about = "List AWS Region")]
     ListRegion(commands::list_region_command::ListRegionOptions),
+    #[structopt(name = "deploy_lambda", about = "Deploy AWS Lambda Function")]
+    DeployLambdaFunction(commands::deploy_function_command::DeployFunctionOptions),
 }
 
 #[derive(Debug, StructOpt)]
@@ -42,5 +45,6 @@ async fn main() -> Result<()> {
         SubCommand::Deploy(opt) => deploy(&opt).await,
         SubCommand::Sign(opt) => sign(&opt).await,
         SubCommand::ListRegion(opt) => list_region(&opt).await,
+        SubCommand::DeployLambdaFunction(opt) => deploy_function(&opt).await,
     }
 }
