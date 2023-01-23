@@ -167,22 +167,21 @@ fn get_config_from_runtime(runtime: &str) -> Result<RuntimeConfig> {
 }
 
 fn get_latest_extension_arn(region: &str) -> String {
-    let version = get_latest_extension();
+    let version = fetch_extension_version_from_github();
     format!(
         "arn:aws:lambda:{}:464622532012:layer:Datadog-Extension:{}",
         version, region
     )
 }
 
-fn get_latest_extension() -> String {
+fn fetch_extension_version_from_github() -> String {
     let client = reqwest::blocking::Client::new();
     let result = match client.post(LATEST_RELEASE).send() {
         Ok(result) => result,
         Err(_) => return FALLBACK_LATEST_EXTESION_VERSION.to_string(),
     };
-    let result = match result.json::<GithubRelease>() {
-        Ok(result) => result,
-        Err(_) => return FALLBACK_LATEST_EXTESION_VERSION.to_string(),
-    };
-    result.tag_name.replace(['v', '.'], "").trim().to_string()
+    match result.json::<GithubRelease>() {
+        Ok(result) => result.tag_name.replace(['.', 'v'], "").trim().to_string(),
+        Err(_) => FALLBACK_LATEST_EXTESION_VERSION.to_string(),
+    }
 }
