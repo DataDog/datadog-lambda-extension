@@ -49,16 +49,15 @@ pub struct DeployFunctionOptions {
     role: String,
     #[structopt(long)]
     extension_arn: String,
-    #[structopt(long)]
-    api_key: String,
 }
 
 pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
+    let api_key = std::env::var("DD_API_KEY").expect("could not find DD_API_KEY env");
     std::env::set_var("AWS_REGION", &args.region);
     let config = aws_config::load_from_env().await;
     let lambda_client = lambda::Client::new(&config);
     let layer_arn = get_latest_arn(&lambda_client, &args.layer_name).await?;
-    create_function(&lambda_client, args, layer_arn).await?;
+    create_function(&lambda_client, args, layer_arn, api_key).await?;
     Ok(())
 }
 
@@ -66,12 +65,13 @@ async fn create_function(
     client: &lambda::Client,
     args: &DeployFunctionOptions,
     layer_arn: String,
+    api_key: String,
 ) -> Result<()> {
     let runtime_config = get_config_from_runtime(&args.runtime)?;
     let function_name = runtime_config.generate_function_name();
     let mut env_map = HashMap::new();
     env_map.insert(String::from("DD_LAMBDA_HANDLER"), runtime_config.dd_handler);
-    env_map.insert(String::from("DD_API_KEY"), args.api_key.clone());
+    env_map.insert(String::from("DD_API_KEY"), api_key);
     let environment = Environment::builder().set_variables(Some(env_map)).build();
 
     let lambda_blob = get_file_as_vec(&runtime_config.package_path);
