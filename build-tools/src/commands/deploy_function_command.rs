@@ -1,4 +1,5 @@
 use lambda::model::{Environment, FunctionCode, Runtime};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Result;
 use std::io::{Error, ErrorKind};
@@ -8,6 +9,10 @@ use structopt::StructOpt;
 use aws_sdk_lambda as lambda;
 
 use super::common::get_file_as_vec;
+
+const LATEST_RELEASE: &str =
+    "https://api.github.com/repos/datadog/datadog-lambda-extension/releases/latest";
+const FALLBACK_LATEST_EXTESION_VERSION: i32 = 36;
 
 struct RuntimeConfig {
     handler: String,
@@ -37,6 +42,11 @@ impl RuntimeConfig {
     }
 }
 
+#[derive(Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+}
+
 #[derive(Debug, StructOpt)]
 pub struct DeployFunctionOptions {
     #[structopt(long)]
@@ -47,8 +57,6 @@ pub struct DeployFunctionOptions {
     region: String,
     #[structopt(long)]
     role: String,
-    #[structopt(long)]
-    extension_arn: String,
 }
 
 pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
@@ -86,7 +94,10 @@ async fn create_function(
         .set_code(Some(function_code))
         .set_runtime(Some(runtime_config.runtime))
         .set_handler(Some(runtime_config.handler))
-        .set_layers(Some(vec![layer_arn, args.extension_arn.clone()]))
+        .set_layers(Some(vec![
+            layer_arn,
+            get_latest_extension_arn(&args.region),
+        ]))
         .set_environment(Some(environment))
         .send()
         .await
@@ -153,4 +164,30 @@ fn get_config_from_runtime(runtime: &str) -> Result<RuntimeConfig> {
         )),
         _ => Err(Error::new(ErrorKind::InvalidData, "invalid runtime")),
     }
+}
+
+fn get_latest_extension_arn(region: &str) -> String {
+    let version = get_latest_extension();
+    format!(
+        "arn:aws:lambda:{}:464622532012:layer:Datadog-Extension:{}",
+        version, region
+    )
+}
+
+fn get_latest_extension() -> String {
+    let client = reqwest::blocking::Client::new();
+    let result = match client.post(LATEST_RELEASE).send() {
+        Ok(result) => result,
+        Err(_) => return FALLBACK_LATEST_EXTESION_VERSION.to_string(),
+    };
+    let result = match result.json::<GithubRelease>() {
+        Ok(result) => result,
+        Err(_) => return FALLBACK_LATEST_EXTESION_VERSION.to_string(),
+    };
+    result
+        .tag_name
+        .replace('v', "")
+        .replace('.', "")
+        .trim()
+        .to_string()
 }
