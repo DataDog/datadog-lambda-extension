@@ -184,10 +184,5 @@ fn get_latest_extension() -> String {
         Ok(result) => result,
         Err(_) => return FALLBACK_LATEST_EXTESION_VERSION.to_string(),
     };
-    result
-        .tag_name
-        .replace('v', "")
-        .replace('.', "")
-        .trim()
-        .to_string()
+    result.tag_name.replace(['v', '.'], "").trim().to_string()
 }
