@@ -3,12 +3,13 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Result;
 use std::io::{Error, ErrorKind};
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
 
 use super::common::get_file_as_vec;
+use super::invoke_function_command::{self, InvokeFunctionOptions};
 
 const LATEST_RELEASE: &str =
     "https://api.github.com/repos/datadog/datadog-lambda-extension/releases/latest";
@@ -32,13 +33,16 @@ impl RuntimeConfig {
     }
     fn generate_function_name(&self) -> String {
         let current_timestamp = SystemTime::now()
-            .elapsed()
+            .duration_since(UNIX_EPOCH)
             .expect("could not get the current timestamp");
         format!(
             "serverless-perf-test-{}-{}",
-            self.runtime.as_str(),
+            self.sanitized_runtime(),
             current_timestamp.as_secs()
         )
+    }
+    fn sanitized_runtime(&self) -> String {
+        self.runtime.as_str().replace('.', "")
     }
 }
 
@@ -57,6 +61,10 @@ pub struct DeployFunctionOptions {
     region: String,
     #[structopt(long)]
     role: String,
+    #[structopt(long)]
+    pr_id: String,
+    #[structopt(long)]
+    should_invoke: bool,
 }
 
 pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
@@ -65,7 +73,16 @@ pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
     let config = aws_config::load_from_env().await;
     let lambda_client = lambda::Client::new(&config);
     let layer_arn = get_latest_arn(&lambda_client, &args.layer_name).await?;
-    create_function(&lambda_client, args, layer_arn, api_key).await?;
+    let deployed_arn = create_function(&lambda_client, args, layer_arn, api_key).await?;
+    if args.should_invoke {
+        let invoke_args = InvokeFunctionOptions {
+            arn: deployed_arn,
+            region: args.region.clone(),
+            nb: 5, // to make sure enhanced metrics are flushed
+            remove_after: true,
+        };
+        invoke_function_command::invoke_function(&invoke_args).await?;
+    }
     Ok(())
 }
 
@@ -74,12 +91,18 @@ async fn create_function(
     args: &DeployFunctionOptions,
     layer_arn: String,
     api_key: String,
-) -> Result<()> {
+) -> Result<String> {
     let runtime_config = get_config_from_runtime(&args.runtime)?;
+    let sanitized_runtime = runtime_config.sanitized_runtime();
     let function_name = runtime_config.generate_function_name();
     let mut env_map = HashMap::new();
     env_map.insert(String::from("DD_LAMBDA_HANDLER"), runtime_config.dd_handler);
     env_map.insert(String::from("DD_API_KEY"), api_key);
+    env_map.insert(String::from("DD_SERVICE"), String::from("serverless-perf"));
+    env_map.insert(
+        String::from("DD_TAGS"),
+        format!("runtime:{},pr:{}", sanitized_runtime, args.pr_id),
+    );
     let environment = Environment::builder().set_variables(Some(env_map)).build();
 
     let lambda_blob = get_file_as_vec(&runtime_config.package_path);
@@ -87,7 +110,7 @@ async fn create_function(
         .set_zip_file(Some(lambda_blob))
         .build();
 
-    client
+    let result = client
         .create_function()
         .set_role(Some(args.role.clone()))
         .set_function_name(Some(function_name))
@@ -102,7 +125,8 @@ async fn create_function(
         .send()
         .await
         .expect("could not deploy the function");
-    Ok(())
+    let function_arn = result.function_arn().expect("could not find the arn");
+    Ok(function_arn.to_string())
 }
 
 async fn get_latest_arn(client: &lambda::Client, layer_name: &str) -> Result<String> {
@@ -170,7 +194,7 @@ fn get_latest_extension_arn(region: &str) -> String {
     let version = fetch_extension_version_from_github();
     format!(
         "arn:aws:lambda:{}:464622532012:layer:Datadog-Extension:{}",
-        version, region
+        region, version
     )
 }
 
