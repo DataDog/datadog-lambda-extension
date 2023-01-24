@@ -38,7 +38,7 @@ pub async fn invoke_function(args: &InvokeFunctionOptions) -> Result<()> {
             .send()
             .await
             .expect("could not update the function");
-        timeout = timeout + 1;
+        timeout += 1;
         thread::sleep(Duration::from_secs(5));
     }
     if args.remove_after {
