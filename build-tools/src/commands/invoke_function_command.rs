@@ -39,7 +39,7 @@ pub async fn invoke_function(args: &InvokeFunctionOptions) -> Result<()> {
             .await
             .expect("could not update the function");
         timeout += 1;
-        thread::sleep(Duration::from_secs(5));
+        thread::sleep(Duration::from_secs(15));
     }
     if args.remove_after {
         remove_function(&lambda_client, args.arn.clone()).await;

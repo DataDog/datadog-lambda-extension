@@ -3,7 +3,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Result;
 use std::io::{Error, ErrorKind};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
@@ -75,6 +76,7 @@ pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
     let layer_arn = get_latest_arn(&lambda_client, &args.layer_name).await?;
     let deployed_arn = create_function(&lambda_client, args, layer_arn, api_key).await?;
     if args.should_invoke {
+        thread::sleep(Duration::from_secs(15));
         let invoke_args = InvokeFunctionOptions {
             arn: deployed_arn,
             region: args.region.clone(),
@@ -130,6 +132,7 @@ async fn create_function(
 }
 
 async fn get_latest_arn(client: &lambda::Client, layer_name: &str) -> Result<String> {
+    let layer_name = layer_name.replace('.', ""); // layers cannot contain dots
     let result = client
         .list_layer_versions()
         .set_layer_name(Some(String::from(layer_name)))
