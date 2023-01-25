@@ -135,7 +135,7 @@ async fn get_latest_arn(client: &lambda::Client, layer_name: &str) -> Result<Str
     let layer_name = layer_name.replace('.', ""); // layers cannot contain dots
     let result = client
         .list_layer_versions()
-        .set_layer_name(Some(String::from(layer_name)))
+        .set_layer_name(Some(layer_name))
         .set_max_items(Some(1))
         .send()
         .await
