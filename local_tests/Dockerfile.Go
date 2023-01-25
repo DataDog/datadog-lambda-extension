@@ -11,7 +11,7 @@ COPY --from=builder /app/app ${LAMBDA_TASK_ROOT}
 # Copy both the datadog extension and the recorder one
 RUN mkdir -p /opt/extensions
 COPY recorder-extension /opt/extensions/
-COPY datadog-agent /opt/extensions/
+COPY datadog-agent-open-telemetry /opt/extensions/
 
 # Make sure that the extension will send the payload to the man in the middle
 # (recorder extension is listenning on 3333)

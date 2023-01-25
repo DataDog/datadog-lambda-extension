@@ -51,7 +51,7 @@ ARCHITECTURE=$ARCHITECTURE VERSION=1 ./scripts/build_binary_and_layer_dockerized
 cd ./local_tests
 
 # Copy the newly built extension in the same folder as the Dockerfile
-cp ../.layers/datadog_extension-$ARCHITECTURE/extensions/datadog-agent .
+cp ../.layers/datadog_extension-$ARCHITECTURE/extensions/datadog-agent-open-telemetry .
 
 # Build the recorder extension which will act as a man-in-a-middle to intercept payloads sent to Datadog
 cd ../../datadog-agent/test/integration/serverless/recorder-extension
