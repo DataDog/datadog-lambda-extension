@@ -22,11 +22,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     if [ -z "$AGENT_VERSION" ]; then \
         go build -race -ldflags="-w \
-        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
+        -X github.com/DataDog/datadog-lambda-extension/src/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
         -tags serverless -o datadog-agent; \
     else \
         go build -race -ldflags="-w \
-        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
+        -X github.com/DataDog/datadog-lambda-extension/src/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
         -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
         -tags serverless -o datadog-agent; \
     fi
