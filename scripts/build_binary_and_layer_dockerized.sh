@@ -21,8 +21,10 @@ fi
 
 if [ -z "$CLOUD_RUN" ]; then
     CMD_PATH="cmd/serverless"
+    BUILD_TAGS="serverless otlp"
 else
     CMD_PATH="cmd/serverless-init"
+    BUILD_TAGS="serverless"
 fi
 
 AGENT_PATH="../datadog-agent"
@@ -68,6 +70,7 @@ function docker_build_zip {
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
         --build-arg CMD_PATH="${CMD_PATH}" \
+        --build-arg BUILD_TAGS="${BUILD_TAGS}" \
         . --load
     dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
     docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip
