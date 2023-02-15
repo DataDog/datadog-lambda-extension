@@ -52,7 +52,6 @@ jobs:
           echo ::add-mask::"7"
           echo ::add-mask::"8"
           echo ::add-mask::"9"
-          echo ::add-mask::"|"
       - uses: actions/checkout@v3
       - id: auth
         env:
