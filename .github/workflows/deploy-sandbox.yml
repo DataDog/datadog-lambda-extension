@@ -69,18 +69,20 @@ jobs:
          --docker-path "scripts_v2/Dockerfile.build" \
          --artifact-name "datadog_extension.zip"
       - name: Sign the layer
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         run: |
-          echo "::add-mask::${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
-          export AWS_ACCESS_KEY_ID=${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          export AWS_SECRET_ACCESS_KEY=${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          export AWS_SESSION_TOKEN=${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
-          ./build-tools/bin/build_tools \
-          sign \
-          --layer-path ./tmp/datadog_extension.zip \
-          --destination-path ./tmp/datadog_extension_signed.zip \
-          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
+         echo $GITHUB_OUTPUT
+         cat $GITHUB_OUTPUT
+         secret=`cat $GITHUB_OUTPUT`
+         echo "::add-mask::$secret"
+         ./build-tools/bin/build_tools \
+         sign \
+         --layer-path ./tmp/datadog_extension.zip \
+         --destination-path ./tmp/datadog_extension_signed.zip \
+         --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - uses: actions/upload-artifact@v3.1.1
         with:
           name: datadog-extension
@@ -88,26 +90,22 @@ jobs:
           retention-days: 5
       - id: list_region
         if: ${{ github.event.inputs.region == 'all' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         name: Build list of regions
         run: |
-          echo "::add-mask::${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
-          export AWS_ACCESS_KEY_ID=${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          export AWS_SECRET_ACCESS_KEY=${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          export AWS_SESSION_TOKEN=${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
-           ./build-tools/bin/build_tools \
-           list_region \
-           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
+         ./build-tools/bin/build_tools \
+         list_region \
+         --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - id: deploy
         if: ${{ github.event.inputs.region != 'all' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         run: |
-          echo "::add-mask::${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
-          export AWS_ACCESS_KEY_ID=${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          export AWS_SECRET_ACCESS_KEY=${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          export AWS_SESSION_TOKEN=${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
           ./build-tools/bin/build_tools \
           deploy \
           --layer-path ./tmp/datadog_extension_signed.zip \
@@ -132,13 +130,11 @@ jobs:
           name: datadog-extension
           path: ./tmp
       - id: deploy
+        env:
+          AWS_ACCESS_KEY_ID: ${{ needs.prepare-artifact.outputs.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
         run: |
-          echo "::add-mask::${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          echo "::add-mask::${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
-          export AWS_ACCESS_KEY_ID=${{ steps.auth.outputs.AWS_ACCESS_KEY_ID }}
-          export AWS_SECRET_ACCESS_KEY=${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
-          export AWS_SESSION_TOKEN=${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
           ./build-tools/bin/build_tools \
           deploy \
           --layer-path ./tmp/datadog_extension_signed.zip \
