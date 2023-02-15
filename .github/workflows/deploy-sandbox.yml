@@ -40,6 +40,19 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
     steps:
+      - id: mask numbers
+        run:
+          echo ::add-mask::0
+          echo ::add-mask::1
+          echo ::add-mask::2
+          echo ::add-mask::3
+          echo ::add-mask::4
+          echo ::add-mask::5
+          echo ::add-mask::6
+          echo ::add-mask::7
+          echo ::add-mask::8
+          echo ::add-mask::9
+          echo ::add-mask::|
       - uses: actions/checkout@v3
       - id: auth
         env:
@@ -74,10 +87,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         run: |
-         echo $GITHUB_OUTPUT
-         cat $GITHUB_OUTPUT
-         secret=`cat $GITHUB_OUTPUT`
-         echo "::add-mask::$secret"
          ./build-tools/bin/build_tools \
          sign \
          --layer-path ./tmp/datadog_extension.zip \
