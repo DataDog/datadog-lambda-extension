@@ -40,6 +40,19 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
     steps:
+      - name: mask numbers
+        run: |
+          echo ::add-mask::"0"
+          echo ::add-mask::"1"
+          echo ::add-mask::"2"
+          echo ::add-mask::"3"
+          echo ::add-mask::"4"
+          echo ::add-mask::"5"
+          echo ::add-mask::"6"
+          echo ::add-mask::"7"
+          echo ::add-mask::"8"
+          echo ::add-mask::"9"
+          echo ::add-mask::"|"
       - uses: actions/checkout@v3
       - id: auth
         env:
@@ -120,6 +133,19 @@ jobs:
       matrix:
         aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
+      - name: mask numbers
+        run: |
+          echo ::add-mask::"0"
+          echo ::add-mask::"1"
+          echo ::add-mask::"2"
+          echo ::add-mask::"3"
+          echo ::add-mask::"4"
+          echo ::add-mask::"5"
+          echo ::add-mask::"6"
+          echo ::add-mask::"7"
+          echo ::add-mask::"8"
+          echo ::add-mask::"9"
+          echo ::add-mask::"|"
       - uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
         with:
