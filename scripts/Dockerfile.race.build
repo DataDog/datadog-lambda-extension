@@ -4,6 +4,7 @@ FROM golang:1.19 as builder
 ARG EXTENSION_VERSION
 ARG ENABLE_RACE_DETECTION
 ARG AGENT_VERSION
+ARG BUILD_TAGS
 RUN mkdir -p /tmp/dd/datadog-agent
 
 # cache dependsencies
@@ -23,12 +24,12 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     if [ -z "$AGENT_VERSION" ]; then \
         go build -race -ldflags="-w \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
-        -tags serverless -o datadog-agent; \
+        -tags "${BUILD_TAGS}" -o datadog-agent; \
     else \
         go build -race -ldflags="-w \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
         -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
-        -tags serverless -o datadog-agent; \
+        -tags "${BUILD_TAGS}" -o datadog-agent; \
     fi
 
 RUN go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
