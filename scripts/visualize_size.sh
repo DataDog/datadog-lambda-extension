@@ -40,6 +40,11 @@ function build_with_symbols() {
     fi
 }
 
+function build_prod() {
+    BUILD_TAGS="$BUILD_TAGS" ARCHITECTURE=amd64 VERSION=1 \
+        ./scripts/build_binary_and_layer_dockerized.sh
+}
+
 function go_binsize_viz() {
     cd .layers/datadog_extension-amd64/extensions/
 
@@ -60,7 +65,7 @@ function list_symbols() {
 }
 
 function binary_size() {
-    size=$(stat -c "%s"  "$BINARY_FILE")
+    size=$(stat -c "%s" "$BINRAY_DIR/datadog_extension-amd64/extensions/datadog-agent")
     echo "size of binary is ${size}"
 }
 
@@ -98,7 +103,7 @@ case $subcommand in
         ;;
 
     size)
-        build_with_symbols
+        build_prod
         binary_size
         ;;
 
