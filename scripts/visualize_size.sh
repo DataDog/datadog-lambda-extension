@@ -5,9 +5,10 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2020 Datadog, Inc.
 
-# Publish the datadog lambda layer across regions, using the AWS CLI
-# Usage: VERSION=5 REGIONS=us-east-1 publish_layers.sh
-# VERSION is required.
+# Required tools for drawing graphs:
+#   digraph: https://pkg.go.dev/golang.org/x/tools/cmd/digraph
+#   graphviz: https://graphviz.org/download/
+
 set -e -o pipefail
 
 # Move into the root directory, so this script can be called from any directory
