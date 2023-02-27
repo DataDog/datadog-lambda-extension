@@ -1,7 +1,7 @@
 use commands::{
     auth_command::auth, build_command::build, deploy_command::deploy,
     deploy_function_command::deploy_function, invoke_function_command::invoke_function,
-    list_region_command::list_region, sign_command::sign,
+    list_region_command::list_region, sign_command::sign, check_layer_consistency_command::check_consistency,
 };
 use std::io::Result;
 use structopt::StructOpt;
@@ -25,6 +25,8 @@ enum SubCommand {
     DeployLambdaFunction(commands::deploy_function_command::DeployFunctionOptions),
     #[structopt(name = "invoke_lambda", about = "Invoke AWS Lambda Function")]
     InvokeLambdaFunction(commands::invoke_function_command::InvokeFunctionOptions),
+    #[structopt(name = "check_layer_version_consistency", about = "Check if a layer is at the same version in all regions")]
+    CheckLayerVersionConsistency(commands::check_layer_consistency_command::CheckLayerConsistencyOptions),
 }
 
 #[derive(Debug, StructOpt)]
@@ -49,5 +51,6 @@ async fn main() -> Result<()> {
         SubCommand::ListRegion(opt) => list_region(&opt).await,
         SubCommand::DeployLambdaFunction(opt) => deploy_function(&opt).await,
         SubCommand::InvokeLambdaFunction(opt) => invoke_function(&opt).await,
+        SubCommand::CheckLayerVersionConsistency(opt) => check_consistency(&opt).await,
     }
 }

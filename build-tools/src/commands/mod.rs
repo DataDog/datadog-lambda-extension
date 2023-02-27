@@ -7,3 +7,4 @@ pub mod deploy_function_command;
 pub mod invoke_function_command;
 pub mod list_region_command;
 pub mod sign_command;
+pub mod check_layer_consistency_command;
