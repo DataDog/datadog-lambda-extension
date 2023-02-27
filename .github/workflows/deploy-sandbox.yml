@@ -124,7 +124,7 @@ jobs:
          --layer-name "Datadog-Extension" \
          --layer-suffix "${{ inputs.layerSuffix }}" \
          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }} \
-         --regions "${{ join(steps.prepare-artifact.outputs.AWS_REGIONS, ',' }}""
+         --regions "${{ join(steps.prepare-artifact.outputs.AWS_REGIONS, ',') }}"
 
       - id: deploy
         if: ${{ github.event.inputs.region != 'all' }}
