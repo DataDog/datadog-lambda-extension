@@ -7,6 +7,8 @@ use crate::security::build_config;
 
 use super::common::{build_layer_name, BuildArchitecture};
 
+#[derive(Debug)]
+struct RegionArgs(Vec<String>);
 pub struct RegionVersion {
     region: String,
     version: i64,
@@ -27,7 +29,7 @@ impl Display for RegionVersion {
 #[derive(Debug, StructOpt)]
 pub struct CheckLayerConsistencyOptions {
     #[structopt(long)]
-    regions: Vec<String>,
+    regions: RegionArgs,
     #[structopt(long)]
     key: Option<String>,
     #[structopt(long)]
@@ -38,7 +40,14 @@ pub struct CheckLayerConsistencyOptions {
     layer_suffix: Option<String>,
 }
 
-pub async fn get_layer_version(
+impl std::str::FromStr for RegionArgs {
+    type Err = Box<dyn std::error::Error>;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(RegionArgs(s.split(",").map(|x| x.trim().to_owned()).collect()))
+    }
+}
+
+pub async fn get_latest_layer_version(
     key: &Option<String>,
     layer_name: String,
     region: &str,
@@ -46,19 +55,21 @@ pub async fn get_layer_version(
     let config = build_config(key, region).await;
     let lambda_client = lambda::Client::new(&config);
     let result = lambda_client
-        .get_layer_version()
+        .list_layer_versions()
         .set_layer_name(Some(layer_name))
         .send()
         .await
         .expect("could not get layer version");
-    RegionVersion::new(String::from(region), result.version())
+    let layer_versions = result.layer_versions().expect("could not list layer versions");
+    let latest = layer_versions.get(0).expect("could not get the latest layer");
+    RegionVersion::new(String::from(region), latest.version())
 }
 
 pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()> {
     let mut last_checked_version: Option<RegionVersion> = None;
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
-    for region in args.regions.iter() {
-        let current_version = get_layer_version(&args.key, layer_name.clone(), region).await;
+    for region in args.regions.0.iter() {
+        let current_version = get_latest_layer_version(&args.key, layer_name.clone(), region).await;
         if let Some(checked_version) = last_checked_version {
             if checked_version.version != current_version.version {
                 let error_message = format!(
@@ -70,8 +81,8 @@ pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()
                     error_message,
                 ));
             }
-            last_checked_version = Some(checked_version);
         }
+        last_checked_version = Some(current_version);
     }
     Ok(())
 }
