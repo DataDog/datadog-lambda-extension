@@ -43,7 +43,7 @@ pub async fn get_layer_version(
     layer_name: String,
     region: &str,
 ) -> RegionVersion {
-    let config = build_config(&key, region).await;
+    let config = build_config(key, region).await;
     let lambda_client = lambda::Client::new(&config);
     let result = lambda_client
         .get_layer_version()
@@ -51,14 +51,14 @@ pub async fn get_layer_version(
         .send()
         .await
         .expect("could not get layer version");
-    return RegionVersion::new(String::from(region), result.version());
+    RegionVersion::new(String::from(region), result.version())
 }
 
 pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()> {
     let mut last_checked_version: Option<RegionVersion> = None;
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
     for region in args.regions.iter() {
-        let current_version = get_layer_version(&args.key, layer_name.clone(), &region).await;
+        let current_version = get_layer_version(&args.key, layer_name.clone(), region).await;
         if let Some(checked_version) = last_checked_version {
             if checked_version.version != current_version.version {
                 let error_message = format!(
