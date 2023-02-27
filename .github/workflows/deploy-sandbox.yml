@@ -121,6 +121,8 @@ jobs:
         run: |
          ./build-tools/bin/build_tools \
          check_layer_version_consistency \
+         --layer-name "Datadog-Extension" \
+         --layer-suffix "${{ inputs.layerSuffix }}" \
          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }} \
          --regions ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
 
