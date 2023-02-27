@@ -9,6 +9,14 @@ use super::common::{build_layer_name, BuildArchitecture};
 
 #[derive(Debug)]
 struct RegionArgs(Vec<String>);
+
+impl std::str::FromStr for RegionArgs {
+    type Err = Box<dyn std::error::Error>;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(RegionArgs(s.split(",").map(|x| x.trim().to_owned()).collect()))
+    }
+}
+
 pub struct RegionVersion {
     region: String,
     version: i64,
@@ -38,13 +46,6 @@ pub struct CheckLayerConsistencyOptions {
     architecture: BuildArchitecture,
     #[structopt(long)]
     layer_suffix: Option<String>,
-}
-
-impl std::str::FromStr for RegionArgs {
-    type Err = Box<dyn std::error::Error>;
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(RegionArgs(s.split(",").map(|x| x.trim().to_owned()).collect()))
-    }
 }
 
 pub async fn get_latest_layer_version(
