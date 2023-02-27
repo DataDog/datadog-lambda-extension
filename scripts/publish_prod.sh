@@ -67,7 +67,7 @@ echo "Checking that you have access to the commercial AWS account"
 aws-vault exec prod-engineering -- aws sts get-caller-identity
 
 echo "Checking that you have access to the GovCloud AWS account"
-saml2aws login -a govcloud-us1-fed-human-engineering
+ddsaml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
 VERSION=$VERSION AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
@@ -79,7 +79,7 @@ echo "Publishing layers to commercial AWS regions"
 aws-vault exec prod-engineering --no-session -- ./scripts/publish_layers.sh
 
 echo "Publishing layers to GovCloud AWS regions"
-saml2aws login -a govcloud-us1-fed-human-engineering
+ddsaml2aws login -a govcloud-us1-fed-human-engineering
 AWS_PROFILE=govcloud-us1-fed-human-engineering ./scripts/publish_layers.sh
 
 ./scripts/build_and_push_docker_image.sh
