@@ -5,10 +5,6 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2020 Datadog, Inc.
 
-# Required tools for drawing graphs:
-#   digraph: https://pkg.go.dev/golang.org/x/tools/cmd/digraph
-#   graphviz: https://graphviz.org/download/
-
 set -e -o pipefail
 
 # Move into the root directory, so this script can be called from any directory
@@ -144,6 +140,10 @@ function print_usage() {
 
         BUILD_TAGS      go build tags to use when building the extension,
                         defaults to serverless
+
+    Tools required for drawing graphs:
+        digraph         https://pkg.go.dev/golang.org/x/tools/cmd/digraph
+        graphviz        https://graphviz.org/download/
     "
 }
 
