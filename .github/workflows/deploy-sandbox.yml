@@ -102,7 +102,7 @@ jobs:
          --layer-name "Datadog-Extension" \
          --layer-suffix "${{ inputs.layerSuffix }}" \
          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }} \
-         --regions "${{ join(steps.list_region.outputs.AWS_REGIONS, ',') }}"
+         --regions "${{ steps.list_region.outputs.AWS_REGIONS }}"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2.1.0
