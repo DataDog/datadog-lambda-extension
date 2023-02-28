@@ -13,7 +13,9 @@ struct RegionArgs(Vec<String>);
 impl std::str::FromStr for RegionArgs {
     type Err = Box<dyn std::error::Error>;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(RegionArgs(s.split(",").map(|x| x.trim().to_owned()).collect()))
+        Ok(RegionArgs(
+            s.split(",").map(|x| x.trim().to_owned()).collect(),
+        ))
     }
 }
 
@@ -53,7 +55,8 @@ pub async fn get_latest_layer_version(
     layer_name: String,
     region: &str,
 ) -> RegionVersion {
-    let config = build_config(key, region).await;
+    let region = sanitize(region);
+    let config = build_config(key, &region).await;
     let lambda_client = lambda::Client::new(&config);
     let result = lambda_client
         .list_layer_versions()
@@ -61,11 +64,13 @@ pub async fn get_latest_layer_version(
         .send()
         .await
         .expect("could not get layer version");
-    let layer_versions = result.layer_versions().expect("could not list layer versions");
-    
+    let layer_versions = result
+        .layer_versions()
+        .expect("could not list layer versions");
+
     let latest_version = match layer_versions.get(0) {
         Some(layer_version) => layer_version.version(),
-        None => 0
+        None => 0,
     };
     RegionVersion::new(String::from(region), latest_version)
 }
@@ -93,4 +98,12 @@ pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()
         last_checked_version = Some(current_version);
     }
     Ok(())
+}
+
+fn sanitize(region: &str) -> String {
+    // making sure that the list param from github action does not contain any invalid chars
+    let region = region.replace("[", "");
+    let region = region.replace("]", "");
+    let region = region.replace(",", "");
+    region.trim().to_string()
 }
