@@ -42,17 +42,16 @@ jobs:
     steps:
       - name: mask numbers
         run: |
-          echo ::add-mask::"0"
-          echo ::add-mask::"1"
-          echo ::add-mask::"2"
-          echo ::add-mask::"3"
-          echo ::add-mask::"4"
-          echo ::add-mask::"5"
-          echo ::add-mask::"6"
-          echo ::add-mask::"7"
-          echo ::add-mask::"8"
-          echo ::add-mask::"9"
-          echo ::add-mask::"|"
+          echo ::add-mask::"0|"
+          echo ::add-mask::"1|"
+          echo ::add-mask::"2|"
+          echo ::add-mask::"3|"
+          echo ::add-mask::"4|"
+          echo ::add-mask::"5|"
+          echo ::add-mask::"6|"
+          echo ::add-mask::"7|"
+          echo ::add-mask::"8|"
+          echo ::add-mask::"9|"
 
       - name: checkout
         uses: actions/checkout@v3
@@ -161,17 +160,16 @@ jobs:
     steps:
       - name: mask numbers
         run: |
-          echo ::add-mask::"0"
-          echo ::add-mask::"1"
-          echo ::add-mask::"2"
-          echo ::add-mask::"3"
-          echo ::add-mask::"4"
-          echo ::add-mask::"5"
-          echo ::add-mask::"6"
-          echo ::add-mask::"7"
-          echo ::add-mask::"8"
-          echo ::add-mask::"9"
-          echo ::add-mask::"|"
+          echo ::add-mask::"0|"
+          echo ::add-mask::"1|"
+          echo ::add-mask::"2|"
+          echo ::add-mask::"3|"
+          echo ::add-mask::"4|"
+          echo ::add-mask::"5|"
+          echo ::add-mask::"6|"
+          echo ::add-mask::"7|"
+          echo ::add-mask::"8|"
+          echo ::add-mask::"9|"
       - uses: actions/checkout@v3
       - uses: actions/download-artifact@v3
         with:
