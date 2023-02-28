@@ -96,11 +96,30 @@ for line in sys.stdin:
 print("}")' | dot -Tsvg -o "output.svg"
 }
 
+function aggregate_sizes() {
+    python3 -c '
+import sys, urllib.parse
+packages = {}
+for line in sys.stdin.readlines():
+    pkg = line.strip().split()
+    if len(pkg) != 4:
+        continue
+    _, size, _, name = pkg
+    size = int(size)
+    namesplit = name.split("/")
+    path = "/".join(namesplit[:-1])
+    package = namesplit[-1].split(".")[0]
+    newname = f"{path}/{package}" if path else package
+    packages[newname] = packages.get(newname, 0) + size
+for pkg, size in sorted(packages.items(), key=lambda a: a[1], reverse=True):
+    print(size,"\t",urllib.parse.unquote(pkg))'
+}
+
 subcommand=$1
 case $subcommand in
     list_symbols)
         build_with_symbols
-        list_symbols
+        list_symbols | aggregate_sizes
         ;;
 
     size)
