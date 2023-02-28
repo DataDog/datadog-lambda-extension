@@ -53,10 +53,8 @@ pub struct CheckLayerConsistencyOptions {
 pub async fn get_latest_layer_version(
     key: &Option<String>,
     layer_name: String,
-    region: &str,
+    region: String,
 ) -> RegionVersion {
-    let region = sanitize(region);
-    println!("sanitized region = >{}<", region);
     let config = build_config(key, &region).await;
     let lambda_client = lambda::Client::new(&config);
     let result = lambda_client
@@ -79,10 +77,9 @@ pub async fn get_latest_layer_version(
 pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()> {
     let mut last_checked_version: Option<RegionVersion> = None;
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
-    println!("layer name = {}", layer_name);
-    println!("regions = {:?}", args.regions.0);
     for region in args.regions.0.iter() {
-        println!("single region = {}", region);
+        let region = sanitize(region);
+        println!("sanitized region = >{}<", region);
         let current_version = get_latest_layer_version(&args.key, layer_name.clone(), region).await;
         if let Some(checked_version) = last_checked_version {
             if checked_version.version != current_version.version {
