@@ -115,6 +115,38 @@ for pkg, size in sorted(packages.items(), key=lambda a: a[1], reverse=True):
     print(size,"\t",urllib.parse.unquote(pkg))'
 }
 
+function print_usage() {
+    echo "visualize_size.sh: tools for debugging and visualizing binary sizes
+    usage: ./scripts/visualize_size.sh TOOL_NAME
+
+    Where TOOL_NAME is one of the following:
+        list_symbols    prints a list of all dependencies of the extension
+                        and the aggregated size of each
+
+        size            prints the size of the extension binary in bytes as
+                        built for production
+
+        package_size    prints the size in bytes of all symbols that match
+                        PACKAGE, requires that PACKAGE be given
+
+        graph           save a a dependency graph to .layers/graph.svg. Shows
+                        all paths to package PACKAGE, requires that PACKAGE be
+                        given
+
+        go_binsize_viz  view relative sizes of packages visually in the browser
+
+    These additional variables are available:
+        PACKAGE         the name of the package to debug, requires full package
+                        name as would be used in an import statement
+
+        CMD_PATH        the path to the entrypoint of the binary to be
+                        visualized, defaults to cmd/serverless
+
+        BUILD_TAGS      go build tags to use when building the extension,
+                        defaults to serverless
+    "
+}
+
 subcommand=$1
 case $subcommand in
     list_symbols)
@@ -136,8 +168,12 @@ case $subcommand in
         graph_package
         ;;
 
+    go_binsize_viz)
+        go_binsize_viz
+        ;;
+
     *)
-        echo "unknown subcommand: ${subcommand}"
+        print_usage
         exit 1
         ;;
 esac
