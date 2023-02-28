@@ -62,14 +62,21 @@ pub async fn get_latest_layer_version(
         .await
         .expect("could not get layer version");
     let layer_versions = result.layer_versions().expect("could not list layer versions");
-    let latest = layer_versions.get(0).expect("could not get the latest layer");
-    RegionVersion::new(String::from(region), latest.version())
+    
+    let latest_version = match layer_versions.get(0) {
+        Some(layer_version) => layer_version.version(),
+        None => 0
+    };
+    RegionVersion::new(String::from(region), latest_version)
 }
 
 pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()> {
     let mut last_checked_version: Option<RegionVersion> = None;
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
+    println!("layer name = {}", layer_name);
+    println!("regions = {:?}", args.regions.0);
     for region in args.regions.0.iter() {
+        println!("single region = {}", region);
         let current_version = get_latest_layer_version(&args.key, layer_name.clone(), region).await;
         if let Some(checked_version) = last_checked_version {
             if checked_version.version != current_version.version {
