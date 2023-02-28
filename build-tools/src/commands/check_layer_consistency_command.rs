@@ -56,6 +56,7 @@ pub async fn get_latest_layer_version(
     region: &str,
 ) -> RegionVersion {
     let region = sanitize(region);
+    println!("sanitized region = >{}<", region);
     let config = build_config(key, &region).await;
     let lambda_client = lambda::Client::new(&config);
     let result = lambda_client
