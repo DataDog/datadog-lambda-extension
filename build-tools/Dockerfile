@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.3-labs
-
 FROM rust AS build
 
 RUN cargo new /app/build-tools
