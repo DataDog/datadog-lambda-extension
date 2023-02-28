@@ -14,7 +14,7 @@ impl std::str::FromStr for RegionArgs {
     type Err = Box<dyn std::error::Error>;
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         Ok(RegionArgs(
-            s.split(",").map(|x| x.trim().to_owned()).collect(),
+            s.split(',').map(|x| x.trim().to_owned()).collect(),
         ))
     }
 }
@@ -72,7 +72,7 @@ pub async fn get_latest_layer_version(
         Some(layer_version) => layer_version.version(),
         None => 0,
     };
-    RegionVersion::new(String::from(region), latest_version)
+    RegionVersion::new(region, latest_version)
 }
 
 pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()> {
@@ -102,8 +102,8 @@ pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()
 
 fn sanitize(region: &str) -> String {
     // making sure that the list param from github action does not contain any invalid chars
-    let region = region.replace("[", "");
-    let region = region.replace("]", "");
-    let region = region.replace(",", "");
+    let region = region.replace('[', "");
+    let region = region.replace(']', "");
+    let region = region.replace(',', "");
     region.trim().to_string()
 }
