@@ -95,8 +95,6 @@ jobs:
           AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         name: Check layer version consistency
         run: |
-         echo "check layer version consistenty"
-         echo ${{ steps.list_region.outputs.AWS_REGIONS }}
          ./build-tools/bin/build_tools \
          check_layer_version_consistency \
          --layer-name "Datadog-Extension" \
