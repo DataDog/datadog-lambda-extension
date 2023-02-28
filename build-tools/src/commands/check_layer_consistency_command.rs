@@ -18,7 +18,6 @@ impl std::str::FromStr for RegionArgs {
         ))
     }
 }
-
 pub struct RegionVersion {
     region: String,
     version: i64,
@@ -50,12 +49,9 @@ pub struct CheckLayerConsistencyOptions {
     layer_suffix: Option<String>,
 }
 
-pub async fn get_latest_layer_version(
-    key: &Option<String>,
-    layer_name: String,
-    region: String,
-) -> RegionVersion {
-    let config = build_config(key, &region).await;
+pub async fn get_latest_layer_version(layer_name: String, region: String) -> RegionVersion {
+    std::env::set_var("AWS_REGION", &region);
+    let config = aws_config::load_from_env().await;
     let lambda_client = lambda::Client::new(&config);
     let result = lambda_client
         .list_layer_versions()
@@ -77,10 +73,13 @@ pub async fn get_latest_layer_version(
 pub async fn check_consistency(args: &CheckLayerConsistencyOptions) -> Result<()> {
     let mut last_checked_version: Option<RegionVersion> = None;
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
+
+    // set a random region as it will be overriden in the loop
+    build_config(&args.key, "us-east-1").await;
+
     for region in args.regions.0.iter() {
         let region = sanitize(region);
-        println!("sanitized region = >{}<", region);
-        let current_version = get_latest_layer_version(&args.key, layer_name.clone(), region).await;
+        let current_version = get_latest_layer_version(layer_name.clone(), region).await;
         if let Some(checked_version) = last_checked_version {
             if checked_version.version != current_version.version {
                 let error_message = format!(
