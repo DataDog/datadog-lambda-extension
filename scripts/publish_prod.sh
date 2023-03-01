@@ -50,25 +50,25 @@ SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
 # Manually confirm access
-read -p "Please confirm that you have write access to the datadog-agent repository in GitHub. (y/n)" CONT
-if [ "$CONT" != "y" ]; then
-    echo "Exiting"
-    exit 1
-fi
-read -p "Please confirm that you have push access to the datadog/lambda-extension repository in Dockerhub. (y/n)" CONT
-if [ "$CONT" != "y" ]; then
-    echo "Exiting"
-    exit 1
-fi
-
-docker login
+#read -p "Please confirm that you have write access to the datadog-agent repository in GitHub. (y/n)" CONT
+#if [ "$CONT" != "y" ]; then
+#    echo "Exiting"
+#    exit 1
+#fi
+#read -p "Please confirm that you have push access to the datadog/lambda-extension repository in Dockerhub. (y/n)" CONT
+#if [ "$CONT" != "y" ]; then
+#    echo "Exiting"
+#    exit 1
+#fi
+#
+#docker login
 
 echo "Checking that you have access to the commercial AWS account"
 aws-vault exec prod-engineering -- aws sts get-caller-identity
 
-echo "Checking that you have access to the GovCloud AWS account"
-ddsaml2aws login -a govcloud-us1-fed-human-engineering
-AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
+#echo "Checking that you have access to the GovCloud AWS account"
+#ddsaml2aws login -a govcloud-us1-fed-human-engineering
+#AWS_PROFILE=govcloud-us1-fed-human-engineering aws sts get-caller-identity
 
 VERSION=$VERSION AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
 
@@ -78,22 +78,22 @@ aws-vault exec prod-engineering -- ./scripts/sign_layers.sh prod
 echo "Publishing layers to commercial AWS regions"
 aws-vault exec prod-engineering --no-session -- ./scripts/publish_layers.sh
 
-echo "Publishing layers to GovCloud AWS regions"
-ddsaml2aws login -a govcloud-us1-fed-human-engineering
-AWS_PROFILE=govcloud-us1-fed-human-engineering ./scripts/publish_layers.sh
+#echo "Publishing layers to GovCloud AWS regions"
+#ddsaml2aws login -a govcloud-us1-fed-human-engineering
+#AWS_PROFILE=govcloud-us1-fed-human-engineering ./scripts/publish_layers.sh
 
-./scripts/build_and_push_docker_image.sh
+#./scripts/build_and_push_docker_image.sh
 
-echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
-git tag "v$VERSION"
-git push origin "refs/tags/v$VERSION"
-
-echo "New extension version published to AWS and Dockerhub!"
-echo
-echo "IMPORTANT: Please follow the following steps to create release notes:"
-echo "1. Manually create a new tag called lambda-extension-${VERSION} in the datadog-agent repository"
-echo "2. Create a new GitHub release in the datadog-lambda-extension repository using the tag v${VERSION}, and add release notes"
-echo ">>> https://github.com/DataDog/datadog-lambda-extension/releases/new?tag=v${VERSION}&title=v${VERSION}"
-
-# Open a PR to the documentation repo to automatically bump layer version
-VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
+#echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
+#git tag "v$VERSION"
+#git push origin "refs/tags/v$VERSION"
+#
+#echo "New extension version published to AWS and Dockerhub!"
+#echo
+#echo "IMPORTANT: Please follow the following steps to create release notes:"
+#echo "1. Manually create a new tag called lambda-extension-${VERSION} in the datadog-agent repository"
+#echo "2. Create a new GitHub release in the datadog-lambda-extension repository using the tag v${VERSION}, and add release notes"
+#echo ">>> https://github.com/DataDog/datadog-lambda-extension/releases/new?tag=v${VERSION}&title=v${VERSION}"
+#
+## Open a PR to the documentation repo to automatically bump layer version
+#VERSION=$VERSION LAYER=datadog-lambda-extension ./scripts/create_documentation_pr.sh
