@@ -13,7 +13,7 @@ EXTENSION_DIR="$DIR/.."
 cd "$EXTENSION_DIR"
 
 if [ -z "$BUILD_TAGS" ]; then
-    BUILD_TAGS="serverless"
+    BUILD_TAGS="serverless otlp"
 fi
 
 if [ -z "$CMD_PATH" ]; then
@@ -39,7 +39,7 @@ function build_with_symbols() {
 
 function build_prod() {
     BUILD_TAGS="$BUILD_TAGS" ARCHITECTURE=amd64 VERSION=1 \
-        ./scripts/build_binary_and_layer_dockerized.sh
+        ./scripts/build_binary_and_layer_dockerized.sh 1>&2
 }
 
 function go_binsize_viz() {
@@ -62,8 +62,7 @@ function list_symbols() {
 }
 
 function binary_size() {
-    size=$(stat -c "%s" "$BINRAY_DIR/datadog_extension-amd64/extensions/datadog-agent")
-    echo "size of binary is ${size}"
+    stat -c "%s" "$BINRAY_DIR/datadog_extension-amd64/extensions/datadog-agent"
 }
 
 function package_size() {
