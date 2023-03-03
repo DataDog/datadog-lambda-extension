@@ -32,6 +32,41 @@ on:
         default: ""
 
 jobs:
+
+
+  build-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+  
+      - name: ⚡ Cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cd 
+        run: cd build-tools
+      
+      - name: Run unit tests 
+        run: cargo test --bins
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload the build-tools binary
+        uses: actions/upload-artifact@v3
+        with:
+          name: build_tools_bin
+          path: target/release/build_tools
+
   prepare-artifact:
     runs-on: ubuntu-latest
     outputs:
@@ -40,6 +75,10 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
     steps:
+      - name: Download build_tools
+        uses: actions/download-artifact@v3
+        with:
+          name: build_tools_bin
       - name: mask numbers
         run: |
           echo ::add-mask::"0"
@@ -59,7 +98,7 @@ jobs:
           AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.GH_ACTION_PUBLISHER_AWS_SECRET_ACCESS_KEY }}
         run: |
-          ./build-tools/bin/build_tools \
+          ./build_tools_bin \
           auth \
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
           --mfa-code ${{ inputs.mfaCode }} \
@@ -72,7 +111,7 @@ jobs:
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2.1.0
       - run: |
-         ./build-tools/bin/build_tools \
+         ./build_tools_bin \
          build \
          --version 1 \
          --agent-version 1 \
@@ -87,7 +126,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         run: |
-         ./build-tools/bin/build_tools \
+         ./build_tools_bin \
          sign \
          --layer-path ./tmp/datadog_extension.zip \
          --destination-path ./tmp/datadog_extension_signed.zip \
@@ -105,7 +144,7 @@ jobs:
           AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         name: Build list of regions
         run: |
-         ./build-tools/bin/build_tools \
+         ./build_tools_bin \
          list_region \
          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
       - id: deploy
@@ -115,7 +154,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
         run: |
-          ./build-tools/bin/build_tools \
+          ./build_tools_bin \
           deploy \
           --layer-path ./tmp/datadog_extension_signed.zip \
           --architecture "${{ inputs.architecture }}" \
@@ -133,6 +172,10 @@ jobs:
       matrix:
         aws_region: ${{ fromJson(needs.prepare-artifact.outputs.AWS_REGIONS) }}
     steps:
+      - name: Download build_tools
+        uses: actions/download-artifact@v3
+        with:
+          name: build_tools_bin
       - name: mask numbers
         run: |
           echo ::add-mask::"0"
@@ -157,7 +200,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ needs.prepare-artifact.outputs.AWS_SECRET_ACCESS_KEY }}
           AWS_SESSION_TOKEN: ${{ needs.prepare-artifact.outputs.AWS_SESSION_TOKEN }}
         run: |
-          ./build-tools/bin/build_tools \
+          ./build_tools_bin \
           deploy \
           --layer-path ./tmp/datadog_extension_signed.zip \
           --architecture "${{ inputs.architecture }}" \
