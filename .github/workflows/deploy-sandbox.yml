@@ -51,15 +51,12 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-
-      - name: Cd 
-        run: cd build-tools
       
       - name: Run unit tests 
-        run: cargo test --bins
+        run: cd build-tools && cargo test --bins
 
       - name: Build release binary
-        run: cargo build --release
+        run: cd build-tools && cargo build --release
 
       - name: Upload the build-tools binary
         uses: actions/upload-artifact@v3
