@@ -77,12 +77,6 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ steps.auth.outputs.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ steps.auth.outputs.AWS_SESSION_TOKEN }}
     steps:
-      - name: Download build_tools
-        uses: actions/download-artifact@v3
-        with:
-          name: build_tools
-      - name: List all files
-        run: ls -lah
       - name: mask numbers
         run: |
           echo ::add-mask::"0"
@@ -97,6 +91,14 @@ jobs:
           echo ::add-mask::"9"
           echo ::add-mask::"|"
       - uses: actions/checkout@v3
+      - name: Download build_tools
+        uses: actions/download-artifact@v3
+        with:
+          name: build_tools
+      - name: Chmod binary
+        run: chmod u+x build_tools
+      - name: List all files
+        run: ls -lah
       - id: auth
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
