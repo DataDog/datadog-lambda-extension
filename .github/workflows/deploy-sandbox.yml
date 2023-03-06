@@ -43,7 +43,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/cache@v1
+      - uses: actions/cache@v3
         with:
           path: ~/.cargo
           key: ${{ runner.os }}-cargo-${{ hashFiles('build-tools/Cargo.toml') }}
@@ -52,7 +52,7 @@ jobs:
             ${{ runner.os }}-cargo
 
       - name: Cargo Target Cache
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         with:
           path: build-tools/target
           key: ${{ runner.os }}-cargo-target-${{ hashFiles('build-tools/Cargo.toml') }}
