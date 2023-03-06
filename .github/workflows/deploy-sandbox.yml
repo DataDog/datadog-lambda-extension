@@ -78,6 +78,8 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: build_tools
+      - name: List all files
+        run: ls -lah
       - name: mask numbers
         run: |
           echo ::add-mask::"0"
