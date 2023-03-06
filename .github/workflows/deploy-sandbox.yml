@@ -40,20 +40,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
   
-      - name: ⚡ Cache
-        uses: actions/cache@v2
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('build-tools/Cargo.lock') }}
-
-      - name: Print key
-        run: echo "Cache key is ${{ runner.os }}-cargo-${{ hashFiles('build-tools/Cargo.lock') }}"
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/cache@v1
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-${{ hashFiles('build-tools/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ hashFiles('build-tools/Cargo.toml') }}
+            ${{ runner.os }}-cargo
+
+      - name: Cargo Target Cache
+        uses: actions/cache@v1
+        with:
+          path: build-tools/target
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('build-tools/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ hashFiles('build-tools/Cargo.toml') }}
+            ${{ runner.os }}-cargo-target
       
       - name: Run unit tests 
         run: cd build-tools && cargo test --bins
