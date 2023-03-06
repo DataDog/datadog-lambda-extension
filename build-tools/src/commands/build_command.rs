@@ -25,10 +25,10 @@ pub struct BuildOptions {
     docker_path: String,
 }
 
-pub fn build(args: &BuildOptions) -> Result<()> {
+pub fn build(args: BuildOptions) -> Result<()> {
     match args.cloudrun {
         true => build_cloud_run(),
-        false => build_extension("cmd/serverless", args),
+        false => build_extension("cmd/serverless", &args),
     }
 }
 

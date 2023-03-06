@@ -68,13 +68,13 @@ pub struct DeployFunctionOptions {
     should_invoke: bool,
 }
 
-pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
+pub async fn deploy_function(args: DeployFunctionOptions) -> Result<()> {
     let api_key = std::env::var("DD_API_KEY").expect("could not find DD_API_KEY env");
     std::env::set_var("AWS_REGION", &args.region);
     let config = aws_config::load_from_env().await;
     let lambda_client = lambda::Client::new(&config);
     let layer_arn = get_latest_arn(&lambda_client, &args.layer_name).await?;
-    let deployed_arn = create_function(&lambda_client, args, layer_arn, api_key).await?;
+    let deployed_arn = create_function(&lambda_client, &args, layer_arn, api_key).await?;
     if args.should_invoke {
         thread::sleep(Duration::from_secs(15));
         let invoke_args = InvokeFunctionOptions {
@@ -83,7 +83,7 @@ pub async fn deploy_function(args: &DeployFunctionOptions) -> Result<()> {
             nb: 5, // to make sure enhanced metrics are flushed
             remove_after: true,
         };
-        invoke_function_command::invoke_function(&invoke_args).await?;
+        invoke_function_command::invoke_function(invoke_args).await?;
     }
     Ok(())
 }

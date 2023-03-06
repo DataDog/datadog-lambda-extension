@@ -42,12 +42,12 @@ struct BuildTools {
 async fn main() -> Result<()> {
     let args = BuildTools::from_args();
     match args.cmd {
-        SubCommand::Auth(opt) => auth(&opt).await,
-        SubCommand::Build(opt) => build(&opt),
-        SubCommand::Deploy(opt) => deploy(&opt).await,
-        SubCommand::Sign(opt) => sign(&opt).await,
-        SubCommand::ListRegion(opt) => list_region(&opt).await,
-        SubCommand::DeployLambdaFunction(opt) => deploy_function(&opt).await,
-        SubCommand::InvokeLambdaFunction(opt) => invoke_function(&opt).await,
+        SubCommand::Auth(opt) => auth(opt).await,
+        SubCommand::Build(opt) => build(opt),
+        SubCommand::Deploy(opt) => deploy(opt).await,
+        SubCommand::Sign(opt) => sign(opt).await,
+        SubCommand::ListRegion(opt) => list_region(opt).await,
+        SubCommand::DeployLambdaFunction(opt) => deploy_function(opt).await,
+        SubCommand::InvokeLambdaFunction(opt) => invoke_function(opt).await,
     }
 }

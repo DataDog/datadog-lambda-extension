@@ -13,7 +13,7 @@ pub struct ListRegionOptions {
     key: Option<String>,
 }
 
-pub async fn list_region(args: &ListRegionOptions) -> Result<()> {
+pub async fn list_region(args: ListRegionOptions) -> Result<()> {
     // set a random AWS_REGION as ec2:DescribeRgions in region-agnostic
     let config = build_config(&args.key, "us-east-1").await;
     let ec2_client = ec2::Client::new(&config);

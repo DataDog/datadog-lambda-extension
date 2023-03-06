@@ -26,7 +26,7 @@ pub struct DeployOptions {
     description: String,
 }
 
-pub async fn deploy(args: &DeployOptions) -> Result<()> {
+pub async fn deploy(args: DeployOptions) -> Result<()> {
     let config = build_config(&args.key, &args.region).await;
     let lambda_client = lambda::Client::new(&config);
 
@@ -36,13 +36,12 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
 
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
 
-    let description = String::from(&args.description);
     // publish layer
     let builder = lambda_client.publish_layer_version();
     builder
         .set_layer_name(Some(layer_name))
         .set_content(Some(content.set_zip_file(Some(lambda_blob)).build()))
-        .set_description(Some(description))
+        .set_description(Some(args.description))
         .send()
         .await
         .expect("error while publishing the layer");
