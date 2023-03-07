@@ -1,5 +1,5 @@
 variables:
-  GIT_DEPTH: 0
+  GIT_DEPTH: 1
 
 image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 
@@ -25,7 +25,8 @@ release:
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   script:
-    - git clone https://github.com/DataDog/datadog-agent.git
+    - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
+    - ls -lah
     - docker run ${TARGET}
       build
       --version 1
