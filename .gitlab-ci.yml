@@ -25,13 +25,13 @@ release:
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   script:
-    - git clone https://github.com/DataDog/datadog-agent.git .
+    - git clone https://github.com/DataDog/datadog-agent.git
     - docker run ${TARGET}
       build
       --version 1
       --agent-version 1
       --architecture amd64
-      --context-path .
+      --context-path ./datadog-agent
       --destination-path /tmp
       --docker-path "scripts_v2/Dockerfile.build"
       --artifact-name "datadog_extension.zip"
