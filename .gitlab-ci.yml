@@ -27,12 +27,14 @@ release:
   script:
     - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
     - ls -lah
-    - docker run ${TARGET}
+    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
+    - docker cp $dockerId:/build_tools .
+    - ./build_tools
       build
       --version 1
       --agent-version 1
       --architecture amd64
-      --context-path ./datadog-agent
+      --context-path /tmp/datadog-agent
       --destination-path /tmp
       --docker-path "scripts_v2/Dockerfile.build"
       --artifact-name "datadog_extension.zip"

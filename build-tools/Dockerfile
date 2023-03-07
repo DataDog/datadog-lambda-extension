@@ -5,6 +5,6 @@ COPY Cargo.lock .
 COPY src ./src
 RUN cargo build --release
 
-FROM debian:bookworm-slim
+FROM scratch
 COPY --from=builder /usr/src/app/target/release/build_tools /build_tools
 ENTRYPOINT ["/build_tools"]
