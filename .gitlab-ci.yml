@@ -23,6 +23,18 @@ build:
   #       - ~/.cargo
   tags: ["arch:amd64"]
   script:
+    - cred=$(aws sts assume-role 
+      --role-arn "arn:aws:iam::486234852809:role/ci-datadog-lambda-extension" 
+      --role-session-name "publishSession"
+      --query '[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]'
+      --external-id $externalID
+      --output text)
+    - ACCESS_KEY_ID=$(echo "$cred" | awk '{ print $1 }')
+    - export AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID
+    - SECRET_ACCESS_KEY=$(echo "$cred" | awk '{ print $2 }')
+    - export AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY
+    - SESSION_TOKEN=$(echo "$cred" | awk '{ print $3 }')
+    - export AWS_SESSION_TOKEN=$SESSION_TOKEN
     - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 486234852809.dkr.ecr.us-east-1.amazonaws.com
     - cd build-tools && docker buildx build --tag ${TARGET} --push .
   retry: 2
