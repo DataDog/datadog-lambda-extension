@@ -23,7 +23,7 @@ build:
   #       - ~/.cargo
   tags: ["runner:main"]
   script:
-    - aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 486234852809.dkr.ecr.us-east-1.amazonaws.com
+    - aws ecr get-login-password | docker login --username AWS --password-stdin 486234852809.dkr.ecr.us-east-1.amazonaws.com
     - cd build-tools && docker buildx build --tag ${TARGET} --push .
   retry: 2
 
