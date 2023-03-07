@@ -18,10 +18,16 @@ first-job:
       --with-decryption 
       --query "Parameter.Value" 
       --out text)
-    - aws sts assume-role 
+    - cred=$(aws sts assume-role 
       --role-arn "arn:aws:iam::425362996713:role/sandbox-layer-deployer" 
       --role-session-name "publishSession"
-      --external-id $externalID
+      --external-id $externalID)
+    - ACCESS_KEY_ID=$(echo "$cred" | awk '{ print $1 }')
+    - export AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID
+    - SECRET_ACCESS_KEY=$(echo "$cred" | awk '{ print $2 }')
+    - export AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY
+    - SESSION_TOKEN=$(echo "$cred" | awk '{ print $3 }')
+    - export AWS_SESSION_TOKEN=$SESSION_TOKEN
     - aws lambda list-layer-versions --layer-name Datadog-Extension --region us-east-1
 
 second-job:
