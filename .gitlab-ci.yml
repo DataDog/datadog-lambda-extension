@@ -8,6 +8,8 @@ stages:
 
 build:
   stage: build_tools_if_needed
+  variables:
+    CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
   # rules:
   # - changes:
   #   - build-tools/**/*
@@ -20,23 +22,4 @@ build:
   #       - ~/.cargo
   tags: ["runner:main"]
   script:
-    - pip3 install awscli==1.27.85
-    - externalID=$(aws ssm get-parameter 
-      --region us-east-1 
-      --name ci.datadog-lambda-extension.externalid 
-      --with-decryption 
-      --query "Parameter.Value" 
-      --out text)
-    - cred=$(aws sts assume-role 
-      --role-arn "arn:aws:iam::425362996713:role/sandbox-layer-deployer" 
-      --role-session-name "publishSession"
-      --query '[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]'
-      --external-id $externalID
-      --output text)
-    - ACCESS_KEY_ID=$(echo "$cred" | awk '{ print $1 }')
-    - export AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID
-    - SECRET_ACCESS_KEY=$(echo "$cred" | awk '{ print $2 }')
-    - export AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY
-    - SESSION_TOKEN=$(echo "$cred" | awk '{ print $3 }')
-    - export AWS_SESSION_TOKEN=$SESSION_TOKEN
-    - cd build-tools && docker build .
+    - cd build-tools && docker buildx build --tag datadog/build-tools .
