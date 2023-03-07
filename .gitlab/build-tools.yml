@@ -1,0 +1,16 @@
+variables:
+  GIT_DEPTH: 0
+
+image: registry.ddbuild.io/images/mirror/ubuntu:20.04
+
+stages:
+  - build
+
+build:
+  stage: build
+  when: manual
+  tags: ["runner:main"]
+  script:
+    - cd build-tools
+    - cargo test
+    - cargo build --release

@@ -5,10 +5,10 @@ image: registry.ddbuild.io/images/mirror/python:3.9
 
 stages:
   - first
-  - second
 
 first-job:
   stage: first
+  when: manual
   tags: ["runner:main"]
   script:
     - pip3 install awscli==1.27.85
@@ -31,9 +31,3 @@ first-job:
     - SESSION_TOKEN=$(echo "$cred" | awk '{ print $3 }')
     - export AWS_SESSION_TOKEN=$SESSION_TOKEN
     - aws lambda list-layer-versions --layer-name Datadog-Extension --region us-east-1
-
-second-job:
-  stage: second
-  tags: ["runner:main"]
-  script:
-    - echo "Test second step"
