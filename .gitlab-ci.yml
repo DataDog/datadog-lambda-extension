@@ -25,6 +25,9 @@ release:
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   script:
+    - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
+    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
+    - docker cp $dockerId:/build_tools .
     - externalID=$(aws ssm get-parameter 
       --region us-east-1 
       --name ci.datadog-lambda-extension.externalid 
@@ -43,9 +46,6 @@ release:
     - export AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY
     - SESSION_TOKEN=$(echo "$cred" | awk '{ print $3 }')
     - export AWS_SESSION_TOKEN=$SESSION_TOKEN
-    - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
-    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
-    - docker cp $dockerId:/build_tools .
     - ./build_tools
       build
       --version 1
