@@ -6,7 +6,7 @@ first-job:
   stage: first
   tags: ["runner:main"]
   script:
-    - echo "Test first step"
+    - aws iam get-role --role-name ci-datadog-lambda-extension
 
 second-job:
   stage: second
