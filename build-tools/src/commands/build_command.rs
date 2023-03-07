@@ -37,8 +37,11 @@ fn build_cloud_run() -> Result<()> {
 }
 
 fn build_extension(cmd_path: &str, args: &BuildOptions) -> Result<()> {
+    println!("in build extension");
     let destination_path = &args.destination_path;
     let dockerfile_path = &args.docker_path;
+    println!("destination_path = {}", destination_path);
+    println!("dockerfile_path = {}", dockerfile_path);
     let image_name = build_image(args, cmd_path, dockerfile_path.as_str())?;
     let docker_container_id = create_container(image_name.as_str())?;
     std::fs::create_dir(destination_path)?;
@@ -77,6 +80,8 @@ fn build_image(args: &BuildOptions, cmd_path: &str, dockerfile_path: &str) -> Re
         args.context_path.as_str(),
         "--load",
     ];
+
+    println!("docker_args = {:?}", docker_args);
 
     let output = Command::new("docker").args(docker_args).output()?;
     let string_output = std::str::from_utf8(&output.stderr);
