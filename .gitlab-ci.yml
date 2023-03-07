@@ -14,17 +14,9 @@ build:
   # rules:
   # - changes:
   #   - build-tools/**/*
-  # cache:
-  #   - key:
-  #       files:
-  #         - build-tools/Cargo.lock
-  #     paths:
-  #       - build-tools/target
-  #       - ~/.cargo
   tags: ["runner:docker"]
   script:
-    - cd build-tools && docker buildx build --tag ${TARGET} .
-    - docker push ${TARGET}
+    - cd build-tools && docker buildx build --tag ${TARGET} --push .
 
 
 
