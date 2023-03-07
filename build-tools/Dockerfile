@@ -2,6 +2,7 @@ FROM rust as builder
 WORKDIR /usr/src/app
 COPY Cargo.toml .
 COPY Cargo.lock .
+COPY src .
 RUN cargo build --release
 
 FROM gcr.io/distroless/static-debian11

@@ -5,19 +5,34 @@ image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 
 stages:
   - build_tools_if_needed
+  - release_layer
 
 build:
   stage: build_tools_if_needed
   variables:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
-  # rules:
-  # - changes:
-  #   - build-tools/**/*
+  rules:
+  - changes:
+    - build-tools/**/*
   tags: ["runner:docker"]
   script:
     - cd build-tools && docker buildx build --tag ${TARGET} --push .
 
-
+release:
+  stage: release_layer
+  tags: ["runner:docker"]
+  script:
+    - docker pull ${TARGET}
+    - docker run ${TARGET}
+    - docker run ${TARGET} --
+      build
+      --version 1
+      --agent-version 1
+      --architecture amd64
+      --context-path .
+      --destination-path /tmp
+      --docker-path "scripts_v2/Dockerfile.build"
+      --artifact-name "datadog_extension.zip"
 
   
