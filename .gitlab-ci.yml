@@ -4,10 +4,12 @@ stages:
 
 first-job:
   stage: first
+  tags: ["runner:main"]
   script:
     - echo "Test first step"
 
 second-job:
   stage: second
+  tags: ["runner:main"]
   script:
     - echo "Test second step"
