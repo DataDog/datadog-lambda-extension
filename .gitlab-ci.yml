@@ -6,6 +6,7 @@ first-job:
   stage: first
   tags: ["runner:main"]
   script:
+    - pip3 install awscli==1.27.85
     - aws iam get-role --role-name ci-datadog-lambda-extension
 
 second-job:
