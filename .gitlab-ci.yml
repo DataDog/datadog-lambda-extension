@@ -9,7 +9,7 @@ first-job:
   tags: ["runner:main"]
   script:
     - pip3 install awscli==1.27.85
-    - aws lambda list-layer-versions --layer-name Datadog-Extension
+    - aws lambda list-layer-versions --layer-name Datadog-Extension --region us-east-1
 
 second-job:
   stage: second
