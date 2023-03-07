@@ -1,0 +1,13 @@
+stages:
+  - first
+  - second
+
+first-job:
+  stage: first
+  script:
+    - echo "Test first step"
+
+second-job:
+  stage: second
+  script:
+    - echo "Test second step"
