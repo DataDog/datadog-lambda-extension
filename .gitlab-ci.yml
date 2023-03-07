@@ -26,7 +26,6 @@ release:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   script:
     - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
-    - ls -lah
     - dockerId=$(docker create --platform linux/amd64 ${TARGET})
     - docker cp $dockerId:/build_tools .
     - ./build_tools
@@ -35,8 +34,19 @@ release:
       --agent-version 1
       --architecture amd64
       --context-path .
-      --destination-path /tmp
+      --destination-path /tmp/serverless
       --docker-path "scripts_v2/Dockerfile.build"
       --artifact-name "datadog_extension.zip"
+    - ./build_tools
+      sign 
+      --layer-path /tmp/serverless/datadog_extension.zip 
+      --destination-path /tmp/serverless/datadog_extension_signed.zip 
+    - ./build_tools
+      deploy \
+      --layer-path /tmp/serverless/datadog_extension_signed.zip \
+      --architecture amd64 \
+      --layer-name "Datadog-Extension" \
+      --layer-suffix "" \
+      --region sa-east-1
 
   
