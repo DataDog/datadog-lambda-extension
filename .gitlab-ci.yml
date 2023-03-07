@@ -4,25 +4,20 @@ variables:
 image: registry.ddbuild.io/images/mirror/ubuntu:20.04
 
 stages:
-  - build
+  - build_tools_if_needed
 
 build:
-  stage: build
-  cache:
-    - key:
-        files:
-          - build-tools/Cargo.lock
-      paths:
-        - build-tools/target
-        - ~/.cargo
-
-  #when: manual
+  stage: build_tools_if_needed
+  # rules:
+  # - changes:
+  #   - build-tools/**/*
+  # cache:
+  #   - key:
+  #       files:
+  #         - build-tools/Cargo.lock
+  #     paths:
+  #       - build-tools/target
+  #       - ~/.cargo
   tags: ["runner:main"]
   script:
-    - apt-get update -y
-    - apt-get install curl -y
-    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    - source $HOME/.cargo/env
-    - cd build-tools
-    - cargo test
-    - cargo build --release
+    - cd build-tools && docker build . -t DataDog/build-tools
