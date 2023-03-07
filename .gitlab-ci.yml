@@ -27,7 +27,6 @@ release:
   script:
     - docker pull ${TARGET}
     - docker run ${TARGET}
-    - docker run ${TARGET} --
       build
       --version 1
       --agent-version 1
