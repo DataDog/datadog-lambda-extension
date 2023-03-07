@@ -22,5 +22,5 @@ build:
   #       - ~/.cargo
   tags: ["arch:amd64"]
   script:
-    - cat /etc/*-release
-    - cd build-tools && docker buildx build --tag datadog/build-tools .
+    - cd build-tools && docker buildx build --tag 425362996713.dkr.ecr.us-east-1.amazonaws.com/serverless-build-tools --push .
+  retry: 2
