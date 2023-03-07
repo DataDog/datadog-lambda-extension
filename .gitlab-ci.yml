@@ -60,9 +60,9 @@ release:
       --layer-path /tmp/serverless/datadog_extension.zip 
       --destination-path /tmp/serverless/datadog_extension_signed.zip 
     - ./build_tools
-      deploy \
-      --layer-path /tmp/serverless/datadog_extension_signed.zip \
-      --architecture amd64 \
-      --layer-name "Datadog-Extension" \
-      --layer-suffix "" \
+      deploy
+      --layer-path /tmp/serverless/datadog_extension_signed.zip
+      --architecture amd64
+      --layer-name "Datadog-Extension"
+      --layer-suffix ""
       --region sa-east-1
