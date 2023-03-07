@@ -13,8 +13,8 @@ build:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   rules:
-  - changes:
-    - build-tools/**/*
+    - changes:
+      - build-tools/**/*
   tags: ["runner:docker"]
   script:
     - cd build-tools && docker buildx build --tag ${TARGET} --push .
