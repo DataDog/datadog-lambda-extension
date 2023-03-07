@@ -11,7 +11,7 @@ first-job:
     PIPELINE_EXECUTION_ROLE: {{pipeline_execution_role}}
   script:
     - pip3 install awscli==1.27.85
-    - ./ci-script/assume-role.sh ${PIPELINE_EXECUTION_ROLE} ci-datadog-lambda-extension
+    - aws lambda list-layer-versions --layer-name Datadog-Extension
 
 second-job:
   stage: second
