@@ -37,10 +37,8 @@ fn build_cloud_run() -> Result<()> {
 }
 
 fn build_extension(cmd_path: &str, args: &BuildOptions) -> Result<()> {
-    let github_workspace =
-        env::var("GITHUB_WORKSPACE").expect("could not find GITHUB_WORKSPACE env var");
     let destination_path = &args.destination_path;
-    let dockerfile_path = format!("{}/{}", github_workspace, args.docker_path);
+    let dockerfile_path = &args.docker_path;
     let image_name = build_image(args, cmd_path, dockerfile_path.as_str())?;
     let docker_container_id = create_container(image_name.as_str())?;
     std::fs::create_dir(destination_path)?;
