@@ -8,9 +8,19 @@ stages:
 
 build:
   stage: build
-  when: manual
+  cache:
+    - key:
+        files:
+          - build-tools/Cargo.lock
+      paths:
+        - build-tools/target
+        - ~/.cargo
+
+  #when: manual
   tags: ["runner:main"]
   script:
+    - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    - source $HOME/.cargo/env
     - cd build-tools
     - cargo test
     - cargo build --release
