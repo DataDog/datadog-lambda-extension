@@ -1,3 +1,6 @@
+variables:
+  GIT_DEPTH: 0
+
 image: registry.ddbuild.io/images/mirror/python:3.9
 
 stages:
