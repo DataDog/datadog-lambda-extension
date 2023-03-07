@@ -22,5 +22,7 @@ build:
   #       - ~/.cargo
   tags: ["arch:amd64"]
   script:
+    - systemctl start docker
+    - sleep 15
     - docker ps
     - cd build-tools && docker buildx build --tag datadog/build-tools .
