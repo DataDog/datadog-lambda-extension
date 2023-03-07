@@ -21,7 +21,9 @@ first-job:
     - cred=$(aws sts assume-role 
       --role-arn "arn:aws:iam::425362996713:role/sandbox-layer-deployer" 
       --role-session-name "publishSession"
-      --external-id $externalID)
+      --query '[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]'
+      --external-id $externalID
+      --output text)
     - ACCESS_KEY_ID=$(echo "$cred" | awk '{ print $1 }')
     - export AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID
     - SECRET_ACCESS_KEY=$(echo "$cred" | awk '{ print $2 }')
