@@ -22,5 +22,6 @@ build:
   #       - ~/.cargo
   tags: ["runner:main"]
   script:
+    - sleep 60
     - docker ps
     - cd build-tools && docker buildx build --tag datadog/build-tools .
