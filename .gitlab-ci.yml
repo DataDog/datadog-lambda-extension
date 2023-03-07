@@ -22,6 +22,8 @@ build:
 release:
   stage: release_layer
   tags: ["runner:docker"]
+  variables:
+    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   script:
     - docker pull ${TARGET}
     - docker run ${TARGET}
