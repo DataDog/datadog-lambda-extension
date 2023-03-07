@@ -18,14 +18,12 @@ pub struct DeployOptions {
     architecture: BuildArchitecture,
     #[structopt(long)]
     layer_suffix: Option<String>,
-    #[structopt(long)]
-    key: Option<String>,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
 }
 
 pub async fn deploy(args: &DeployOptions) -> Result<()> {
-    let config = build_config(&args.key, &args.region).await;
+    let config = build_config(&args.region).await;
     let lambda_client = lambda::Client::new(&config);
 
     // build the content object

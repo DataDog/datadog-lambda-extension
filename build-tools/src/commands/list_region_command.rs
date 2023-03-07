@@ -9,13 +9,11 @@ use crate::security::build_config;
 
 #[derive(Debug, StructOpt)]
 pub struct ListRegionOptions {
-    #[structopt(long)]
-    key: Option<String>,
 }
 
-pub async fn list_region(args: &ListRegionOptions) -> Result<()> {
+pub async fn list_region(_: &ListRegionOptions) -> Result<()> {
     // set a random AWS_REGION as ec2:DescribeRgions in region-agnostic
-    let config = build_config(&args.key, "us-east-1").await;
+    let config = build_config("us-east-1").await;
     let ec2_client = ec2::Client::new(&config);
     let regions = get_list(&ec2_client).await?;
     write_region(&regions)?;

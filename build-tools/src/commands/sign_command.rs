@@ -24,12 +24,10 @@ pub struct SignOptions {
     layer_path: String,
     #[structopt(long)]
     destination_path: String,
-    #[structopt(long)]
-    key: Option<String>,
 }
 
 pub async fn sign(args: &SignOptions) -> Result<()> {
-    let config = build_config(&args.key, "sa-east-1").await; // TODO fixeme when ready for production
+    let config = build_config("sa-east-1").await; // TODO fixeme when ready for production
     let s3_client = s3::Client::new(&config);
     let signer_client = signer::Client::new(&config);
     let key = build_s3_key();
