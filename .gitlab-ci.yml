@@ -34,7 +34,7 @@ release:
       --version 1
       --agent-version 1
       --architecture amd64
-      --context-path /tmp/datadog-agent
+      --context-path .
       --destination-path /tmp
       --docker-path "scripts_v2/Dockerfile.build"
       --artifact-name "datadog_extension.zip"
