@@ -28,15 +28,15 @@ pub struct SignOptions {
     key: Option<String>,
 }
 
-pub async fn sign(args: &SignOptions) -> Result<()> {
+pub async fn sign(args: SignOptions) -> Result<()> {
     let config = build_config(&args.key, "sa-east-1").await; // TODO fixeme when ready for production
     let s3_client = s3::Client::new(&config);
     let signer_client = signer::Client::new(&config);
     let key = build_s3_key();
-    upload_object(args, &key, &s3_client).await?;
+    upload_object(&args, &key, &s3_client).await?;
     let job_id = sign_object(&key, &signer_client).await?;
     verify(&job_id, &signer_client).await?;
-    download_object(args, &job_id, &s3_client).await?;
+    download_object(&args, &job_id, &s3_client).await?;
     delete_object(&job_id, &s3_client).await?;
     delete_object(&key, &s3_client).await?;
     Ok(())

@@ -30,6 +30,10 @@ on:
         type: string
         description: Suffix to be appended to the layer name (default empty)
         default: ""
+      description:
+        type: string
+        description: Optional description to add to the layer (default empty)
+        default: ""
 
 jobs:
   prepare-artifact:
@@ -122,7 +126,8 @@ jobs:
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
           --region ${{ github.event.inputs.region }} \
-          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }} \
+          --description "${{ inputs.description }}"
 
   deploy-artifact:
     if: ${{ github.event.inputs.region == 'all' }}
@@ -164,4 +169,5 @@ jobs:
           --layer-name "Datadog-Extension" \
           --layer-suffix "${{ inputs.layerSuffix }}" \
           --region ${{ matrix.aws_region }} \
-          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
+          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }} \
+          --description "${{ inputs.description }}"

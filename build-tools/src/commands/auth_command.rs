@@ -15,7 +15,7 @@ pub struct AuthOptions {
     key: String,
 }
 
-pub async fn auth(args: &AuthOptions) -> Result<()> {
+pub async fn auth(args: AuthOptions) -> Result<()> {
     // set a random AWS_REGION as sts in region-agnostic
     std::env::set_var("AWS_REGION", "us-east-1");
 

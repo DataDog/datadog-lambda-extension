@@ -22,9 +22,11 @@ pub struct DeployOptions {
     key: Option<String>,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
+    #[structopt(long)]
+    description: String,
 }
 
-pub async fn deploy(args: &DeployOptions) -> Result<()> {
+pub async fn deploy(args: DeployOptions) -> Result<()> {
     let config = build_config(&args.key, &args.region).await;
     let lambda_client = lambda::Client::new(&config);
 
@@ -39,6 +41,7 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
     builder
         .set_layer_name(Some(layer_name))
         .set_content(Some(content.set_zip_file(Some(lambda_blob)).build()))
+        .set_description(Some(args.description))
         .send()
         .await
         .expect("error while publishing the layer");

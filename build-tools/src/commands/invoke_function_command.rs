@@ -15,7 +15,7 @@ pub struct InvokeFunctionOptions {
     pub remove_after: bool,
 }
 
-pub async fn invoke_function(args: &InvokeFunctionOptions) -> Result<()> {
+pub async fn invoke_function(args: InvokeFunctionOptions) -> Result<()> {
     std::env::set_var("AWS_REGION", &args.region);
     let config = aws_config::load_from_env().await;
     let lambda_client = lambda::Client::new(&config);
