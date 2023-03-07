@@ -20,4 +20,4 @@ build:
   #       - ~/.cargo
   tags: ["runner:main"]
   script:
-    - cd build-tools && docker build . -t DataDog/build-tools
+    - cd build-tools && docker build . -t datadog/build-tools
