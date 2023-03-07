@@ -7,8 +7,6 @@ stages:
 first-job:
   stage: first
   tags: ["runner:main"]
-  variables:
-    PIPELINE_EXECUTION_ROLE: {{pipeline_execution_role}}
   script:
     - pip3 install awscli==1.27.85
     - aws lambda list-layer-versions --layer-name Datadog-Extension
