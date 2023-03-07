@@ -7,9 +7,11 @@ stages:
 first-job:
   stage: first
   tags: ["runner:main"]
+  variables:
+    PIPELINE_EXECUTION_ROLE: {{pipeline_execution_role}}
   script:
     - pip3 install awscli==1.27.85
-    - aws iam get-role --role-name ci-datadog-lambda-extension
+    - ./ci-script/assume-role.sh ${PIPELINE_EXECUTION_ROLE} ci-datadog-lambda-extension
 
 second-job:
   stage: second
