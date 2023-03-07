@@ -9,6 +9,16 @@ first-job:
   tags: ["runner:main"]
   script:
     - pip3 install awscli==1.27.85
+    - externalID=$(aws ssm get-parameter 
+      --region us-east-1 
+      --name ci.datadog-lambda-extension.externalid 
+      --with-decryption 
+      --query "Parameter.Value" 
+      --out text)
+    - aws sts assume-role 
+      --role-arn "arn:aws:iam::425362996713:role/sandbox-layer-deployer" 
+      --role-session-name "publish layer session"
+      --external-id $externalID
     - aws lambda list-layer-versions --layer-name Datadog-Extension --region us-east-1
 
 second-job:
