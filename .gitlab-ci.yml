@@ -1,7 +1,7 @@
 variables:
   GIT_DEPTH: 0
 
-image: registry.ddbuild.io/images/mirror/ubuntu:20.04
+image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 
 stages:
   - build_tools_if_needed
