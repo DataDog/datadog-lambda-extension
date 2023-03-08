@@ -79,7 +79,6 @@ fn build_image(args: &BuildOptions, cmd_path: &str, dockerfile_path: &str) -> Re
     ];
 
     let output = Command::new("docker").args(docker_args).output()?;
-    let string_output = std::str::from_utf8(&output.stderr);
 
     match output.status.success() {
         true => Ok(docker_image_name),
