@@ -46,8 +46,6 @@ release:
       --destination-path /tmp/serverless
       --docker-path "scripts_v2/Dockerfile.build"
       --artifact-name "datadog_extension.zip"
-      --assume-role "$ROLE_TO_ASSUME"
-      --external-id "$EXTERNAL_ID"
     # sign
     - ./build_tools
       sign 
