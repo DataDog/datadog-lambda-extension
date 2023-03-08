@@ -24,28 +24,19 @@ release:
   tags: ["runner:docker"]
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+    ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
   script:
     - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
     - dockerId=$(docker create --platform linux/amd64 ${TARGET})
     - docker cp $dockerId:/build_tools .
-    - externalID=$(aws ssm get-parameter 
+    - EXTERNAL_ID=$(aws ssm get-parameter 
       --region us-east-1 
       --name ci.datadog-lambda-extension.externalid 
       --with-decryption 
       --query "Parameter.Value" 
       --out text)
-    - cred=$(aws sts assume-role 
-      --role-arn "arn:aws:iam::425362996713:role/sandbox-layer-deployer" 
-      --role-session-name "publishSession"
-      --query '[Credentials.AccessKeyId,Credentials.SecretAccessKey,Credentials.SessionToken]'
-      --external-id $externalID
-      --output text)
-    - ACCESS_KEY_ID=$(echo "$cred" | awk '{ print $1 }')
-    - export AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID
-    - SECRET_ACCESS_KEY=$(echo "$cred" | awk '{ print $2 }')
-    - export AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY
-    - SESSION_TOKEN=$(echo "$cred" | awk '{ print $3 }')
-    - export AWS_SESSION_TOKEN=$SESSION_TOKEN
+
+    # build
     - ./build_tools
       build
       --version 1
@@ -55,10 +46,16 @@ release:
       --destination-path /tmp/serverless
       --docker-path "scripts_v2/Dockerfile.build"
       --artifact-name "datadog_extension.zip"
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
+    # sign
     - ./build_tools
       sign 
       --layer-path /tmp/serverless/datadog_extension.zip 
       --destination-path /tmp/serverless/datadog_extension_signed.zip 
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
+    # deploy
     - ./build_tools
       deploy
       --layer-path /tmp/serverless/datadog_extension_signed.zip
@@ -66,3 +63,5 @@ release:
       --layer-name "Datadog-Extension"
       --layer-suffix ""
       --region sa-east-1
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
