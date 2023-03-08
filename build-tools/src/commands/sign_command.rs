@@ -32,7 +32,7 @@ pub struct SignOptions {
 
 pub async fn sign(args: &SignOptions) -> Result<()> {
     let config = build_config(
-        "us-east-1",
+        "sa-east-1",
         args.assume_role.clone(),
         args.external_id.clone(),
     )
