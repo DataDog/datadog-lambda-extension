@@ -1,13 +1,11 @@
 use commands::{
-    build_command::build, deploy_command::deploy,
-    deploy_function_command::deploy_function, invoke_function_command::invoke_function,
-    list_region_command::list_region, sign_command::sign,
+    build_command::build, deploy_command::deploy, deploy_function_command::deploy_function,
+    invoke_function_command::invoke_function, list_region_command::list_region, sign_command::sign,
 };
 use std::io::Result;
 use structopt::StructOpt;
 
 mod commands;
-mod security;
 
 #[derive(Debug, StructOpt)]
 enum SubCommand {
@@ -18,7 +16,7 @@ enum SubCommand {
     #[structopt(name = "sign", about = "Sign Layer")]
     Sign(commands::sign_command::SignOptions),
     #[structopt(name = "list_region", about = "List AWS Region")]
-    ListRegion,
+    ListRegion(commands::list_region_command::ListRegionOptions),
     #[structopt(name = "deploy_lambda", about = "Deploy AWS Lambda Function")]
     DeployLambdaFunction(commands::deploy_function_command::DeployFunctionOptions),
     #[structopt(name = "invoke_lambda", about = "Invoke AWS Lambda Function")]
@@ -43,7 +41,7 @@ async fn main() -> Result<()> {
         SubCommand::Build(opt) => build(&opt),
         SubCommand::Deploy(opt) => deploy(&opt).await,
         SubCommand::Sign(opt) => sign(&opt).await,
-        SubCommand::ListRegion => list_region().await,
+        SubCommand::ListRegion(opt) => list_region(&opt).await,
         SubCommand::DeployLambdaFunction(opt) => deploy_function(&opt).await,
         SubCommand::InvokeLambdaFunction(opt) => invoke_function(&opt).await,
     }

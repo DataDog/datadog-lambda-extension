@@ -3,8 +3,7 @@ use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
 
-use crate::security::build_config;
-
+use super::common::build_config;
 use super::common::get_file_as_vec;
 use super::common::BuildArchitecture;
 
@@ -20,10 +19,19 @@ pub struct DeployOptions {
     layer_suffix: Option<String>,
     #[structopt(long, default_value = "sa-east-1")]
     region: String,
+    #[structopt(long)]
+    assume_role: Option<String>,
+    #[structopt(long)]
+    external_id: Option<String>,
 }
 
 pub async fn deploy(args: &DeployOptions) -> Result<()> {
-    let config = build_config(&args.region).await;
+    let config = build_config(
+        &args.region,
+        args.assume_role.clone(),
+        args.external_id.clone(),
+    )
+    .await;
     let lambda_client = lambda::Client::new(&config);
 
     // build the content object

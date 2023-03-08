@@ -1,5 +1,6 @@
 pub mod common;
 
+pub mod assume_role_command;
 pub mod build_command;
 pub mod deploy_command;
 pub mod deploy_function_command;
