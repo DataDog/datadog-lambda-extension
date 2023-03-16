@@ -22,6 +22,13 @@ on:
         options:
         - amd64
         - arm64
+      buildTags:
+        type: choice
+        description: Build tags
+        default: 'serverless otlp'
+        options:
+          - 'serverless otlp'
+          - 'serverless'
       agentBranch:
         type: string
         description: Datadog agent branch name (default main)
@@ -80,6 +87,7 @@ jobs:
          --context-path "${GITHUB_WORKSPACE}" \
          --destination-path "${GITHUB_WORKSPACE}/tmp" \
          --docker-path "scripts_v2/Dockerfile.build" \
+         --build-tags "${{ inputs.buildTags }}" \
          --artifact-name "datadog_extension.zip"
       - name: Sign the layer
         env:
