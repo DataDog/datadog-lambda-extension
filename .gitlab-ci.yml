@@ -42,6 +42,7 @@ build_and_deploy_layer:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   tags: ["runner:docker"]
   artifacts:
+    untracked: true
     paths:
       - /tmp/serverless/* 
   script:
