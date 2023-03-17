@@ -42,54 +42,53 @@ build_and_deploy_layer:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   tags: ["runner:docker"]
   artifacts:
-    untracked: true
     paths:
-      - /tmp/serverless/* 
+      - tmp/serverless/datadog_extension_signed
   script:
-    - ls
-    # - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
-    # - dockerId=$(docker create --platform linux/amd64 ${TARGET})
-    # - docker cp $dockerId:/build_tools .
-    # - EXTERNAL_ID=$(aws ssm get-parameter 
-    #   --region us-east-1 
-    #   --name ci.datadog-lambda-extension.externalid 
-    #   --with-decryption 
-    #   --query "Parameter.Value" 
-    #   --out text)
+    - mkdir -p tmp/serverless
+    - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
+    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
+    - docker cp $dockerId:/build_tools .
+    - EXTERNAL_ID=$(aws ssm get-parameter 
+      --region us-east-1 
+      --name ci.datadog-lambda-extension.externalid 
+      --with-decryption 
+      --query "Parameter.Value" 
+      --out text)
 
-    # # build
-    # - ./build_tools
-    #   build
-    #   --version 1
-    #   --agent-version 1
-    #   --architecture amd64
-    #   --context-path .
-    #   --destination-path /tmp/serverless
-    #   --docker-path "scripts_v2/Dockerfile.build"
-    #   --artifact-name "datadog_extension.zip"
+    # build
+    - ./build_tools
+      build
+      --version 1
+      --agent-version 1
+      --architecture amd64
+      --context-path .
+      --destination-path tmp/serverless
+      --docker-path "scripts_v2/Dockerfile.build"
+      --artifact-name "datadog_extension.zip"
 
-    # # sign
-    # - ./build_tools
-    #   sign 
-    #   --layer-path /tmp/serverless/datadog_extension.zip 
-    #   --destination-path /tmp/serverless/datadog_extension_signed.zip 
-    #   --assume-role "$ROLE_TO_ASSUME"
-    #   --external-id "$EXTERNAL_ID"
+    # sign
+    - ./build_tools
+      sign 
+      --layer-path tmp/serverless/datadog_extension.zip 
+      --destination-path tmp/serverless/datadog_extension_signed.zip 
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
 
-    # # ls artifacts
-    # - ls /tmp/serverless
+    # ls artifacts
+    - ls tmp/serverless
 
-    # # deploy to single region if needed
-    # - if [ "${REGION_TO_DEPLOY}" = "all" ]; then exit 0; fi
-    # - ./build_tools
-    #   deploy
-    #   --layer-path /tmp/serverless/datadog_extension_signed.zip
-    #   --architecture amd64
-    #   --layer-name "Datadog-Extension"
-    #   --layer-suffix "$LAYER_SUFFIX"
-    #   --region "$REGION_TO_DEPLOY"
-    #   --assume-role "$ROLE_TO_ASSUME"
-    #   --external-id "$EXTERNAL_ID"
+    # deploy to single region if needed
+    - if [ "${REGION_TO_DEPLOY}" = "all" ]; then exit 0; fi
+    - ./build_tools
+      deploy
+      --layer-path tmp/serverless/datadog_extension_signed.zip
+      --architecture amd64
+      --layer-name "Datadog-Extension"
+      --layer-suffix "$LAYER_SUFFIX"
+      --region "$REGION_TO_DEPLOY"
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
 
 prepare_multi_region:
   stage: prepare_multi_region
@@ -120,7 +119,8 @@ prepare_multi_region:
     - dockerId=$(docker create --platform linux/amd64 ${TARGET})
     - docker cp $dockerId:/build_tools .
     - regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME" --external-id "$EXTERNAL_ID")
-    - sed "s/XXX/${regions}/" trigger_region.orig.yaml > trigger_region.yaml
+    - sed "s/xxx_layer_sufix_xxx/${LAYER_SUFFIX}/" trigger_region.orig.yaml > trigger_region.yaml
+    - sed "s/xxx_aws_regions_xxx/${regions}/" trigger_region.yaml > trigger_region.yaml
     - cat trigger_region.yaml
 
 multi_region:
