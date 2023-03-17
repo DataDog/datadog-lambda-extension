@@ -94,6 +94,9 @@ build_and_deploy_layer:
 prepare_multi_region:
   stage: prepare_multi_region
   tags: ["runner:docker"]
+  artifacts:
+    paths:
+      - trigger_region.yaml
   rules:
     - if: $REGION_TO_DEPLOY != "all"
       when: never
