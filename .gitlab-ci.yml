@@ -92,12 +92,11 @@ build_and_deploy_layer:
 prepare_multi_region:
   stage: prepare_multi_region
   tags: ["runner:docker"]
-  rules:
-    - if: $REGION_TO_DEPLOY == "all"
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
   script:
+    - if [ "${REGION_TO_DEPLOY}" != "all" ]; then exit 0; fi
     - EXTERNAL_ID=$(aws ssm get-parameter
         --region us-east-1
         --name ci.datadog-lambda-extension.externalid
