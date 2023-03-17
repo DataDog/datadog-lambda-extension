@@ -34,7 +34,7 @@ release:
     - sed 's/XXX/us-east-1/' trigger_region.orig.yaml > trigger_region.yaml
 
 multi_region:
-  stage: triggers
+  stage: trigger
   trigger:
     include:
       - artifact: trigger_region.yaml
