@@ -5,9 +5,8 @@ image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 
 stages:
   - build_tools_if_needed
-  - trigger_multi_region
   - release_layer
-  - trigger_single_region
+  - trigger
 
 build:
   stage: build_tools_if_needed
@@ -34,7 +33,7 @@ release:
   script:
     - sed 's/XXX/us-east-1/' trigger_region.orig.yaml > trigger_region.yaml
 
-trigger_single_region:
+multi_region:
   stage: triggers
   trigger:
     include:
