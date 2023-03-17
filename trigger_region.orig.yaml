@@ -11,7 +11,7 @@ deploy_single_region:
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
-    LAYER_SUFFIX: xxx_layer_sufix_xxx
+    LAYER_SUFFIX: "xxx_layer_sufix_xxx"
   tags: ["runner:docker"]
   parallel:
     matrix:
