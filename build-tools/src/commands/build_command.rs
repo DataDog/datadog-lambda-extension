@@ -23,6 +23,8 @@ pub struct BuildOptions {
     artifact_name: String,
     #[structopt(long)]
     docker_path: String,
+    #[structopt(long, default_value = "serverless otlp")]
+    build_tags: String,
 }
 
 pub fn build(args: &BuildOptions) -> Result<()> {
@@ -60,6 +62,7 @@ fn build_image(args: &BuildOptions, cmd_path: &str, dockerfile_path: &str) -> Re
     let extension_version_build_arg = format!("EXTENSION_VERSION={}", args.version);
     let agent_version_build_arg = format!("AGENT_VERSION={}", args.agent_version);
     let cmd_path_build_arg = format!("CMD_PATH={}", cmd_path);
+    let build_tags_build_arg = format!("BUILD_TAGS={}", args.build_tags);
 
     let docker_args = [
         "buildx",
@@ -76,6 +79,8 @@ fn build_image(args: &BuildOptions, cmd_path: &str, dockerfile_path: &str) -> Re
         agent_version_build_arg.as_str(),
         "--build-arg",
         cmd_path_build_arg.as_str(),
+        "--build-arg",
+        build_tags_build_arg.as_str(),
         args.context_path.as_str(),
         "--load",
     ];

@@ -21,8 +21,10 @@ fi
 
 if [ -z "$CLOUD_RUN" ]; then
     CMD_PATH="cmd/serverless"
+    BUILD_TAGS="serverless otlp"
 else
     CMD_PATH="cmd/serverless-init"
+    BUILD_TAGS="serverless"
 fi
 
 AGENT_PATH="../datadog-agent"
