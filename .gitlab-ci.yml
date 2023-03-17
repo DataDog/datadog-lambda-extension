@@ -77,13 +77,6 @@ build_and_deploy_layer:
       --assume-role "$ROLE_TO_ASSUME"
       --external-id "$EXTERNAL_ID"
 
-multi_region:
-  stage: trigger
-  trigger:
-    include:
-      - artifact: trigger_region.yaml
-        job: release
-
 release:
   stage: release_layer
   tags: ["runner:docker"]
@@ -104,3 +97,10 @@ release:
     - docker cp $dockerId:/build_tools .
     - regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME" --external-id "$EXTERNAL_ID")
     - sed 's/XXX/$regions/' trigger_region.orig.yaml > trigger_region.yaml
+
+multi_region:
+  stage: trigger
+  trigger:
+    include:
+      - artifact: trigger_region.yaml
+        job: release
