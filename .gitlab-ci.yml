@@ -117,6 +117,7 @@ prepare_multi_region:
     - docker cp $dockerId:/build_tools .
     - regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME" --external-id "$EXTERNAL_ID")
     - sed 's/XXX/$regions/' trigger_region.orig.yaml > trigger_region.yaml
+    - cat trigger_region.yaml
 
 multi_region:
   rules:
