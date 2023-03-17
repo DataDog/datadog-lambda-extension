@@ -97,9 +97,6 @@ prepare_multi_region:
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
-  artifacts:
-    paths:
-      - /tmp/serverless/*
   script:
     - EXTERNAL_ID=$(aws ssm get-parameter
         --region us-east-1
