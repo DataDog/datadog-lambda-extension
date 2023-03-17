@@ -93,6 +93,8 @@ build_and_deploy_layer:
 prepare_multi_region:
   stage: prepare_multi_region
   tags: ["runner:docker"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
