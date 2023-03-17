@@ -117,6 +117,8 @@ prepare_multi_region:
     - sed 's/XXX/$regions/' trigger_region.orig.yaml > trigger_region.yaml
 
 multi_region:
+  rules:
+    - if: $REGION_TO_DEPLOY == "all"
   stage: trigger
   trigger:
     include:
