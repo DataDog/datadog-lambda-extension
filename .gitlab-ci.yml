@@ -7,6 +7,7 @@ stages:
   - build_tools_if_needed
   - trigger_multi_region
   - release_layer
+  - trigger_single_region
 
 build:
   stage: build_tools_if_needed
