@@ -9,8 +9,8 @@ image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 stages:
   - build_tools_if_needed
   - build_layer
-  - trigger
   - release_layer
+  - trigger
 
 build_tools:
   stage: build_tools_if_needed
