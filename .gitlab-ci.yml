@@ -43,7 +43,7 @@ build_and_deploy_layer:
   tags: ["runner:docker"]
   artifacts:
     paths:
-      - tmp/serverless/datadog_extension_signed
+      - tmp/serverless/datadog_extension_signed.zip
   script:
     - mkdir tmp
     - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
