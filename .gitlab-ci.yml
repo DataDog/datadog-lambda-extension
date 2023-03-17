@@ -116,4 +116,4 @@ multi_region:
   trigger:
     include:
       - artifact: trigger_region.yaml
-        job: release
+        job: prepare_multi_region
