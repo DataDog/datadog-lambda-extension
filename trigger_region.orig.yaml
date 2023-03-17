@@ -10,7 +10,9 @@ deploy_single_region:
   stage: deploy_single_region
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
-    REGION_PARAM: XXX
   tags: ["runner:docker"]
+  parallel:
+    matrix:
+      - PARAM_AWS_REGION: [XXX]
   script:
-    - echo "deploying for region = $REGION_PARAM"
+    - echo "deploying for region = $PARAM_AWS_REGION"

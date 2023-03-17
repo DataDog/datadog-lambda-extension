@@ -1,5 +1,4 @@
 use std::io::Result;
-use std::io::Write;
 use std::io::{Error, ErrorKind};
 
 use aws_sdk_ec2 as ec2;
@@ -25,7 +24,7 @@ pub async fn list_region(args: &ListRegionOptions) -> Result<()> {
     .await;
     let ec2_client = ec2::Client::new(&config);
     let regions = get_list(&ec2_client).await?;
-    write_region(&regions)?;
+    output_region(&regions)?;
     Ok(())
 }
 
@@ -50,14 +49,14 @@ async fn get_list(ec2_client: &ec2::Client) -> Result<Vec<String>> {
     }
 }
 
-fn write_region(regions: &Vec<String>) -> Result<()> {
-    let github_env_file =
-        std::env::var("GITHUB_OUTPUT").expect("could not find GITHUB_OUTPUT file");
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open(github_env_file)
-        .expect("could not open GITHUB_OUTPUT file");
-    writeln!(file, "AWS_REGIONS={:?}", regions)?;
+fn output_region(regions: &Vec<String>, ) -> Result<()> {
+    let mut first = true;
+    for region in regions.iter() {
+        if !first {
+            print!(",");
+        }
+        first = false;
+        print!("{}", region);
+    }
     Ok(())
 }
