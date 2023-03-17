@@ -45,7 +45,7 @@ build_and_deploy_layer:
     paths:
       - tmp/serverless/datadog_extension_signed
   script:
-    - mkdir -p tmp/serverless
+    - mkdir tmp
     - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
     - dockerId=$(docker create --platform linux/amd64 ${TARGET})
     - docker cp $dockerId:/build_tools .
