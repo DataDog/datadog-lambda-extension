@@ -1,7 +1,7 @@
 variables:
   GIT_DEPTH: 1
   REGION_TO_DEPLOY:
-    description: "use <sa-east-1> for dev, <us-east-1> for RC & <all> for all regions (without the <>)"
+    description: "use sa-east-1 for dev, us-east-1 for RC, all for all regions"
     value: sa-east-1
 
 image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
@@ -42,7 +42,7 @@ release:
         --out text)
     - dockerId=$(docker create --platform linux/amd64 ${TARGET})
     - docker cp $dockerId:/build_tools .
-    - $regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME --external-id "$EXTERNAL_ID")
+    - $regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME" --external-id "$EXTERNAL_ID")
     - sed 's/XXX/$regions/' trigger_region.orig.yaml > trigger_region.yaml
 
 multi_region:
