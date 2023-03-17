@@ -21,10 +21,16 @@ fi
 
 if [ -z "$CLOUD_RUN" ]; then
     CMD_PATH="cmd/serverless"
-    BUILD_TAGS="serverless otlp"
 else
     CMD_PATH="cmd/serverless-init"
-    BUILD_TAGS="serverless"
+fi
+
+if [ -z "$BUILD_TAGS" ]; then
+    if [ -z "$CLOUD_RUN" ]; then
+        BUILD_TAGS="serverless otlp"
+    else
+        BUILD_TAGS="serverless"
+    fi
 fi
 
 AGENT_PATH="../datadog-agent"
@@ -57,10 +63,6 @@ cd $ROOT_DIR
 BUILD_FILE=Dockerfile.build
 if [ "$RACE_DETECTION_ENABLED" = "true" ]; then
     BUILD_FILE=Dockerfile.race.build
-fi
-
-if [ -z "$BUILD_TAGS" ]; then
-    BUILD_TAGS="serverless"
 fi
 
 function docker_build_zip {
