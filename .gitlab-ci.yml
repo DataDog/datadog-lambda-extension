@@ -96,6 +96,7 @@ prepare_multi_region:
   artifacts:
     paths:
       - trigger_region.yaml
+      - tmp/serverless/datadog_extension_signed.zip
   rules:
     - if: $REGION_TO_DEPLOY != "all"
       when: never
