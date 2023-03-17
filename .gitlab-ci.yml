@@ -29,43 +29,56 @@ release:
   artifacts:
     paths:
       - /tmp/serverless/datadog_extension_signed.zip 
+      - trigger_region.yaml
   script:
-    - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
-    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
-    - docker cp $dockerId:/build_tools .
-    - EXTERNAL_ID=$(aws ssm get-parameter 
-      --region us-east-1 
-      --name ci.datadog-lambda-extension.externalid 
-      --with-decryption 
-      --query "Parameter.Value" 
-      --out text)
+    - sed 's/XXX/us-east-1/' trigger_region.orig.yaml > trigger_region.yaml
 
-    # build
-    - ./build_tools
-      build
-      --version 1
-      --agent-version 1
-      --architecture amd64
-      --context-path .
-      --destination-path /tmp/serverless
-      --docker-path "scripts_v2/Dockerfile.build"
-      --artifact-name "datadog_extension.zip"
+trigger_single_region:
+  stage: triggers
+  trigger:
+    include:
+      - artifact: trigger_region.yaml
+        job: release
 
-    # sign
-    - ./build_tools
-      sign 
-      --layer-path /tmp/serverless/datadog_extension.zip 
-      --destination-path /tmp/serverless/datadog_extension_signed.zip 
-      --assume-role "$ROLE_TO_ASSUME"
-      --external-id "$EXTERNAL_ID"
 
-    # deploy
-    - ./build_tools
-      deploy
-      --layer-path /tmp/serverless/datadog_extension_signed.zip
-      --architecture amd64
-      --layer-name "Datadog-Extension"
-      --layer-suffix ""
-      --region sa-east-1
-      --assume-role "$ROLE_TO_ASSUME"
-      --external-id "$EXTERNAL_ID"
+
+
+    # - git clone --depth=1 https://github.com/DataDog/datadog-agent.git
+    # - dockerId=$(docker create --platform linux/amd64 ${TARGET})
+    # - docker cp $dockerId:/build_tools .
+    # - EXTERNAL_ID=$(aws ssm get-parameter 
+    #   --region us-east-1 
+    #   --name ci.datadog-lambda-extension.externalid 
+    #   --with-decryption 
+    #   --query "Parameter.Value" 
+    #   --out text)
+
+    # # build
+    # - ./build_tools
+    #   build
+    #   --version 1
+    #   --agent-version 1
+    #   --architecture amd64
+    #   --context-path .
+    #   --destination-path /tmp/serverless
+    #   --docker-path "scripts_v2/Dockerfile.build"
+    #   --artifact-name "datadog_extension.zip"
+
+    # # sign
+    # - ./build_tools
+    #   sign 
+    #   --layer-path /tmp/serverless/datadog_extension.zip 
+    #   --destination-path /tmp/serverless/datadog_extension_signed.zip 
+    #   --assume-role "$ROLE_TO_ASSUME"
+    #   --external-id "$EXTERNAL_ID"
+
+    # # deploy
+    # - ./build_tools
+    #   deploy
+    #   --layer-path /tmp/serverless/datadog_extension_signed.zip
+    #   --architecture amd64
+    #   --layer-name "Datadog-Extension"
+    #   --layer-suffix ""
+    #   --region sa-east-1
+    #   --assume-role "$ROLE_TO_ASSUME"
+    #   --external-id "$EXTERNAL_ID"

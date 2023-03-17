@@ -1,0 +1,16 @@
+variables:
+  GIT_DEPTH: 0
+
+image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
+
+stages:
+  - deploy_single_region
+
+deploy_single_region:
+  stage: deploy_single_region
+  variables:
+    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+    REGION_PARAM: XXX
+  tags: ["runner:docker"]
+  script:
+    - echo "deploying for region = $REGION_PARAM"
