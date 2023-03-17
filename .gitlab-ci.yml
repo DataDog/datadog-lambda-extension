@@ -9,11 +9,10 @@ image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 stages:
   - build_tools_if_needed
   - build_layer
-  - release_layer
   - trigger
+  - release_layer
 
 build_tools:
-  when: manual
   stage: build_tools_if_needed
   variables:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
@@ -26,8 +25,9 @@ build_tools:
     - cd build-tools && docker buildx build --tag ${TARGET} --push .
 
 build_and_deploy_layer:
-  when: manual
   stage: build_layer
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
   variables:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
@@ -77,16 +77,19 @@ build_and_deploy_layer:
       --assume-role "$ROLE_TO_ASSUME"
       --external-id "$EXTERNAL_ID"
 
+multi_region:
+  stage: trigger
+  trigger:
+    include:
+      - artifact: trigger_region.yaml
+        job: release
+
 release:
-  only:
-    variables:
-      - $REGION_TO_DEPLOY == "all"
   stage: release_layer
   tags: ["runner:docker"]
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
-
   artifacts:
     paths:
       - /tmp/serverless/datadog_extension_signed.zip 
@@ -101,26 +104,3 @@ release:
     - docker cp $dockerId:/build_tools .
     - regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME" --external-id "$EXTERNAL_ID")
     - sed 's/XXX/$regions/' trigger_region.orig.yaml > trigger_region.yaml
-
-multi_region:
-  stage: trigger
-  trigger:
-    include:
-      - artifact: trigger_region.yaml
-        job: release
-
-
-
-
-
-
-    # # deploy
-    # - ./build_tools
-    #   deploy
-    #   --layer-path /tmp/serverless/datadog_extension_signed.zip
-    #   --architecture amd64
-    #   --layer-name "Datadog-Extension"
-    #   --layer-suffix ""
-    #   --region sa-east-1
-    #   --assume-role "$ROLE_TO_ASSUME"
-    #   --external-id "$EXTERNAL_ID"
