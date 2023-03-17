@@ -43,7 +43,7 @@ build_and_deploy_layer:
   tags: ["runner:docker"]
   artifacts:
     paths:
-      - /tmp/serverless/datadog_extension_signed.zip 
+      - /tmp/serverless/* 
   script:
     - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
     - dockerId=$(docker create --platform linux/amd64 ${TARGET})
@@ -74,6 +74,9 @@ build_and_deploy_layer:
       --assume-role "$ROLE_TO_ASSUME"
       --external-id "$EXTERNAL_ID"
 
+    # ls artifacts
+    - ls /tmp/serverless
+
     # deploy to single region if needed
     - if [ "${REGION_TO_DEPLOY}" = "all" ]; then exit 0; fi
     - ./build_tools
@@ -86,17 +89,17 @@ build_and_deploy_layer:
       --assume-role "$ROLE_TO_ASSUME"
       --external-id "$EXTERNAL_ID"
 
-release:
-  stage: release_layer
+prepare_multi_region:
+  stage: prepare_multi_region
   tags: ["runner:docker"]
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $REGION_TO_DEPLOY == "all"
   variables:
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
   artifacts:
     paths:
-      - /tmp/serverless/datadog_extension_signed.zip 
+      - /tmp/serverless/*
   script:
     - EXTERNAL_ID=$(aws ssm get-parameter
         --region us-east-1
