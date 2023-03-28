@@ -68,27 +68,13 @@ build_and_deploy_layer:
       --artifact-name "datadog_extension.zip"
 
     # sign
-    - ./build_tools
+    - jobId=$(./build_tools
       sign 
       --layer-path tmp/serverless/datadog_extension.zip 
-      --destination-path tmp/serverless/datadog_extension_signed.zip 
       --assume-role "$ROLE_TO_ASSUME"
-      --external-id "$EXTERNAL_ID"
+      --external-id "$EXTERNAL_ID")
 
-    # ls artifacts
-    - ls tmp/serverless
-
-    # deploy to single region if needed
-    - if [ "${REGION_TO_DEPLOY}" = "all" ]; then exit 0; fi
-    - ./build_tools
-      deploy
-      --layer-path tmp/serverless/datadog_extension_signed.zip
-      --architecture amd64
-      --layer-name "Datadog-Extension"
-      --layer-suffix "$LAYER_SUFFIX"
-      --region "$REGION_TO_DEPLOY"
-      --assume-role "$ROLE_TO_ASSUME"
-      --external-id "$EXTERNAL_ID"
+    - echo "signing jobId is = $jobId"
 
 prepare_multi_region:
   stage: prepare_multi_region
@@ -96,7 +82,6 @@ prepare_multi_region:
   artifacts:
     paths:
       - trigger_region.yaml
-      - tmp/serverless/datadog_extension_signed.zip
   rules:
     - if: $REGION_TO_DEPLOY != "all"
       when: never

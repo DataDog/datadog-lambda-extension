@@ -1,6 +1,7 @@
 use commands::{
     build_command::build, deploy_command::deploy, deploy_function_command::deploy_function,
     invoke_function_command::invoke_function, list_region_command::list_region, sign_command::sign,
+    download_signed_command::download_signed,
 };
 use std::io::Result;
 use structopt::StructOpt;
@@ -15,6 +16,8 @@ enum SubCommand {
     Deploy(commands::deploy_command::DeployOptions),
     #[structopt(name = "sign", about = "Sign Layer")]
     Sign(commands::sign_command::SignOptions),
+    #[structopt(name = "download_signed", about = "Download Signed Layer")]
+    DownloadSigned(commands::download_signed_command::DownloadSignedOptions),
     #[structopt(name = "list_region", about = "List AWS Region")]
     ListRegion(commands::list_region_command::ListRegionOptions),
     #[structopt(name = "deploy_lambda", about = "Deploy AWS Lambda Function")]
@@ -41,6 +44,7 @@ async fn main() -> Result<()> {
         SubCommand::Build(opt) => build(&opt),
         SubCommand::Deploy(opt) => deploy(&opt).await,
         SubCommand::Sign(opt) => sign(&opt).await,
+        SubCommand::DownloadSigned(opt) => download_signed(&opt).await,
         SubCommand::ListRegion(opt) => list_region(&opt).await,
         SubCommand::DeployLambdaFunction(opt) => deploy_function(&opt).await,
         SubCommand::InvokeLambdaFunction(opt) => invoke_function(&opt).await,

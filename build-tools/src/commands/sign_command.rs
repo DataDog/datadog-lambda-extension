@@ -6,8 +6,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use core::time;
 use signer::model::{Destination, S3Destination, S3Source, SigningStatus, Source};
 use std::{
-    fs::File,
-    io::{Error, ErrorKind, Result, Write},
+    io::{Error, ErrorKind, Result},
     path::Path,
     thread,
 };
@@ -22,8 +21,6 @@ const SIGNING_PROFILE_NAME: &str = "DatadogLambdaSigningProfile";
 pub struct SignOptions {
     #[structopt(long)]
     layer_path: String,
-    #[structopt(long)]
-    destination_path: String,
     #[structopt(long)]
     pub assume_role: Option<String>,
     #[structopt(long)]
@@ -43,9 +40,8 @@ pub async fn sign(args: &SignOptions) -> Result<()> {
     upload_object(args, &key, &s3_client).await?;
     let job_id = sign_object(&key, &signer_client).await?;
     verify(&job_id, &signer_client).await?;
-    download_object(args, &job_id, &s3_client).await?;
-    delete_object(&job_id, &s3_client).await?;
-    delete_object(&key, &s3_client).await?;
+    // printing the job_id so we could retrieve the artifact later
+    print!("{}", job_id);
     Ok(())
 }
 
@@ -64,21 +60,6 @@ async fn upload_object(args: &SignOptions, key: &str, s3_client: &s3::Client) ->
     Ok(())
 }
 
-async fn download_object(args: &SignOptions, job_id: &str, s3_client: &s3::Client) -> Result<()> {
-    let response = s3_client
-        .get_object()
-        .bucket(BUCKET_NAME)
-        .key(job_id.to_string() + ".zip")
-        .send()
-        .await
-        .expect("error while download the signed layer");
-    let data = response.body.collect().await?.into_bytes();
-    let buffer = Vec::from(data);
-    let mut file = File::create(args.destination_path.clone())?;
-    file.write_all(&buffer)?;
-    Ok(())
-}
-
 async fn sign_object(key: &str, signer_client: &signer::Client) -> Result<String> {
     let source = build_source(key);
     let destination = build_destination();
@@ -94,17 +75,6 @@ async fn sign_object(key: &str, signer_client: &signer::Client) -> Result<String
         Some(job_id) => Ok(String::from(job_id)),
         None => Err(Error::new(ErrorKind::NotFound, "could not find the job id")),
     }
-}
-
-async fn delete_object(key: &str, s3_client: &s3::Client) -> Result<()> {
-    s3_client
-        .delete_object()
-        .key(key)
-        .bucket(BUCKET_NAME)
-        .send()
-        .await
-        .expect("could not delete the object");
-    Ok(())
 }
 
 async fn verify(job_id: &str, signer_client: &signer::Client) -> Result<()> {
