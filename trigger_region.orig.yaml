@@ -27,13 +27,13 @@ deploy_single_region:
     - docker cp $dockerId:/build_tools .
     - ./build_tools
       download_signed
-      --destination-path tmp/serverless/datadog_extension_signed.zip
+      --destination-path datadog_extension_signed.zip
       --job-id "xxx_jobId_xxx"
       --assume-role "$ROLE_TO_ASSUME"
       --external-id "$EXTERNAL_ID"
     - ./build_tools
       deploy
-      --layer-path tmp/serverless/datadog_extension_signed.zip
+      --layer-path datadog_extension_signed.zip
       --architecture amd64
       --layer-name "Datadog-Extension"
       --layer-suffix "$LAYER_SUFFIX"
