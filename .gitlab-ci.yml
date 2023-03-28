@@ -75,6 +75,7 @@ build_and_deploy_layer:
       --external-id "$EXTERNAL_ID")
 
     - echo "signing jobId is = $jobId"
+    - echo $jobId > tmp/serverless/jobId
 
 prepare_multi_region:
   stage: prepare_multi_region
@@ -82,6 +83,7 @@ prepare_multi_region:
   artifacts:
     paths:
       - trigger_region.yaml
+      - tmp/serverless/jobId
   rules:
     - if: $REGION_TO_DEPLOY != "all"
       when: never
@@ -95,7 +97,6 @@ prepare_multi_region:
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
   script:
     - echo $CI_PIPELINE_SOURCE
-    - if [ "${REGION_TO_DEPLOY}" != "all" ]; then exit 0; fi
     - EXTERNAL_ID=$(aws ssm get-parameter
         --region us-east-1
         --name ci.datadog-lambda-extension.externalid
@@ -105,13 +106,15 @@ prepare_multi_region:
     - dockerId=$(docker create --platform linux/amd64 ${TARGET})
     - docker cp $dockerId:/build_tools .
     - regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME" --external-id "$EXTERNAL_ID")
+    - if [ "${REGION_TO_DEPLOY}" != "all" ]; then regions=$REGION_TO_DEPLOY; fi
+    - jobId=$(cat tmp/serverless/jobId)
+    - echo "job id = $jobId"
     - sed "s/xxx_layer_sufix_xxx/${LAYER_SUFFIX}/" trigger_region.orig.yaml > trigger_region.tmp.yaml
-    - sed "s/xxx_aws_regions_xxx/${regions}/" trigger_region.tmp.yaml > trigger_region.yaml
+    - sed "s/xxx_aws_regions_xxx/${regions}/" trigger_region.tmp.yaml > trigger_region.tmp2.yaml
+    - sed "s/xxx_jobId_xxx/${jobId}/" trigger_region.tmp2.yaml > trigger_region.yaml
     - cat trigger_region.yaml
 
 multi_region:
-  rules:
-    - if: $REGION_TO_DEPLOY == "all"
   stage: trigger
   trigger:
     include:
