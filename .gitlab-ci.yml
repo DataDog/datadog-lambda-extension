@@ -41,9 +41,6 @@ build_and_deploy_layer:
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   tags: ["runner:docker"]
-  artifacts:
-    paths:
-      - tmp/serverless/datadog_extension_signed.zip
   script:
     - mkdir tmp
     - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
