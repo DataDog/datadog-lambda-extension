@@ -113,6 +113,9 @@ prepare_multi_region:
 
 multi_region:
   stage: trigger
+  rules:
+    - if: $REGION_TO_DEPLOY != ""
+      when: never
   trigger:
     include:
       - artifact: trigger_region.yaml
