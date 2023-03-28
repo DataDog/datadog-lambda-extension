@@ -82,8 +82,6 @@ prepare_multi_region:
       - trigger_region.yaml
       - tmp/serverless/jobId
   rules:
-    - if: $REGION_TO_DEPLOY != "all"
-      when: never
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "external"
     - if: $CI_PIPELINE_SOURCE == "trigger"

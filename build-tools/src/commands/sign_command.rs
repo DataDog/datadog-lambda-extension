@@ -90,7 +90,6 @@ async fn verify(job_id: &str, signer_client: &signer::Client) -> Result<()> {
         if result {
             return Ok(());
         }
-        println!("Job is still running waiting for 10 seconds to try checking the status again");
         thread::sleep(delay);
     }
     Err(Error::new(ErrorKind::TimedOut, "the signing job timeouts"))
