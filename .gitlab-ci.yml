@@ -2,7 +2,7 @@ variables:
   GIT_DEPTH: 1
   REGION_TO_DEPLOY:
     description: "use sa-east-1 for dev, us-east-1 for RC, all for all regions"
-    value: sa-east-1
+    value: ""
   AGENT_BRANCH:
     description: "datadog-agent branch you want to release"
     value: main
