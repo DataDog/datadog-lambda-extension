@@ -26,11 +26,7 @@ else
 fi
 
 if [ -z "$BUILD_TAGS" ]; then
-    if [ -z "$CLOUD_RUN" ]; then
-        BUILD_TAGS="serverless otlp"
-    else
-        BUILD_TAGS="serverless"
-    fi
+    BUILD_TAGS="serverless otlp"
 fi
 
 AGENT_PATH="../datadog-agent"
