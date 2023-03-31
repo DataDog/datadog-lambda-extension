@@ -81,7 +81,7 @@ function docker_build_zip {
 
 if [ "$CLOUD_RUN" == "true" ]; then
     echo "Building for cloud run (both arch + alpine)"
-    #docker_build_zip amd64
+    docker_build_zip amd64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
 elif [ "$ARCHITECTURE" == "amd64" ]; then
