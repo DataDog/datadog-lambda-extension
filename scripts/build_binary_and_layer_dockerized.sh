@@ -26,11 +26,7 @@ else
 fi
 
 if [ -z "$BUILD_TAGS" ]; then
-    if [ -z "$CLOUD_RUN" ]; then
-        BUILD_TAGS="serverless otlp"
-    else
-        BUILD_TAGS="serverless"
-    fi
+    BUILD_TAGS="serverless otlp"
 fi
 
 AGENT_PATH="../datadog-agent"
@@ -86,10 +82,8 @@ function docker_build_zip {
 if [ "$CLOUD_RUN" == "true" ]; then
     echo "Building for cloud run (both arch + alpine)"
     docker_build_zip amd64
-    docker_build_zip arm64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
-    docker_build_zip arm64 -alpine
 elif [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64
