@@ -13,7 +13,7 @@ use std::{
 };
 use structopt::StructOpt;
 
-use crate::security::build_config;
+use super::common::build_config;
 
 const BUCKET_NAME: &str = "dd-lambda-signing-bucket-serverless-sandbox";
 const SIGNING_PROFILE_NAME: &str = "DatadogLambdaSigningProfile";
@@ -25,11 +25,18 @@ pub struct SignOptions {
     #[structopt(long)]
     destination_path: String,
     #[structopt(long)]
-    key: Option<String>,
+    pub assume_role: Option<String>,
+    #[structopt(long)]
+    pub external_id: Option<String>,
 }
 
 pub async fn sign(args: &SignOptions) -> Result<()> {
-    let config = build_config(&args.key, "sa-east-1").await; // TODO fixeme when ready for production
+    let config = build_config(
+        "sa-east-1",
+        args.assume_role.clone(),
+        args.external_id.clone(),
+    )
+    .await;
     let s3_client = s3::Client::new(&config);
     let signer_client = signer::Client::new(&config);
     let key = build_s3_key();

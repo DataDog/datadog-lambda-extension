@@ -1,0 +1,134 @@
+variables:
+  GIT_DEPTH: 1
+  REGION_TO_DEPLOY:
+    description: "use sa-east-1 for dev, us-east-1 for RC, all for all regions"
+    value: sa-east-1
+  AGENT_BRANCH:
+    description: "datadog-agent branch you want to release"
+    value: main
+  LAYER_SUFFIX:
+    description: "Suffix to be appended to the layer name (default empty)"
+    value: ""
+
+image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
+
+stages:
+  - build_tools_if_needed
+  - build_layer
+  - prepare_multi_region
+  - trigger
+
+build_tools:
+  stage: build_tools_if_needed
+  variables:
+    CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
+    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: never
+    - changes:
+      - build-tools/**/*
+  tags: ["runner:docker"]
+  script:
+    - cd build-tools && docker buildx build --tag ${TARGET} --push .
+
+build_and_deploy_layer:
+  stage: build_layer
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+  variables:
+    CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
+    ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
+    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+  tags: ["runner:docker"]
+  artifacts:
+    paths:
+      - tmp/serverless/datadog_extension_signed.zip
+  script:
+    - mkdir tmp
+    - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
+    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
+    - docker cp $dockerId:/build_tools .
+    - EXTERNAL_ID=$(aws ssm get-parameter 
+      --region us-east-1 
+      --name ci.datadog-lambda-extension.externalid 
+      --with-decryption 
+      --query "Parameter.Value" 
+      --out text)
+
+    # build
+    - ./build_tools
+      build
+      --version 1
+      --agent-version 1
+      --architecture amd64
+      --context-path .
+      --destination-path tmp/serverless
+      --docker-path "scripts_v2/Dockerfile.build"
+      --artifact-name "datadog_extension.zip"
+
+    # sign
+    - ./build_tools
+      sign 
+      --layer-path tmp/serverless/datadog_extension.zip 
+      --destination-path tmp/serverless/datadog_extension_signed.zip 
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
+
+    # ls artifacts
+    - ls tmp/serverless
+
+    # deploy to single region if needed
+    - if [ "${REGION_TO_DEPLOY}" = "all" ]; then exit 0; fi
+    - ./build_tools
+      deploy
+      --layer-path tmp/serverless/datadog_extension_signed.zip
+      --architecture amd64
+      --layer-name "Datadog-Extension"
+      --layer-suffix "$LAYER_SUFFIX"
+      --region "$REGION_TO_DEPLOY"
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
+
+prepare_multi_region:
+  stage: prepare_multi_region
+  tags: ["runner:docker"]
+  artifacts:
+    paths:
+      - trigger_region.yaml
+      - tmp/serverless/datadog_extension_signed.zip
+  rules:
+    - if: $REGION_TO_DEPLOY != "all"
+      when: never
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "external"
+    - if: $CI_PIPELINE_SOURCE == "trigger"
+    - if: $CI_PIPELINE_SOURCE == "pipeline"
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+  variables:
+    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+    ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
+  script:
+    - echo $CI_PIPELINE_SOURCE
+    - if [ "${REGION_TO_DEPLOY}" != "all" ]; then exit 0; fi
+    - EXTERNAL_ID=$(aws ssm get-parameter
+        --region us-east-1
+        --name ci.datadog-lambda-extension.externalid
+        --with-decryption
+        --query "Parameter.Value"
+        --out text)
+    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
+    - docker cp $dockerId:/build_tools .
+    - regions=$(./build_tools list_region --assume-role "$ROLE_TO_ASSUME" --external-id "$EXTERNAL_ID")
+    - sed "s/xxx_layer_sufix_xxx/${LAYER_SUFFIX}/" trigger_region.orig.yaml > trigger_region.tmp.yaml
+    - sed "s/xxx_aws_regions_xxx/${regions}/" trigger_region.tmp.yaml > trigger_region.yaml
+    - cat trigger_region.yaml
+
+multi_region:
+  rules:
+    - if: $REGION_TO_DEPLOY == "all"
+  stage: trigger
+  trigger:
+    include:
+      - artifact: trigger_region.yaml
+        job: prepare_multi_region

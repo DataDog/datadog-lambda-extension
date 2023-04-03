@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-aes-gcm = "0.10.1"
 aws-config = "0.53.0"
 aws-sdk-ec2 = "0.23.0"
 aws-sdk-lambda = "0.23.0"

@@ -1,0 +1,36 @@
+variables:
+  GIT_DEPTH: 0
+
+image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
+
+stages:
+  - deploy_single_region
+
+deploy_single_region:
+  stage: deploy_single_region
+  variables:
+    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+    ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
+    LAYER_SUFFIX: "xxx_layer_sufix_xxx"
+  tags: ["runner:docker"]
+  parallel:
+    matrix:
+      - PARAM_AWS_REGION: [xxx_aws_regions_xxx]
+  script:
+    - EXTERNAL_ID=$(aws ssm get-parameter
+        --region us-east-1
+        --name ci.datadog-lambda-extension.externalid
+        --with-decryption
+        --query "Parameter.Value"
+        --out text)
+    - dockerId=$(docker create --platform linux/amd64 ${TARGET})
+    - docker cp $dockerId:/build_tools .
+    - ./build_tools
+      deploy
+      --layer-path tmp/serverless/datadog_extension_signed.zip
+      --architecture amd64
+      --layer-name "Datadog-Extension"
+      --layer-suffix "$LAYER_SUFFIX"
+      --region "$PARAM_AWS_REGION"
+      --assume-role "$ROLE_TO_ASSUME"
+      --external-id "$EXTERNAL_ID"
