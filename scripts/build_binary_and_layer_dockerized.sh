@@ -25,6 +25,10 @@ else
     CMD_PATH="cmd/serverless-init"
 fi
 
+if [ -z "$BUILD_TAGS" ]; then
+    BUILD_TAGS="serverless otlp"
+fi
+
 AGENT_PATH="../datadog-agent"
 
 # Move into the root directory, so this script can be called from any directory
@@ -57,10 +61,6 @@ if [ "$RACE_DETECTION_ENABLED" = "true" ]; then
     BUILD_FILE=Dockerfile.race.build
 fi
 
-if [ -z "$BUILD_TAGS" ]; then
-    BUILD_TAGS="serverless"
-fi
-
 function docker_build_zip {
     arch=$1
     suffix=$2
@@ -82,10 +82,8 @@ function docker_build_zip {
 if [ "$CLOUD_RUN" == "true" ]; then
     echo "Building for cloud run (both arch + alpine)"
     docker_build_zip amd64
-    docker_build_zip arm64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
-    docker_build_zip arm64 -alpine
 elif [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64

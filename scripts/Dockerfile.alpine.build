@@ -4,8 +4,11 @@ FROM alpine:3.16 as builder
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG CMD_PATH
+ARG BUILD_TAGS
 
-RUN apk add --no-cache git make musl-dev go gcc
+RUN apk add --no-cache git make musl-dev gcc
+COPY --from=golang:1.19-alpine /usr/local/go/ /usr/lib/go
+
 ENV GOROOT /usr/lib/go
 ENV GOPATH /go
 ENV PATH /go/bin:$PATH
@@ -27,18 +30,11 @@ WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \ 
-    if [ -z "$AGENT_VERSION" ]; then \
-        go build -ldflags="-w \
+    /usr/lib/go/bin/go build -ldflags="-w \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
-        -tags serverless -o datadog-agent; \
-    else \
-        go build -ldflags="-w \
-        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
-        -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
-        -tags serverless -o datadog-agent; \
-    fi
+        -tags "${BUILD_TAGS}" -o datadog-agent;
 
-RUN go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
+RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension
