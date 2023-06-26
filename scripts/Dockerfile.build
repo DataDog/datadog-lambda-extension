@@ -1,6 +1,8 @@
 # syntax = docker/dockerfile:experimental
 
-FROM golang:1.19 as builder
+# this fixes the version of the golang image to avoid breaking changes in glibc
+# sha1 comes from https://github.com/docker-library/repo-info/blob/b939681d85e36bae10eabe53b913f1d05e972f1f/repos/golang/remote/1.19.md
+FROM golang@sha256:2dde7ccba42da98d45e0f38f23f1c0d1474a779e4089faf665f9af0dd3f844db as builder
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG CMD_PATH
