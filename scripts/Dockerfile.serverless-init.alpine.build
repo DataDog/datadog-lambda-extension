@@ -1,0 +1,3 @@
+FROM scratch
+
+COPY ./bin/datadog-agent-alpine /datadog-init

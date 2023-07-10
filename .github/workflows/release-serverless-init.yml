@@ -1,0 +1,110 @@
+name: Release serverless-init
+
+on:
+  workflow_dispatch:
+    inputs:
+      buildTags:
+        type: choice
+        description: Build tags
+        default: "serverless otlp"
+        options:
+          - "serverless otlp"
+          - "serverless"
+      tag:
+        type: string
+        description: Docker image tag name, eg. (beta11, beta12-rc1, etc.)
+      latestTag:
+        type: choice
+        description: Additionally, tag this as latest? Only use this if releasing a new production version.
+        default: "no"
+        options:
+          - "yes"
+          - "no"
+      agentVersion:
+        type: string
+        description: Datadog agent version
+      agentBranch:
+        type: string
+        description: Datadog agent branch name (default main)
+        default: "main"
+
+env:
+  IMAGE_NAME: datadog/serverless-init
+
+jobs:
+  release-serverless-init:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/checkout@v3
+        with:
+          repository: DataDog/datadog-agent
+          ref: refs/heads/${{ inputs.agentBranch }}
+          path: datadog-agent
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Build binaries
+        working-directory: ./scripts
+        run: ./build_serverless_init.sh
+        env:
+          AGENT_PATH: datadog-agent
+          VERSION: ${{ inputs.tag }}
+          SERVERLESS_INIT: true
+          AGENT_VERSION: ${{ inputs.agentVersion }}
+
+      - name: Set up build directory and copy binaries
+        run: |
+          mkdir ./scripts/bin
+          cp .layers/datadog_extension-amd64/extensions/datadog-agent ./scripts/bin/datadog-agent
+          cp .layers/datadog_extension-amd64-alpine/extensions/datadog-agent ./scripts/bin/datadog-agent-alpine
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: ./scripts
+          file: ./scripts/Dockerfile.serverless-init.build
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ inputs.tag }}
+
+      - name: Build and push (alpine)
+        id: docker_build_alpine
+        uses: docker/build-push-action@v2
+        with:
+          context: ./scripts
+          file: ./scripts/Dockerfile.serverless-init.alpine.build
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:${{ inputs.tag }}-alpine
+
+      - name: Build and push latest
+        id: docker_build_latest
+        uses: docker/build-push-action@v2
+        if: ${{ inputs.latestTag == 'yes' }}
+        with:
+          context: ./scripts
+          file: ./scripts/Dockerfile.serverless-init.build
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:latest
+
+      - name: Build and push latest alpine
+        id: docker_build_alpine_latest
+        uses: docker/build-push-action@v2
+        if: ${{ inputs.latestTag == 'yes' }}
+        with:
+          context: ./scripts
+          file: ./scripts/Dockerfile.serverless-init.alpine.build
+          push: true
+          tags: ${{ env.IMAGE_NAME }}:latest-alpine
