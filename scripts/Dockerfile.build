@@ -31,7 +31,7 @@ ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 # add the current version number to the tags package before compilation
 
-RUN --mount=type=cache,target=/go/pkg/mod \
+RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     if [ -z "$AGENT_VERSION" ]; then \
         /usr/local/go/bin/go build -ldflags="-w \
