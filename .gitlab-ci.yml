@@ -132,3 +132,17 @@ multi_region:
     include:
       - artifact: trigger_region.yaml
         job: prepare_multi_region
+
+deploy_serverless_init_to_docker_registries:
+  stage: deploy
+  when: manual
+  trigger:
+    project: DataDog/public-images
+    branch: main
+    strategy: depend
+  variables:
+    IMG_SOURCES: ghcr.io/datadog/datadog-lambda-extension/serverless-init:$IMAGE_TAG
+    IMG_DESTINATIONS: serverless-init:$IMAGE_TAG
+    IMG_SIGNING: "false"
+    RETRY_COUNT: 5
+    RETRY_DELAY: 300
