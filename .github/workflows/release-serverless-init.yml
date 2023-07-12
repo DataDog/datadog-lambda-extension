@@ -98,19 +98,19 @@ jobs:
       - name: Build and push latest
         id: docker_build_latest
         uses: docker/build-push-action@v4
-        if: ${{ env.REGISTRY }}/${{ github.event.inputs.latestTag == 'yes' }}
+        if: ${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Build and push latest alpine
         id: docker_build_alpine_latest
         uses: docker/build-push-action@v4
-        if: ${{ env.REGISTRY }}/${{ github.event.inputs.latestTag == 'yes' }}
+        if: ${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:latest-alpine
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
