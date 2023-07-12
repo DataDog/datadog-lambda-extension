@@ -79,26 +79,26 @@ jobs:
 
       - name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v4
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
 
       - name: Build and push (alpine)
         id: docker_build_alpine
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v4
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
 
       - name: Build and push latest
         id: docker_build_latest
-        uses: docker/build-push-action@v2
-        if: ${{ github.event.inputs.latestTag == 'yes' }}
+        uses: docker/build-push-action@v4
+        if: ${{ env.REGISTRY }}/${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
@@ -107,8 +107,8 @@ jobs:
 
       - name: Build and push latest alpine
         id: docker_build_alpine_latest
-        uses: docker/build-push-action@v2
-        if: ${{ github.event.inputs.latestTag == 'yes' }}
+        uses: docker/build-push-action@v4
+        if: ${{ env.REGISTRY }}/${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
