@@ -32,13 +32,15 @@ then
   then
     echo "Configuring for the .NET runtime!"
   fi
-  # Handle the CORECLR_PROFILER_PATH
-  # Try the native loader first (Datadog.Trace.ClrProfiler.Native.so), then
-  # fall back to the tracer library (Datadog.Tracer.Native.so)
-  PROFILER_PATHS=("/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
-                  "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
-                  "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
-                  "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so")
+  # Handle the CORECLR_PROFILER_PATH:
+  # Load the tracer library directly (Datadog.Tracer.Native.so),
+  # which avoids loading the shared loader (Datadog.Trace.ClrProfiler.Native.so)
+  # since we don't support Continuous Profiling yet.
+  # Keep trying Datadog.Trace.ClrProfiler.Native.so as a fall back for backwards compatibility.
+  PROFILER_PATHS=("/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
+                  "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
+                  "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
+                  "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so")
   PROFILER_FOUND=false
   ## Search from all possible places
   for PROFILER_PATH in "${PROFILER_PATHS[@]}"
@@ -52,7 +54,7 @@ then
   done
   if [ $PROFILER_FOUND == false ]
   then
-    echo "CLR Profiler file not found. Function profiling may not work correctly"
+    echo ".NET CLR Profiler file not found. APM instrumentation may not work correctly."
   fi
   # Other env variables for .NET
   export CORECLR_ENABLE_PROFILING="1"
