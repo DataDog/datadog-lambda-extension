@@ -40,7 +40,8 @@ then
   PROFILER_PATHS=("/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
                   "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
                   "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
-                  "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so")
+                  "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
+                  "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so")
   PROFILER_FOUND=false
   ## Search from all possible places
   for PROFILER_PATH in "${PROFILER_PATHS[@]}"
