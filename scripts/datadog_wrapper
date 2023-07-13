@@ -36,7 +36,7 @@ then
   # Load the tracer library directly (Datadog.Tracer.Native.so),
   # which avoids loading the shared loader (Datadog.Trace.ClrProfiler.Native.so)
   # since we don't support Continuous Profiling yet.
-  # Keep trying Datadog.Trace.ClrProfiler.Native.so as a fall back for backwards compatibility.
+  # Keep trying Datadog.Trace.ClrProfiler.Native.so for backwards compatibility.
   PROFILER_PATHS=("/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
                   "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
                   "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
