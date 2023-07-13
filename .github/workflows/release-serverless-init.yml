@@ -29,7 +29,8 @@ on:
         default: "main"
 
 env:
-  IMAGE_NAME: datadog/serverless-init
+  IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
+  REGISTRY: ghcr.io
 
 jobs:
   release-serverless-init:
@@ -41,7 +42,7 @@ jobs:
       - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent
-          ref: refs/heads/${{ inputs.agentBranch }}
+          ref: refs/heads/${{ github.event.inputs.agentBranch }}
           path: datadog-agent
 
       - name: Set up QEMU
@@ -55,9 +56,9 @@ jobs:
         run: ./build_serverless_init.sh
         env:
           AGENT_PATH: datadog-agent
-          VERSION: ${{ inputs.tag }}
+          VERSION: ${{ github.event.inputs.tag }}
           SERVERLESS_INIT: true
-          AGENT_VERSION: ${{ inputs.agentVersion }}
+          AGENT_VERSION: ${{ github.event.inputs.agentVersion }}
 
       - name: Set up build directory and copy binaries
         run: |
@@ -65,46 +66,47 @@ jobs:
           cp .layers/datadog_extension-amd64/extensions/datadog-agent ./scripts/bin/datadog-agent
           cp .layers/datadog_extension-amd64-alpine/extensions/datadog-agent ./scripts/bin/datadog-agent-alpine
 
-      - name: Login to DockerHub
+      - name: Login to GHCR
         uses: docker/login-action@v2
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_TOKEN }}
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v4
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:${{ inputs.tag }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
 
       - name: Build and push (alpine)
         id: docker_build_alpine
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v4
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:${{ inputs.tag }}-alpine
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
 
       - name: Build and push latest
         id: docker_build_latest
-        uses: docker/build-push-action@v2
-        if: ${{ inputs.latestTag == 'yes' }}
+        uses: docker/build-push-action@v4
+        if: ${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
       - name: Build and push latest alpine
         id: docker_build_alpine_latest
-        uses: docker/build-push-action@v2
-        if: ${{ inputs.latestTag == 'yes' }}
+        uses: docker/build-push-action@v4
+        if: ${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
-          tags: ${{ env.IMAGE_NAME }}:latest-alpine
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
