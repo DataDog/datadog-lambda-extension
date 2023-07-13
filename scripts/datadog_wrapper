@@ -33,15 +33,20 @@ then
     echo "Configuring for the .NET runtime!"
   fi
   # Handle the CORECLR_PROFILER_PATH:
-  # Load the tracer library directly (Datadog.Tracer.Native.so),
-  # which avoids loading the shared loader (Datadog.Trace.ClrProfiler.Native.so)
-  # since we don't support Continuous Profiling yet.
-  # Keep trying Datadog.Trace.ClrProfiler.Native.so for backwards compatibility.
-  PROFILER_PATHS=("/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
-                  "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
-                  "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
-                  "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
-                  "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so")
+  # Try to loads the library from these paths in order:
+  PROFILER_PATHS=(
+    # use the shared loader if it's present (it was removed from
+    # the dotnet layer for now, but this keeps
+    # forwards compatibility with Continuous Profiling)
+    "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
+    "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
+    # use the tracer library directly (without the shared loader),
+    # this should be the common case going forward
+    "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
+    "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
+    # keep this as a fallback for backwards compatibility
+    "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
+  )
   PROFILER_FOUND=false
   ## Search from all possible places
   for PROFILER_PATH in "${PROFILER_PATHS[@]}"
