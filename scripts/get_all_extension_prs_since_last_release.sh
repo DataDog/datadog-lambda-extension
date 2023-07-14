@@ -19,6 +19,9 @@ last_release_date=$(date -u -d"$last_release_date + 1 second" +"%Y-%m-%dT%H:%M:%
 # Initialize page number
 page=1
 
+# Initialize line number
+line=1
+
 echo "What's Changed"
 
 while true; do
@@ -31,12 +34,15 @@ while true; do
         break
     fi
 
-    # Iterate over all PRs and print their title, merge commit SHA, and the date they were merged
+    # Iterate over all PRs and print their title, merge commit SHA, the date they were merged, the author's username, and the PR link
     for (( i=0; i<$prs_length; i++ )); do
         pr_title=$(echo $response | jq -r ".items[$i].title")
-        pr_sha=$(echo $response | jq -r ".items[$i].pull_request.url" | xargs curl -s | jq -r ".merge_commit_sha" | cut -c1-7)
+        pr_sha=$(echo $response | jq -r ".items[$i].pull_request.url" | xargs curl -s | jq -r ".merge_commit_sha")
         pr_merged_at=$(echo $response | jq -r ".items[$i].closed_at")
-        echo "$pr_title DataDog/datadog-agent@$pr_sha merged at $pr_merged_at"
+        pr_author=$(echo $response | jq -r ".items[$i].user.login")
+        pr_url=$(echo $response | jq -r ".items[$i].html_url")
+        echo -e "$line. $pr_title DataDog/datadog-agent@$pr_sha merged at $pr_merged_at by $pr_author. PR link: $pr_url\n"
+        ((line++))
     done
 
     ((page++))
@@ -46,8 +52,12 @@ echo
 echo "#############################################################"
 echo "#                                                           #"
 echo "#   IMPORTANT: Please verify these commits before integrating   #"
-echo "#   them into the release. This script is primarily for     #"
+echo "#   them into the lambda extension release. (i.e. not every commit outputted #"
+echo "#   here needs to be included in release) This script is primarily for     #"
 echo "#   convenience and does not replace a thorough review process.  #"
 echo "#                                                           #"
 echo "#############################################################"
+echo
+echo "Also, remember to verify the list of commits at https://github.com/DataDog/datadog-agent/pulls?q=is%3Apr+label%3Ateam%2Fserverless+is%3Aclosed+sort%3Aupdated-desc"
+echo "Please make an announcement in the serverless-backroom mentioning everyone whose commits are going to be pulled in. If their commit wasn't released, they should not close their JIRA ticket until they can assert it was released."
 echo
