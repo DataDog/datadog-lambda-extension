@@ -31,11 +31,12 @@ while true; do
         break
     fi
 
-    # Iterate over all PRs and print their title and merge commit SHA
+    # Iterate over all PRs and print their title, merge commit SHA, and the date they were merged
     for (( i=0; i<$prs_length; i++ )); do
         pr_title=$(echo $response | jq -r ".items[$i].title")
         pr_sha=$(echo $response | jq -r ".items[$i].pull_request.url" | xargs curl -s | jq -r ".merge_commit_sha" | cut -c1-7)
-        echo "$pr_title DataDog/datadog-agent@$pr_sha"
+        pr_merged_at=$(echo $response | jq -r ".items[$i].closed_at")
+        echo "$pr_title DataDog/datadog-agent@$pr_sha merged at $pr_merged_at"
     done
 
     ((page++))
