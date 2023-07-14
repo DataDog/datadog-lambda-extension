@@ -11,45 +11,42 @@
 
 # Get the date of the last release
 last_release_date=$(curl -s "https://api.github.com/repos/DataDog/datadog-lambda-extension/releases/latest" | jq -r '.published_at')
-last_release_date=$(date -u -d"$last_release_date" +"%s")
+last_release_date=$(date -u -d"$last_release_date" +"%Y-%m-%dT%H:%M:%SZ")
 
-# get all PRs since the last release
+# Add one second to the last_release_date to avoid including PRs merged exactly at the release time
+last_release_date=$(date -u -d"$last_release_date + 1 second" +"%Y-%m-%dT%H:%M:%SZ")
+
+# Initialize page number
 page=1
-echo "What's Changed"
-while true
-do
-    response=$(curl -s "https://api.github.com/repos/DataDog/datadog-agent/pulls?state=closed&sort=updated&direction=desc&per_page=100&page=$page")
-    prs_length=$(echo $response | jq -r '. | length')
 
-    if [[ prs_length -eq 0 ]]; then
+echo "What's Changed"
+
+while true; do
+    # Use GitHub's Search API to find all merged PRs in the DataDog/datadog-agent repo labeled "team/serverless" that were merged after the last release
+    response=$(curl -s "https://api.github.com/search/issues?q=repo:DataDog/datadog-agent+label:team/serverless+merged:>=$last_release_date&type=pr&sort=updated&order=desc&per_page=100&page=$page")
+
+    # Check if the response contains items, if not break the loop
+    prs_length=$(echo $response | jq -r '.items | length')
+    if [[ $prs_length -eq 0 ]]; then
         break
     fi
 
-    for (( i=0; i<$prs_length; i++ ))
-    do
-        merged_at=$(echo $response | jq -r ".[$i].merged_at")
-        if [[ "$merged_at" == "null" ]]; then
-            continue
-        fi
-
-        base_ref=$(echo $response | jq -r ".[$i].base.ref")
-        if [[ "$base_ref" != "main" ]]; then
-            continue
-        fi
-
-        merged_at=$(date -u -d"$merged_at" +"%s")
-        if [[ $merged_at -lt $last_release_date ]]; then
-            break 2
-        fi
-
-        labels=$(echo $response | jq -r ".[$i].labels[]?.name" | grep "team/serverless")
-        if [[ "$labels" != "" ]]; then
-            pr_number=$(echo $response | jq -r ".[$i].number")
-            pr_title=$(echo $response | jq -r ".[$i].title")
-            pr_sha=$(echo $response | jq -r ".[$i].merge_commit_sha" | cut -c1-7)
-            echo "$pr_title DataDog/datadog-agent@$pr_sha"
-        fi
+    # Iterate over all PRs and print their title and merge commit SHA
+    for (( i=0; i<$prs_length; i++ )); do
+        pr_title=$(echo $response | jq -r ".items[$i].title")
+        pr_sha=$(echo $response | jq -r ".items[$i].pull_request.url" | xargs curl -s | jq -r ".merge_commit_sha" | cut -c1-7)
+        echo "$pr_title DataDog/datadog-agent@$pr_sha"
     done
 
     ((page++))
 done
+
+echo
+echo "#############################################################"
+echo "#                                                           #"
+echo "#   IMPORTANT: Please verify these commits before integrating   #"
+echo "#   them into the release. This script is primarily for     #"
+echo "#   convenience and does not replace a thorough review process.  #"
+echo "#                                                           #"
+echo "#############################################################"
+echo
