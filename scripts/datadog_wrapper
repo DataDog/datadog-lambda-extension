@@ -33,7 +33,7 @@ then
     echo "Configuring for the .NET runtime!"
   fi
   # Handle the CORECLR_PROFILER_PATH:
-  # Try to loads the library from these paths in order:
+  # Try to load the library from these paths in order:
   PROFILER_PATHS=(
     # use the shared loader if it's present (it was removed from
     # the dotnet layer for now, but this keeps
