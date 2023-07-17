@@ -19,7 +19,7 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-if [ -z "$CLOUD_RUN" ]; then
+if [ -z "$SERVERLESS_INIT" ]; then
     CMD_PATH="cmd/serverless"
 else
     CMD_PATH="cmd/serverless-init"
@@ -29,7 +29,9 @@ if [ -z "$BUILD_TAGS" ]; then
     BUILD_TAGS="serverless otlp"
 fi
 
-AGENT_PATH="../datadog-agent"
+if [ -z "$AGENT_PATH" ]; then
+    AGENT_PATH="../datadog-agent"
+fi
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -79,8 +81,8 @@ function docker_build_zip {
     unzip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip -d $TARGET_DIR/datadog_extension-${arch}${suffix}
 }
 
-if [ "$CLOUD_RUN" == "true" ]; then
-    echo "Building for cloud run (both arch + alpine)"
+if [ "$SERVERLESS_INIT" == "true" ]; then
+    echo "Building serverless init (both arch + alpine)"
     docker_build_zip amd64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
