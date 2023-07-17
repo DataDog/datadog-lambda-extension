@@ -19,9 +19,6 @@ last_release_date=$(date -u -d"$last_release_date + 1 second" +"%Y-%m-%dT%H:%M:%
 # Initialize page number
 page=1
 
-# Initialize line number
-line=1
-
 echo "What's Changed"
 
 while true; do
@@ -34,21 +31,16 @@ while true; do
         break
     fi
 
-    # Iterate over all PRs and print their title, merge commit SHA, the date they were merged, the author's username, and the PR link
+    # Iterate over all PRs and print their title and merge commit SHA
     for (( i=0; i<$prs_length; i++ )); do
         pr_title=$(echo $response | jq -r ".items[$i].title")
         pr_sha=$(echo $response | jq -r ".items[$i].pull_request.url" | xargs curl -s | jq -r ".merge_commit_sha")
-        pr_merged_at=$(echo $response | jq -r ".items[$i].closed_at")
-        pr_author=$(echo $response | jq -r ".items[$i].user.login")
-        pr_url=$(echo $response | jq -r ".items[$i].html_url")
-        echo -e "$line. $pr_title DataDog/datadog-agent@$pr_sha merged at $pr_merged_at by $pr_author. PR link: $pr_url\n"
-        ((line++))
+        echo -e "+ $pr_title https://github.com/DataDog/datadog-agent/commit/$pr_sha\n"
     done
 
     ((page++))
 done
 
-echo
 echo "#############################################################"
 echo "#                                                           #"
 echo "#   IMPORTANT: Please verify these commits before integrating   #"
