@@ -31,6 +31,7 @@ on:
 env:
   IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
   REGISTRY: ghcr.io
+  ARCHITECTURE: amd64
 
 jobs:
   release-serverless-init:
