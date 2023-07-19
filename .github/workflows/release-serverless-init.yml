@@ -80,6 +80,7 @@ jobs:
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
+          platforms: linux/amd64
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
 
@@ -89,6 +90,7 @@ jobs:
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
+          platforms: linux/amd64
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
 
@@ -99,6 +101,7 @@ jobs:
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
+          platforms: linux/amd64
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 
@@ -109,5 +112,6 @@ jobs:
         with:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
+          platforms: linux/amd64
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
