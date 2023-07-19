@@ -69,7 +69,7 @@ fi
 
 # if it is java
 DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
-if [[ "$AWS_EXECUTION_ENV" == *"java"* ]] || [ -f "$DD_Agent_Jar" ]
+if [[ "$AWS_EXECUTION_ENV" == *"java"* ]] && [ -f "$DD_Agent_Jar" ]
 then
   if [ "$DD_LOG_LEVEL" == "debug" ]
   then
@@ -79,24 +79,18 @@ then
   export DD_RUNTIME_METRICS_ENABLED="false"
   export DD_REMOTE_CONFIG_ENABLED="false"
 
-  if [ -f "$DD_Agent_Jar" ]
-  then
-    # Removes the -XX:-TieredCompilation flag from the java command passed 
-    # through from the Lambda runtime. Allows the JVM to use the C1 compiler
-    # and Interpreter, which is much faster on cold start and 
-    # uses less memory.
-    START_COMMAND=${args[0]}
-    REMAINDER_ARGS=("${args[@]:1}")
-    for index in "${!REMAINDER_ARGS[@]}" ; do
-      [[ ${REMAINDER_ARGS[$index]} == "-XX:-TieredCompilation" ]] && unset -v 'REMAINDER_ARGS[$index]' ;
-    done
-    REMAINDER_ARGS="${REMAINDER_ARGS[@]}"
-    # -XX:TieredStopAtLevel=1 tells the compiler to stop at the C1 compiler
-    args=($START_COMMAND -javaagent:$DD_Agent_Jar -XX:TieredStopAtLevel=1 ${REMAINDER_ARGS[@]})
-
-  else
-    echo "File $DD_Agent_Jar does not exist!"
-  fi
+  # Removes the -XX:-TieredCompilation flag from the java command passed 
+  # through from the Lambda runtime. Allows the JVM to use the C1 compiler
+  # and Interpreter, which is much faster on cold start and 
+  # uses less memory.
+  START_COMMAND=${args[0]}
+  REMAINDER_ARGS=("${args[@]:1}")
+  for index in "${!REMAINDER_ARGS[@]}" ; do
+    [[ ${REMAINDER_ARGS[$index]} == "-XX:-TieredCompilation" ]] && unset -v 'REMAINDER_ARGS[$index]' ;
+  done
+  REMAINDER_ARGS="${REMAINDER_ARGS[@]}"
+  # -XX:TieredStopAtLevel=1 tells the compiler to stop at the C1 compiler
+  args=($START_COMMAND -javaagent:$DD_Agent_Jar -XX:TieredStopAtLevel=1 ${REMAINDER_ARGS[@]})
 fi
 
 exec "${args[@]}"
