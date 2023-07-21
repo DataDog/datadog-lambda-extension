@@ -32,11 +32,20 @@ then
   then
     echo "Configuring for the .NET runtime!"
   fi
-  # Handle the CORECLR_PROFILER_PATH
-  DEFAULT_PATH=/opt/datadog/Datadog.Trace.ClrProfiler.Native.so
-  ARM64_PATH=/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so
-  X64_PATH=/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so
-  PROFILER_PATHS=("${DEFAULT_PATH}" "${ARM64_PATH}" "${X64_PATH}")
+  # Handle the CORECLR_PROFILER_PATH:
+  # Try to load the library from these paths, in order:
+  PROFILER_PATHS=(
+    # use the shared loader if it's present (it was removed from the dotnet
+    # layer, this lines keep forwards compatibility if it's added back)
+    "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
+    "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
+    # if shared loader is not found,
+    # use the tracer library directly
+    "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
+    "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
+    # keep this as a fallback for backwards compatibility
+    "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
+  )
   PROFILER_FOUND=false
   ## Search from all possible places
   for PROFILER_PATH in "${PROFILER_PATHS[@]}"
@@ -50,7 +59,7 @@ then
   done
   if [ $PROFILER_FOUND == false ]
   then
-    echo "CLR Profiler file not found. Function profiling may not work correctly"
+    echo ".NET CLR Profiler file not found. APM instrumentation may not work correctly."
   fi
   # Other env variables for .NET
   export CORECLR_ENABLE_PROFILING="1"
@@ -59,7 +68,8 @@ then
 fi
 
 # if it is java
-if [[ "$AWS_EXECUTION_ENV" == *"java"* ]]
+DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
+if [[ "$AWS_EXECUTION_ENV" == *"java"* ]] && [ -f "$DD_Agent_Jar" ]
 then
   if [ "$DD_LOG_LEVEL" == "debug" ]
   then
@@ -69,25 +79,18 @@ then
   export DD_RUNTIME_METRICS_ENABLED="false"
   export DD_REMOTE_CONFIG_ENABLED="false"
 
-  DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
-  if [ -f "$DD_Agent_Jar" ]
-  then
-    # Removes the -XX:-TieredCompilation flag from the java command passed 
-    # through from the Lambda runtime. Allows the JVM to use the C1 compiler
-    # and Interpreter, which is much faster on cold start and 
-    # uses less memory.
-    START_COMMAND=${args[0]}
-    REMAINDER_ARGS=("${args[@]:1}")
-    for index in "${!REMAINDER_ARGS[@]}" ; do
-      [[ ${REMAINDER_ARGS[$index]} == "-XX:-TieredCompilation" ]] && unset -v 'REMAINDER_ARGS[$index]' ;
-    done
-    REMAINDER_ARGS="${REMAINDER_ARGS[@]}"
-    # -XX:TieredStopAtLevel=1 tells the compiler to stop at the C1 compiler
-    args=($START_COMMAND -javaagent:$DD_Agent_Jar -XX:TieredStopAtLevel=1 ${REMAINDER_ARGS[@]})
-
-  else
-    echo "File $DD_Agent_Jar does not exist!"
-  fi
+  # Removes the -XX:-TieredCompilation flag from the java command passed 
+  # through from the Lambda runtime. Allows the JVM to use the C1 compiler
+  # and Interpreter, which is much faster on cold start and 
+  # uses less memory.
+  START_COMMAND=${args[0]}
+  REMAINDER_ARGS=("${args[@]:1}")
+  for index in "${!REMAINDER_ARGS[@]}" ; do
+    [[ ${REMAINDER_ARGS[$index]} == "-XX:-TieredCompilation" ]] && unset -v 'REMAINDER_ARGS[$index]' ;
+  done
+  REMAINDER_ARGS="${REMAINDER_ARGS[@]}"
+  # -XX:TieredStopAtLevel=1 tells the compiler to stop at the C1 compiler
+  args=($START_COMMAND -javaagent:$DD_Agent_Jar -XX:TieredStopAtLevel=1 ${REMAINDER_ARGS[@]})
 fi
 
 exec "${args[@]}"

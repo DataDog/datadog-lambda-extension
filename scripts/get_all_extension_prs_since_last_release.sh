@@ -34,19 +34,22 @@ while true; do
     # Iterate over all PRs and print their title and merge commit SHA
     for (( i=0; i<$prs_length; i++ )); do
         pr_title=$(echo $response | jq -r ".items[$i].title")
-        pr_sha=$(echo $response | jq -r ".items[$i].pull_request.url" | xargs curl -s | jq -r ".merge_commit_sha" | cut -c1-7)
-        echo "$pr_title DataDog/datadog-agent@$pr_sha"
+        pr_sha=$(echo $response | jq -r ".items[$i].pull_request.url" | xargs curl -s | jq -r ".merge_commit_sha")
+        echo -e "+ $pr_title https://github.com/DataDog/datadog-agent/commit/$pr_sha\n"
     done
 
     ((page++))
 done
 
-echo
 echo "#############################################################"
 echo "#                                                           #"
 echo "#   IMPORTANT: Please verify these commits before integrating   #"
-echo "#   them into the release. This script is primarily for     #"
+echo "#   them into the lambda extension release. (i.e. not every commit outputted #"
+echo "#   here needs to be included in release) This script is primarily for     #"
 echo "#   convenience and does not replace a thorough review process.  #"
 echo "#                                                           #"
 echo "#############################################################"
+echo
+echo "Also, remember to verify the list of commits at https://github.com/DataDog/datadog-agent/pulls?q=is%3Apr+label%3Ateam%2Fserverless+is%3Aclosed+sort%3Aupdated-desc"
+echo "Please make an announcement in the serverless-backroom mentioning everyone whose commits are going to be pulled in. If their commit wasn't released, they should not close their JIRA ticket until they can assert it was released."
 echo

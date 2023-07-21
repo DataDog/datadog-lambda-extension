@@ -7,17 +7,16 @@ ARG CMD_PATH
 ARG BUILD_TAGS
 RUN mkdir -p /tmp/dd/datadog-agent
 
-# install go 1.19
 RUN yum install -y wget tar gzip gcc
 RUN arch="$(uname -m)"; \
     if [ "${arch}" = 'aarch64' ]; then \
-        arch='arm64'; \
+    arch='arm64'; \
     fi; \
     if [ "${arch}" = 'x86_64' ]; then \
-        arch='amd64'; \
+    arch='amd64'; \
     fi; \
-    wget -O go1.19.10.linux-${arch}.tar.gz https://go.dev/dl/go1.19.10.linux-${arch}.tar.gz; \
-    tar -C /usr/local -xzf go1.19.10.linux-${arch}.tar.gz
+    wget -O go1.20.6.linux-${arch}.tar.gz https://go.dev/dl/go1.20.6.linux-${arch}.tar.gz; \
+    tar -C /usr/local -xzf go1.20.6.linux-${arch}.tar.gz
 
 # cache dependencies
 COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
@@ -34,14 +33,14 @@ WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     if [ -z "$AGENT_VERSION" ]; then \
-        /usr/local/go/bin/go build -ldflags="-w \
-        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
-        -tags "${BUILD_TAGS}" -o datadog-agent; \
+    /usr/local/go/bin/go build -ldflags="-w \
+    -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
+    -tags "${BUILD_TAGS}" -o datadog-agent; \
     else \
-        /usr/local/go/bin/go build -ldflags="-w \
-        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
-        -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
-        -tags "${BUILD_TAGS}" -o datadog-agent; \
+    /usr/local/go/bin/go build -ldflags="-w \
+    -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
+    -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
+    -tags "${BUILD_TAGS}" -o datadog-agent; \
     fi
 
 RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
