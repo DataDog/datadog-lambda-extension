@@ -19,9 +19,9 @@ fi
 case "$RUNTIME" in
     python)
         if [ "$ARCHITECTURE" == "amd64" ]; then
-            LAYER_NAME=Datadog-Python39-ARM
-        else
             LAYER_NAME=Datadog-Python39
+        else
+            LAYER_NAME=Datadog-Python39-ARM
         fi
         DOCKERFILE=Dockerfile.Python
         ;;
