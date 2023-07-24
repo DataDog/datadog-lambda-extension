@@ -19,7 +19,7 @@ while true; do
         curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{}' ; echo
     fi
     sleep 1
-    if [[ $i -gt $NB_INVOKE ]]
+    if [[ $i -ge $NB_INVOKE ]]
     then
         echo "Saving logs to logs.txt"
         docker logs $dockerId >./local_tests/logs.txt 2>&1

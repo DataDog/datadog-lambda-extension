@@ -47,6 +47,7 @@ CURRENT_PATH=$(pwd)
 # Build the extension
 ARCHITECTURE=$ARCHITECTURE VERSION=1 ./scripts/build_binary_and_layer_dockerized.sh
 
+
 # Move to the local_tests repo
 cd ./local_tests
 
@@ -55,7 +56,13 @@ cp ../.layers/datadog_extension-$ARCHITECTURE/extensions/datadog-agent .
 
 # Build the recorder extension which will act as a man-in-a-middle to intercept payloads sent to Datadog
 cd ../../datadog-agent/test/integration/serverless/recorder-extension
-GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
+
+if [ `uname -o` == "GNU/Linux" ]; then
+      CGO_ENABLED=0 GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
+    else
+      GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
+fi
+
 cd "$CURRENT_PATH/local_tests"
 if [ -z "$LAYER_PATH" ] && [ -n "$LAYER_NAME" ]; then
     # Get the latest available version
@@ -73,7 +80,7 @@ if [ -z "$LAYER_PATH" ] && [ -n "$LAYER_NAME" ]; then
         URL=$(aws-vault exec serverless-sandbox-account-admin \
             -- aws lambda get-layer-version --layer-name $LAYER_NAME --version-number $LATEST_AVAILABLE_VERSION \
             --query Content.Location --region sa-east-1 --output text)
-        curl $URL -o "$LAYER"
+        curl -k $URL -o "$LAYER"
         rm -rf $CURRENT_PATH/local_tests/META_INF
         rm -rf $CURRENT_PATH/local_tests/python
         unzip "$LAYER"
