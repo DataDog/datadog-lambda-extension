@@ -82,6 +82,7 @@ jobs:
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
+          provenance: false
 
       - name: Build and push (alpine)
         id: docker_build_alpine
@@ -91,6 +92,7 @@ jobs:
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
+          provenance: false
 
       - name: Build and push latest
         id: docker_build_latest
@@ -101,6 +103,7 @@ jobs:
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          provenance: false
 
       - name: Build and push latest alpine
         id: docker_build_alpine_latest
@@ -111,3 +114,4 @@ jobs:
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
+          provenance: false
