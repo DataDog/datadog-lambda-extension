@@ -45,7 +45,7 @@ if [ -z $VERSION ]; then
     echo "No version specified, automatically incrementing version number"
 
     LAST_LAYER_VERSION=$(
-        aws-vault exec serverless-sandbox-account-admin -- \
+        aws-vault exec sso-serverless-sandbox-account-admin -- \
         aws lambda list-layer-versions \
             --layer-name $LAYER_NAME \
             --region $REGION \
@@ -65,4 +65,4 @@ SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
 VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE ./scripts/build_binary_and_layer_dockerized.sh
-VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE REGIONS=$REGION aws-vault exec serverless-sandbox-account-admin -- ./scripts/publish_layers.sh
+VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE REGIONS=$REGION aws-vault exec sso-serverless-sandbox-account-admin -- ./scripts/publish_layers.sh
