@@ -2,6 +2,9 @@
 
 # Use with `VERSION=<DESIRED_VERSION> ./build_docker_image.sh`
 
+# To publish an Alpine image, set ALPINE=true:
+# Use with `VERSION=<DESIRED_VERSION> ALPINE=true ./build_docker_image.sh`
+
 # Unless explicitly stated otherwise all files in this repository are licensed
 # under the Apache License Version 2.0.
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
@@ -9,8 +12,8 @@
 
 set -e
 
-DOCKER_REPOSITORY_NAME="datadog/lambda-extension"
-DOCKERFILE_LOCATION="scripts/Dockerfile"
+# DOCKER_REPOSITORY_NAME="datadog/lambda-extension"
+DOCKER_REPOSITORY_NAME="davidlee434/test-image"
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -25,9 +28,18 @@ fi
 
 # Build the image, tagged with the version
 echo "Building the Docker image, and pushing to Dockerhub"
-docker buildx build --platform linux/arm64,linux/amd64 \
-  -t $DOCKER_REPOSITORY_NAME:$VERSION \
-  -t $DOCKER_REPOSITORY_NAME:latest \
-  -f ./scripts/Dockerfile \
-  --build-arg EXTENSION_VERSION="${VERSION}" . \
-  --push
+if [ "$ALPINE" == "true" ]; then
+  docker buildx build --platform linux/arm64,linux/amd64 \
+    -t $DOCKER_REPOSITORY_NAME:$VERSION-alpine \
+    -t $DOCKER_REPOSITORY_NAME:latest-alpine \
+    -f ./scripts/Dockerfile.alpine \
+    --build-arg EXTENSION_VERSION="${VERSION}" . \
+    --push
+else
+  docker buildx build --platform linux/arm64,linux/amd64 \
+    -t $DOCKER_REPOSITORY_NAME:$VERSION \
+    -t $DOCKER_REPOSITORY_NAME:latest \
+    -f ./scripts/Dockerfile \
+    --build-arg EXTENSION_VERSION="${VERSION}" . \
+    --push  
+fi
