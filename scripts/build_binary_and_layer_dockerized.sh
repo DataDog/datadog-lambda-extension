@@ -95,7 +95,7 @@ elif [ "$ARCHITECTURE" == "arm64" ]; then
     docker_build_zip arm64
     docker_build_zip arm64 -alpine
 else
-    echo "Building for both amd64 and arm64 (including alpine)"
+    echo "Building for both amd64 and arm64"
     docker_build_zip amd64
     docker_build_zip arm64
     docker_build_zip amd64 -alpine
