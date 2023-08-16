@@ -12,8 +12,7 @@
 
 set -e
 
-# DOCKER_REPOSITORY_NAME="datadog/lambda-extension"
-DOCKER_REPOSITORY_NAME="davidlee434/test-image"
+DOCKER_REPOSITORY_NAME="datadog/lambda-extension"
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
