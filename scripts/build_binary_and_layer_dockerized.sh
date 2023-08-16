@@ -98,6 +98,7 @@ else
     echo "Building for both amd64 and arm64"
     docker_build_zip amd64
     docker_build_zip arm64
+    BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
     docker_build_zip arm64 -alpine
 fi
