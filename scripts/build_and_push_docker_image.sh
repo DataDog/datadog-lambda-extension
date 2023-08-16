@@ -23,7 +23,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 # Build the image, tagged with the version
-echo "Building the non-alpine Docker images, and pushing to Dockerhub"
+echo "Building the non-alpine Docker image, and pushing to Dockerhub"
 docker buildx build --platform linux/arm64,linux/amd64 \
   -t $DOCKER_REPOSITORY_NAME:$VERSION \
   -t $DOCKER_REPOSITORY_NAME:latest \
@@ -31,7 +31,7 @@ docker buildx build --platform linux/arm64,linux/amd64 \
   --build-arg EXTENSION_VERSION="${VERSION}" . \
   --push
 
-echo "Building the alpine Docker images, and pushing to Dockerhub"
+echo "Building the alpine Docker image, and pushing to Dockerhub"
 docker buildx build --platform linux/arm64,linux/amd64 \
   -t $DOCKER_REPOSITORY_NAME:$VERSION-alpine \
   -t $DOCKER_REPOSITORY_NAME:latest-alpine \
