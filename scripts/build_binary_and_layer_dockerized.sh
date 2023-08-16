@@ -89,10 +89,12 @@ if [ "$SERVERLESS_INIT" == "true" ]; then
 elif [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64
+    BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
 elif [ "$ARCHITECTURE" == "arm64" ]; then
     echo "Building for arm64 only"
     docker_build_zip arm64
+    BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip arm64 -alpine
 else
     echo "Building for both amd64 and arm64"
