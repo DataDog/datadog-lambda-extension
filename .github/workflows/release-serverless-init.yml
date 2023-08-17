@@ -103,28 +103,28 @@ jobs:
           provenance: false
           platforms: linux/amd64,linux/arm64
 
-      # - name: Build and push latest
-      #   id: docker_build_latest
-      #   uses: docker/build-push-action@v4
-      #   if: ${{ github.event.inputs.latestTag == 'yes' }}
-      #   with:
-      #     context: ./scripts
-      #     file: ./scripts/Dockerfile.serverless-init.build
-      #     push: true
-      #     # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-      #     tags: ghcr.io/test-sls-init-image:latest
-      #     provenance: false
-      #     platforms: linux/amd64,linux/arm64
+      - name: Build and push latest
+        id: docker_build_latest
+        uses: docker/build-push-action@v4
+        # if: ${{ github.event.inputs.latestTag == 'yes' }}
+        with:
+          context: ./scripts
+          file: ./scripts/Dockerfile.serverless-init.build
+          push: true
+          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ghcr.io/test-sls-init-image:latest
+          provenance: false
+          platforms: linux/amd64,linux/arm64
 
-      # - name: Build and push latest alpine
-      #   id: docker_build_alpine_latest
-      #   uses: docker/build-push-action@v4
-      #   if: ${{ github.event.inputs.latestTag == 'yes' }}
-      #   with:
-      #     context: ./scripts
-      #     file: ./scripts/Dockerfile.serverless-init.alpine.build
-      #     push: true
-      #     # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
-      #     tags: ghcr.io/test-sls-init-image:latest-alpine
-      #     provenance: false
-      #     platforms: linux/amd64,linux/arm64
+      - name: Build and push latest alpine
+        id: docker_build_alpine_latest
+        uses: docker/build-push-action@v4
+        # if: ${{ github.event.inputs.latestTag == 'yes' }}
+        with:
+          context: ./scripts
+          file: ./scripts/Dockerfile.serverless-init.alpine.build
+          push: true
+          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
+          tags: ghcr.io/test-sls-init-image:latest-alpine
+          provenance: false
+          platforms: linux/amd64,linux/arm64
