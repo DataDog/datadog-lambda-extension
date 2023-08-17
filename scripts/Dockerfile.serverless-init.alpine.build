@@ -1,4 +1,4 @@
 FROM scratch
 ARG TARGETARCH
 
-COPY ./bin/datadog_extension-$TARGETARCH-alpine/bin/datadog-agent /datadog-init
+COPY ./bin/datadog_extension-$TARGETARCH-alpine/extensions/datadog-agent /datadog-init
