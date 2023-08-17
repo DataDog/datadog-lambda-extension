@@ -29,7 +29,7 @@ on:
         default: "main"
 
 env:
-  IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
+  # IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
   REGISTRY: ghcr.io
   ARCHITECTURE: amd64
 
@@ -79,7 +79,8 @@ jobs:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
+          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
+          tags: ghcr.io/test-sls-init-image:${{ github.event.inputs.tag }}
           provenance: false
           platforms: linux/amd64,linux/arm64
 
@@ -90,7 +91,8 @@ jobs:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
+          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
+          tags: ghcr.io/test-sls-init-image:${{ github.event.inputs.tag }}-alpine
           provenance: false
           platforms: linux/amd64,linux/arm64
 
@@ -102,7 +104,8 @@ jobs:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.build
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ghcr.io/test-sls-init-image:latest
           provenance: false
           platforms: linux/amd64,linux/arm64
 
@@ -114,6 +117,7 @@ jobs:
           context: ./scripts
           file: ./scripts/Dockerfile.serverless-init.alpine.build
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
+          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
+          tags: ghcr.io/test-sls-init-image:latest-alpine
           provenance: false
           platforms: linux/amd64,linux/arm64
