@@ -33,11 +33,11 @@ WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     if [ -z "$AGENT_VERSION" ]; then \
-    /usr/local/go/bin/go build -ldflags="-w \
+    /usr/local/go/bin/go build -x -ldflags="-w \
     -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
     -tags "${BUILD_TAGS}" -o datadog-agent; \
     else \
-    /usr/local/go/bin/go build -ldflags="-w \
+    /usr/local/go/bin/go build -x -ldflags="-w \
     -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
     -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
     -tags "${BUILD_TAGS}" -o datadog-agent; \
