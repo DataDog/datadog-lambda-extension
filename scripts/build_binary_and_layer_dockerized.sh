@@ -84,8 +84,10 @@ function docker_build_zip {
 if [ "$SERVERLESS_INIT" == "true" ]; then
     echo "Building serverless init (both arch + alpine)"
     docker_build_zip amd64
+    docker_build_zip arm64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
+    docker_build_zip arm64 -alpine
 elif [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64
