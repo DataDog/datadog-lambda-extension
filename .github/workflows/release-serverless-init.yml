@@ -35,10 +35,6 @@ env:
   IMAGE_NAME: datadog/datadog-lambda-extension/test-sls-init-image
   REGISTRY: ghcr.io
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
   release-serverless-init:
     runs-on: ubuntu-latest
@@ -70,7 +66,7 @@ jobs:
         env:
           AGENT_PATH: datadog-agent
           # VERSION: ${{ github.event.inputs.tag }}
-          VERSION: 12
+          VERSION: 13
           SERVERLESS_INIT: true
           ALPINE: ${{ matrix.arrays.isAlpine }}
           # AGENT_VERSION: ${{ github.event.inputs.agentVersion }}
@@ -95,7 +91,7 @@ jobs:
           file: ./scripts/${{ matrix.arrays.dockerFile }}
           push: true
           # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}${{ matrix.arrays.tagSuffix }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:12${{ matrix.arrays.tagSuffix }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:13${{ matrix.arrays.tagSuffix }}
           provenance: false
           platforms: linux/amd64,linux/arm64
 
