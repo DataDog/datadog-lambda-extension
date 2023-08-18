@@ -27,12 +27,9 @@ on:
         type: string
         description: Datadog agent branch name (default main)
         default: "main"
-  push:
-    branches: david.lee/serverless-init-arm64
 
 env:
-  # IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
-  IMAGE_NAME: datadog/datadog-lambda-extension/test-sls-init-image
+  IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
   REGISTRY: ghcr.io
 
 jobs:
@@ -41,17 +38,17 @@ jobs:
     strategy:
       matrix:
         arrays: [
-          {dockerFile: "Dockerfile.serverless-init.build", isAlpine: false, tagSuffix: ""},
-          {dockerFile: "Dockerfile.serverless-init.alpine.build", isAlpine: true, tagSuffix: "-alpine"}
+          {dockerFile: "Dockerfile.serverless-init.build", isAlpine: "false", tagSuffix: ""},
+          {dockerFile: "Dockerfile.serverless-init.alpine.build", isAlpine: "true", tagSuffix: "-alpine"}
         ]
+    name: "Release Serverless Init (isAlpine: ${{ matrix.arrays.isAlpine }})"
     steps:
       - uses: actions/checkout@v3
 
       - uses: actions/checkout@v3
         with:
           repository: DataDog/datadog-agent
-          # ref: refs/heads/${{ github.event.inputs.agentBranch }}
-          ref: refs/heads/main
+          ref: refs/heads/${{ github.event.inputs.agentBranch }}
           path: datadog-agent
 
       - name: Set up QEMU
@@ -65,12 +62,10 @@ jobs:
         run: ./build_serverless_init.sh
         env:
           AGENT_PATH: datadog-agent
-          # VERSION: ${{ github.event.inputs.tag }}
-          VERSION: 13
+          VERSION: ${{ github.event.inputs.tag }}
           SERVERLESS_INIT: true
           ALPINE: ${{ matrix.arrays.isAlpine }}
-          # AGENT_VERSION: ${{ github.event.inputs.agentVersion }}
-          AGENT_VERSION: "7.46.0"
+          AGENT_VERSION: ${{ github.event.inputs.agentVersion }}
 
       - name: Set up build directory and copy binaries
         run: |
@@ -90,15 +85,14 @@ jobs:
           context: ./scripts
           file: ./scripts/${{ matrix.arrays.dockerFile }}
           push: true
-          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}${{ matrix.arrays.tagSuffix }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:13${{ matrix.arrays.tagSuffix }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}${{ matrix.arrays.tagSuffix }}
           provenance: false
           platforms: linux/amd64,linux/arm64
 
       - name: Build and push latest
         id: docker_build_latest
         uses: docker/build-push-action@v4
-        # if: ${{ github.event.inputs.latestTag == 'yes' }}
+        if: ${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
           file: ./scripts/${{ matrix.arrays.dockerFile }}
