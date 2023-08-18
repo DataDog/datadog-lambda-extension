@@ -27,11 +27,18 @@ on:
         type: string
         description: Datadog agent branch name (default main)
         default: "main"
+  push:
+    branches: david.lee/serverless-init-arm64
 
 env:
-  IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
+  # IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
+  IMAGE_NAME: datadog/datadog-lambda-extension/test-sls-init-image
   REGISTRY: ghcr.io
   ARCHITECTURE: amd64
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   release-serverless-init:
