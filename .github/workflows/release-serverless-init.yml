@@ -34,7 +34,6 @@ env:
   # IMAGE_NAME: datadog/datadog-lambda-extension/serverless-init
   IMAGE_NAME: datadog/datadog-lambda-extension/test-sls-init-image
   REGISTRY: ghcr.io
-  ARCHITECTURE: amd64
 
 permissions:
   contents: read
@@ -43,7 +42,12 @@ permissions:
 jobs:
   release-serverless-init:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        arrays: [
+          {dockerFile: "Dockerfile.serverless-init.build", isAlpine: false, tagSuffix: ""},
+          {dockerFile: "Dockerfile.serverless-init.alpine.build", isAlpine: true, tagSuffix: "-alpine"}
+        ]
     steps:
       - uses: actions/checkout@v3
 
@@ -66,8 +70,9 @@ jobs:
         env:
           AGENT_PATH: datadog-agent
           # VERSION: ${{ github.event.inputs.tag }}
-          VERSION: 11
+          VERSION: 12
           SERVERLESS_INIT: true
+          ALPINE: ${{ matrix.arrays.isAlpine }}
           # AGENT_VERSION: ${{ github.event.inputs.agentVersion }}
           AGENT_VERSION: "7.46.0"
 
@@ -87,24 +92,12 @@ jobs:
         uses: docker/build-push-action@v4
         with:
           context: ./scripts
-          file: ./scripts/Dockerfile.serverless-init.build
+          file: ./scripts/${{ matrix.arrays.dockerFile }}
           push: true
-          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:11
+          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}${{ matrix.arrays.tagSuffix }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:12${{ matrix.arrays.tagSuffix }}
           provenance: false
           platforms: linux/amd64,linux/arm64
-
-      - name: Build and push (alpine)
-        id: docker_build_alpine
-        uses: docker/build-push-action@v4
-        with:
-          context: ./scripts
-          file: ./scripts/Dockerfile.serverless-init.alpine.build
-          push: true
-          # tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}-alpine
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:11-alpine
-          provenance: false
-          platforms: linux/amd64
 
       - name: Build and push latest
         id: docker_build_latest
@@ -112,20 +105,8 @@ jobs:
         # if: ${{ github.event.inputs.latestTag == 'yes' }}
         with:
           context: ./scripts
-          file: ./scripts/Dockerfile.serverless-init.build
+          file: ./scripts/${{ matrix.arrays.dockerFile }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest${{ matrix.arrays.tagSuffix }}
           provenance: false
           platforms: linux/amd64,linux/arm64
-
-      - name: Build and push latest alpine
-        id: docker_build_alpine_latest
-        uses: docker/build-push-action@v4
-        # if: ${{ github.event.inputs.latestTag == 'yes' }}
-        with:
-          context: ./scripts
-          file: ./scripts/Dockerfile.serverless-init.alpine.build
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest-alpine
-          provenance: false
-          platforms: linux/amd64
