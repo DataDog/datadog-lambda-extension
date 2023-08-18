@@ -5,7 +5,8 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2021 Datadog, Inc.
 
-# Usage: AGENT_VERSION=7.43.0 VERSION=5 ./scripts/build_serverless_init.sh
+# Usage: AGENT_VERSION=7.43.0 VERSION=5 ALPINE=false ./scripts/build_serverless_init.sh
+# the ALPINE var indicates whether or not alpine or non-alpine images will be built.
 
 # Optional environment variables:
 # VERSION - Use a specific version number
