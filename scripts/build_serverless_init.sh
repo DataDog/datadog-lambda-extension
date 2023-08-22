@@ -5,7 +5,8 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2021 Datadog, Inc.
 
-# Usage: AGENT_VERSION=7.43.0 VERSION=5 ARCHITECTURE=[amd64|arm64] ./scripts/build_serverless_init.sh
+# Usage: AGENT_VERSION=7.43.0 VERSION=5 ALPINE=false ./scripts/build_serverless_init.sh
+# the ALPINE var indicates whether or not alpine or non-alpine images will be built.
 
 # Optional environment variables:
 # VERSION - Use a specific version number
@@ -16,4 +17,4 @@ set -e
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 cd $SCRIPTS_DIR/..
 
-AGENT_VERSION=$AGENT_VERSION VERSION=$VERSION ARCHITECTURE=$ARCHITECTURE SERVERLESS_INIT=true ./scripts/build_binary_and_layer_dockerized.sh
+AGENT_VERSION=$AGENT_VERSION VERSION=$VERSION SERVERLESS_INIT=true ALPINE=$ALPINE ./scripts/build_binary_and_layer_dockerized.sh
