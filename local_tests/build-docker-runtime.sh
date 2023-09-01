@@ -66,7 +66,7 @@ fi
 cd "$CURRENT_PATH/local_tests"
 if [ -z "$LAYER_PATH" ] && [ -n "$LAYER_NAME" ]; then
     # Get the latest available version
-    LATEST_AVAILABLE_VERSION=$(aws-vault exec serverless-sandbox-account-admin \
+    LATEST_AVAILABLE_VERSION=$(aws-vault exec sso-serverless-sandbox-account-admin \
     -- aws lambda list-layer-versions --layer-name $LAYER_NAME --region sa-east-1 --max-items 1 \
     | jq -r ".LayerVersions | .[0] |  .Version")
 
@@ -77,7 +77,7 @@ if [ -z "$LAYER_PATH" ] && [ -n "$LAYER_NAME" ]; then
         echo "The layer has already been downloaded, skipping"
     else
         echo "Downloading the latest $RUNTIME layer (version $LATEST_AVAILABLE_VERSION)"
-        URL=$(aws-vault exec serverless-sandbox-account-admin \
+        URL=$(aws-vault exec sso-serverless-sandbox-account-admin \
             -- aws lambda get-layer-version --layer-name $LAYER_NAME --version-number $LATEST_AVAILABLE_VERSION \
             --query Content.Location --region sa-east-1 --output text)
         curl -k $URL -o "$LAYER"

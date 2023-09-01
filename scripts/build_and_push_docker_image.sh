@@ -10,7 +10,6 @@
 set -e
 
 DOCKER_REPOSITORY_NAME="datadog/lambda-extension"
-DOCKERFILE_LOCATION="scripts/Dockerfile"
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
@@ -24,10 +23,18 @@ if [ -z "$VERSION" ]; then
 fi
 
 # Build the image, tagged with the version
-echo "Building the Docker image, and pushing to Dockerhub"
+echo "Building the non-alpine Docker image, and pushing to Dockerhub"
 docker buildx build --platform linux/arm64,linux/amd64 \
   -t $DOCKER_REPOSITORY_NAME:$VERSION \
   -t $DOCKER_REPOSITORY_NAME:latest \
   -f ./scripts/Dockerfile \
+  --build-arg EXTENSION_VERSION="${VERSION}" . \
+  --push
+
+echo "Building the alpine Docker image, and pushing to Dockerhub"
+docker buildx build --platform linux/arm64,linux/amd64 \
+  -t $DOCKER_REPOSITORY_NAME:$VERSION-alpine \
+  -t $DOCKER_REPOSITORY_NAME:latest-alpine \
+  -f ./scripts/Dockerfile.alpine \
   --build-arg EXTENSION_VERSION="${VERSION}" . \
   --push

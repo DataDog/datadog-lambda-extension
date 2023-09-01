@@ -81,19 +81,30 @@ function docker_build_zip {
     unzip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip -d $TARGET_DIR/datadog_extension-${arch}${suffix}
 }
 
-if [ "$SERVERLESS_INIT" == "true" ]; then
-    echo "Building serverless init (both arch + alpine)"
+if [[ "$SERVERLESS_INIT" == "true" && "$ALPINE" == "false" ]]; then
+    echo "Building serverless init for non-alpine amd64 & arm64"
     docker_build_zip amd64
+    docker_build_zip arm64
+elif [[ "$SERVERLESS_INIT" == "true" && "$ALPINE" == "true" ]]; then
+    echo "Building serverless init for alpine amd64 & arm64"
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
+    docker_build_zip arm64 -alpine
 elif [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_zip amd64
+    BUILD_FILE=Dockerfile.alpine.build
+    docker_build_zip amd64 -alpine
 elif [ "$ARCHITECTURE" == "arm64" ]; then
     echo "Building for arm64 only"
     docker_build_zip arm64
+    BUILD_FILE=Dockerfile.alpine.build
+    docker_build_zip arm64 -alpine
 else
     echo "Building for both amd64 and arm64"
     docker_build_zip amd64
     docker_build_zip arm64
+    BUILD_FILE=Dockerfile.alpine.build
+    docker_build_zip amd64 -alpine
+    docker_build_zip arm64 -alpine
 fi

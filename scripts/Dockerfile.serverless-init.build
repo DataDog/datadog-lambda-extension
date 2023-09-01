@@ -1,3 +1,4 @@
 FROM scratch
+ARG TARGETARCH
 
-COPY ./bin/datadog-agent /datadog-init
+COPY ./bin/datadog_extension-$TARGETARCH/extensions/datadog-agent /datadog-init
