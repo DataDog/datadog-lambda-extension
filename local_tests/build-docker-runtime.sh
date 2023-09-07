@@ -7,7 +7,7 @@ if [ -z $RUNTIME ]; then
     RUNTIME=python
 fi
 
-# Determine architecture, M1 requires arm64 while Intel chip requires amd64
+# Determine architecture, M1 requires arm64 while Intel chip requires amd64. If testing with docker on M1, use amd64
 if [ -z "$ARCHITECTURE" ]; then
   if [ `uname -m` == "arm64" ]; then
       ARCHITECTURE=arm64
