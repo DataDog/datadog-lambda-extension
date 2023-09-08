@@ -11,7 +11,7 @@ find_layers_from_all_regions() {
 diff_from_useast1() {
   for f1 in all_layers_*.log; do
     diff --unified=0 "$f1" all_layers_us-east-1.log
-  done | grep -vE "Datadog-Trace-Forwarder-Python|Node8|metric|Node10|Node12|Python27|Python36|Ruby2-5" >all_diff.log # ignore deprecated layers
+  done | grep -vE "@@|Datadog-Trace-Forwarder-Python|Node8|metric|Node10|Node12|Python27|Python36|Ruby2-5" >all_diff.log # ignore deprecated layers
 }
 
 "$@"
