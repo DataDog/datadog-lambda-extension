@@ -24,7 +24,8 @@ COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
 WORKDIR /tmp/dd/datadog-agent
 
 # copy source files (/tgz gets unzip automatically by Docker)
-ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
+COPY ./scripts/.src/datadog-agent.tgz /tmp/dd/
+RUN tar -xzf /tmp/dd/datadog-agent.tgz -C /tmp/dd/ && rm /tmp/dd/datadog-agent.tgz
 
 # build the extension
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
