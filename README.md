@@ -39,6 +39,29 @@ You can also open an issue for a feature request.
 
 If you find an issue with this package and have a fix, please feel free to open a pull request following the [procedures](https://github.com/DataDog/datadog-agent/blob/master/docs/dev/contributing.md).
 
+## Testing
+
+To test a change to the Datadog Lambda Extension in Google Cloud Run:
+
+1. Clone this repo and [the Datadog Agent repo](https://github.com/DataDog/datadog-agent) into the same parent directory.
+2. Run `VERSION=0 SERVERLESS_INIT=true ./scripts/build_binary_and_layer_dockerized.sh` in this repo to build the extension.
+3. Create a "Hello World" serverless application [as described here](https://cloud.google.com/run/docs/quickstarts/build-and-deploy/go).
+4. Follow [the public instructions](https://docs.datadoghq.com/serverless/google_cloud_run) to add the Lambda Extension to your serverless application.
+5. Copy the binary file that you built to the same location as your Dockerfile:
+```
+cp datadog-lambda-extension/.layers/datadog_extension-amd64/extensions/datadog-agent ~/hello-world-app/datadog-init
+```
+6. In your Dockerfile, replace
+```
+COPY --from=datadog/serverless-init:1 /datadog-init /app/datadog-init
+```
+with
+```
+COPY datadog-init /app/datadog-init
+```
+
+Deploy your serverless application, and it will run with a version of the Lambda Extension that includes your changes to the code.
+
 ## Community
 
 For product feedback and questions, join the `#serverless` channel in the [Datadog community on Slack](https://chat.datadoghq.com/).
