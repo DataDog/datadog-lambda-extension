@@ -41,7 +41,7 @@ If you find an issue with this package and have a fix, please feel free to open 
 
 ## Testing
 
-To test a change to the Datadog Lambda Extension:
+To test a change to the Datadog Lambda Extension in Google Cloud Run:
 
 1. Clone this repo and [the Datadog Agent repo](https://github.com/DataDog/datadog-agent) into the same parent directory.
 2. Run `VERSION=0 SERVERLESS_INIT=true ./scripts/build_binary_and_layer_dockerized.sh` in this repo to build the extension.
