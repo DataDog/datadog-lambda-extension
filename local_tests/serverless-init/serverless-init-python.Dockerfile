@@ -4,9 +4,17 @@ RUN apt-get update && \
     python3 -m venv /venv && \
     /venv/bin/pip install --upgrade pip setuptools wheel
 
+FROM build AS build-venv
+COPY requirements.txt /requirements.txt
+RUN /venv/bin/pip install --disable-pip-version-check -r /requirements.txt
+
 FROM gcr.io/distroless/python3-debian11
 
+COPY --from=build-venv /venv /venv
+
 COPY datadog-agent /app/datadog-init
+
+COPY app.py /app/app.py
 
 WORKDIR /app
 
