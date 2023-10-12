@@ -1,6 +1,8 @@
 .DS_Store
 .layers
+.idea
 extensions
+existing_layers
 scripts/.cache
 scripts/.src
 local_tests/logs.txt
@@ -14,3 +16,5 @@ local_tests/java/build/
 local_tests/java/lib/
 local_tests/java/out/
 local_tests/java/.gradle/
+local_tests/serverless-init/datadog-agent
+local_tests/serverless-init/logs.txt
