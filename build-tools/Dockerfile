@@ -1,4 +1,4 @@
-FROM rust as builder
+FROM rust:buster as builder
 WORKDIR /usr/src/app
 COPY Cargo.toml .
 COPY Cargo.lock .
