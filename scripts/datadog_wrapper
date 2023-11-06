@@ -22,8 +22,8 @@ then
   fi
 
   # Enable library's instrumentation telemetry needed for ASM OSS VM
-  export DD_INSTRUMENTATION_TELEMETRY_ENABLED="true" # the standard env var to enable telemetry
-  export DD_TRACE_TELEMETRY_ENABLED="true" # but dd-trace-js uses another one
+  export DD_INSTRUMENTATION_TELEMETRY_ENABLED="${DD_INSTRUMENTATION_TELEMETRY_ENABLED:-true}" # the standard env var to enable telemetry
+  export DD_TRACE_TELEMETRY_ENABLED="${DD_TRACE_TELEMETRY_ENABLED:-true}" # but dd-trace-js uses another one
 fi
 
 if [ "$DD_LOG_LEVEL" == "debug" ]
