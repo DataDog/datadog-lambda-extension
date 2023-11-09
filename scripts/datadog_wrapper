@@ -20,10 +20,21 @@ then
   then
     echo "[bootstrap] rerouting AWS_LAMBDA_RUNTIME_API to the Datadog extension at $AWS_LAMBDA_RUNTIME_API"
   fi
+fi
 
-  # Enable library's instrumentation telemetry needed for ASM OSS VM
+if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
+then
+  if [ "$DD_LOG_LEVEL" == "debug" ]
+  then
+    echo "Enabling Datadog Application Security Management"
+  fi
+
+  # Enable the library's instrumentation telemetry needed for ASM OSS VM
   export DD_INSTRUMENTATION_TELEMETRY_ENABLED="${DD_INSTRUMENTATION_TELEMETRY_ENABLED:-true}" # the standard env var to enable telemetry
-  export DD_TRACE_TELEMETRY_ENABLED="${DD_TRACE_TELEMETRY_ENABLED:-true}" # but dd-trace-js uses another one
+  export DD_TRACE_TELEMETRY_ENABLED="${DD_TRACE_TELEMETRY_ENABLED:-true}" # but dd-trace-js < v4.18.0 uses this other one
+
+  # Automatically enable the library's APM tracing required by ASM in order to slightly ease the onboarding experience
+  export DD_TRACE_ENABLED="true"
 fi
 
 if [ "$DD_LOG_LEVEL" == "debug" ]
