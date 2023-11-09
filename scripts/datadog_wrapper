@@ -3,31 +3,31 @@ args=("$@")
 
 # lowercase DD_LOG_LEVEL
 DD_LOG_LEVEL=$(echo "$DD_LOG_LEVEL" | tr '[:upper:]' '[:lower:]')
+
+# debug_log is a variadic function that prints a message to stdout if the log level is debug
+debug_log() {
+  if [ "$DD_LOG_LEVEL" == "debug" ]
+  then
+    echo "[datadog-wrapper]" "$@"
+  fi
+}
+
 DD_SERVERLESS_APPSEC_ENABLED=$(echo "$DD_SERVERLESS_APPSEC_ENABLED" | tr '[:upper:]' '[:lower:]')
 
 if [ "$DD_EXPERIMENTAL_ENABLE_PROXY" == "true" ] || [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
 then
-  if [ "$DD_LOG_LEVEL" == "debug" ]
-  then
-    echo "[bootstrap] runtime api proxy mode"
-    echo "[bootstrap] original AWS_LAMBDA_RUNTIME_API value is $AWS_LAMBDA_RUNTIME_API"
-  fi
+  debug_log "Enabling Datadog's Runtime API proxy"
+  debug_log "The original AWS_LAMBDA_RUNTIME_API value is $AWS_LAMBDA_RUNTIME_API"
 
   # Replace the Runtime API address with the proxy address of the extension
   export AWS_LAMBDA_RUNTIME_API="127.0.0.1:9000"
 
-  if [ "$DD_LOG_LEVEL" == "debug" ]
-  then
-    echo "[bootstrap] rerouting AWS_LAMBDA_RUNTIME_API to the Datadog extension at $AWS_LAMBDA_RUNTIME_API"
-  fi
+  debug_log "Rerouting AWS_LAMBDA_RUNTIME_API to the Datadog extension at $AWS_LAMBDA_RUNTIME_API"
 fi
 
 if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
 then
-  if [ "$DD_LOG_LEVEL" == "debug" ]
-  then
-    echo "Enabling Datadog Application Security Management"
-  fi
+  debug_log "Enabling Datadog Application Security Management"
 
   # Enable the library's instrumentation telemetry needed for ASM OSS VM
   export DD_INSTRUMENTATION_TELEMETRY_ENABLED="${DD_INSTRUMENTATION_TELEMETRY_ENABLED:-true}" # the standard env var to enable telemetry
@@ -37,18 +37,12 @@ then
   export DD_TRACE_ENABLED="true"
 fi
 
-if [ "$DD_LOG_LEVEL" == "debug" ]
-then
-  echo "The runtime is $AWS_EXECUTION_ENV"
-fi
+debug_log "The runtime is $AWS_EXECUTION_ENV"
 
 # if it is .Net
 if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]
 then
-  if [ "$DD_LOG_LEVEL" == "debug" ]
-  then
-    echo "Configuring for the .NET runtime!"
-  fi
+  debug_log "Configuring for the .NET runtime!"
   # Handle the CORECLR_PROFILER_PATH:
   # Try to load the library from these paths, in order:
   PROFILER_PATHS=(
@@ -88,10 +82,7 @@ fi
 DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
 if [[ "$AWS_EXECUTION_ENV" == *"java"* ]] && [ -f "$DD_Agent_Jar" ]
 then
-  if [ "$DD_LOG_LEVEL" == "debug" ]
-  then
-    echo "Configuring for the Java runtime!"
-  fi
+  debug_log "Configuring for the Java runtime!"
   export DD_JMXFETCH_ENABLED="false"
   export DD_RUNTIME_METRICS_ENABLED="false"
   export DD_REMOTE_CONFIG_ENABLED="false"
