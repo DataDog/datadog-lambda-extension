@@ -83,8 +83,16 @@ function docker_build_zip {
   unzip "$FULL_EXT_NAME".zip -d "$FULL_EXT_NAME"
 }
 
+function build_rust_shell {
+  cd ../serverless-agent-shell
+  ./build.sh "$ARCHITECTURE"
+  cd -
+  cp ../serverless-agent-shell/lambda-extension-shell scripts/.src/lambda-extension-shell
+}
+
 prepare_tags
 prepare_dir
+build_rust_shell
 
 BUILD_FILE=Dockerfile.build
 if [ "$RACE_DETECTION_ENABLED" = "true" ]; then

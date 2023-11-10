@@ -6,16 +6,14 @@ DD_LOG_LEVEL=$(echo "$DD_LOG_LEVEL" | tr '[:upper:]' '[:lower:]')
 
 # debug_log is a variadic function that prints a message to stdout if the log level is debug
 debug_log() {
-  if [ "$DD_LOG_LEVEL" == "debug" ]
-  then
+  if [ "$DD_LOG_LEVEL" == "debug" ]; then
     echo "[datadog-wrapper]" "$@"
   fi
 }
 
 DD_SERVERLESS_APPSEC_ENABLED=$(echo "$DD_SERVERLESS_APPSEC_ENABLED" | tr '[:upper:]' '[:lower:]')
 
-if [ "$DD_EXPERIMENTAL_ENABLE_PROXY" == "true" ] || [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
-then
+if [ "$DD_EXPERIMENTAL_ENABLE_PROXY" == "true" ] || [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]; then
   debug_log "Enabling Datadog's Runtime API proxy"
   debug_log "The original AWS_LAMBDA_RUNTIME_API value is $AWS_LAMBDA_RUNTIME_API"
 
@@ -25,13 +23,12 @@ then
   debug_log "Rerouting AWS_LAMBDA_RUNTIME_API to the Datadog extension at $AWS_LAMBDA_RUNTIME_API"
 fi
 
-if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
-then
+if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]; then
   debug_log "Enabling Datadog Application Security Management"
 
   # Enable the library's instrumentation telemetry needed for ASM OSS VM
   export DD_INSTRUMENTATION_TELEMETRY_ENABLED="${DD_INSTRUMENTATION_TELEMETRY_ENABLED:-true}" # the standard env var to enable telemetry
-  export DD_TRACE_TELEMETRY_ENABLED="${DD_TRACE_TELEMETRY_ENABLED:-true}" # but dd-trace-js < v4.18.0 uses this other one
+  export DD_TRACE_TELEMETRY_ENABLED="${DD_TRACE_TELEMETRY_ENABLED:-true}"                     # but dd-trace-js < v4.18.0 uses this other one
 
   # Automatically enable the library's APM tracing required by ASM in order to slightly ease the onboarding experience
   export DD_TRACE_ENABLED="true"
@@ -39,66 +36,66 @@ fi
 
 debug_log "The runtime is $AWS_EXECUTION_ENV"
 
-# if it is .Net
-if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]
-then
-  debug_log "Configuring for the .NET runtime!"
-  # Handle the CORECLR_PROFILER_PATH:
-  # Try to load the library from these paths, in order:
-  PROFILER_PATHS=(
-    # use the shared loader if it's present (it was removed from the dotnet
-    # layer, this lines keep forwards compatibility if it's added back)
-    "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
-    "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
-    # if shared loader is not found,
-    # use the tracer library directly
-    "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
-    "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
-    # keep this as a fallback for backwards compatibility
-    "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
-  )
-  PROFILER_FOUND=false
-  ## Search from all possible places
-  for PROFILER_PATH in "${PROFILER_PATHS[@]}"
-  do
-  if [ -f "$PROFILER_PATH" ]
-  then
-    export CORECLR_PROFILER_PATH="$PROFILER_PATH"
-    PROFILER_FOUND=true
-    break
+function dotnet_setup() {
+  if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]; then
+    debug_log "Configuring for the .NET runtime!"
+    # Handle the CORECLR_PROFILER_PATH:
+    # Try to load the library from these paths, in order:
+    PROFILER_PATHS=(
+      # use the shared loader if it's present (it was removed from the dotnet
+      # layer, this lines keep forwards compatibility if it's added back)
+      "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
+      "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
+      # if shared loader is not found,
+      # use the tracer library directly
+      "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
+      "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
+      # keep this as a fallback for backwards compatibility
+      "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
+    )
+    PROFILER_FOUND=false
+    ## Search from all possible places
+    for PROFILER_PATH in "${PROFILER_PATHS[@]}"; do
+      if [ -f "$PROFILER_PATH" ]; then
+        export CORECLR_PROFILER_PATH="$PROFILER_PATH"
+        PROFILER_FOUND=true
+        break
+      fi
+    done
+    if [ $PROFILER_FOUND == false ]; then
+      echo ".NET CLR Profiler file not found. APM instrumentation may not work correctly."
+    fi
+    # Other env variables for .NET
+    export CORECLR_ENABLE_PROFILING="1"
+    export CORECLR_PROFILER="{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"
+    export DD_DOTNET_TRACER_HOME="/opt/datadog"
   fi
-  done
-  if [ $PROFILER_FOUND == false ]
-  then
-    echo ".NET CLR Profiler file not found. APM instrumentation may not work correctly."
+}
+
+function java_setup() {
+  DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
+  if [[ "$AWS_EXECUTION_ENV" == *"java"* ]] && [ -f "$DD_Agent_Jar" ]; then
+    debug_log "Configuring for the Java runtime!"
+    export DD_JMXFETCH_ENABLED="false"
+    export DD_RUNTIME_METRICS_ENABLED="false"
+    export DD_REMOTE_CONFIG_ENABLED="false"
+
+    # Removes the -XX:-TieredCompilation flag from the java command passed
+    # through from the Lambda runtime. Allows the JVM to use the C1 compiler
+    # and Interpreter, which is much faster on cold start and
+    # uses less memory.
+    START_COMMAND=${args[0]}
+    REMAINDER_ARGS=("${args[@]:1}")
+    for index in "${!REMAINDER_ARGS[@]}"; do
+      [[ ${REMAINDER_ARGS[$index]} == "-XX:-TieredCompilation" ]] && unset -v 'REMAINDER_ARGS[$index]'
+    done
+    REMAINDER_ARGS="${REMAINDER_ARGS[@]}"
+    # -XX:TieredStopAtLevel=1 tells the compiler to stop at the C1 compiler
+    args=($START_COMMAND -javaagent:$DD_Agent_Jar -XX:TieredStopAtLevel=1 ${REMAINDER_ARGS[@]})
   fi
-  # Other env variables for .NET
-  export CORECLR_ENABLE_PROFILING="1"
-  export CORECLR_PROFILER="{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"
-  export DD_DOTNET_TRACER_HOME="/opt/datadog"
-fi
+}
 
-# if it is java
-DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
-if [[ "$AWS_EXECUTION_ENV" == *"java"* ]] && [ -f "$DD_Agent_Jar" ]
-then
-  debug_log "Configuring for the Java runtime!"
-  export DD_JMXFETCH_ENABLED="false"
-  export DD_RUNTIME_METRICS_ENABLED="false"
-  export DD_REMOTE_CONFIG_ENABLED="false"
+dotnet_setup
+java_setup
 
-  # Removes the -XX:-TieredCompilation flag from the java command passed 
-  # through from the Lambda runtime. Allows the JVM to use the C1 compiler
-  # and Interpreter, which is much faster on cold start and 
-  # uses less memory.
-  START_COMMAND=${args[0]}
-  REMAINDER_ARGS=("${args[@]:1}")
-  for index in "${!REMAINDER_ARGS[@]}" ; do
-    [[ ${REMAINDER_ARGS[$index]} == "-XX:-TieredCompilation" ]] && unset -v 'REMAINDER_ARGS[$index]' ;
-  done
-  REMAINDER_ARGS="${REMAINDER_ARGS[@]}"
-  # -XX:TieredStopAtLevel=1 tells the compiler to stop at the C1 compiler
-  args=($START_COMMAND -javaagent:$DD_Agent_Jar -XX:TieredStopAtLevel=1 ${REMAINDER_ARGS[@]})
-fi
-
-exec "${args[@]}"
+exec lambda-extension-shell "${args[@]}"
