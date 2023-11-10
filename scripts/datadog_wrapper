@@ -98,4 +98,4 @@ function java_setup() {
 dotnet_setup
 java_setup
 
-exec lambda-extension-shell "${args[@]}"
+exec "${args[@]}"
