@@ -19,9 +19,7 @@ COPY java/lib/dd-java-agent.jar /opt/dd-java-agent.jar
 COPY --from=builder /tmp /var/task/
 
 # Copy both the datadog extension and the recorder one
-RUN mkdir -p /opt/extensions
-COPY recorder-extension /opt/extensions/
-COPY datadog-agent /opt/extensions/
+COPY .container-opt/ /opt/
 
 # Make sure that the extension will send the payload to the man in the middle
 # (recorder extension is listenning on 3333)

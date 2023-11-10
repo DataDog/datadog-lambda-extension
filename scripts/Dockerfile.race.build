@@ -41,8 +41,10 @@ RUN apt-get update
 RUN apt-get install -y zip
 RUN mkdir /extensions
 WORKDIR /extensions
-COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /extensions/datadog-agent
-RUN  zip -r datadog_extension.zip /extensions
+COPY --from=builder /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /datadog-agent-go
+COPY ./scripts/.src/lambda-extension-shell /extensions/datadog-agent
+
+RUN  zip -r datadog_extension.zip /extensions /datadog-agent-go
 
 # keep the smallest possible docker image
 FROM scratch

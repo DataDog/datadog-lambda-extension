@@ -55,14 +55,14 @@ RUN apt-get update
 RUN apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
-COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /datadog-agent
-RUN strip /datadog-agent
+COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /datadog-agent-go
+RUN strip /datadog-agent-go
 
 COPY ./scripts/.src/lambda-extension-shell /extensions/datadog-agent
 
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
-RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent
+RUN zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent-go
 
 # keep the smallest possible docker image
 FROM scratch

@@ -12,7 +12,7 @@ FROM gcr.io/distroless/python3-debian11
 
 COPY --from=build-venv /venv /venv
 
-COPY datadog-agent /app/datadog-init
+COPY .container-opt/datadog-agent-go /app/datadog-init
 
 COPY app.py /app/app.py
 

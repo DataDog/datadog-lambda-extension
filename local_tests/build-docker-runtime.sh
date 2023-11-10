@@ -52,15 +52,16 @@ ARCHITECTURE=$ARCHITECTURE VERSION=1 ./scripts/build_binary_and_layer_dockerized
 cd ./local_tests
 
 # Copy the newly built extension in the same folder as the Dockerfile
-cp ../.layers/datadog_extension-$ARCHITECTURE/extensions/datadog-agent .
+mkdir -p .container-opt/
+cp -r ../.layers/datadog_extension-$ARCHITECTURE/* .container-opt/
 
 # Build the recorder extension which will act as a man-in-a-middle to intercept payloads sent to Datadog
 cd ../../datadog-agent/test/integration/serverless/recorder-extension
 
 if [ `uname -o` == "GNU/Linux" ]; then
-      CGO_ENABLED=0 GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
+      CGO_ENABLED=0 GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/.container-opt/extensions/recorder-extension" main.go
     else
-      GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
+      GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/.container-opt/extensions/recorder-extension" main.go
 fi
 
 cd "$CURRENT_PATH/local_tests"
