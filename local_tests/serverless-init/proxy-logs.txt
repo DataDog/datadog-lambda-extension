@@ -1,0 +1,68 @@
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Found 'DD_PROXY_HTTP' env var, using it for the Agent proxy settings
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Found 'DD_PROXY_HTTPS' env var, using it for the Agent proxy settings
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | 'use_proxy_for_cloud_metadata' is enabled: adding cloud provider URL to the no_proxy list
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Starting logs-agent...
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | logs-agent started
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Adding Datadog Agent Log Source
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | WARN | Error loading config: Config File "datadog" Not Found in "[]"
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | 0 Features detected from environment: 
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Error loading config: Config File "datadog" Not Found in "[]"
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Using a SyncForwarder with a 5s timeout
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | 'site' and 'dd_url' are both set in config: setting main endpoint to 'dd_url': "http://127.0.0.1:3333"
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | WARN | Error loading config: Config File "serverless" Not Found in "[/var/task/datadog.yaml]"
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | 0 Features detected from environment: 
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Retry queue storage on disk is disabled
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Loaded configuration: /var/task/datadog.yaml
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | 'site' and 'apm_config.apm_dd_url' are both set in config: setting main endpoint to 'apm_config.apm_dd_url': "http://127.0.0.1:3333"
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Setting DefaultEnv to "dev" (from 'env' config option)
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Creating TimeSampler #0
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Forwarder started
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Demultiplexer started
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | 'telemetry.dogstatsd.aggregator_channel_latency_buckets' is empty, falling back to default values
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | 'telemetry.dogstatsd.listeners_latency_buckets' is empty, falling back to default values
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | 'telemetry.dogstatsd.listeners_channel_latency_buckets' is empty, falling back to default values
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Starting Agent with processor trace buffer of size 0
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Stats writer initialized (climit=20 qsize=83)
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Receiver configured with 2 decoders and a timeout of 1000ms
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | WARN | Trace writer initialized (climit=100 qsize=1)
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | [pipeline_stats] Creating proxy handler
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | [pipeline_stats] Intake URL %s http://127.0.0.1:3333/api/v0.1/pipeline_stats
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | [pipeline_stats] Creating reverse proxy
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | dogstatsd-udp: 127.0.0.1:8125 successfully initialized
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | DogStatsD will run 2 workers
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Listener started with 1000 maximum connections.
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | Listening for traces at http://localhost:8126
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | INFO | dogstatsd-udp: starting to listen on 127.0.0.1:8125
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Starting concentrator
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | otlp endpoint disabled
+2023-11-13 18:36:58 UTC | SERVERLESS_INIT | DEBUG | Launching subprocess [/venv/bin/ddtrace-run /venv/bin/python3 app.py]
+ * Serving Flask app 'app' (lazy loading)
+ * Environment: production
+   WARNING: This is a development server. Do not use it in a production deployment.
+   Use a production WSGI server instead.
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8080
+ * Running on http://172.17.0.2:8080
+[33mPress CTRL+C to quit[0m
+172.17.0.1 - - [13/Nov/2023 18:37:00] "GET / HTTP/1.1" 200 -
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Received a Flush trigger
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Sending sketches payload : {"metric":"datadog.serverless_agent.enhanced.cold_start","tags":["env:dev","service:integration-test-service","version:1","testing:true","datadog_init_version:1"],"host":"","interval":10,"points":[{"sketch":{"summary":{"Min":1,"Max":1,"Sum":1,"Avg":1,"Cnt":1}},"ts":1699900610}]}
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Demultiplexer: sendIterableSeries: start sending iterable series to the serializer
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | The payload was not too big, returning the full payload
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | WARN | Deprecation warning: the HTTP request to http://127.0.0.1:3333 uses proxy http://google2.com:80 but will ignore the proxy when the Agent configuration option no_proxy_nonexact_match defaults to true in a future agent version. Please adapt the Agent’s proxy configuration accordingly
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | The payload was not too big, returning the full payload
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | SyncForwarder.sendHTTPTransactions first attempt: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/beta/sketches": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Retrying transaction
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | SyncForwarder.sendHTTPTransactions first attempt: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/v1/series": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Retrying transaction
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | WARN | SyncForwarder.sendHTTPTransactions failed to send: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/v1/series": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | SyncForwarder has flushed 1 transactions
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | Demultiplexer: sendIterableSeries: stop routine
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | WARN | SyncForwarder.sendHTTPTransactions failed to send: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/beta/sketches": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:37:01 UTC | SERVERLESS_INIT | DEBUG | SyncForwarder has flushed 1 transactions
