@@ -33,7 +33,7 @@ ENV DD_LOGS_CONFIG_LOGS_NO_SSL=true
 ENV DD_LOGS_ENABLED=false
 ENV DD_LOCAL_TEST=1
 
-# ENV DD_PROXY_HTTP=http://google2.com:80
-# ENV DD_PROXY_HTTPS=http://google2.com:80
+ENV DD_PROXY_HTTP=http://google2.com:80
+ENV DD_PROXY_HTTPS=http://google2.com:80
 
 CMD [ "datadog_lambda.handler.handler" ]  

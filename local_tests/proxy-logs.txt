@@ -1,86 +1,90 @@
-13 Nov 2023 18:29:17,015 [INFO] (rapid) exec '/var/runtime/bootstrap' (cwd=/var/task, handler=)
-START RequestId: 39762a63-f381-43a7-8ee8-2345532fdbc1 Version: $LATEST
-13 Nov 2023 18:29:17,060 [INFO] (rapid) extensionsDisabledByLayer(/opt/disable-extensions-jwigqn8j) -> stat /opt/disable-extensions-jwigqn8j: no such file or directory
-13 Nov 2023 18:29:17,060 [INFO] (rapid) Configuring and starting Operator Domain
-13 Nov 2023 18:29:17,060 [INFO] (rapid) Starting runtime domain
-13 Nov 2023 18:29:17,066 [INFO] (rapid) External agent recorder-extension (1b82c009-342e-43c5-a748-b11dac9b0b20) registered, subscribed to [SHUTDOWN]
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Datadog extension version : 1|Datadog environment variables: DD_API_KEY=***|DD_APM_DD_URL=http://127.0.0.1:3333|DD_CAPTURE_LAMBDA_PAYLOAD=false|DD_DD_URL=http://127.0.0.1:3333|DD_ENV=dev|DD_LAMBDA_HANDLER=func.handler|DD_LOCAL_TEST=1|DD_LOGS_CONFIG_LOGS_DD_URL=127.0.0.1:3333|DD_LOGS_CONFIG_LOGS_NO_SSL=true|DD_LOGS_ENABLED=false|DD_LOGS_INJECTION=false|DD_LOG_LEVEL=DEBUG|DD_MERGE_XRAY_TRACES=false|DD_REMOTE_CONFIGURATION_ENABLED=false|DD_SERVERLESS_LOGS_ENABLED=false|DD_SERVICE=integration-test-service|DD_SITE=datadoghq.com|DD_TAGS=testing:true|DD_TRACE_ENABLED=true|
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Starting daemon to receive messages from runtime...
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Unable to restore the state from file
-13 Nov 2023 18:29:17,126 [INFO] (rapid) External agent datadog-agent (c26d68cf-c00a-4122-9cf5-2e4ad9acd3a7) registered, subscribed to [INVOKE SHUTDOWN]
-13 Nov 2023 18:29:17,127 [INFO] (rapid) Starting runtime without AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN , Expected?: false
-2023-11-13 18:29:17 UTC | DD_EXTENSION | WARN | Unknown environment variable: DD_LOCAL_TEST
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | 'use_proxy_for_cloud_metadata' is enabled: adding cloud provider URL to the no_proxy list
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | FIPS mode is disabled
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | 0 Features detected from environment: 
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Using a SyncForwarder with a 5s timeout
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | 'site' and 'dd_url' are both set in config: setting main endpoint to 'dd_url': "http://127.0.0.1:3333"
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | Retry queue storage on disk is disabled
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | Creating TimeSampler #0
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Forwarder started
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Demultiplexer started
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | 'telemetry.dogstatsd.aggregator_channel_latency_buckets' is empty, falling back to default values
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | 'telemetry.dogstatsd.listeners_latency_buckets' is empty, falling back to default values
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | 'telemetry.dogstatsd.listeners_channel_latency_buckets' is empty, falling back to default values
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | dogstatsd-udp: 127.0.0.1:8125 successfully initialized
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | DogStatsD will run 2 workers
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | dogstatsd-udp: starting to listen on 127.0.0.1:8125
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | appsec: security monitoring is not enabled: DD_SERVERLESS_APPSEC_ENABLED is not set to true
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Running in local test mode. Telemetry collection HTTP route won't be enabled
-2023-11-13 18:29:17 UTC | DD_EXTENSION | WARN | Unknown environment variable: DD_LOCAL_TEST
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | otlp endpoint disabled
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | 'use_proxy_for_cloud_metadata' is enabled: adding cloud provider URL to the no_proxy list
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | FIPS mode is disabled
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | 0 Features detected from environment: 
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | Loaded configuration: /var/task/datadog.yaml
-2023-11-13 18:29:17 UTC | DD_EXTENSION | INFO | 'site' and 'apm_config.apm_dd_url' are both set in config: setting main endpoint to 'apm_config.apm_dd_url': "http://127.0.0.1:3333"
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Setting DefaultEnv to "dev" (from 'env' config option)
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Starting ColdStartSpanCreator
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Setting ColdStartSpanCreator on Daemon
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | finding the lambda runtime took 255µs. found runtime: python3.9
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | serverless agent ready in 37.4182ms
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Hit on the serverless.Hello route.
-[DEBUG]	2023-11-13T18:29:17.569Z		datadog_lambda_wrapper wrapped
-[DEBUG]	2023-11-13T18:29:17.649Z		datadog_lambda_wrapper initialized
-[DEBUG]	2023-11-13T18:29:17.651Z	e6da654e-583d-4faa-84e5-379b068c20be	Sending metric aws.lambda.enhanced.invocations value 1 to Datadog via extension
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Received invocation event...
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Starting Log Collection with ARN: arn:aws:lambda:us-east-1:012345678912:function:test_function and RequestId: 
-[DEBUG]	2023-11-13T18:29:17.652Z	e6da654e-583d-4faa-84e5-379b068c20be	Reading trace context from env var 
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | The flush strategy end has decided to not flush at moment: starting
-[DEBUG]	2023-11-13T18:29:17.653Z	e6da654e-583d-4faa-84e5-379b068c20be	extracted dd trace context None
-[DEBUG]	2023-11-13T18:29:17.653Z	e6da654e-583d-4faa-84e5-379b068c20be	Unable to infer a span: unknown event type
-[DEBUG]	2023-11-13T18:29:17.653Z	e6da654e-583d-4faa-84e5-379b068c20be	datadog_lambda_wrapper _before() done
-[DEBUG]	2023-11-13T18:29:17.754Z	e6da654e-583d-4faa-84e5-379b068c20be	Sending metric self.monitoring value 1 to Datadog via extension
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | [ColdStartCreator] No init duration, passing
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Hit on the serverless.Flush route.
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | The flush strategy end has decided to flush at moment: stopping
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Beginning traces flush at time 1699900157
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Beginning metrics flush at time 1699900157
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Received a Flush trigger
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Beginning logs flush at time 1699900157
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Finished logs flush that was started at time 1699900157
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Demultiplexer: sendIterableSeries: start sending iterable series to the serializer
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Sending sketches payload : {"metric":"aws.lambda.enhanced.invocations","tags":["env:dev","dd_extension_version:1","architecture:x86_64","memorysize:3008","functionname:test_function","service:integration-test-service","function_arn:arn:aws:lambda:::function:test_function","runtime:python3.9","testing:true","resource:test_function","cold_start:true"],"host":"","interval":10,"points":[{"sketch":{"summary":{"Min":1,"Max":1,"Sum":1,"Avg":1,"Cnt":1}},"ts":1699900150}]}
-[DEBUG]	2023-11-13T18:29:17.779Z	e6da654e-583d-4faa-84e5-379b068c20be	datadog_lambda_wrapper _after() done
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Sending sketches payload : {"metric":"self.monitoring","tags":["dd_lambda_layer:datadog-python39_4.81.0","env:dev","dd_extension_version:1","architecture:x86_64","memorysize:3008","functionname:test_function","service:integration-test-service","function_arn:arn:aws:lambda:::function:test_function","runtime:python3.9","testing:true","resource:test_function"],"host":"","interval":10,"points":[{"sketch":{"summary":{"Min":1,"Max":1,"Sum":1,"Avg":1,"Cnt":1}},"ts":1699900150}]}
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | The payload was not too big, returning the full payload
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Using proxy http://google.com:80 for URL 'http://127.0.0.1:3333'
-2023-11-13 18:29:17 UTC | DD_EXTENSION | WARN | Deprecation warning: the HTTP request to http://127.0.0.1:3333 uses proxy http://google.com:80 but will ignore the proxy when the Agent configuration option no_proxy_nonexact_match defaults to true in a future agent version. Please adapt the Agent’s proxy configuration accordingly
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | The payload was not too big, returning the full payload
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Using proxy http://google.com:80 for URL 'http://127.0.0.1:3333'
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | SyncForwarder.sendHTTPTransactions first attempt: error "404 Not Found" while sending transaction to "http://127.0.0.1:3333/api/beta/sketches", rescheduling it: "<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content=\"initial-scale=1, minimum-scale=1, width=device-width\">\n  <title>Error 404 (Not Found)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:********@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:********@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www...."
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Retrying transaction
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Using proxy http://google.com:80 for URL 'http://127.0.0.1:3333'
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | SyncForwarder.sendHTTPTransactions first attempt: error "404 Not Found" while sending transaction to "http://127.0.0.1:3333/api/v1/series", rescheduling it: "<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content=\"initial-scale=1, minimum-scale=1, width=device-width\">\n  <title>Error 404 (Not Found)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:********@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:********@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www...."
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Retrying transaction
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Finished traces flush that was started at time 1699900157
-2023-11-13 18:29:17 UTC | DD_EXTENSION | DEBUG | Using proxy http://google.com:80 for URL 'http://127.0.0.1:3333'
-2023-11-13 18:29:18 UTC | DD_EXTENSION | WARN | SyncForwarder.sendHTTPTransactions failed to send: error "404 Not Found" while sending transaction to "http://127.0.0.1:3333/api/beta/sketches", rescheduling it: "<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content=\"initial-scale=1, minimum-scale=1, width=device-width\">\n  <title>Error 404 (Not Found)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:********@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:********@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www...."
-2023-11-13 18:29:18 UTC | DD_EXTENSION | DEBUG | SyncForwarder has flushed 1 transactions
-2023-11-13 18:29:18 UTC | DD_EXTENSION | WARN | SyncForwarder.sendHTTPTransactions failed to send: error "404 Not Found" while sending transaction to "http://127.0.0.1:3333/api/v1/series", rescheduling it: "<!DOCTYPE html>\n<html lang=en>\n  <meta charset=utf-8>\n  <meta name=viewport content=\"initial-scale=1, minimum-scale=1, width=device-width\">\n  <title>Error 404 (Not Found)!!1</title>\n  <style>\n    *{margin:0;padding:0}html,code{font:15px/22px arial,sans-serif}html{background:#fff;color:#222;padding:15px}body{margin:7% auto 0;max-width:390px;min-height:180px;padding:30px 0 15px}* > body{background:url(//www.google.com/images/errors/robot.png) 100% 5px no-repeat;padding-right:205px}p{margin:11px 0 22px;overflow:hidden}ins{color:#777;text-decoration:none}a img{border:********@media screen and (max-width:772px){body{background:none;margin-top:0;max-width:none;padding-right:0}}#logo{background:url(//www.google.com/images/branding/googlelogo/1x/googlelogo_color_150x54dp.png) no-repeat;margin-left:********@media only screen and (min-resolution:192dpi){#logo{background:url(//www.google.com/images/branding/googlelogo/2x/googlelogo_color_150x54dp.png) no-repeat 0% 0%/100% 100%;-moz-border-image:url(//www...."
-2023-11-13 18:29:18 UTC | DD_EXTENSION | DEBUG | SyncForwarder has flushed 1 transactions
-2023-11-13 18:29:18 UTC | DD_EXTENSION | DEBUG | Demultiplexer: sendIterableSeries: stop routine
-2023-11-13 18:29:18 UTC | DD_EXTENSION | DEBUG | Finished metrics flush that was started at time 1699900157
-2023-11-13 18:29:18 UTC | DD_EXTENSION | DEBUG | Finished flushing
-END RequestId: e6da654e-583d-4faa-84e5-379b068c20be
-REPORT RequestId: e6da654e-583d-4faa-84e5-379b068c20be	Init Duration: 0.43 ms	Duration: 1006.57 ms	Billed Duration: 1007 ms	Memory Size: 3008 MB	Max Memory Used: 3008 MB	
+13 Nov 2023 18:31:42,801 [INFO] (rapid) exec '/var/runtime/bootstrap' (cwd=/var/task, handler=)
+13 Nov 2023 18:31:42,840 [INFO] (rapid) extensionsDisabledByLayer(/opt/disable-extensions-jwigqn8j) -> stat /opt/disable-extensions-jwigqn8j: no such file or directory
+START RequestId: 868371ba-9350-4140-adb8-d56a35d2d9d5 Version: $LATEST
+13 Nov 2023 18:31:42,840 [INFO] (rapid) Configuring and starting Operator Domain
+13 Nov 2023 18:31:42,840 [INFO] (rapid) Starting runtime domain
+13 Nov 2023 18:31:42,847 [INFO] (rapid) External agent recorder-extension (5f2c21b4-8778-4171-b226-8af88c0a3eba) registered, subscribed to [SHUTDOWN]
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Datadog extension version : 1|Datadog environment variables: DD_API_KEY=***|DD_APM_DD_URL=http://127.0.0.1:3333|DD_CAPTURE_LAMBDA_PAYLOAD=false|DD_DD_URL=http://127.0.0.1:3333|DD_ENV=dev|DD_LAMBDA_HANDLER=func.handler|DD_LOCAL_TEST=1|DD_LOGS_CONFIG_LOGS_DD_URL=127.0.0.1:3333|DD_LOGS_CONFIG_LOGS_NO_SSL=true|DD_LOGS_ENABLED=false|DD_LOGS_INJECTION=false|DD_LOG_LEVEL=DEBUG|DD_MERGE_XRAY_TRACES=false|DD_PROXY_HTTP=http://google2.com:80|DD_PROXY_HTTPS=http://google2.com:80|DD_REMOTE_CONFIGURATION_ENABLED=false|DD_SERVERLESS_LOGS_ENABLED=false|DD_SERVICE=integration-test-service|DD_SITE=datadoghq.com|DD_TAGS=testing:true|DD_TRACE_ENABLED=true|
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Starting daemon to receive messages from runtime...
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Unable to restore the state from file
+13 Nov 2023 18:31:42,916 [INFO] (rapid) External agent datadog-agent (2a8cdd24-e057-4223-9683-2f04f608b422) registered, subscribed to [INVOKE SHUTDOWN]
+13 Nov 2023 18:31:42,916 [INFO] (rapid) Starting runtime without AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN , Expected?: false
+2023-11-13 18:31:42 UTC | DD_EXTENSION | WARN | Unknown environment variable: DD_LOCAL_TEST
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | Found 'DD_PROXY_HTTP' env var, using it for the Agent proxy settings
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | Found 'DD_PROXY_HTTPS' env var, using it for the Agent proxy settings
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | 'use_proxy_for_cloud_metadata' is enabled: adding cloud provider URL to the no_proxy list
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | FIPS mode is disabled
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | 0 Features detected from environment: 
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Using a SyncForwarder with a 5s timeout
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | 'site' and 'dd_url' are both set in config: setting main endpoint to 'dd_url': "http://127.0.0.1:3333"
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | Retry queue storage on disk is disabled
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | Creating TimeSampler #0
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Forwarder started
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Demultiplexer started
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | 'telemetry.dogstatsd.aggregator_channel_latency_buckets' is empty, falling back to default values
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | 'telemetry.dogstatsd.listeners_latency_buckets' is empty, falling back to default values
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | 'telemetry.dogstatsd.listeners_channel_latency_buckets' is empty, falling back to default values
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | dogstatsd-udp: 127.0.0.1:8125 successfully initialized
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | DogStatsD will run 2 workers
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | dogstatsd-udp: starting to listen on 127.0.0.1:8125
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Running in local test mode. Telemetry collection HTTP route won't be enabled
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | appsec: security monitoring is not enabled: DD_SERVERLESS_APPSEC_ENABLED is not set to true
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | otlp endpoint disabled
+2023-11-13 18:31:42 UTC | DD_EXTENSION | WARN | Unknown environment variable: DD_LOCAL_TEST
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | Found 'DD_PROXY_HTTP' env var, using it for the Agent proxy settings
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | Found 'DD_PROXY_HTTPS' env var, using it for the Agent proxy settings
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | 'use_proxy_for_cloud_metadata' is enabled: adding cloud provider URL to the no_proxy list
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | FIPS mode is disabled
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | 0 Features detected from environment: 
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | Loaded configuration: /var/task/datadog.yaml
+2023-11-13 18:31:42 UTC | DD_EXTENSION | INFO | 'site' and 'apm_config.apm_dd_url' are both set in config: setting main endpoint to 'apm_config.apm_dd_url': "http://127.0.0.1:3333"
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Setting DefaultEnv to "dev" (from 'env' config option)
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Starting ColdStartSpanCreator
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | Setting ColdStartSpanCreator on Daemon
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | finding the lambda runtime took 543.2µs. found runtime: python3.9
+2023-11-13 18:31:42 UTC | DD_EXTENSION | DEBUG | serverless agent ready in 34.2581ms
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Hit on the serverless.Hello route.
+[DEBUG]	2023-11-13T18:31:43.454Z		datadog_lambda_wrapper wrapped
+[DEBUG]	2023-11-13T18:31:43.524Z		datadog_lambda_wrapper initialized
+[DEBUG]	2023-11-13T18:31:43.526Z	3e12089f-3398-442f-986e-6c36991c0ebe	Sending metric aws.lambda.enhanced.invocations value 1 to Datadog via extension
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Received invocation event...
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Starting Log Collection with ARN: arn:aws:lambda:us-east-1:012345678912:function:test_function and RequestId: 
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | The flush strategy end has decided to not flush at moment: starting
+[DEBUG]	2023-11-13T18:31:43.528Z	3e12089f-3398-442f-986e-6c36991c0ebe	Reading trace context from env var 
+[DEBUG]	2023-11-13T18:31:43.528Z	3e12089f-3398-442f-986e-6c36991c0ebe	extracted dd trace context None
+[DEBUG]	2023-11-13T18:31:43.529Z	3e12089f-3398-442f-986e-6c36991c0ebe	Unable to infer a span: unknown event type
+[DEBUG]	2023-11-13T18:31:43.529Z	3e12089f-3398-442f-986e-6c36991c0ebe	datadog_lambda_wrapper _before() done
+[DEBUG]	2023-11-13T18:31:43.630Z	3e12089f-3398-442f-986e-6c36991c0ebe	Sending metric self.monitoring value 1 to Datadog via extension
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | [ColdStartCreator] No init duration, passing
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Hit on the serverless.Flush route.
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | The flush strategy end has decided to flush at moment: stopping
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Beginning metrics flush at time 1699900303
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Received a Flush trigger
+[DEBUG]	2023-11-13T18:31:43.656Z	3e12089f-3398-442f-986e-6c36991c0ebe	datadog_lambda_wrapper _after() done
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Sending sketches payload : {"metric":"aws.lambda.enhanced.invocations","tags":["function_arn:arn:aws:lambda:::function:test_function","runtime:python3.9","memorysize:3008","env:dev","architecture:x86_64","service:integration-test-service","testing:true","dd_extension_version:1","functionname:test_function","resource:test_function","cold_start:true"],"host":"","interval":10,"points":[{"sketch":{"summary":{"Min":1,"Max":1,"Sum":1,"Avg":1,"Cnt":1}},"ts":1699900300}]}
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Sending sketches payload : {"metric":"self.monitoring","tags":["dd_lambda_layer:datadog-python39_4.81.0","function_arn:arn:aws:lambda:::function:test_function","runtime:python3.9","memorysize:3008","env:dev","architecture:x86_64","service:integration-test-service","testing:true","dd_extension_version:1","functionname:test_function","resource:test_function"],"host":"","interval":10,"points":[{"sketch":{"summary":{"Min":1,"Max":1,"Sum":1,"Avg":1,"Cnt":1}},"ts":1699900300}]}
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Beginning logs flush at time 1699900303
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Beginning traces flush at time 1699900303
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Demultiplexer: sendIterableSeries: start sending iterable series to the serializer
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | The payload was not too big, returning the full payload
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Finished logs flush that was started at time 1699900303
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | The payload was not too big, returning the full payload
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:31:43 UTC | DD_EXTENSION | WARN | Deprecation warning: the HTTP request to http://127.0.0.1:3333 uses proxy http://google2.com:80 but will ignore the proxy when the Agent configuration option no_proxy_nonexact_match defaults to true in a future agent version. Please adapt the Agent’s proxy configuration accordingly
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | SyncForwarder.sendHTTPTransactions first attempt: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/v1/series": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Retrying transaction
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | SyncForwarder.sendHTTPTransactions first attempt: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/beta/sketches": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Retrying transaction
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Using proxy http://google2.com:80 for URL 'http://127.0.0.1:3333'
+2023-11-13 18:31:43 UTC | DD_EXTENSION | WARN | SyncForwarder.sendHTTPTransactions failed to send: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/beta/sketches": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | SyncForwarder has flushed 1 transactions
+2023-11-13 18:31:43 UTC | DD_EXTENSION | WARN | SyncForwarder.sendHTTPTransactions failed to send: error while sending transaction, rescheduling it: Post "http://127.0.0.1:3333/api/v1/series": proxyconnect tcp: dial tcp: lookup google2.com on 192.168.65.5:53: no such host
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | SyncForwarder has flushed 1 transactions
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Demultiplexer: sendIterableSeries: stop routine
+2023-11-13 18:31:43 UTC | DD_EXTENSION | DEBUG | Finished metrics flush that was started at time 1699900303
+2023-11-13 18:31:44 UTC | DD_EXTENSION | DEBUG | Finished traces flush that was started at time 1699900303
+2023-11-13 18:31:44 UTC | DD_EXTENSION | DEBUG | Finished flushing
+END RequestId: 3e12089f-3398-442f-986e-6c36991c0ebe
+REPORT RequestId: 3e12089f-3398-442f-986e-6c36991c0ebe	Init Duration: 0.30 ms	Duration: 1743.57 ms	Billed Duration: 1744 ms	Memory Size: 3008 MB	Max Memory Used: 3008 MB	
