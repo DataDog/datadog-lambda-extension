@@ -1,3 +1,0 @@
-proxy:
-    https: "http://google.com:80"
-    http: "http://google.com:80"
