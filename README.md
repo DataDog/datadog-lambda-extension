@@ -27,6 +27,8 @@ By default, the Extension flushes data back to Datadog at the end of each invoca
 
 For Lambda functions deployed in a region that is far from the Datadog site, for example, a Lambda function deployed in eu-west-1 reporting data to the US1 Datadog site, can observe a higher duration (and therefore, cost) overhead due to the network latency. To reduce the overhead, configure the extension to flush data less often, such as every minute `DD_SERVERLESS_FLUSH_STRATEGY=periodically,60000`.
 
+In some rare cases where a very short timeout is configured (the definition of what is _short_ depends on the runtime), it is possible to notice that the Lambda handler code may not get run on subsequent invocations. This is a possibility when the first invocation times out, requiring the `INIT` [phase](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-extensions-api.html#runtimes-extensions-api-lifecycle) to be started again in the next invocation. In the subsequent invocation, should the function time out before the `INIT` phase is completed, the function is terminated by Lambda and the handler code is not run. You can identify these failures using `INIT_REPORT` [logs](https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html#runtimes-lifecycle-init-errors). Datadog recommends increasing the timeout for a Lambda function where this has been identified.
+
 ## Opening Issues
 
 If you encounter a bug with this package, we want to hear about it. Before opening a new issue, search the existing issues to avoid duplicates.
