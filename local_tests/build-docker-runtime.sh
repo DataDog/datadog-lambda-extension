@@ -47,8 +47,6 @@ CURRENT_PATH=$(pwd)
 # Build the extension
 ARCHITECTURE=$ARCHITECTURE VERSION=1 ./scripts/build_binary_and_layer_dockerized.sh
 
-
-# Move to the local_tests repo
 cd ./local_tests
 
 # Copy the newly built extension in the same folder as the Dockerfile

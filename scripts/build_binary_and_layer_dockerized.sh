@@ -37,11 +37,11 @@ function prepare_tags() {
 
 function prepare_dir() {
   # Move into the root directory, so this script can be called from any directory
-  SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-  ROOT_DIR=$SCRIPTS_DIR/..
+  local SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+  local ROOT_DIR=$SCRIPTS_DIR/..
   cd "$ROOT_DIR"
 
-  EXTENSION_DIR=".layers"
+  local EXTENSION_DIR=".layers"
   TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
   # Make sure the folder does not exist
@@ -50,7 +50,7 @@ function prepare_dir() {
   mkdir -p $EXTENSION_DIR
 
   # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
-  CACHE_DIR=$ROOT_DIR/scripts/.cache
+  local CACHE_DIR=$ROOT_DIR/scripts/.cache
   mkdir -p "$ROOT_DIR"/scripts/.src "$CACHE_DIR"
   echo "Copy mod files to build a cache"
   cp $AGENT_PATH/go.mod "$CACHE_DIR"
@@ -64,8 +64,8 @@ function prepare_dir() {
 }
 
 function docker_build_zip {
-  arch=$1
-  suffix=$2
+  local arch=$1
+  local suffix=$2
 
   DOCKER_BUILDKIT=1 docker buildx build --platform linux/"${arch}" \
     -t datadog/build-lambda-extension-"${arch}":"$VERSION" \
@@ -75,9 +75,9 @@ function docker_build_zip {
     --build-arg CMD_PATH="${CMD_PATH}" \
     --build-arg BUILD_TAGS="${BUILD_TAGS}" \
     . --load
-  dockerId=$(docker create datadog/build-lambda-extension-"${arch}":"$VERSION")
+  local dockerId=$(docker create datadog/build-lambda-extension-"${arch}":"$VERSION")
 
-  FULL_EXT_NAME=$TARGET_DIR/datadog_extension-${arch}${suffix}
+  local FULL_EXT_NAME=$TARGET_DIR/datadog_extension-${arch}${suffix}
 
   docker cp "$dockerId":/datadog_extension.zip "$FULL_EXT_NAME".zip
   unzip "$FULL_EXT_NAME".zip -d "$FULL_EXT_NAME"
@@ -87,7 +87,7 @@ function build_rust_shell {
   cd ../serverless-agent-shell
   ./build.sh "$ARCHITECTURE"
   cd -
-  cp ../serverless-agent-shell/lambda-extension-shell scripts/.src/lambda-extension-shell
+  cp ../serverless-agent-shell/lambda-extension-shell-"$ARCHITECTURE" scripts/.src/lambda-extension-shell
 }
 
 prepare_tags
