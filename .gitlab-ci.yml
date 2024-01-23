@@ -9,6 +9,9 @@ variables:
   LAYER_SUFFIX:
     description: "Suffix to be appended to the layer name (default empty)"
     value: ""
+  TEST:
+    description: "Testing"
+    value: ""
 
 image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 
@@ -38,7 +41,8 @@ build_and_deploy_layer:
     - if: $CI_PIPELINE_SOURCE == "web"
   variables:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
-    ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
+    # ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
+    ROLE_TO_ASSUME: arn:aws:iam::464622532012:role/dd-serverless-layer-deployer-role // use this for prod
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
   tags: ["runner:docker"]
   artifacts:
