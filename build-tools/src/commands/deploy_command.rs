@@ -39,11 +39,13 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
     let lambda_blob = get_file_as_vec(&args.layer_path);
 
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);
+    let description: String = "Datadog Lambda Extension".to_string();
 
     // publish layer
     let builder = lambda_client.publish_layer_version();
     builder
         .set_layer_name(Some(layer_name))
+        .set_description(Some(description))
         .set_content(Some(content.set_zip_file(Some(lambda_blob)).build()))
         .send()
         .await
