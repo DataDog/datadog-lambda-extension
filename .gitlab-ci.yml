@@ -12,6 +12,9 @@ variables:
   ARCH:
     description: "Architecture type to deploy to (default amd64)"
     value: amd64
+  PUBLISH_PROD: # obviously this doesn't work
+    description: "Whether to display an option to deploy to prod"
+    value: "false"
 
 image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
 
@@ -139,7 +142,10 @@ multi_region:
 
 say_hello:
   stage: hello
+  tags: ["runner:docker"]
   script:
     - echo "Hello world!"
-  when: manual
-  allow_failure: false
+  rules:
+    - if: $PUBLISH_PROD == "true"
+      when: manual
+      allow_failure: false
