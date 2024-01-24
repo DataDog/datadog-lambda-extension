@@ -77,10 +77,10 @@ function docker_build_zip {
     . --load
   local dockerId=$(docker create datadog/build-lambda-extension-"${arch}":"$VERSION")
 
-  local FULL_EXT_NAME=$TARGET_DIR/datadog_extension-${arch}${suffix}
+  local FULL_FILE_NAME=$TARGET_DIR/datadog_extension-${arch}${suffix}
 
-  docker cp "$dockerId":/datadog_extension.zip "$FULL_EXT_NAME".zip
-  unzip "$FULL_EXT_NAME".zip -d "$FULL_EXT_NAME"
+  docker cp "$dockerId":/datadog_extension.zip "$FULL_FILE_NAME".zip
+  unzip "$FULL_FILE_NAME".zip -d "$FULL_FILE_NAME"
 }
 
 function build_rust_shell {
