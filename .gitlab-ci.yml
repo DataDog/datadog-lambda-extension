@@ -20,7 +20,7 @@ stages:
   - build_layer
   - prepare_multi_region
   - trigger
-  - say_hello
+  - hello
 
 build_tools:
   stage: build_tools_if_needed
