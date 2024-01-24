@@ -20,6 +20,7 @@ stages:
   - build_layer
   - prepare_multi_region
   - trigger
+  - say_hello
 
 build_tools:
   stage: build_tools_if_needed
@@ -135,3 +136,10 @@ multi_region:
     include:
       - artifact: trigger_region.yaml
         job: prepare_multi_region
+
+say_hello:
+  stage: hello
+  script:
+    - echo "Hello world!"
+  when: manual
+  allow_failure: false
