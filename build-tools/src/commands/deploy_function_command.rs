@@ -1,4 +1,5 @@
 use lambda::model::{Environment, FunctionCode, Runtime};
+use reqwest::header::USER_AGENT;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::Result;
@@ -14,7 +15,7 @@ use super::invoke_function_command::{self, InvokeFunctionOptions};
 
 const LATEST_RELEASE: &str =
     "https://api.github.com/repos/datadog/datadog-lambda-extension/releases/latest";
-const FALLBACK_LATEST_EXTESION_VERSION: i32 = 36;
+const FALLBACK_LATEST_EXTENSION_VERSION: i32 = 53;
 
 struct RuntimeConfig {
     handler: String,
@@ -203,12 +204,12 @@ fn get_latest_extension_arn(region: &str) -> String {
 
 fn fetch_extension_version_from_github() -> String {
     let client = reqwest::blocking::Client::new();
-    let result = match client.post(LATEST_RELEASE).send() {
+    let result: reqwest::blocking::Response = match client.get(LATEST_RELEASE).header(USER_AGENT, "sls-perf-test").send() {
         Ok(result) => result,
-        Err(_) => return FALLBACK_LATEST_EXTESION_VERSION.to_string(),
+        Err(_) => return FALLBACK_LATEST_EXTENSION_VERSION.to_string(),
     };
     match result.json::<GithubRelease>() {
         Ok(result) => result.tag_name.replace(['.', 'v'], "").trim().to_string(),
-        Err(_) => FALLBACK_LATEST_EXTESION_VERSION.to_string(),
+        Err(_) => return FALLBACK_LATEST_EXTENSION_VERSION.to_string(),
     }
 }
