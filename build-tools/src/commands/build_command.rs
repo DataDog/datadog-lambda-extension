@@ -42,10 +42,10 @@ fn build_extension(cmd_path: &str, args: &BuildOptions) -> Result<()> {
     let destination_path = &args.destination_path;
     let dockerfile_path = &args.docker_path;
     let image_name = build_image(args, cmd_path, dockerfile_path.as_str())?;
-    let docker_container_id = create_container(image_name.as_str())?;
-    std::fs::create_dir(destination_path)?;
-    copy_zip_file(args, docker_container_id.as_str(), destination_path)?;
-    remove_container(&docker_container_id)?;
+    // let docker_container_id = create_container(image_name.as_str())?;
+    // std::fs::create_dir(destination_path)?;
+    // copy_zip_file(args, docker_container_id.as_str(), destination_path)?;
+    // remove_container(&docker_container_id)?;
     Ok(())
 }
 

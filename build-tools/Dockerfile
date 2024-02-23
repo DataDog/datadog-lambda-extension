@@ -5,6 +5,5 @@ COPY Cargo.lock .
 COPY src ./src
 RUN cargo build --release
 
-FROM scratch
-COPY --from=builder /usr/src/app/target/release/build_tools /build_tools
-ENTRYPOINT ["/build_tools"]
+FROM 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
+COPY --from=builder /usr/src/app/target/release/build_tools /usr/local/bin/
