@@ -10,7 +10,7 @@
 # or
 # VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
 
-set -e
+set -ex
 
 function prepare_tags() {
   if [ -z "$VERSION" ]; then
@@ -67,6 +67,9 @@ function docker_build_zip {
   local arch=$1
   local suffix=$2
 
+
+  build_rust_shell "$arch"
+
   DOCKER_BUILDKIT=1 docker buildx build --platform linux/"${arch}" \
     -t datadog/build-lambda-extension-"${arch}":"$VERSION" \
     -f ./scripts/"$BUILD_FILE" \
@@ -85,14 +88,13 @@ function docker_build_zip {
 
 function build_rust_shell {
   cd ../serverless-agent-shell
-  ./build.sh "$ARCHITECTURE"
+  ./build.sh "$1"
   cd -
-  cp ../serverless-agent-shell/lambda-extension-shell-"$ARCHITECTURE" scripts/.src/lambda-extension-shell
+  cp ../serverless-agent-shell/lambda-extension-shell-"$1" scripts/.src/lambda-extension-shell
 }
 
 prepare_tags
 prepare_dir
-build_rust_shell
 
 BUILD_FILE=Dockerfile.build
 if [ "$RACE_DETECTION_ENABLED" = "true" ]; then
