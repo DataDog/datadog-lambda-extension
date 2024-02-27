@@ -3,7 +3,7 @@
 N_INVOKE=$1
 
 # Start the container
-dockerId=$(docker run -d -p 9000:8080 -p 127.0.0.1:8124:8124 datadog/extension-local-tests)
+dockerId=$(docker run -d -p 127.0.0.1:9000:8080 -p 127.0.0.1:8124:8124 datadog/extension-local-tests)
 
 i=0
 while true; do
