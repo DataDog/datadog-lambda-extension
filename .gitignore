@@ -1,10 +1,14 @@
 .DS_Store
 .layers
 .idea
+.serverless
+response.x
 extensions
 existing_layers
 scripts/.cache
 scripts/.src
+reports.log
+__pycache__
 local_tests/logs.txt
 local_tests/META_INF
 local_tests/python
