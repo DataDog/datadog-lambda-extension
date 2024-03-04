@@ -1,15 +1,12 @@
 FROM public.ecr.aws/lambda/nodejs:16
 
-# Add Datadog library
-COPY nodejs /opt/nodejs
+RUN npm install datadog-lambda
 
 # Copy customer code
 COPY func.js /var/task/
 
 # Copy both the datadog extension and the recorder one
-RUN mkdir -p /opt/extensions
-COPY recorder-extension /opt/extensions/
-COPY datadog-agent /opt/extensions/
+COPY .container-opt/ /opt/
 
 # Make sure that the extension will send the payload to the man in the middle
 # (recorder extension is listenning on 3333)

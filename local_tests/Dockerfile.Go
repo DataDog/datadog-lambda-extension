@@ -9,9 +9,7 @@ FROM public.ecr.aws/lambda/go:1
 COPY --from=builder /app/app ${LAMBDA_TASK_ROOT}
 
 # Copy both the datadog extension and the recorder one
-RUN mkdir -p /opt/extensions
-COPY recorder-extension /opt/extensions/
-COPY datadog-agent /opt/extensions/
+COPY .container-opt/ /opt/
 
 # Make sure that the extension will send the payload to the man in the middle
 # (recorder extension is listenning on 3333)

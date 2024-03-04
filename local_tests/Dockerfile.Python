@@ -1,15 +1,12 @@
 FROM public.ecr.aws/lambda/python:3.9
 
-# Add Datadog library
-COPY python /opt/python
+RUN pip install datadog-lambda
 
 # Copy customer code
 COPY func.py /var/task/
 
 # Copy both the datadog extension and the recorder one
-RUN mkdir -p /opt/extensions
-COPY recorder-extension /opt/extensions/
-COPY datadog-agent /opt/extensions/
+COPY .container-opt/ /opt/
 
 # Make sure that the extension will send the payload to the man in the middle
 # (recorder extension is listenning on 3333)
