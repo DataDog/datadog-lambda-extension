@@ -1,0 +1,28 @@
+service: ${env:SERVICE_NAME}
+provider:
+  name: aws
+  region: sa-east-1
+  deploymentBucket: ${env:DEPLOYMENT_BUCKET}
+  memorySize: 128
+  timeout: 30
+  environment:
+    DD_SERVICE: ${env:SERVICE_NAME}
+    DD_CAPTURE_LAMBDA_PAYLOAD: "true"
+    DD_LAMBDA_HANDLER: index.handler
+    DD_MERGE_XRAY_TRACES: "false"
+    DD_SERVERLESS_APPSEC_ENABLED: "false"
+    DD_TRACE_ENABLED: "true"
+    DD_LOG_LEVEL: "debug"
+    DD_API_KEY: ${env:DD_API_KEY}
+    # GODEBUG: inittrace=1
+
+functions:
+  pierre-bench:
+    runtime: nodejs20.x
+    name: ${env:FUNCTION_NAME}
+    # in order to disable the tracer, set handler to index.handler, and comment the tracer layer line
+    handler: /opt/nodejs/node_modules/datadog-lambda-js/handler.handler
+    # handler: index.handler
+    layers:
+      - arn:aws:lambda:sa-east-1:464622532012:layer:Datadog-Node20-x:104
+      - ${env:EXTENSION_ARN}
