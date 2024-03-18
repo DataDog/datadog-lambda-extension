@@ -28,7 +28,7 @@ build_tools:
       when: never
     - changes:
       - build-tools/**/*
-  tags: ["runner:docker"]
+  tags: ["arch:amd64"]
   script:
     - cd build-tools && docker buildx build --tag ${TARGET} --push .
 
@@ -40,7 +40,7 @@ build_and_deploy_layer:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
     TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
-  tags: ["runner:docker"]
+  tags: ["arch:amd64"]
   artifacts:
     paths:
       - tmp/serverless/datadog_extension_signed.zip
@@ -92,7 +92,7 @@ build_and_deploy_layer:
 
 prepare_multi_region:
   stage: prepare_multi_region
-  tags: ["runner:docker"]
+  tags: ["arch:amd64"]
   artifacts:
     paths:
       - trigger_region.yaml
