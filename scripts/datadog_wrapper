@@ -86,6 +86,7 @@ then
   export DD_JMXFETCH_ENABLED="false"
   export DD_RUNTIME_METRICS_ENABLED="false"
   export DD_REMOTE_CONFIG_ENABLED="false"
+  export DD_APPSEC_ENABLED="false"
 
   # Removes the -XX:-TieredCompilation flag from the java command passed 
   # through from the Lambda runtime. Allows the JVM to use the C1 compiler
