@@ -1,32 +1,32 @@
-use aws_sdk_lambda::types::ByteStream;
 use aws_sdk_s3 as s3;
+use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_signer as signer;
+use clap::Parser;
 use rand::{distributions::Alphanumeric, Rng};
 
 use core::time;
-use signer::model::{Destination, S3Destination, S3Source, SigningStatus, Source};
+use signer::types::{Destination, S3Destination, S3Source, SigningStatus, Source};
 use std::{
     fs::File,
     io::{Error, ErrorKind, Result, Write},
     path::Path,
     thread,
 };
-use structopt::StructOpt;
 
 use super::common::build_config;
 
 const BUCKET_NAME: &str = "dd-lambda-signing-bucket-serverless-sandbox";
 const SIGNING_PROFILE_NAME: &str = "DatadogLambdaSigningProfile";
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct SignOptions {
-    #[structopt(long)]
+    #[arg(long)]
     layer_path: String,
-    #[structopt(long)]
+    #[arg(long)]
     destination_path: String,
-    #[structopt(long)]
+    #[arg(long)]
     pub assume_role: Option<String>,
-    #[structopt(long)]
+    #[arg(long)]
     pub external_id: Option<String>,
 }
 
@@ -143,7 +143,8 @@ fn build_source(key: &str) -> Source {
         .bucket_name(BUCKET_NAME)
         .key(key)
         .version("null")
-        .build();
+        .build()
+        .expect("Expected valid S3 source");
     Source::builder().s3(s3_source).build()
 }
 

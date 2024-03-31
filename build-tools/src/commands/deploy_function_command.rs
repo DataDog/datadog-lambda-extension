@@ -1,4 +1,6 @@
-use lambda::model::{Environment, FunctionCode, Runtime};
+use clap::Parser;
+
+use lambda::types::{Environment, FunctionCode, Runtime};
 use reqwest::header::USER_AGENT;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -6,7 +8,6 @@ use std::io::Result;
 use std::io::{Error, ErrorKind};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
 
@@ -53,19 +54,19 @@ struct GithubRelease {
     tag_name: String,
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 pub struct DeployFunctionOptions {
-    #[structopt(long)]
+    #[arg(long)]
     layer_name: String,
-    #[structopt(long)]
+    #[arg(long)]
     runtime: String,
-    #[structopt(long)]
+    #[arg(long)]
     region: String,
-    #[structopt(long)]
+    #[arg(long)]
     role: String,
-    #[structopt(long)]
+    #[arg(long)]
     pr_id: String,
-    #[structopt(long)]
+    #[arg(long)]
     should_invoke: bool,
 }
 
@@ -142,15 +143,7 @@ async fn get_latest_arn(client: &lambda::Client, layer_name: &str) -> Result<Str
         .await
         .expect("could not list layer versions");
 
-    let layer_versions = match result.layer_versions() {
-        Some(layer_versions) => layer_versions,
-        None => {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "could not get layer versions",
-            ))
-        }
-    };
+    let layer_versions = result.layer_versions();
 
     let latest_version = match layer_versions.first() {
         Some(latest_version) => latest_version.layer_version_arn(),
@@ -176,19 +169,19 @@ fn get_config_from_runtime(runtime: &str) -> Result<RuntimeConfig> {
             String::from("app.handler"),
             String::from("/opt/nodejs/node_modules/datadog-lambda-js/handler.handler"),
             String::from("functions/nodejs.zip"),
-            lambda::model::Runtime::Nodejs14x,
+            lambda::types::Runtime::Nodejs14x,
         )),
         "nodejs16.x" => Ok(RuntimeConfig::new(
             String::from("app.handler"),
             String::from("/opt/nodejs/node_modules/datadog-lambda-js/handler.handler"),
             String::from("functions/nodejs.zip"),
-            lambda::model::Runtime::Nodejs16x,
+            lambda::types::Runtime::Nodejs16x,
         )),
         "nodejs18.x" => Ok(RuntimeConfig::new(
             String::from("app.handler"),
             String::from("/opt/nodejs/node_modules/datadog-lambda-js/handler.handler"),
             String::from("functions/nodejs.zip"),
-            lambda::model::Runtime::Nodejs18x,
+            lambda::types::Runtime::Nodejs18x,
         )),
         _ => Err(Error::new(ErrorKind::InvalidData, "invalid runtime")),
     }
@@ -204,12 +197,16 @@ fn get_latest_extension_arn(region: &str) -> String {
 
 fn fetch_extension_version_from_github() -> String {
     let client = reqwest::blocking::Client::new();
-    let result: reqwest::blocking::Response = match client.get(LATEST_RELEASE).header(USER_AGENT, "sls-perf-test").send() {
+    let result: reqwest::blocking::Response = match client
+        .get(LATEST_RELEASE)
+        .header(USER_AGENT, "sls-perf-test")
+        .send()
+    {
         Ok(result) => result,
         Err(_) => return FALLBACK_LATEST_EXTENSION_VERSION.to_string(),
     };
     match result.json::<GithubRelease>() {
         Ok(result) => result.tag_name.replace(['.', 'v'], "").trim().to_string(),
-        Err(_) => return FALLBACK_LATEST_EXTENSION_VERSION.to_string(),
+        Err(_) => FALLBACK_LATEST_EXTENSION_VERSION.to_string(),
     }
 }

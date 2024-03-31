@@ -1,42 +1,42 @@
+use clap::Parser;
 use commands::{
     build_command::build, deploy_command::deploy, deploy_function_command::deploy_function,
     invoke_function_command::invoke_function, list_region_command::list_region, sign_command::sign,
 };
 use std::io::Result;
-use structopt::StructOpt;
 
 mod commands;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, Parser)]
 enum SubCommand {
-    #[structopt(name = "build", about = "Build extension")]
+    #[command(name = "build", about = "Build extension")]
     Build(commands::build_command::BuildOptions),
-    #[structopt(name = "deploy", about = "Deploy to AWS")]
+    #[command(name = "deploy", about = "Deploy to AWS")]
     Deploy(commands::deploy_command::DeployOptions),
-    #[structopt(name = "sign", about = "Sign Layer")]
+    #[command(name = "sign", about = "Sign Layer")]
     Sign(commands::sign_command::SignOptions),
-    #[structopt(name = "list_region", about = "List AWS Region")]
+    #[command(name = "list_region", about = "List AWS Region")]
     ListRegion(commands::list_region_command::ListRegionOptions),
-    #[structopt(name = "deploy_lambda", about = "Deploy AWS Lambda Function")]
+    #[command(name = "deploy_lambda", about = "Deploy AWS Lambda Function")]
     DeployLambdaFunction(commands::deploy_function_command::DeployFunctionOptions),
-    #[structopt(name = "invoke_lambda", about = "Invoke AWS Lambda Function")]
+    #[command(name = "invoke_lambda", about = "Invoke AWS Lambda Function")]
     InvokeLambdaFunction(commands::invoke_function_command::InvokeFunctionOptions),
 }
 
-#[derive(Debug, StructOpt)]
-#[structopt(
+#[derive(Debug, Parser)]
+#[command(
     name = "build-tools",
     author = "Team Serverless",
     about = "build-tools - Let's you build and release layers"
 )]
 struct BuildTools {
-    #[structopt(subcommand)]
+    #[command(subcommand)]
     cmd: SubCommand,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = BuildTools::from_args();
+    let args = BuildTools::parse();
     match args.cmd {
         SubCommand::Build(opt) => build(&opt),
         SubCommand::Deploy(opt) => deploy(&opt).await,
