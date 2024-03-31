@@ -4,7 +4,7 @@ mod lifecycle_handler;
 mod logger;
 mod logs_handler;
 
-use std::{os::unix::process::CommandExt, process::Command};
+use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
 use lambda_extension::{service_fn, Error, Extension, SharedService};
 
@@ -15,11 +15,12 @@ use logs_handler::logs_handler;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     // First load the configuration
-    let config = match config::get_config() {
+    let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or("".to_string());
+    let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => config,
         Err(e) => {
             log::error!("Error loading configuration: {:?}", e);
-            let err = Command::new("../bin/datadog-lambda-extension").exec();
+            let err = Command::new("../datadog-lambda-go").exec();
             panic!("Error starting the extension: {:?}", err);
         }
     };

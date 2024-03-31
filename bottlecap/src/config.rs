@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde::Deserialize;
 
 use figment::{
@@ -54,11 +56,12 @@ pub enum ConfigError {
     UnsupportedField(String),
 }
 
-pub fn get_config() -> Result<Config, ConfigError> {
+pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
+    let path = config_directory.join("datadog.yaml");
     let figment = Figment::new()
         .merge(Env::prefixed("DD_"))
         .merge(Env::prefixed("DATADOG_"))
-        .merge(Yaml::file("datadog.yaml"));
+        .merge(Yaml::file(path));
 
     let config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => ConfigError::UnsupportedField(field),
@@ -80,7 +83,7 @@ pub mod tests {
                 unknown_field: true
             "#,
             )?;
-            let config = get_config().expect_err("should reject unknown fields");
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
                 config,
                 ConfigError::UnsupportedField("unknown_field".to_string())
@@ -93,7 +96,7 @@ pub mod tests {
     fn test_reject_unknown_fields_env() {
         figment::Jail::expect_with(|jail| {
             jail.set_env("DD_UNKNOWN_FIELD", "true");
-            let config = get_config().expect_err("should reject unknown fields");
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
                 config,
                 ConfigError::UnsupportedField("unknown_field".to_string())
@@ -111,7 +114,7 @@ pub mod tests {
                 apm_enabled: true
             "#,
             )?;
-            let config = get_config().expect("should parse config");
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
@@ -127,7 +130,7 @@ pub mod tests {
     fn test_parse_env() {
         figment::Jail::expect_with(|jail| {
             jail.set_env("DD_APM_ENABLED", "true");
-            let config = get_config().expect("should parse config");
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
@@ -142,7 +145,7 @@ pub mod tests {
     #[test]
     fn test_parse_default() {
         figment::Jail::expect_with(|_| {
-            let config = get_config().expect("should parse config");
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config, Config::default());
             Ok(())
         });
