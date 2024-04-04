@@ -1,15 +1,16 @@
-use clap::Parser;
 use std::io::Result;
+use std::io::{Error, ErrorKind};
 
 use aws_sdk_ec2 as ec2;
+use structopt::StructOpt;
 
 use super::common::build_config;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, StructOpt)]
 pub struct ListRegionOptions {
-    #[arg(long)]
+    #[structopt(long)]
     pub assume_role: Option<String>,
-    #[arg(long)]
+    #[structopt(long)]
     pub external_id: Option<String>,
 }
 
@@ -34,18 +35,21 @@ async fn get_list(ec2_client: &ec2::Client) -> Result<Vec<String>> {
         .await
         .expect("could not list regions");
 
-    let regions = result.regions();
-    let result: Vec<_> = regions.iter().map(|region| region.region_name()).collect();
+    if let Some(regions) = result.regions() {
+        let result: Vec<_> = regions.iter().map(|region| region.region_name()).collect();
 
-    let result = result
-        .iter()
-        .flatten()
-        .map(|region_name| String::from(*region_name))
-        .collect::<Vec<_>>();
-    Ok(result)
+        let result = result
+            .iter()
+            .flatten()
+            .map(|region_name| String::from(*region_name))
+            .collect::<Vec<_>>();
+        Ok(result)
+    } else {
+        Err(Error::new(ErrorKind::InvalidData, "could not get regions"))
+    }
 }
 
-fn output_region(regions: &[String]) -> Result<()> {
+fn output_region(regions: &Vec<String>, ) -> Result<()> {
     let mut first = true;
     for region in regions.iter() {
         if !first {

@@ -1,5 +1,5 @@
-use clap::Parser;
 use std::io::Result;
+use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
 
@@ -7,21 +7,21 @@ use super::common::build_config;
 use super::common::get_file_as_vec;
 use super::common::BuildArchitecture;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, StructOpt)]
 pub struct DeployOptions {
-    #[arg(long)]
+    #[structopt(long)]
     layer_path: String,
-    #[arg(long)]
+    #[structopt(long)]
     layer_name: String,
-    #[arg(long)]
+    #[structopt(long, possible_values = &BuildArchitecture::variants(), case_insensitive = true, default_value = "amd64")]
     architecture: BuildArchitecture,
-    #[arg(long)]
+    #[structopt(long)]
     layer_suffix: Option<String>,
-    #[arg(long, default_value = "sa-east-1")]
+    #[structopt(long, default_value = "sa-east-1")]
     region: String,
-    #[arg(long)]
+    #[structopt(long)]
     assume_role: Option<String>,
-    #[arg(long)]
+    #[structopt(long)]
     external_id: Option<String>,
 }
 
@@ -35,7 +35,7 @@ pub async fn deploy(args: &DeployOptions) -> Result<()> {
     let lambda_client = lambda::Client::new(&config);
 
     // build the content object
-    let content = aws_sdk_lambda::types::LayerVersionContentInput::builder();
+    let content = aws_sdk_lambda::model::LayerVersionContentInput::builder();
     let lambda_blob = get_file_as_vec(&args.layer_path);
 
     let layer_name = build_layer_name(&args.layer_name, &args.architecture, &args.layer_suffix);

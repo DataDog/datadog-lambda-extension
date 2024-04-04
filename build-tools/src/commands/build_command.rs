@@ -1,29 +1,29 @@
-use clap::Parser;
 use std::env;
 use std::io::Result;
 use std::process::Command;
+use structopt::StructOpt;
 
 use super::common::BuildArchitecture;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, StructOpt)]
 pub struct BuildOptions {
-    #[arg(long)]
+    #[structopt(long, possible_values = &BuildArchitecture::variants(), case_insensitive = true, default_value = "amd64")]
     architecture: BuildArchitecture,
-    #[arg(long, default_value = "123")]
+    #[structopt(long, default_value = "123")]
     agent_version: String,
-    #[arg(long, default_value = "123")]
+    #[structopt(long, default_value = "123")]
     version: String,
-    #[arg(long)]
+    #[structopt(long)]
     context_path: String,
-    #[arg(long)]
+    #[structopt(long)]
     destination_path: String,
-    #[arg(long)]
+    #[structopt(long)]
     cloudrun: bool,
-    #[arg(long)]
+    #[structopt(long)]
     artifact_name: String,
-    #[arg(long)]
+    #[structopt(long)]
     docker_path: String,
-    #[arg(long, default_value = "serverless otlp")]
+    #[structopt(long, default_value = "serverless otlp")]
     build_tags: String,
 }
 

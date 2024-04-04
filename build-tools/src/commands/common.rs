@@ -1,27 +1,17 @@
 use aws_config::SdkConfig;
 use aws_sdk_sts as sts;
-use aws_sdk_sts::types::Credentials;
-use serde::Deserialize;
-use std::fmt::Display;
+use aws_sdk_sts::model::Credentials;
 use std::io::Result;
 use std::{fs::File, io::Read};
 
-use aws_sdk_ec2::primitives::Blob;
-#[derive(Debug, clap::ValueEnum, Clone, Default, Deserialize)]
-pub enum BuildArchitecture {
-    #[serde(alias = "arm64")]
-    Arm64,
-    #[default]
-    #[serde(alias = "amd64")]
-    Amd64,
-}
+use aws_sdk_ec2::types::Blob;
+use structopt::clap::arg_enum;
 
-impl Display for BuildArchitecture {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BuildArchitecture::Arm64 => write!(f, "arm64"),
-            BuildArchitecture::Amd64 => write!(f, "amd64"),
-        }
+arg_enum! {
+    #[derive(Debug)]
+    pub enum BuildArchitecture {
+        Arm64,
+        Amd64
     }
 }
 
@@ -76,7 +66,22 @@ async fn assume_role(role: String, external_id: String) -> Result<()> {
 }
 
 fn load_credentials(credentials: &Credentials) {
-    std::env::set_var("AWS_ACCESS_KEY_ID", credentials.access_key_id());
-    std::env::set_var("AWS_SECRET_ACCESS_KEY", credentials.secret_access_key());
-    std::env::set_var("AWS_SESSION_TOKEN", credentials.session_token());
+    std::env::set_var(
+        "AWS_ACCESS_KEY_ID",
+        credentials
+            .access_key_id()
+            .expect("could not find AWS_ACCESS_KEY_ID"),
+    );
+    std::env::set_var(
+        "AWS_SECRET_ACCESS_KEY",
+        credentials
+            .secret_access_key()
+            .expect("could not find AWS_SECRET_ACCESS_KEY"),
+    );
+    std::env::set_var(
+        "AWS_SESSION_TOKEN",
+        credentials
+            .session_token()
+            .expect("could not find AWS_SESSION_TOKEN"),
+    );
 }

@@ -1,17 +1,17 @@
-use clap::Parser;
 use std::{io::Result, thread, time::Duration};
+use structopt::StructOpt;
 
 use aws_sdk_lambda as lambda;
 
-#[derive(Debug, Parser)]
+#[derive(Debug, StructOpt)]
 pub struct InvokeFunctionOptions {
-    #[arg(long)]
+    #[structopt(long)]
     pub region: String,
-    #[arg(long)]
+    #[structopt(long)]
     pub arn: String,
-    #[arg(long)]
+    #[structopt(long)]
     pub nb: i32,
-    #[arg(long)]
+    #[structopt(long)]
     pub remove_after: bool,
 }
 

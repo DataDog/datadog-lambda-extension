@@ -24,7 +24,7 @@ COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
 WORKDIR /tmp/dd/datadog-agent
 
 # copy source files (/tgz gets unzip automatically by Docker)
-ADD  ./scripts/.src/datadog-agent.tgz /tmp/dd
+ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
 
 # build the extension
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
@@ -46,12 +46,6 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
 RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
-FROM rust:1.77-buster as bottlecap-builder
-RUN mkdir -p /tmp/dd
-COPY ./bottlecap /tmp/dd/bottlecap
-RUN cd /tmp/dd/bottlecap && cargo build --release
-RUN cp /tmp/dd/bottlecap/target/release/bottlecap /tmp/dd/bottlecap/bottlecap
-
 # zip the extension
 FROM ubuntu:latest as compresser
 ARG CMD_PATH
@@ -61,10 +55,8 @@ RUN apt-get update
 RUN apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
-COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /datadog-agent-go
-RUN strip /datadog-agent-go
-
-COPY --from=bottlecap-builder /tmp/dd/bottlecap/bottlecap /extensions/datadog-agent
+COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
+RUN strip /extensions/datadog-agent
 
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
