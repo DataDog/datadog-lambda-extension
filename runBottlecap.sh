@@ -1,5 +1,5 @@
 # build bottlecap in debug mode
-cd bootlecap 
+cd bottlecap 
 cargo build
 cd ..
 
