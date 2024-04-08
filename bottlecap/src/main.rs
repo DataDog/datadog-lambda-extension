@@ -12,7 +12,7 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use logger::SimpleLogger;
 use serde::Deserialize;
 
-const EXTENSION_NAME: &str = "lambda_extension";
+const EXTENSION_NAME: &str = "bottlecap";
 const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
 
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
                 invoked_function_arn,
             }) => {
                 println!(
-                    "[rust agent]Invoke event {}; deadline: {}, invoked_function_arn: {}",
+                    "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
             }
