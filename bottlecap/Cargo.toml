@@ -7,10 +7,10 @@ edition = "2021"
 
 [dependencies]
 figment = { version = "0.10.15", features = ["yaml", "env"] }
-lambda-extension = { version = "0.10.0", features = [] }
 log = "0.4.21"
-serde = "1.0.197"
 tokio = "1.37.0"
+serde = { version = "1.0.197", features = ["derive"], default-features = false }
+ureq = { version = "2.9.6", features = ["json"], default-features = false }
 
 [dev-dependencies]
 figment = { version = "0.10.15", features = ["yaml", "env", "test"] }
