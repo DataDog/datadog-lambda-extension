@@ -6,8 +6,10 @@ cd bottlecap
 # build bottlecap in debug mode
 if (echo $arch | grep -q "Darwin"); then
     PATH=/usr/bin:$PATH cargo zigbuild --target=aarch64-unknown-linux-gnu
+    build_path=bottlecap/target/aarch64-unknown-linux-gnu/debug/bottlecap
 else
     cargo build
+    build_path=bottlecap/target/debug/bottlecap
 fi
 cd ..
 
@@ -18,7 +20,7 @@ echo -e 'export const handler = async () => {\n\tconsole.log("Hello world!");\n}
 docker cp "/tmp/index.mjs" "${docker_name}:/var/task/index.mjs"
 docker start "${docker_name}"           
 docker exec "${docker_name}" mkdir -p /opt/extensions
-docker cp bottlecap/target/aarch64-unknown-linux-gnu/debug/bottlecap "${docker_name}:/opt/extensions/bottlecap"
+docker cp "${build_path}" "${docker_name}:/opt/extensions/bottlecap"
 curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{}'
 docker logs "${docker_name}"                                             
 docker stop "${docker_name}" 
