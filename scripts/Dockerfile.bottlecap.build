@@ -9,12 +9,14 @@ RUN cp /tmp/dd/bottlecap/target/release/bottlecap /tmp/dd/bottlecap/bottlecap
 # zip the extension
 FROM ubuntu:latest as compresser
 ARG CMD_PATH
+ARG EXTENSION_NAME_AND_ARCH
 ARG DATADOG_WRAPPER=datadog_wrapper
 
 RUN apt-get update
 RUN apt-get install -y zip binutils
-RUN if [ ! -f /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent ]; then echo 'datadog-agent not found. Exiting.'; exit 1; fi
-COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /datadog-agent-go
+RUN echo $EXTENSION_NAME_AND_ARCH
+#RUN if [ ! -f .layers/$EXTENSION_NAME_AND_ARCH/extensions/datadog-agent ]; then echo 'datadog-agent not found. Exiting.'; exit 1; fi
+COPY ./.layers/$EXTENSION_NAME_AND_ARCH/extensions/datadog-agent /datadog-agent-go
 RUN strip /datadog-agent-go # just in case
 RUN mkdir /extensions
 WORKDIR /extensions
