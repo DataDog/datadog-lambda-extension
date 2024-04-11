@@ -90,13 +90,6 @@ function docker_build_bottlecap_zip {
     unzip $TARGET_DIR/datadog_bottlecap-${arch}${suffix}.zip -d $TARGET_DIR/datadog_bottlecap-${arch}${suffix}
 }
 
-function validate_agent_built {
-    if [ ! -f /dd/datadog-agent/${CMD_PATH}/datadog-agent ]; then
-        echo 'datadog-agent not found. Exiting.'
-        exit 1
-    fi
-}
-
 if [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_agent_zip amd64
