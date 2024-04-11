@@ -15,7 +15,6 @@ ARG DATADOG_WRAPPER=datadog_wrapper
 RUN apt-get update
 RUN apt-get install -y zip binutils
 RUN echo $EXTENSION_NAME_AND_ARCH
-RUN if [ ! -f ./.layers/$EXTENSION_NAME_AND_ARCH/extensions/datadog-agent ]; then echo 'datadog-agent not found. Exiting.'; exit 1; fi
 COPY ./.layers/$EXTENSION_NAME_AND_ARCH/extensions/datadog-agent /datadog-agent-go
 RUN strip /datadog-agent-go # just in case
 RUN mkdir /extensions
