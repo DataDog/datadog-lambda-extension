@@ -24,7 +24,6 @@ COPY --from=bottlecap-builder /tmp/dd/bottlecap/bottlecap /extensions/datadog-ag
 
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
-# if datadog-agent-go not present, echo error and exit 1
 RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent-go
 
 # keep the smallest possible docker image
