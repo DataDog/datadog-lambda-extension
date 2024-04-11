@@ -12,7 +12,7 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use logger::SimpleLogger;
 use serde::Deserialize;
 
-const EXTENSION_NAME: &str = "bottlecap";
+const EXTENSION_NAME: &str = "datadog-agent";
 const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
 
