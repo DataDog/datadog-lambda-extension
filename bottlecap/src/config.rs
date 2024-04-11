@@ -67,7 +67,6 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         figment::error::Kind::UnknownField(field, _) => ConfigError::UnsupportedField(field),
         _ => ConfigError::ParseError(err.to_string()),
     })?;
-    println!("{:?}", config);
     Ok(config)
 }
 

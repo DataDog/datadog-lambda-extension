@@ -87,12 +87,8 @@ fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or("".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => {
-            println!("ASTUYVE config passed let's go");
-            config
-        },
+        Ok(config) => config,
         Err(e) => {
-            println!("ASTUYVE config failed, booting into agent");
             log::error!("Error loading configuration: {:?}", e);
             let err = Command::new("/opt/datadog-agent-go").exec();
             panic!("Error starting the extension: {:?}", err);
