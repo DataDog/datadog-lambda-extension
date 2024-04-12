@@ -1,6 +1,12 @@
 #![deny(clippy::all)]
 mod config;
+mod dogstatsd;
+mod event_bus;
 mod logger;
+use tracing_subscriber::EnvFilter;
+mod events;
+
+use crate::dogstatsd::dogstatsd::DogStatsD;
 
 use std::collections::HashMap;
 use std::env;
@@ -15,6 +21,10 @@ use serde::Deserialize;
 const EXTENSION_NAME: &str = "bottlecap";
 const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
+
+// todo: make sure we can override those with environment variables
+const DOGSTATSD_HOST: &str = "0.0.0.0";
+const DOGSTATSD_PORT: u16 = 8185;
 
 struct RegisterResponse {
     pub extension_id: String,
@@ -84,6 +94,12 @@ fn register() -> Result<RegisterResponse> {
 }
 
 fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .json()
+        .with_env_filter(EnvFilter::from_default_env())
+        .without_time()
+        .init();
+
     // First load the configuration
     let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or("".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
@@ -97,6 +113,9 @@ fn main() -> Result<()> {
     SimpleLogger::init(config.log_level).expect("Error initializing logger");
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let dogstats_client = DogStatsD::new(DOGSTATSD_HOST, DOGSTATSD_PORT);
+    dogstats_client.run();
 
     loop {
         let evt = next_event(&r.extension_id);
