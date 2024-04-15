@@ -1,13 +1,13 @@
 #![deny(clippy::all)]
 mod config;
-mod metrics;
 mod event_bus;
 mod logger;
+mod metrics;
 use tracing_subscriber::EnvFilter;
 mod events;
 
-use crate::metrics::dogstatsd::DogStatsD;
 use crate::event_bus::bus::EventBus;
+use crate::metrics::dogstatsd::DogStatsD;
 
 use std::collections::HashMap;
 use std::env;
@@ -115,8 +115,7 @@ fn main() -> Result<()> {
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let mut event_bus = EventBus::new();
-    event_bus.run();
+    let event_bus = EventBus::run();
 
     let dogstats_client = DogStatsD::new(DOGSTATSD_HOST, DOGSTATSD_PORT);
     dogstats_client.run(event_bus.get_sender_copy());
@@ -139,6 +138,7 @@ fn main() -> Result<()> {
                 deadline_ms,
             }) => {
                 println!("Exiting: {}, deadline: {}", shutdown_reason, deadline_ms);
+                event_bus.shutdown();
                 return Ok(());
             }
             Err(err) => {

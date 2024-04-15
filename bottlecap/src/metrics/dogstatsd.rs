@@ -29,7 +29,7 @@ impl<'a> DogStatsD<'a> {
                 );
                 let dummy_tags = vec!["tagA:valueA".to_string(), "tagB:valueB".to_string()];
                 let metric_event = MetricEvent::new("metric_name".to_string(), 1.0, dummy_tags);
-                let _  = event_bus.send(Event::Metric(metric_event)); // todo check the result
+                let _ = event_bus.send(Event::Metric(metric_event)); // todo check the result
             }
         });
     }

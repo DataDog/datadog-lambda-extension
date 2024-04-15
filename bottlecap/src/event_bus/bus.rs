@@ -1,43 +1,50 @@
 use std::sync::mpsc;
 use std::sync::mpsc::Sender;
 use std::thread;
+use tracing::debug;
 use tracing::error;
 
 use crate::events;
 use events::Event;
 
 pub struct EventBus {
-    tx: Option<Sender<events::Event>>,
+    tx: Sender<events::Event>,
+    join_handle: thread::JoinHandle<()>,
 }
 
 impl EventBus {
-    pub fn new() -> EventBus {
-        EventBus { tx: None }
-    }
-    pub fn run(&mut self) {
-        let (tx, rx) = mpsc::channel::<Event>();
-        self.tx = Some(tx);
-        let _ = thread::spawn(move || loop {
+    pub fn run() -> EventBus {
+        let (tx, rx) = mpsc::channel();
+        let join_handle = thread::spawn(move || loop {
             let received = rx.recv();
             if let Ok(event) = received {
                 match event {
                     Event::Metric(event) => {
-                        println!("Metric event: {:?}", event);
+                        debug!("Metric event: {:?}", event);
                     }
                     _ => {
-                        println!("Other event");
+                        debug!("Other event");
                     }
                 }
             } else {
                 error!("could not get the event");
             }
         });
+        EventBus { tx, join_handle }
     }
 
     pub fn get_sender_copy(&self) -> Sender<events::Event> {
-        match &self.tx {
-            Some(sender) => sender.clone(),
-            None => panic!("The event bus needs to be initialized first"),
+        self.tx.clone()
+    }
+
+    pub fn shutdown(self) {
+        match self.join_handle.join() {
+            Ok(_) => {
+                debug!("EventBus thread has been shutdown");
+            }
+            Err(e) => {
+                error!("Error shutting down the EventBus thread: {:?}", e);
+            }
         }
     }
 }
