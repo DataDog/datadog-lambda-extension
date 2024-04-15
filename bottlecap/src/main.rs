@@ -116,9 +116,8 @@ fn main() -> Result<()> {
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let event_bus = EventBus::run();
-
-    let dogstats_client = DogStatsD::new(DOGSTATSD_HOST, DOGSTATSD_PORT);
-    dogstats_client.run(event_bus.get_sender_copy());
+    let dogstats_client =
+        DogStatsD::run(DOGSTATSD_HOST, DOGSTATSD_PORT, event_bus.get_sender_copy());
 
     loop {
         let evt = next_event(&r.extension_id);
@@ -138,6 +137,7 @@ fn main() -> Result<()> {
                 deadline_ms,
             }) => {
                 println!("Exiting: {}, deadline: {}", shutdown_reason, deadline_ms);
+                dogstats_client.shutdown();
                 event_bus.shutdown();
                 return Ok(());
             }
