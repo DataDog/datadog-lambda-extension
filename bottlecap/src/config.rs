@@ -77,6 +77,7 @@ pub mod tests {
     #[test]
     fn test_reject_unknown_fields_yaml() {
         figment::Jail::expect_with(|jail| {
+            jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
                 r#"
@@ -95,6 +96,7 @@ pub mod tests {
     #[test]
     fn test_reject_unknown_fields_env() {
         figment::Jail::expect_with(|jail| {
+            jail.clear_env();
             jail.set_env("DD_UNKNOWN_FIELD", "true");
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
@@ -108,6 +110,7 @@ pub mod tests {
     #[test]
     fn test_parse_config_file() {
         figment::Jail::expect_with(|jail| {
+            jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
                 r#"
@@ -129,6 +132,7 @@ pub mod tests {
     #[test]
     fn test_parse_env() {
         figment::Jail::expect_with(|jail| {
+            jail.clear_env();
             jail.set_env("DD_APM_ENABLED", "true");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
@@ -144,7 +148,8 @@ pub mod tests {
 
     #[test]
     fn test_parse_default() {
-        figment::Jail::expect_with(|_| {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config, Config::default());
             Ok(())
