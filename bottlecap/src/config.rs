@@ -29,7 +29,7 @@ pub struct Config {
     pub tags: Option<String>,
     pub log_level: LogLevel,
     pub apm_enabled: bool,
-    pub logs_enabled: bool,
+    pub serverless_logs_enabled: bool,
     pub handler: String,
 }
 
@@ -44,7 +44,7 @@ impl Default for Config {
             version: None,
             tags: None,
             log_level: LogLevel::default(),
-            logs_enabled: true,
+            serverless_logs_enabled: true,
             handler: String::default(),
         }
     }
