@@ -20,7 +20,7 @@ echo -e 'export const handler = async () => {\n\tconsole.log("Hello world!");\n}
 docker cp "/tmp/index.mjs" "${docker_name}:/var/task/index.mjs"
 docker start "${docker_name}"           
 docker exec "${docker_name}" mkdir -p /opt/extensions
-docker cp "${build_path}" "${docker_name}:/opt/extensions/bottlecap"
+docker cp "${build_path}" "${docker_name}:/opt/extensions/datadog-agent"
 curl -XPOST "http://localhost:9000/2015-03-31/functions/function/invocations" -d '{}'
 docker logs "${docker_name}"                                             
 docker stop "${docker_name}" 
