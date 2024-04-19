@@ -14,6 +14,7 @@ ureq = { version = "2.9.6", features = ["json"], default-features = false }
 
 tracing = {version = "0.1.40", default-features = false }
 tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter", "json"] }
+chrono = { version = "0.4.38", features = ["serde"] }
 
 
 [dev-dependencies]
