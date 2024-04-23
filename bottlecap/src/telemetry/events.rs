@@ -64,7 +64,7 @@ pub enum TelemetryRecord {
     },
 
     /// Record marking start of an invocation
-    #[serde(rename = "platform.start")]
+    #[serde(rename = "platform.start", rename_all = "camelCase")]
     PlatformStart {
         /// Request identifier
         request_id: String,
@@ -150,6 +150,7 @@ pub enum InitType {
 
 /// Phase in which initialization occurs
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum InitPhase {
     /// Initialization phase
     Init,
@@ -159,6 +160,7 @@ pub enum InitPhase {
 
 /// Status of invocation/initialization
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum Status {
     /// Success
     Success,
