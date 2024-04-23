@@ -121,7 +121,7 @@ fn main() -> Result<()> {
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let event_bus = EventBus::run();
-    let telemetry_listener = TelemetryListener::run();
+    let telemetry_listener = TelemetryListener::run(event_bus.get_sender_copy());
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client.subscribe();
     
