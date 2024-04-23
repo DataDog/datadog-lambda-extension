@@ -66,7 +66,7 @@ impl TelemetryListener {
             }
         }
 
-        let response = b"HTTP/1.1 200 OK";
+        let response = b"HTTP/1.1 200 OK\r\n\r\n";
         match stream.write(response) {
             Ok(_) => debug!("Acknowledge data receive"),
             Err(e) => error!("Error sending response: {}", e),
