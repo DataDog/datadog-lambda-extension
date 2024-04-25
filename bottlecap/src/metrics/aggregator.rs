@@ -293,6 +293,21 @@ mod tests {
     }
 
     #[test]
+    fn clear() {
+        let mut aggregator = Aggregator::<2>::new().unwrap();
+
+        let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
+        let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
+
+        assert!(aggregator.insert(&metric1).is_ok());
+        assert!(aggregator.insert(&metric2).is_ok());
+
+        assert_eq!(aggregator.len(), 2);
+        aggregator.clear();
+        assert_eq!(aggregator.len(), 0);
+    }
+
+    #[test]
     fn to_series() {
         let mut aggregator = Aggregator::<2>::new().unwrap();
 
