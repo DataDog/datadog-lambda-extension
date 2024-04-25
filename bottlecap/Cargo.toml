@@ -21,6 +21,7 @@ serde_json = "1.0.116"
 
 [dev-dependencies]
 figment = { version = "0.10.15", features = ["yaml", "env", "test"] }
+proptest = "1.4.0"
 
 
 [profile.release]

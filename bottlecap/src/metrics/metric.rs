@@ -195,3 +195,179 @@ pub fn id(name: Ustr, tagset: Option<Ustr>) -> u64 {
     }
     hasher.finish()
 }
+// <METRIC_NAME>:<VALUE>:<VALUE>:<VALUE>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_KEY_2>:<TAG_VALUE_2>|c:<CONTAINER_ID>
+//
+// Types:
+//  * c -- COUNT, allows packed values, summed
+//  * g -- GAUGE, allows packed values, last one wins
+//
+// SAMPLE_RATE ignored for the sake of simplicity.
+
+#[cfg(test)]
+mod tests {
+    use proptest::{collection, option, strategy::Strategy, string::string_regex};
+    use ustr::Ustr;
+
+    use crate::metrics::metric::id;
+
+    use super::{ParseError, Metric};
+
+    fn metric_name() -> impl Strategy<Value = String> {
+        string_regex("[a-zA-Z0-9.-]{1,128}").unwrap()
+    }
+
+    fn metric_values() -> impl Strategy<Value = String> {
+        string_regex("[0-9]+(:[0-9]){0,8}").unwrap()
+    }
+
+    fn metric_type() -> impl Strategy<Value = String> {
+        string_regex("g|c").unwrap()
+    }
+
+    fn metric_tagset() -> impl Strategy<Value = Option<String>> {
+        option::of(
+            string_regex("[a-zA-Z]{1,64}:[a-zA-Z]{1,64}(,[a-zA-Z]{1,64}:[a-zA-Z]{1,64}){0,31}")
+                .unwrap(),
+        )
+    }
+
+    fn metric_tags() -> impl Strategy<Value = Vec<(String, String)>> {
+        collection::vec(("[a-z]{1,8}", "[A-Z]{1,8}"), 0..32)
+    }
+
+    proptest::proptest! {
+        // For any valid name, tags et al the parse routine is able to parse an
+        // encoded metric line.
+        #[test]
+        fn parse_valid_inputs(
+            name in metric_name(),
+            values in metric_values(),
+            mtype in metric_type(),
+            tagset in metric_tagset()
+        ) {
+            let input = if let Some(ref tagset) = tagset {
+                format!("{name}:{values}|{mtype}|#{tagset}")
+            } else {
+                format!("{name}:{values}|{mtype}")
+            };
+            let metric = Metric::parse(&input).unwrap();
+            assert_eq!(name, metric.raw_name());
+            assert_eq!(values, metric.raw_values());
+            assert_eq!(tagset, metric.raw_tagset().map(String::from));
+        }
+
+        #[test]
+        fn parse_missing_name_and_value(
+            mtype in metric_type(),
+            tagset in metric_tagset()
+        ) {
+            let input = if let Some(ref tagset) = tagset {
+                format!("|{mtype}|#{tagset}")
+            } else {
+                format!("|{mtype}")
+            };
+            let result = Metric::parse(&input);
+
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                ParseError::Raw("Missing name, value section")
+            );
+        }
+
+        #[test]
+        fn parse_invalid_name_and_value_format(
+            name in metric_name(),
+            values in metric_values(),
+            mtype in metric_type(),
+            tagset in metric_tagset()
+        ) {
+            // If there is a ':' in the values we cannot distinguish where the
+            // name and the first value are.
+            let value = values.split(":").next().unwrap();
+            let input = if let Some(ref tagset) = tagset {
+                format!("{name}{value}|{mtype}|#{tagset}")
+            } else {
+                format!("{name}{value}|{mtype}")
+            };
+            let result = Metric::parse(&input);
+
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                ParseError::Raw("Missing name, value section")
+            );
+        }
+
+        #[test]
+        fn parse_unsupported_metric_type(
+            name in metric_name(),
+            values in metric_values(),
+            mtype in "[abefhijklmnopqrstuvwxyz]",
+            tagset in metric_tagset()
+        ) {
+            let input = if let Some(ref tagset) = tagset {
+                format!("{name}:{values}|{mtype}|#{tagset}")
+            } else {
+                format!("{name}:{values}|{mtype}")
+            };
+            let result = Metric::parse(&input);
+
+            assert!(result.is_err());
+            assert_eq!(
+                result.unwrap_err(),
+                ParseError::Raw("Unsupported metric type")
+            );
+        }
+
+        // The ID of a name, tagset is the same even if the tagset is in a
+        // distinct order.
+        // For any valid name, tags et al the parse routine is able to parse an
+        // encoded metric line.
+        #[test]
+        fn id_consistent(name in metric_name(),
+                         mut tags in metric_tags()) {
+            let mut tagset1 = String::new();
+            let mut tagset2 = String::new();
+
+            for (k,v) in &tags {
+                tagset1.push_str(k);
+                tagset1.push_str(":");
+                tagset1.push_str(v);
+                tagset1.push_str(",");
+            }
+            tags.reverse();
+            for (k,v) in &tags {
+                tagset2.push_str(k);
+                tagset2.push_str(":");
+                tagset2.push_str(v);
+                tagset2.push_str(",");
+            }
+            if !tags.is_empty() {
+                tagset1.pop();
+                tagset2.pop();
+            }
+
+            let id1 = id(Ustr::from(&name), Some(Ustr::from(&tagset1)));
+            let id2 = id(Ustr::from(&name), Some(Ustr::from(&tagset2)));
+
+            assert_eq!(id1, id2);
+        }
+    }
+
+    #[test]
+    fn parse_too_many_tags() {
+        // 33
+        assert_eq!(Metric::parse("foo:1|g|#a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3").unwrap_err(),
+        ParseError::Raw("Too many tags"));
+
+        // 32
+        assert!(Metric::parse("foo:1|g|#a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2").is_ok());
+
+        // 31
+        assert!(Metric::parse("foo:1|g|#a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1").is_ok());
+
+        // 30
+        assert!(Metric::parse("foo:1|g|#a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3").is_ok());
+    }
+}
