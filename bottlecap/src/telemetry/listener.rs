@@ -1,3 +1,5 @@
+#![allow(clippy::unused_io_amount)]
+
 use crate::events;
 use crate::telemetry::events::TelemetryEvent;
 use crate::TELEMETRY_PORT;
@@ -113,7 +115,7 @@ impl TelemetryListener {
         let buf: [u8; 262144] = [0; 256 * 1024]; // Using the default limit from AWS
 
         let join_handle = std::thread::spawn(move || {
-            debug!("Initializating Telemetry Listener");
+            debug!("Initializing Telemetry Listener");
 
             loop {
                 for stream in listener.incoming() {
@@ -143,7 +145,7 @@ impl TelemetryListener {
         event_bus: Sender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
-        stream.read_exact(&mut buf)?;
+        stream.read(&mut buf)?;
 
         let p = HttpRequestParser::from_buf(&buf)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
@@ -162,10 +164,10 @@ impl TelemetryListener {
     ) -> Result<(), Box<dyn Error>> {
         match request {
             Ok(_) => {
-                stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n")?;
+                stream.write(b"HTTP/1.1 200 OK\r\n\r\n")?;
             }
             Err(_) => {
-                stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")?;
+                stream.write(b"HTTP/1.1 400 Bad Request\r\n\r\n")?;
             }
         }
         Ok(())
