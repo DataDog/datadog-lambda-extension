@@ -10,7 +10,7 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
-use tracing::debug;
+use tracing::{debug, error};
 
 pub struct HttpRequestParser {
     headers: HashMap<String, String>,
@@ -27,8 +27,8 @@ impl HttpRequestParser {
             body: String::new(),
         };
 
-        let body_start_index = parser.parse_headers(&buf)?;
-        let _ = parser.parse_body(&buf, body_start_index);
+        let body_start_index = parser.parse_headers(buf)?;
+        parser.parse_body(buf, body_start_index)?;
 
         Ok(parser)
     }
@@ -38,8 +38,12 @@ impl HttpRequestParser {
         let mut i = 0;
 
         // Ignore method, path, and protocol
+        // i + 1 because we are checking next character always
         while i + 1 < buf.len() {
+            // '\n\r' indicate the end of every line, the first line
+            // is always method, path, and protocol.
             if buf[i] == CR && buf[i + 1] == LR {
+                // i + 2 to skip '\n\r' on the next iteration
                 last_start = i + 2;
                 break;
             }
@@ -49,20 +53,30 @@ impl HttpRequestParser {
         // Parse headers
         i = last_start;
         while i < buf.len() {
+            // Here we've reached end of one header
             if buf[i] == CR && buf[i + 1] == LR {
+                // Slice the header from the buffer, not using i+1
+                // because we don't want to include '\r\n' in the value
                 let header = std::str::from_utf8(&buf[last_start..i])?;
                 let mut header_parts = header.split(": ");
-                let key: &str = header_parts.next().unwrap();
-                let value = header_parts.next().unwrap();
-                self.headers
-                    .insert(key.to_string().to_lowercase(), value.to_string());
+
+                if let (Some(key), Some(value)) = (header_parts.next(), header_parts.next()) {
+                    self.headers
+                        .insert(key.to_string().to_lowercase(), value.to_string());
+                } else {
+                    error!("Error parsing header, skipping it: {}", header);
+                }
 
                 // Check if we reached the end of the headers
+                // i + 3 because we are checking next 3 characters, '\r\n\r\n'
+                // This indicates the end of the headers, and the start of the body
                 if i + 3 < buf.len() && buf[i + 2] == CR && buf[i + 3] == LR {
+                    // Set our last_start so we can parse the body
                     last_start = i + 4;
                     break;
                 }
 
+                // Skip '\r\n' to start parsing the next header
                 last_start = i + 2;
                 i = last_start;
                 continue;
@@ -74,6 +88,7 @@ impl HttpRequestParser {
     }
 
     fn parse_body(&mut self, buf: &[u8], start_index: usize) -> Result<(), Box<dyn Error>> {
+        // TODO: Handle content-length not being present
         let end_index = start_index
             + self
                 .headers
@@ -94,7 +109,7 @@ pub struct TelemetryListener {
 impl TelemetryListener {
     pub fn run(event_bus: Sender<events::Event>) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("0.0.0.0:{}", TELEMETRY_PORT);
-        let listener = TcpListener::bind(&addr)?;
+        let listener = TcpListener::bind(addr)?;
         let buf: [u8; 262144] = [0; 256 * 1024]; // Using the default limit from AWS
 
         let join_handle = std::thread::spawn(move || {
@@ -105,12 +120,16 @@ impl TelemetryListener {
                     debug!("Received a Telemetry API connection");
 
                     let cloned_event_bus = event_bus.clone();
-                    let stream = stream.unwrap();
-                    // TODO: revisit if it makes sense to spawn a new thread per connection.
-                    std::thread::spawn(move || {
-                        let r = Self::handle_stream(&stream, buf, cloned_event_bus);
-                        let _ = Self::acknowledge_request(stream, r);
-                    });
+                    if let Ok(stream) = stream {
+                        std::thread::spawn(move || {
+                            let r = Self::handle_stream(&stream, buf, cloned_event_bus);
+                            if let Err(e) = Self::acknowledge_request(stream, r) {
+                                error!("Error acknowledging Telemetry request: {:?}", e);
+                            }
+                        });
+                    } else {
+                        error!("Error accepting connection");
+                    }
                 }
             }
         });
@@ -124,12 +143,14 @@ impl TelemetryListener {
         event_bus: Sender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
-        stream.read(&mut buf)?;
+        stream.read_exact(&mut buf)?;
 
         let p = HttpRequestParser::from_buf(&buf)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
         for event in telemetry_events {
-            let _ = event_bus.send(events::Event::Telemetry(event));
+            if let Err(e) = event_bus.send(events::Event::Telemetry(event)) {
+                error!("Error sending Telemetry event to the event bus: {}", e);
+            }
         }
 
         Ok(())
@@ -141,10 +162,10 @@ impl TelemetryListener {
     ) -> Result<(), Box<dyn Error>> {
         match request {
             Ok(_) => {
-                stream.write(b"HTTP/1.1 200 OK\r\n\r\n")?;
+                stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n")?;
             }
             Err(_) => {
-                stream.write(b"HTTP/1.1 400 Bad Request\r\n\r\n")?;
+                stream.write_all(b"HTTP/1.1 400 Bad Request\r\n\r\n")?;
             }
         }
         Ok(())

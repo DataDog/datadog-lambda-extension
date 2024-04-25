@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use crate::{base_url, EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE};
 
 pub struct TelemetryApiClient {
@@ -10,7 +12,7 @@ impl TelemetryApiClient {
         TelemetryApiClient { extension_id, port }
     }
 
-    pub fn subscribe(&self) -> Result<ureq::Response, ureq::Error> {
+    pub fn subscribe(&self) -> Result<ureq::Response, Box<dyn Error>> {
         let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE)?; // TODO: handle error
         let data = ureq::json!({
             "schemaVersion": "2022-12-13",
@@ -31,6 +33,6 @@ impl TelemetryApiClient {
             .set(EXTENSION_ID_HEADER, &self.extension_id)
             .send_json(data);
 
-        resp
+        Ok(resp?)
     }
 }
