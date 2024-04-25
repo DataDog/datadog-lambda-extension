@@ -48,10 +48,17 @@ impl Entry {
 
 impl Entry {
     fn of_generation(generation: u16, id: u64, metric: &Metric) -> Self {
+        let metric_value = match metric.first_value() {
+            Ok(value) => value,
+            Err(e) => {
+                error!("failed to parse metric: {:?}", e);
+                0.0
+            }
+        };
         Self {
             id,
             generation,
-            value: metric.values().next().unwrap().unwrap(),
+            value: metric_value,
             name: metric.name,
             tags: metric.tags,
             kind: metric.kind,
