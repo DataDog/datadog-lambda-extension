@@ -9,8 +9,7 @@ mod events;
 
 use crate::event_bus::bus::EventBus;
 use crate::metrics::dogstatsd::DogStatsD;
-use crate::telemetry::{listener::TelemetryListener, client::TelemetryApiClient};
-
+use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
 
 use std::collections::HashMap;
 use std::env;
@@ -39,9 +38,12 @@ struct RegisterResponse {
 }
 
 fn base_url(route: &str) -> Result<String> {
-    Ok(format!("http://{}/{}", 
-        env::var("AWS_LAMBDA_RUNTIME_API").map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
-    route))
+    Ok(format!(
+        "http://{}/{}",
+        env::var("AWS_LAMBDA_RUNTIME_API")
+            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        route
+    ))
 }
 
 #[derive(Deserialize)]
@@ -66,8 +68,8 @@ enum NextEventResponse {
 }
 
 fn next_event(ext_id: &str) -> Result<NextEventResponse> {
-    let base_url =
-        base_url(EXTENSION_ROUTE).map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let base_url = base_url(EXTENSION_ROUTE)
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{}/event/next", base_url);
     ureq::get(&url)
         .set(EXTENSION_ID_HEADER, ext_id)
@@ -79,8 +81,8 @@ fn next_event(ext_id: &str) -> Result<NextEventResponse> {
 
 fn register() -> Result<RegisterResponse> {
     let mut map = HashMap::new();
-    let base_url =
-        base_url(EXTENSION_ROUTE).map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let base_url = base_url(EXTENSION_ROUTE)
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     map.insert("events", vec!["INVOKE", "SHUTDOWN"]);
     let url = format!("{}/register", base_url);
 
@@ -121,10 +123,14 @@ fn main() -> Result<()> {
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let event_bus = EventBus::run();
-    let telemetry_listener = TelemetryListener::run(event_bus.get_sender_copy());
+
+    let telemetry_listener = TelemetryListener::run(event_bus.get_sender_copy())
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
-    telemetry_client.subscribe();
-    
+    let _ = telemetry_client
+        .subscribe()
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
     let dogstats_client =
         DogStatsD::run(DOGSTATSD_HOST, DOGSTATSD_PORT, event_bus.get_sender_copy());
 
