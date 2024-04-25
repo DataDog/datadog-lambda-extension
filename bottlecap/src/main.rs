@@ -120,7 +120,7 @@ fn main() -> Result<()> {
         host: DOGSTATSD_HOST.to_string(),
         port: DOGSTATSD_PORT,
     };
-    let dogstats_client =
+    let mut dogstats_client =
         DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
 
     loop {

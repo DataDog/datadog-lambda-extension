@@ -52,9 +52,14 @@ impl DogStatsD {
                         continue;
                     }
                 };
-                //TODO(astuyve): move expect to match, perhaps aggregate multi-value metrics in
-                //aggregator or modify metric event to pass multi-value metrics
-                let metric_event = MetricEvent::new(parsed_metric.name.to_string(), parsed_metric.first_value().expect("no first metric"), parsed_metric.tags());
+                let first_value = match parsed_metric.first_value() {
+                    Ok(val) => val,
+                    Err(e) => {
+                        log::error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+                        continue;
+                    }
+                };
+                let metric_event = MetricEvent::new(parsed_metric.name.to_string(), first_value, parsed_metric.tags());
                 let _ = aggregator.lock().expect("lock poisoned").insert(&parsed_metric);
                 log::info!("inserted metric into aggregator");
                 // Don't publish until after validation and adding metric_event to buff
@@ -63,15 +68,17 @@ impl DogStatsD {
         })
     }
 
-    pub fn flush(&self) {
-        let current_points = &self.aggregator.lock().expect("lock poisoned").to_series();
+    pub fn flush(&mut self) {
+        let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned");
+        let current_points = locked_aggr.to_series();
         if current_points.series.is_empty() {
             return;
         }
         let _ = &self.dd_api.ship(&current_points).expect("failed to ship metrics to datadog");
+        locked_aggr.clear();
     }
 
-    pub fn shutdown(self) {
+    pub fn shutdown(mut self) {
         self.flush();
         match self.serve_handle.join() {
             Ok(_) => {
