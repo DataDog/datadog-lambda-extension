@@ -4,6 +4,7 @@ mod event_bus;
 mod logger;
 mod metrics;
 mod telemetry;
+use telemetry::listener::TelemetryListenerConfig;
 use tracing_subscriber::EnvFilter;
 mod events;
 
@@ -124,8 +125,13 @@ fn main() -> Result<()> {
 
     let event_bus = EventBus::run();
 
-    let telemetry_listener = TelemetryListener::run(event_bus.get_sender_copy())
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let telemetry_listener_config = TelemetryListenerConfig {
+        host: "0.0.0.0".to_string(),
+        port: TELEMETRY_PORT,
+    };
+    let telemetry_listener =
+        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
+            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
         .subscribe()
