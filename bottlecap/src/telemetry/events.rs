@@ -59,7 +59,6 @@ pub enum TelemetryRecord {
         initialization_type: InitType,
         /// Phase of initialisation
         phase: InitPhase,
-        /// Metrics
         metrics: InitReportMetrics,
     },
 
@@ -98,7 +97,6 @@ pub enum TelemetryRecord {
         /// When unsuccessful, the error_type describes what kind of error occurred
         #[serde(skip_serializing_if = "Option::is_none")]
         error_type: Option<String>,
-        /// Metrics
         metrics: ReportMetrics,
     },
 
@@ -162,13 +160,9 @@ pub enum InitPhase {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
-    /// Success
     Success,
-    /// Error
     Error,
-    /// Failure
     Failure,
-    /// Timeout
     Timeout,
 }
 
