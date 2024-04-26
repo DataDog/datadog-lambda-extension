@@ -22,13 +22,13 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use logger::SimpleLogger;
 use serde::Deserialize;
 
+const EXTENSION_HOST: &str = "0.0.0.0";
 const EXTENSION_NAME: &str = "datadog-agent";
 const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
 const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 
 // todo: make sure we can override those with environment variables
-const DOGSTATSD_HOST: &str = "0.0.0.0";
 const DOGSTATSD_PORT: u16 = 8185;
 
 const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
@@ -126,7 +126,7 @@ fn main() -> Result<()> {
     let event_bus = EventBus::run();
 
     let telemetry_listener_config = TelemetryListenerConfig {
-        host: "0.0.0.0".to_string(),
+        host: EXTENSION_HOST.to_string(),
         port: TELEMETRY_PORT,
     };
     let telemetry_listener =
@@ -138,7 +138,7 @@ fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let dogstats_client =
-        DogStatsD::run(DOGSTATSD_HOST, DOGSTATSD_PORT, event_bus.get_sender_copy());
+        DogStatsD::run(EXTENSION_HOST, DOGSTATSD_PORT, event_bus.get_sender_copy());
 
     loop {
         let evt = next_event(&r.extension_id);
