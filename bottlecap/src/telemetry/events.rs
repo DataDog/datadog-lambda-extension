@@ -30,10 +30,8 @@ pub enum TelemetryRecord {
         /// Phase of initialisation
         phase: InitPhase,
         /// Lambda runtime version
-        #[serde(skip_serializing_if = "Option::is_none")]
         runtime_version: Option<String>,
         /// Lambda runtime version ARN
-        #[serde(skip_serializing_if = "Option::is_none")]
         runtime_version_arn: Option<String>,
     },
 
@@ -43,12 +41,10 @@ pub enum TelemetryRecord {
         /// Type of initialization
         initialization_type: InitType,
         /// Phase of initialisation
-        #[serde(skip_serializing_if = "Option::is_none")]
         phase: Option<InitPhase>,
         /// Status of initalization
         status: Status,
         /// When the status = failure, the error_type describes what kind of error occurred
-        #[serde(skip_serializing_if = "Option::is_none")]
         error_type: Option<String>,
     },
 
@@ -68,7 +64,6 @@ pub enum TelemetryRecord {
         /// Request identifier
         request_id: String,
         /// Version of the Lambda function
-        #[serde(skip_serializing_if = "Option::is_none")]
         version: Option<String>,
     },
 
@@ -80,10 +75,8 @@ pub enum TelemetryRecord {
         /// Status of the invocation
         status: Status,
         /// When unsuccessful, the error_type describes what kind of error occurred
-        #[serde(skip_serializing_if = "Option::is_none")]
         error_type: Option<String>,
         /// Metrics corresponding to the runtime
-        #[serde(skip_serializing_if = "Option::is_none")]
         metrics: Option<RuntimeDoneMetrics>,
     },
 
@@ -95,7 +88,6 @@ pub enum TelemetryRecord {
         /// Status of the invocation
         status: Status,
         /// When unsuccessful, the error_type describes what kind of error occurred
-        #[serde(skip_serializing_if = "Option::is_none")]
         error_type: Option<String>,
         metrics: ReportMetrics,
     },
@@ -199,10 +191,8 @@ pub struct ReportMetrics {
     #[serde(rename = "maxMemoryUsedMB")]
     pub max_memory_used_mb: u64,
     /// Init duration in case of a cold start
-    #[serde(default = "Option::default", skip_serializing_if = "Option::is_none")]
     pub init_duration_ms: Option<f64>,
     /// Restore duration in milliseconds
-    #[serde(default = "Option::default", skip_serializing_if = "Option::is_none")]
     pub restore_duration_ms: Option<f64>,
 }
 
