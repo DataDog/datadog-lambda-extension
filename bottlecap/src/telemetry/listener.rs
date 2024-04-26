@@ -2,7 +2,6 @@
 
 use crate::events;
 use crate::telemetry::events::TelemetryEvent;
-use crate::TELEMETRY_PORT;
 
 use std::collections::HashMap;
 use std::error::Error;
@@ -90,13 +89,18 @@ impl HttpRequestParser {
     }
 
     fn parse_body(&mut self, buf: &[u8], start_index: usize) -> Result<(), Box<dyn Error>> {
-        // TODO: Handle content-length not being present
-        let end_index = start_index
-            + self
-                .headers
-                .get("content-length")
-                .unwrap()
-                .parse::<usize>()?;
+        let content_length = match self.headers.get("content-length") {
+            Some(length) => length.parse::<usize>()?,
+            None => return Err(Box::from("content-length header not found")),
+        };
+
+        let end_index = start_index + content_length;
+
+        if end_index > buf.len() {
+            return Err(Box::from(
+                "content-length header is greater than the buffer length",
+            ));
+        }
 
         self.body = std::str::from_utf8(&buf[start_index..end_index])?.to_string();
 
@@ -108,9 +112,17 @@ pub struct TelemetryListener {
     join_handle: std::thread::JoinHandle<()>,
 }
 
+pub struct TelemetryListenerConfig {
+    pub host: String,
+    pub port: u16,
+}
+
 impl TelemetryListener {
-    pub fn run(event_bus: Sender<events::Event>) -> Result<TelemetryListener, Box<dyn Error>> {
-        let addr = format!("0.0.0.0:{}", TELEMETRY_PORT);
+    pub fn run(
+        config: &TelemetryListenerConfig,
+        event_bus: Sender<events::Event>,
+    ) -> Result<TelemetryListener, Box<dyn Error>> {
+        let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
         let buf: [u8; 262144] = [0; 256 * 1024]; // Using the default limit from AWS
 
@@ -182,5 +194,97 @@ impl TelemetryListener {
                 debug!("Error shutting down the Telemetry Listener thread: {:?}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_headers() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf = b"GET /path HTTP/1.1\r\nContent-Length: 10\r\nHeader1: Value1\r\n\r\n";
+        let result = parser.parse_headers(buf);
+        assert!(result.is_ok());
+        assert_eq!(parser.headers.len(), 2);
+        assert_eq!(
+            parser.headers.get("content-length"),
+            Some(&"10".to_string())
+        );
+        assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
+    }
+
+    #[test]
+    #[should_panic(expected = "content-length header not found")]
+    fn test_parse_headers_no_content_length() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf = b"GET /path HTTP/1.1\r\nHeader1: Value1\r\n\r\n";
+        let body_start_index = parser.parse_headers(buf).unwrap();
+        parser.parse_body(buf, body_start_index).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "content-length header is greater than the buffer length")]
+    fn test_parse_headers_wrong_content_length() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf =
+            b"GET /path HTTP/1.1\r\nContent-Length: 56\r\nHeader1: Value1\r\n\r\nHello, World!";
+        let body_start_index = parser.parse_headers(buf).unwrap();
+        parser.parse_body(buf, body_start_index).unwrap();
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }"
+    )]
+    fn test_parse_headers_invalid_content_length() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf = b"GET /path HTTP/1.1\r\nContent-Length: Bottlecap!\r\nHeader1: Value1\r\n\r\nHello, World!";
+        let body_start_index = parser.parse_headers(buf).unwrap();
+        parser.parse_body(buf, body_start_index).unwrap();
+    }
+
+    #[test]
+    fn test_parse_body() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        parser
+            .headers
+            .insert("content-length".to_string(), "13".to_string());
+        let buf = b"Hello, World!";
+        let result = parser.parse_body(buf, 0);
+        assert!(result.is_ok());
+        assert_eq!(parser.body, "Hello, World!".to_string());
+    }
+
+    #[test]
+    fn test_from_buf() {
+        let buf =
+            b"GET /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!";
+        let result = HttpRequestParser::from_buf(buf);
+        assert!(result.is_ok());
+        let parser = result.unwrap();
+        assert_eq!(parser.headers.len(), 2);
+        assert_eq!(
+            parser.headers.get("content-length"),
+            Some(&"13".to_string())
+        );
+        assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
+        assert_eq!(parser.body, "Hello, World!".to_string());
     }
 }
