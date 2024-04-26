@@ -1,5 +1,3 @@
-#![allow(clippy::unused_io_amount)]
-
 use crate::events;
 use crate::telemetry::events::TelemetryEvent;
 
@@ -134,9 +132,9 @@ impl TelemetryListener {
                     debug!("Received a Telemetry API connection");
 
                     let cloned_event_bus = event_bus.clone();
-                    if let Ok(stream) = stream {
+                    if let Ok(mut stream) = stream {
                         std::thread::spawn(move || {
-                            let r = Self::handle_stream(&stream, buf, cloned_event_bus);
+                            let r = Self::handle_stream(&mut stream, buf, cloned_event_bus);
                             if let Err(e) = Self::acknowledge_request(stream, r) {
                                 error!("Error acknowledging Telemetry request: {:?}", e);
                             }
@@ -152,11 +150,12 @@ impl TelemetryListener {
     }
 
     fn handle_stream(
-        mut stream: &TcpStream,
+        stream: &mut impl Read,
         mut buf: [u8; 262144],
         event_bus: Sender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
+        #![allow(clippy::unused_io_amount)]
         stream.read(&mut buf)?;
 
         let p = HttpRequestParser::from_buf(&buf)?;
@@ -170,6 +169,7 @@ impl TelemetryListener {
         Ok(())
     }
 
+    #[allow(clippy::unused_io_amount)]
     fn acknowledge_request(
         mut stream: TcpStream,
         request: Result<(), Box<dyn Error>>,
@@ -199,6 +199,10 @@ impl TelemetryListener {
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
+
+    use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
+
     use super::*;
 
     #[test]
@@ -270,6 +274,68 @@ mod tests {
         let result = parser.parse_body(buf, 0);
         assert!(result.is_ok());
         assert_eq!(parser.body, "Hello, World!".to_string());
+    }
+
+    struct MockTcpStream {
+        data: Vec<u8>,
+    }
+
+    impl Read for MockTcpStream {
+        fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+            let len = std::cmp::min(buf.len(), self.data.len());
+            buf.write_all(&self.data[..len])?;
+            self.data = self.data.split_off(len);
+            Ok(len)
+        }
+    }
+
+    #[test]
+    fn test_handle_stream() {
+        let mut stream = MockTcpStream {
+            data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let buf = [0; 262144];
+        let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
+        let event = rx.recv().expect("No events received");
+        let telemetry_event = match event {
+            events::Event::Telemetry(te) => te,
+            _ => panic!("Expected Telemetry Event"),
+        };
+
+        let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
+        assert_eq!(telemetry_event.time, expected_time);
+        assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
+            initialization_type: InitType::OnDemand,
+            phase: InitPhase::Init,
+            runtime_version: Some("nodejs:20.v22".to_string()), 
+            runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()), 
+        });
+        assert!(result.is_ok());
+    }
+
+    macro_rules! test_handle_stream_invalid_body {
+        ($($name:ident: $value:tt,)*) => {
+            $(
+                #[test]
+                #[should_panic]
+                fn $name() {
+                    let mut stream = MockTcpStream {
+                        data: $value.to_string().into_bytes(),
+                    };
+                    let (tx, _) = std::sync::mpsc::channel();
+                    let buf = [0; 262144];
+                    TelemetryListener::handle_stream(&mut stream, buf, tx).unwrap()
+                }
+            )*
+        }
+    }
+
+    test_handle_stream_invalid_body! {
+        invalid_json: "POST /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!",
+        empty_json: "POST /path HTTP/1.1\r\nContent-Length: 2\r\nHeader1: Value1\r\n\r\n{}",
+        json_array_with_empty_json: "POST /path HTTP/1.1\r\nContent-Length: 4\r\nHeader1: Value1\r\n\r\n[{}]",
+
     }
 
     #[test]
