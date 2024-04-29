@@ -1,15 +1,47 @@
 use std::sync::mpsc::Sender;
 
 use crate::events::{self, Event, MetricEvent};
+use crate::metrics::aggregator::Aggregator;
+use crate::metrics::constants;
+use crate::metrics::datadog;
+use crate::metrics::metric::Metric;
+use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
-    join_handle: std::thread::JoinHandle<()>,
+    serve_handle: std::thread::JoinHandle<()>,
+    aggregator: Arc<Mutex<Aggregator<1024>>>,
+    dd_api: datadog::DdApi,
+}
+
+pub struct DogStatsDConfig {
+    pub host: String,
+    pub port: u16,
 }
 
 impl DogStatsD {
-    pub fn run(host: &str, port: u16, event_bus: Sender<events::Event>) -> DogStatsD {
+    pub fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
+        let aggr: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>> = Arc::new(Mutex::new(
+            Aggregator::<{ constants::CONTEXTS }>::new().expect("failed to create aggregator"),
+        ));
+        let serializer_aggr = Arc::clone(&aggr);
+        let serve_handle =
+            DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
+        let dd_api = datadog::DdApi::new();
+        DogStatsD {
+            serve_handle,
+            aggregator: aggr,
+            dd_api,
+        }
+    }
+
+    fn run_server(
+        host: &str,
+        port: u16,
+        event_bus: Sender<events::Event>,
+        aggregator: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>>,
+    ) -> std::thread::JoinHandle<()> {
         let addr = format!("{}:{}", host, port);
-        let join_handle = std::thread::spawn(move || {
+        std::thread::spawn(move || {
             let socket = std::net::UdpSocket::bind(addr).expect("couldn't bind to address");
             loop {
                 let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
@@ -21,16 +53,55 @@ impl DogStatsD {
                     msg,
                     src
                 );
-                let dummy_tags = vec!["tagA:valueA".to_string(), "tagB:valueB".to_string()];
-                let metric_event = MetricEvent::new("metric_name".to_string(), 1.0, dummy_tags);
+                let parsed_metric = match Metric::parse(msg) {
+                    Ok(parsed_metric) => {
+                        log::info!("parsed metric: {:?}", parsed_metric);
+                        parsed_metric
+                    }
+                    Err(e) => {
+                        log::error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+                        continue;
+                    }
+                };
+                let first_value = match parsed_metric.first_value() {
+                    Ok(val) => val,
+                    Err(e) => {
+                        log::error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+                        continue;
+                    }
+                };
+                let metric_event = MetricEvent::new(
+                    parsed_metric.name.to_string(),
+                    first_value,
+                    parsed_metric.tags(),
+                );
+                let _ = aggregator
+                    .lock()
+                    .expect("lock poisoned")
+                    .insert(&parsed_metric);
+                log::info!("inserted metric into aggregator");
+                // Don't publish until after validation and adding metric_event to buff
                 let _ = event_bus.send(Event::Metric(metric_event)); // todo check the result
             }
-        });
-        DogStatsD { join_handle }
+        })
     }
 
-    pub fn shutdown(self) {
-        match self.join_handle.join() {
+    pub fn flush(&mut self) {
+        let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned");
+        let current_points = locked_aggr.to_series();
+        if current_points.series.is_empty() {
+            return;
+        }
+        let _ = &self
+            .dd_api
+            .ship(&current_points)
+            .expect("failed to ship metrics to datadog");
+        locked_aggr.clear();
+    }
+
+    pub fn shutdown(mut self) {
+        self.flush();
+        match self.serve_handle.join() {
             Ok(_) => {
                 log::info!("DogStatsD thread has been shutdown");
             }

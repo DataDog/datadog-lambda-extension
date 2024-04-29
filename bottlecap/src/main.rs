@@ -9,7 +9,7 @@ use tracing_subscriber::EnvFilter;
 mod events;
 
 use crate::event_bus::bus::EventBus;
-use crate::metrics::dogstatsd::DogStatsD;
+use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
 use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
 
 use std::collections::HashMap;
@@ -124,6 +124,11 @@ fn main() -> Result<()> {
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let event_bus = EventBus::run();
+    let dogstatsd_config = DogStatsDConfig {
+        host: EXTENSION_HOST.to_string(),
+        port: DOGSTATSD_PORT,
+    };
+    let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
 
     let telemetry_listener_config = TelemetryListenerConfig {
         host: EXTENSION_HOST.to_string(),
@@ -137,9 +142,6 @@ fn main() -> Result<()> {
         .subscribe()
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let dogstats_client =
-        DogStatsD::run(EXTENSION_HOST, DOGSTATSD_PORT, event_bus.get_sender_copy());
-
     loop {
         let evt = next_event(&r.extension_id);
         match evt {
@@ -148,10 +150,13 @@ fn main() -> Result<()> {
                 deadline_ms,
                 invoked_function_arn,
             }) => {
-                println!(
+                log::info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                    request_id, deadline_ms, invoked_function_arn
+                    request_id,
+                    deadline_ms,
+                    invoked_function_arn
                 );
+                dogstats_client.flush();
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
