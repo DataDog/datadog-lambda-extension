@@ -1,3 +1,5 @@
+use crate::telemetry::events::TelemetryEvent;
+
 #[derive(Debug)]
 
 pub struct MetricEvent {
@@ -15,5 +17,6 @@ impl MetricEvent {
 #[derive(Debug)]
 pub enum Event {
     Metric(MetricEvent),
+    Telemetry(TelemetryEvent),
     Unknown,
 }

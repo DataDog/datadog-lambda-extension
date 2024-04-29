@@ -3,11 +3,14 @@ mod config;
 mod event_bus;
 mod logger;
 mod metrics;
+mod telemetry;
+use telemetry::listener::TelemetryListenerConfig;
 use tracing_subscriber::EnvFilter;
 mod events;
 
 use crate::event_bus::bus::EventBus;
 use crate::metrics::dogstatsd::DogStatsD;
+use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
 
 use std::collections::HashMap;
 use std::env;
@@ -19,23 +22,28 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use logger::SimpleLogger;
 use serde::Deserialize;
 
+const EXTENSION_HOST: &str = "0.0.0.0";
 const EXTENSION_NAME: &str = "datadog-agent";
 const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
+const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 
 // todo: make sure we can override those with environment variables
-const DOGSTATSD_HOST: &str = "0.0.0.0";
 const DOGSTATSD_PORT: u16 = 8185;
+
+const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
+const TELEMETRY_PORT: u16 = 8124;
 
 struct RegisterResponse {
     pub extension_id: String,
 }
 
-fn base_url() -> Result<String> {
+fn base_url(route: &str) -> Result<String> {
     Ok(format!(
-        "http://{}/2020-01-01/extension",
+        "http://{}/{}",
         env::var("AWS_LAMBDA_RUNTIME_API")
-            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?
+            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        route
     ))
 }
 
@@ -61,8 +69,8 @@ enum NextEventResponse {
 }
 
 fn next_event(ext_id: &str) -> Result<NextEventResponse> {
-    let base_url =
-        base_url().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let base_url = base_url(EXTENSION_ROUTE)
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{}/event/next", base_url);
     ureq::get(&url)
         .set(EXTENSION_ID_HEADER, ext_id)
@@ -74,8 +82,8 @@ fn next_event(ext_id: &str) -> Result<NextEventResponse> {
 
 fn register() -> Result<RegisterResponse> {
     let mut map = HashMap::new();
-    let base_url =
-        base_url().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let base_url = base_url(EXTENSION_ROUTE)
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     map.insert("events", vec!["INVOKE", "SHUTDOWN"]);
     let url = format!("{}/register", base_url);
 
@@ -116,8 +124,21 @@ fn main() -> Result<()> {
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let event_bus = EventBus::run();
+
+    let telemetry_listener_config = TelemetryListenerConfig {
+        host: EXTENSION_HOST.to_string(),
+        port: TELEMETRY_PORT,
+    };
+    let telemetry_listener =
+        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
+            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
+    telemetry_client
+        .subscribe()
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
     let dogstats_client =
-        DogStatsD::run(DOGSTATSD_HOST, DOGSTATSD_PORT, event_bus.get_sender_copy());
+        DogStatsD::run(EXTENSION_HOST, DOGSTATSD_PORT, event_bus.get_sender_copy());
 
     loop {
         let evt = next_event(&r.extension_id);
@@ -138,6 +159,7 @@ fn main() -> Result<()> {
             }) => {
                 println!("Exiting: {}, deadline: {}", shutdown_reason, deadline_ms);
                 dogstats_client.shutdown();
+                telemetry_listener.shutdown();
                 event_bus.shutdown();
                 return Ok(());
             }
