@@ -19,4 +19,6 @@ pub const MAX_TAG_VALUE_BYTES: usize = 64;
 /// The maximum number of bytes that a container ID will be.
 pub const MAX_CONTAINER_ID_BYTES: usize = 64;
 
+pub const CONTEXTS: usize = 1024;
+
 pub static MAX_CONTEXTS: usize = 65_536; // 2**16, arbitrary

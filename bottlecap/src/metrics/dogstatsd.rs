@@ -4,8 +4,8 @@ use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::metric::Metric;
 use crate::metrics::datadog;
+use crate::metrics::constants;
 use std::sync::{Arc, Mutex};
-use tracing;
 
 pub struct DogStatsD {
     serve_handle: std::thread::JoinHandle<()>,
@@ -17,18 +17,17 @@ pub struct DogStatsDConfig {
     pub host: String,
     pub port: u16,
 }
-const CONTEXTS: usize = 1024;
 
 impl DogStatsD {
     pub fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
-        let aggr: Arc<Mutex<Aggregator<CONTEXTS>>> = Arc::new(Mutex::new(Aggregator::<CONTEXTS>::new().expect("failed to create aggregator")));
+        let aggr: Arc<Mutex<Aggregator<{constants::CONTEXTS}>>> = Arc::new(Mutex::new(Aggregator::<{constants::CONTEXTS}>::new().expect("failed to create aggregator")));
         let serializer_aggr = Arc::clone(&aggr);
         let serve_handle = DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
         let dd_api = datadog::DdApi::new();
         DogStatsD { serve_handle, aggregator: aggr, dd_api }
     }
 
-    fn run_server(host: &str, port: u16, event_bus: Sender<events::Event>, aggregator: Arc<Mutex<Aggregator<CONTEXTS>>>) -> std::thread::JoinHandle<()> {
+    fn run_server(host: &str, port: u16, event_bus: Sender<events::Event>, aggregator: Arc<Mutex<Aggregator<{constants::CONTEXTS}>>>) -> std::thread::JoinHandle<()> {
         let addr = format!("{}:{}", host, port);
         std::thread::spawn(move || {
             let socket = std::net::UdpSocket::bind(addr).expect("couldn't bind to address");
