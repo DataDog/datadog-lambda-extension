@@ -3,6 +3,5 @@ COPY --from=busybox:1.35.0-uclibc /bin/sh /bin/sh
 ARG TARGETARCH
 
 COPY ./bin/datadog_extension-$TARGETARCH/extensions/datadog-agent /app/datadog-init
-#COPY serverless-init /datadog-init
 
 ENTRYPOINT ["/app/datadog-init"]
