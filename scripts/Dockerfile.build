@@ -15,8 +15,8 @@ RUN arch="$(uname -m)"; \
     if [ "${arch}" = 'x86_64' ]; then \
     arch='amd64'; \
     fi; \
-    wget -O go1.21.7.linux-${arch}.tar.gz https://go.dev/dl/go1.21.7.linux-${arch}.tar.gz; \
-    tar -C /usr/local -xzf go1.21.7.linux-${arch}.tar.gz
+    wget -O go1.21.8.linux-${arch}.tar.gz https://go.dev/dl/go1.21.8.linux-${arch}.tar.gz; \
+    tar -C /usr/local -xzf go1.21.8.linux-${arch}.tar.gz
 
 # cache dependencies
 COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
