@@ -10,8 +10,8 @@ use tracing::error;
 /// Interface for the DogStatsD metrics intake API.
 #[derive(Debug)]
 pub struct DdApi {
-    // runtime: tokio::runtime::Runtime,
     api_key: String,
+    ureq_agent: ureq::Agent,
 }
 /// Error relating to `ship`
 #[derive(thiserror::Error, Debug)]
@@ -34,6 +34,7 @@ impl Default for DdApi {
     fn default() -> Self {
         Self {
             api_key: env::var("DD_API_KEY").expect("unable to read envvars, catastrophic failure"),
+            ureq_agent: ureq::AgentBuilder::new().build(),
         }
     }
 }
@@ -56,7 +57,7 @@ impl DdApi {
         let body = serde_json::to_vec(&series)?;
         log::info!("sending body: {:?}", &series);
 
-        let resp: Result<ureq::Response, ureq::Error> = ureq::post("https://api.datadoghq.com/api/v2/series")
+        let resp: Result<ureq::Response, ureq::Error> = self.ureq_agent.post("https://api.datadoghq.com/api/v2/series")
             .set("DD-API-KEY", &api_key)
             .set("Content-Type", "application/json")
             .send_bytes(body.as_slice());

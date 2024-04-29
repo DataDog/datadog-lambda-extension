@@ -26,7 +26,7 @@ pub enum Error {
 #[derive(Debug, Clone, Copy)]
 struct Entry {
     id: u64,
-    generation: u16,
+    // generation: u16,
     name: Ustr,
     tags: Option<Ustr>,
     kind: metric::Type,
@@ -34,6 +34,24 @@ struct Entry {
 }
 
 impl Entry {
+    fn new_from_metric(id: u64, metric: &Metric) -> Self {
+        let metric_value = match metric.first_value() {
+            Ok(value) => value,
+            Err(e) => {
+                error!("failed to parse metric: {:?}", e);
+                0.0
+            }
+        };
+        Self {
+            id,
+            // generation,
+            value: metric_value,
+            name: metric.name,
+            tags: metric.tags,
+            kind: metric.kind,
+        }
+    }
+
     /// Return an iterator over key, value pairs
     fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
@@ -44,38 +62,17 @@ impl Entry {
             }
         })
     }
-}
 
-impl Entry {
-    fn of_generation(generation: u16, id: u64, metric: &Metric) -> Self {
-        let metric_value = match metric.first_value() {
-            Ok(value) => value,
-            Err(e) => {
-                error!("failed to parse metric: {:?}", e);
-                0.0
-            }
-        };
-        Self {
-            id,
-            generation,
-            value: metric_value,
-            name: metric.name,
-            tags: metric.tags,
-            kind: metric.kind,
-        }
-    }
-
-    #[inline]
-    fn aged_out(self, generation: u16) -> bool {
-        self.generation.abs_diff(generation) >= 2
-    }
+    // #[inline]
+    // fn aged_out(self, generation: u16) -> bool {
+    //     self.generation.abs_diff(generation) >= 2
+    // }
 }
 
 #[derive(Clone)]
 // NOTE by construction we know that intervals and contexts do not explore the
 // full space of usize but the type system limits how we can express this today.
 pub struct Aggregator<const CONTEXTS: usize> {
-    generation: u16,
     map: hash_table::HashTable<Entry>,
 }
 
@@ -94,26 +91,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         }
 
         Ok(Self {
-            generation: 0,
             map: hash_table::HashTable::new(),
         })
     }
 
-    /// Remove an members of the Aggregator that are outside the generation
-    /// window. (Arbitrarily, 2 generations.) The length of the Aggregator after
-    /// calling this function will be reduced by the value returned.
-    ///
-    /// Returns the number of purged entries.
-    fn purge(&mut self) -> usize {
-        let total_removed = self
-            .map
-            .extract_if(|entry| entry.aged_out(self.generation))
-            .fold(0, |acc, _| acc + 1);
-        self.generation = self.generation.wrapping_add(1);
-        total_removed
-    }
-
-    /// Scan the
 
     /// Insert a `Metric` into the `Aggregator` at the current interval
     ///
@@ -133,7 +114,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                 if len >= CONTEXTS {
                     return Err(errors::Insert::Overflow);
                 }
-                let ent = Entry::of_generation(self.generation, id, metric);
+                let ent = Entry::new_from_metric(id, metric);
                 entry.insert(ent);
             }
             hash_table::Entry::Occupied(mut entry) => match metric.kind {
@@ -154,16 +135,6 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         }
 
         Ok(())
-    }
-
-    /// Return true if the instance is empty -- has no metrics -- else false.
-    fn is_empty(&self) -> bool {
-        self.map.is_empty()
-    }
-
-    /// Return the number of elements currently maintained in the table.
-    fn len(&self) -> usize {
-        self.map.len()
     }
 
     pub fn clear(&mut self) {
@@ -240,7 +211,7 @@ mod tests {
         assert!(aggregator.insert(&metric2).is_ok());
 
         // Both unique contexts get one slot.
-        assert_eq!(aggregator.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
     }
 
     #[test]
@@ -260,43 +231,15 @@ mod tests {
         assert!(id2 != id3);
 
         assert!(aggregator.insert(&metric1).is_ok());
-        assert_eq!(aggregator.len(), 1);
+        assert_eq!(aggregator.map.len(), 1);
 
         assert!(aggregator.insert(&metric2).is_ok());
         assert!(aggregator.insert(&metric2).is_ok());
         assert!(aggregator.insert(&metric2).is_ok());
-        assert_eq!(aggregator.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
 
         assert!(aggregator.insert(&metric3).is_err());
-        assert_eq!(aggregator.len(), 2);
-    }
-
-    #[test]
-    fn purge() {
-        let mut aggregator = Aggregator::<2>::new().unwrap();
-
-        let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
-        let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
-
-        assert!(aggregator.insert(&metric1).is_ok());
-        assert!(aggregator.insert(&metric2).is_ok());
-
-        // No metrics age out after the first purge
-        assert_eq!(aggregator.generation, 0);
-        assert_eq!(aggregator.purge(), 0);
-        assert_eq!(aggregator.len(), 2);
-        // No metrics age out after the second purge
-        assert_eq!(aggregator.generation, 1);
-        assert_eq!(aggregator.purge(), 0);
-        assert_eq!(aggregator.len(), 2);
-        // Two metrics age out after the last purge
-        assert_eq!(aggregator.generation, 2);
-        assert_eq!(aggregator.purge(), 2);
-        assert_eq!(aggregator.len(), 0);
-        // No metrics exist
-        assert_eq!(aggregator.generation, 3);
-        assert_eq!(aggregator.purge(), 0);
-        assert_eq!(aggregator.len(), 0);
+        assert_eq!(aggregator.map.len(), 2);
     }
 
     #[test]
@@ -309,9 +252,9 @@ mod tests {
         assert!(aggregator.insert(&metric1).is_ok());
         assert!(aggregator.insert(&metric2).is_ok());
 
-        assert_eq!(aggregator.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
         aggregator.clear();
-        assert_eq!(aggregator.len(), 0);
+        assert_eq!(aggregator.map.len(), 0);
     }
 
     #[test]
@@ -325,11 +268,11 @@ mod tests {
         assert!(aggregator.insert(&metric1).is_ok());
         assert!(aggregator.insert(&metric2).is_ok());
 
-        assert_eq!(aggregator.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
         assert_eq!(aggregator.to_series().len(), 2);
-        assert_eq!(aggregator.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
         assert_eq!(aggregator.to_series().len(), 2);
-        assert_eq!(aggregator.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
 
         assert!(aggregator.insert(&metric3).is_err());
         assert_eq!(aggregator.to_series().len(), 2);
