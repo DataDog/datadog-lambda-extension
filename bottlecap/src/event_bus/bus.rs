@@ -22,6 +22,9 @@ impl EventBus {
                     Event::Metric(event) => {
                         debug!("Metric event: {:?}", event);
                     }
+                    Event::Telemetry(event) => {
+                        debug!("Telemetry event: {:?}", event);
+                    }
                     _ => {
                         debug!("Other event");
                     }
