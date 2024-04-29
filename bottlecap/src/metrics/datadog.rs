@@ -2,10 +2,10 @@
 
 use std::env;
 
-use ureq;
 use serde::{Serialize, Serializer};
 use serde_json;
 use tracing::error;
+use ureq;
 
 /// Interface for the DogStatsD metrics intake API.
 #[derive(Debug)]
@@ -57,16 +57,22 @@ impl DdApi {
         let body = serde_json::to_vec(&series)?;
         log::info!("sending body: {:?}", &series);
 
-        let resp: Result<ureq::Response, ureq::Error> = self.ureq_agent.post("https://api.datadoghq.com/api/v2/series")
+        let resp: Result<ureq::Response, ureq::Error> = self
+            .ureq_agent
+            .post("https://api.datadoghq.com/api/v2/series")
             .set("DD-API-KEY", &api_key)
             .set("Content-Type", "application/json")
             .send_bytes(body.as_slice());
         match resp {
             Ok(_resp) => Ok(()),
-            Err(ureq::Error::Status(code, response)) => {
-                Err(ShipError::Failure { status: code, body: response.into_string().unwrap() })
-            }
-            Err(e) => { Err(ShipError::Failure { status: 500, body: e.to_string() }) }
+            Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {
+                status: code,
+                body: response.into_string().unwrap(),
+            }),
+            Err(e) => Err(ShipError::Failure {
+                status: 500,
+                body: e.to_string(),
+            }),
         }
     }
 }

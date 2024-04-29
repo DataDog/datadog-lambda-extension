@@ -1,7 +1,10 @@
 //! The aggregation of metrics.
 
 use crate::metrics::metric;
-use crate::metrics::{constants, errors, datadog, metric::{Metric, Type}};
+use crate::metrics::{
+    constants, datadog, errors,
+    metric::{Metric, Type},
+};
 
 use std::time;
 
@@ -95,7 +98,6 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         })
     }
 
-
     /// Insert a `Metric` into the `Aggregator` at the current interval
     ///
     /// # Errors
@@ -106,10 +108,11 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         let id = metric::id(metric.name, metric.tags);
         let len = self.map.len();
 
-        match self
-            .map
-            .entry(id, |m| m.id == id, |m| crate::metrics::metric::id(m.name, m.tags))
-        {
+        match self.map.entry(
+            id,
+            |m| m.id == id,
+            |m| crate::metrics::metric::id(m.name, m.tags),
+        ) {
             hash_table::Entry::Vacant(entry) => {
                 if len >= CONTEXTS {
                     return Err(errors::Insert::Overflow);
@@ -175,10 +178,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             // These tags are interned so we don't need to clone them here but we're just doing it
             // because it's easier than dealing with the lifetimes.
             if let Some(tags) = entry.tags {
-                final_tags = tags
-                    .split(',')
-                    .map(|tag| tag.to_string())
-                    .collect();
+                final_tags = tags.split(',').map(|tag| tag.to_string()).collect();
             }
             let metric = datadog::Metric {
                 metric: entry.name.as_str(),
@@ -196,8 +196,8 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 #[cfg(test)]
 mod tests {
     use crate::metrics::aggregator::{
-        Aggregator,
         metric::{self, Metric},
+        Aggregator,
     };
 
     #[test]

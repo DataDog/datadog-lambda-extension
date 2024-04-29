@@ -1,10 +1,9 @@
-use ustr::Ustr;
-use std::hash::{Hash, Hasher};
-use crate::metrics::errors::ParseError;
 use crate::metrics::constants;
+use crate::metrics::errors::ParseError;
 use fnv::FnvHasher;
-#[derive(Debug)]
-#[derive(Clone, Copy, Eq, PartialEq)]
+use std::hash::{Hash, Hasher};
+use ustr::Ustr;
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 /// Determine what kind/type of a metric has come in
 pub enum Type {
     /// Dogstatsd 'count' metric type, monotonically increasing counter
@@ -60,7 +59,6 @@ impl Metric {
     /// limits in [`constants`]. Any non-viable input will be discarded.
     /// example aj-test.increment:1|c|#user:aj-test from 127.0.0.1:50983
     pub fn parse(input: &str) -> Result<Metric, crate::metrics::errors::ParseError> {
-
         // TODO must enforce / exploit constraints given in `constants`.
         let mut sections = input.split('|');
 
@@ -128,16 +126,18 @@ impl Metric {
             Some(v) => match v {
                 Ok(v) => Ok(v),
                 Err(_e) => Err(ParseError::Raw("Failed to parse value as float")),
-            }
+            },
             None => Err(ParseError::Raw("No value")),
         }
     }
 
     pub(crate) fn tags(&self) -> Vec<String> {
-        self.tags.unwrap_or_default().to_string()
-                    .split(',')
-                    .map(|tag| tag.to_string())
-                    .collect()
+        self.tags
+            .unwrap_or_default()
+            .to_string()
+            .split(',')
+            .map(|tag| tag.to_string())
+            .collect()
     }
 
     #[cfg(test)]
@@ -210,7 +210,7 @@ mod tests {
 
     use crate::metrics::metric::id;
 
-    use super::{ParseError, Metric};
+    use super::{Metric, ParseError};
 
     fn metric_name() -> impl Strategy<Value = String> {
         string_regex("[a-zA-Z0-9.-]{1,128}").unwrap()

@@ -2,9 +2,9 @@ use std::sync::mpsc::Sender;
 
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
-use crate::metrics::metric::Metric;
-use crate::metrics::datadog;
 use crate::metrics::constants;
+use crate::metrics::datadog;
+use crate::metrics::metric::Metric;
 use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
@@ -20,14 +20,26 @@ pub struct DogStatsDConfig {
 
 impl DogStatsD {
     pub fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
-        let aggr: Arc<Mutex<Aggregator<{constants::CONTEXTS}>>> = Arc::new(Mutex::new(Aggregator::<{constants::CONTEXTS}>::new().expect("failed to create aggregator")));
+        let aggr: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>> = Arc::new(Mutex::new(
+            Aggregator::<{ constants::CONTEXTS }>::new().expect("failed to create aggregator"),
+        ));
         let serializer_aggr = Arc::clone(&aggr);
-        let serve_handle = DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
+        let serve_handle =
+            DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
         let dd_api = datadog::DdApi::new();
-        DogStatsD { serve_handle, aggregator: aggr, dd_api }
+        DogStatsD {
+            serve_handle,
+            aggregator: aggr,
+            dd_api,
+        }
     }
 
-    fn run_server(host: &str, port: u16, event_bus: Sender<events::Event>, aggregator: Arc<Mutex<Aggregator<{constants::CONTEXTS}>>>) -> std::thread::JoinHandle<()> {
+    fn run_server(
+        host: &str,
+        port: u16,
+        event_bus: Sender<events::Event>,
+        aggregator: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>>,
+    ) -> std::thread::JoinHandle<()> {
         let addr = format!("{}:{}", host, port);
         std::thread::spawn(move || {
             let socket = std::net::UdpSocket::bind(addr).expect("couldn't bind to address");
@@ -58,8 +70,15 @@ impl DogStatsD {
                         continue;
                     }
                 };
-                let metric_event = MetricEvent::new(parsed_metric.name.to_string(), first_value, parsed_metric.tags());
-                let _ = aggregator.lock().expect("lock poisoned").insert(&parsed_metric);
+                let metric_event = MetricEvent::new(
+                    parsed_metric.name.to_string(),
+                    first_value,
+                    parsed_metric.tags(),
+                );
+                let _ = aggregator
+                    .lock()
+                    .expect("lock poisoned")
+                    .insert(&parsed_metric);
                 log::info!("inserted metric into aggregator");
                 // Don't publish until after validation and adding metric_event to buff
                 let _ = event_bus.send(Event::Metric(metric_event)); // todo check the result
@@ -73,7 +92,10 @@ impl DogStatsD {
         if current_points.series.is_empty() {
             return;
         }
-        let _ = &self.dd_api.ship(&current_points).expect("failed to ship metrics to datadog");
+        let _ = &self
+            .dd_api
+            .ship(&current_points)
+            .expect("failed to ship metrics to datadog");
         locked_aggr.clear();
     }
 

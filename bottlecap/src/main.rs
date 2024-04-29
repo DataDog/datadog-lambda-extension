@@ -128,8 +128,7 @@ fn main() -> Result<()> {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
     };
-    let mut dogstats_client =
-        DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
+    let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
 
     let telemetry_listener_config = TelemetryListenerConfig {
         host: EXTENSION_HOST.to_string(),
@@ -153,7 +152,9 @@ fn main() -> Result<()> {
             }) => {
                 log::info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                    request_id, deadline_ms, invoked_function_arn
+                    request_id,
+                    deadline_ms,
+                    invoked_function_arn
                 );
                 dogstats_client.flush();
             }
