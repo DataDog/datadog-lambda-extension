@@ -1,6 +1,7 @@
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer, self};
+use tracing::debug;
 
 use figment::{
     providers::{Env, Format, Yaml},
@@ -17,16 +18,20 @@ pub enum LogLevel {
     Error,
 }
 
+#[derive(Debug, PartialEq)]
 pub struct PeriodicStrategy {
     pub interval: u64,
 }
 
+#[derive(Debug, PartialEq)]
 pub enum FlushStrategy {
     End,
     Periodically(PeriodicStrategy),
 }
 
-impl Serde::Deserilize for FlushStrategy {
+// Deserialize for FlushStrategy
+// Flush Strategy can be either "end" or "periodically,<ms>"
+impl<'de> Deserialize<'de> for FlushStrategy {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -35,8 +40,28 @@ impl Serde::Deserilize for FlushStrategy {
         match value.as_str() {
             "end" => Ok(FlushStrategy::End),
             _ => {
-                let strategy = PeriodicStrategy::deserialize(value)?;
-                Ok(FlushStrategy::Periodically(strategy))
+                let mut split_value = value.as_str().split(',');
+                // "periodically,60000"
+                match split_value.next() {
+                    Some(first_value) if first_value.starts_with("periodically") => {
+                        let interval = split_value.next();
+                        // "60000"
+                        match interval {
+                            Some(interval) => {
+                                let interval = interval.parse().map_err(serde::de::Error::custom)?;
+                                Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
+                            },
+                            None => {
+                                debug!("invalid flush strategy: {}, using end", value);
+                                Ok(FlushStrategy::End)
+                            }
+                        }
+                    },
+                    _ => {
+                        debug!("invalid flush strategy: {}, using end", value);
+                        Ok(FlushStrategy::End)
+                    }
+                }
             }
         }
     }
@@ -56,7 +81,7 @@ pub struct Config {
     pub serverless_logs_enabled: bool,
     pub apm_enabled: bool,
     pub lambda_handler: String,
-    pub serverless_flush_strategy: Option<String>,
+    pub serverless_flush_strategy: FlushStrategy,
 }
 
 impl Default for Config {
@@ -65,6 +90,7 @@ impl Default for Config {
             // General
             site: "datadoqhq.com".to_string(),
             api_key: String::default(),
+            serverless_flush_strategy: FlushStrategy::End,
             // Unified Tagging
             env: None,
             service: None,
