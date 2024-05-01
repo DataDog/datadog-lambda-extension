@@ -6,11 +6,15 @@ mod metrics;
 mod telemetry;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing_subscriber::EnvFilter;
+use tracing::{debug, error};
+
 mod events;
 
+use crate::events::Event;
 use crate::event_bus::bus::EventBus;
 use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
 use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
+use crate::telemetry::events::TelemetryRecord;
 
 use std::collections::HashMap;
 use std::env;
@@ -144,6 +148,7 @@ fn main() -> Result<()> {
 
     loop {
         let evt = next_event(&r.extension_id);
+        let mut shutdown = false;
         match evt {
             Ok(NextEventResponse::Invoke {
                 request_id,
@@ -156,23 +161,61 @@ fn main() -> Result<()> {
                     deadline_ms,
                     invoked_function_arn
                 );
-                dogstats_client.flush();
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
                 deadline_ms,
             }) => {
                 println!("Exiting: {}, deadline: {}", shutdown_reason, deadline_ms);
-                dogstats_client.shutdown();
-                telemetry_listener.shutdown();
-                event_bus.shutdown();
-                return Ok(());
+                shutdown = true;
             }
             Err(err) => {
                 eprintln!("Error: {:?}", err);
                 println!("Exiting");
                 return Err(err);
             }
+        }
+        // Block until we get something from the telemetry API
+        loop {
+            let received = event_bus.rx.recv();
+            if let Ok(event) = received {
+                match event {
+                    Event::Metric(event) => {
+                        debug!("Metric event: {:?}", event);
+                    }
+                    Event::Telemetry(event) => {
+                        debug!("event: {:?}", event.record);
+                        match event.record {
+                            TelemetryRecord::PlatformInitReport { initialization_type, phase, metrics } => {
+                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                                // write this straight to metrics aggr
+                                // write this straight to logs aggr
+                                // write this straight to trace aggr
+                            },
+                            TelemetryRecord::PlatformRuntimeDone { request_id, status, .. } => {
+                                debug!("Runtime done for request_id: {:?} with status: {:?}", request_id, status);
+                                debug!("FLUSHING ALL");
+                                dogstats_client.flush();
+                                debug!("CALLING FOR NEXT EVENT");
+                                break;
+                            },
+                            TelemetryRecord::PlatformReport { request_id, status, .. } => {
+                                debug!("Platform report for request_id: {:?} with status: {:?}", request_id, status);
+                            },
+                            _ => {}
+                            
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                error!("could not get the event");
+            }
+        }
+        if shutdown {
+            dogstats_client.shutdown();
+            telemetry_listener.shutdown();
+            return Ok(());
         }
     }
 }

@@ -17,6 +17,31 @@ pub enum LogLevel {
     Error,
 }
 
+pub struct PeriodicStrategy {
+    pub interval: u64,
+}
+
+pub enum FlushStrategy {
+    End,
+    Periodically(PeriodicStrategy),
+}
+
+impl Serde::Deserilize for FlushStrategy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "end" => Ok(FlushStrategy::End),
+            _ => {
+                let strategy = PeriodicStrategy::deserialize(value)?;
+                Ok(FlushStrategy::Periodically(strategy))
+            }
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
@@ -31,6 +56,7 @@ pub struct Config {
     pub serverless_logs_enabled: bool,
     pub apm_enabled: bool,
     pub lambda_handler: String,
+    pub serverless_flush_strategy: Option<String>,
 }
 
 impl Default for Config {
