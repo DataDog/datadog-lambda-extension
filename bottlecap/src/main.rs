@@ -2,6 +2,7 @@
 mod config;
 mod event_bus;
 mod logger;
+mod logs;
 mod metrics;
 mod telemetry;
 use telemetry::listener::TelemetryListenerConfig;
@@ -9,6 +10,7 @@ use tracing_subscriber::EnvFilter;
 mod events;
 
 use crate::event_bus::bus::EventBus;
+use crate::logs::agent::LogsAgent;
 use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
 use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
 
@@ -123,6 +125,7 @@ fn main() -> Result<()> {
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
+    let mut logs_agent = LogsAgent::run("TODO"); // todo how to add function arn?
     let event_bus = EventBus::run();
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
@@ -135,7 +138,7 @@ fn main() -> Result<()> {
         port: TELEMETRY_PORT,
     };
     let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
+        TelemetryListener::run(&telemetry_listener_config, logs_agent.get_sender_copy())
             .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
@@ -156,6 +159,8 @@ fn main() -> Result<()> {
                     deadline_ms,
                     invoked_function_arn
                 );
+                logs_agent.set_function_arn(invoked_function_arn);
+                logs_agent.flush();
                 dogstats_client.flush();
             }
             Ok(NextEventResponse::Shutdown {
@@ -165,6 +170,7 @@ fn main() -> Result<()> {
                 println!("Exiting: {}, deadline: {}", shutdown_reason, deadline_ms);
                 dogstats_client.shutdown();
                 telemetry_listener.shutdown();
+                logs_agent.shutdown();
                 event_bus.shutdown();
                 return Ok(());
             }
