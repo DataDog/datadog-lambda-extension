@@ -25,6 +25,7 @@ pub struct PeriodicStrategy {
 
 #[derive(Debug, PartialEq)]
 pub enum FlushStrategy {
+    Default,
     End,
     Periodically(PeriodicStrategy),
 }
@@ -52,14 +53,14 @@ impl<'de> Deserialize<'de> for FlushStrategy {
                                 Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
                             },
                             None => {
-                                debug!("invalid flush strategy: {}, using end", value);
-                                Ok(FlushStrategy::End)
+                                debug!("invalid flush strategy: {}, using default", value);
+                                Ok(FlushStrategy::Default)
                             }
                         }
                     },
                     _ => {
-                        debug!("invalid flush strategy: {}, using end", value);
-                        Ok(FlushStrategy::End)
+                        debug!("invalid flush strategy: {}, using default", value);
+                        Ok(FlushStrategy::Default)
                     }
                 }
             }
@@ -90,7 +91,7 @@ impl Default for Config {
             // General
             site: "datadoqhq.com".to_string(),
             api_key: String::default(),
-            serverless_flush_strategy: FlushStrategy::End,
+            serverless_flush_strategy: FlushStrategy::Default,
             // Unified Tagging
             env: None,
             service: None,
