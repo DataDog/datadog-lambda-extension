@@ -11,11 +11,10 @@ pub struct EventBus {
 impl EventBus {
     pub fn run() -> EventBus {
         let (tx, rx) = mpsc::channel();
-        EventBus { tx, rx}
+        EventBus { tx, rx }
     }
 
     pub fn get_sender_copy(&self) -> Sender<events::Event> {
         self.tx.clone()
     }
-
 }

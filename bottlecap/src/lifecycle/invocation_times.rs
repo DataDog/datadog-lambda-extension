@@ -8,14 +8,17 @@ pub struct InvocationTimes {
 
 impl InvocationTimes {
     pub fn new() -> InvocationTimes {
-        InvocationTimes { times: [0; LOOKBACK_COUNT], head: 0 }
+        InvocationTimes {
+            times: [0; LOOKBACK_COUNT],
+            head: 0,
+        }
     }
 
     pub fn add(&mut self, timestamp: u64) {
         self.times[self.head] = timestamp;
         self.head = (self.head + 1) % LOOKBACK_COUNT;
     }
-    
+
     pub fn should_adapt_to_periodic(&self, now: u64) -> bool {
         let mut count = 0;
         let mut last = 0;
@@ -41,7 +44,10 @@ mod tests {
     #[test]
     fn new() {
         let invocation_times = invocation_times::InvocationTimes::new();
-        assert_eq!(invocation_times.times, [0; invocation_times::LOOKBACK_COUNT]);
+        assert_eq!(
+            invocation_times.times,
+            [0; invocation_times::LOOKBACK_COUNT]
+        );
         assert_eq!(invocation_times.head, 0);
     }
 
@@ -54,11 +60,11 @@ mod tests {
         assert_eq!(invocation_times.head, 1);
         assert_eq!(invocation_times.should_adapt_to_periodic(1), false);
     }
-    
+
     #[test]
     fn insertion_with_full_buffer_fast_invokes() {
         let mut invocation_times = invocation_times::InvocationTimes::new();
-        for i in 0..invocation_times::LOOKBACK_COUNT+1 {
+        for i in 0..invocation_times::LOOKBACK_COUNT + 1 {
             invocation_times.add(i as u64);
         }
         // should wrap around

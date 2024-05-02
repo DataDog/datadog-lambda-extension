@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use serde::{Deserialize, Deserializer, self};
+use serde::{self, Deserialize, Deserializer};
 use tracing::debug;
 
 use figment::{
@@ -49,15 +49,16 @@ impl<'de> Deserialize<'de> for FlushStrategy {
                         // "60000"
                         match interval {
                             Some(interval) => {
-                                let interval = interval.parse().map_err(serde::de::Error::custom)?;
+                                let interval =
+                                    interval.parse().map_err(serde::de::Error::custom)?;
                                 Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
-                            },
+                            }
                             None => {
                                 debug!("invalid flush strategy: {}, using default", value);
                                 Ok(FlushStrategy::Default)
                             }
                         }
-                    },
+                    }
                     _ => {
                         debug!("invalid flush strategy: {}, using default", value);
                         Ok(FlushStrategy::Default)
