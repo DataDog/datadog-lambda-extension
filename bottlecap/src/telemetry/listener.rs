@@ -1,4 +1,3 @@
-use crate::events;
 use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
@@ -118,7 +117,7 @@ pub struct TelemetryListenerConfig {
 impl TelemetryListener {
     pub fn run(
         config: &TelemetryListenerConfig,
-        event_bus: Sender<events::Event>,
+        event_bus: Sender<TelemetryEvent>,
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
@@ -152,7 +151,7 @@ impl TelemetryListener {
     fn handle_stream(
         stream: &mut impl Read,
         mut buf: [u8; 262144],
-        event_bus: Sender<events::Event>,
+        event_bus: Sender<TelemetryEvent>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
         #![allow(clippy::unused_io_amount)]
@@ -161,7 +160,7 @@ impl TelemetryListener {
         let p = HttpRequestParser::from_buf(&buf)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
         for event in telemetry_events {
-            if let Err(e) = event_bus.send(events::Event::Telemetry(event)) {
+            if let Err(e) = event_bus.send(event) {
                 error!("Error sending Telemetry event to the event bus: {}", e);
             }
         }
@@ -297,11 +296,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         let buf = [0; 262144];
         let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
-        let event = rx.recv().expect("No events received");
-        let telemetry_event = match event {
-            events::Event::Telemetry(te) => te,
-            _ => panic!("Expected Telemetry Event"),
-        };
+        let telemetry_event = rx.recv().expect("No events received");
 
         let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
         assert_eq!(telemetry_event.time, expected_time);
