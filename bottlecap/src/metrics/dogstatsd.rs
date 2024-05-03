@@ -28,8 +28,10 @@ impl DogStatsD {
         let serializer_aggr = Arc::clone(&aggr);
         let serve_handle =
             DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
-        let api_key = config.datadog_config.api_key.clone();
-        let dd_api = datadog::DdApi::new(api_key);
+        let dd_api = datadog::DdApi::new(
+            config.datadog_config.api_key.clone(),
+            config.datadog_config.site.clone(),
+        );
         DogStatsD {
             serve_handle,
             aggregator: aggr,

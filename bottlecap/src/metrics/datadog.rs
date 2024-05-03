@@ -9,6 +9,7 @@ use ureq;
 #[derive(Debug)]
 pub struct DdApi {
     api_key: String,
+    site: String,
     ureq_agent: ureq::Agent,
 }
 /// Error relating to `ship`
@@ -29,9 +30,10 @@ pub enum ShipError {
 }
 
 impl DdApi {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String, site: String) -> Self {
         DdApi {
             api_key,
+            site,
             ureq_agent: ureq::AgentBuilder::new().build(),
         }
     }
@@ -42,9 +44,10 @@ impl DdApi {
         let body = serde_json::to_vec(&series)?;
         log::info!("sending body: {:?}", &series);
 
+        let url = format!("https://api.{}/api/v2/series", &self.site);
         let resp: Result<ureq::Response, ureq::Error> = self
             .ureq_agent
-            .post("https://api.datadoghq.com/api/v2/series")
+            .post(&url)
             .set("DD-API-KEY", &self.api_key)
             .set("Content-Type", "application/json")
             .send_bytes(body.as_slice());

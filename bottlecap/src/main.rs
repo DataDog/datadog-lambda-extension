@@ -150,8 +150,7 @@ fn main() -> Result<()> {
         .subscribe()
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let serverless_flush_strategy = config.serverless_flush_strategy.clone();
-    let mut flush_control = FlushControl::new(serverless_flush_strategy);
+    let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut shutdown = false;
 
     loop {
