@@ -49,9 +49,13 @@ impl<'de> Deserialize<'de> for FlushStrategy {
                         // "60000"
                         match interval {
                             Some(interval) => {
-                                let interval =
-                                    interval.parse().map_err(serde::de::Error::custom)?;
-                                Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
+                                if let Ok(parsed_interval) = interval.parse() {
+                                    return Ok(FlushStrategy::Periodically(PeriodicStrategy {
+                                        interval: parsed_interval,
+                                    }));
+                                }
+                                debug!("invalid flush interval: {}, using default", interval);
+                                Ok(FlushStrategy::Default)
                             }
                             None => {
                                 debug!("invalid flush strategy: {}, using default", value);
@@ -234,6 +238,89 @@ pub mod tests {
             jail.clear_env();
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config, Config::default());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_default() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_end() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "end");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    serverless_flush_strategy: FlushStrategy::End,
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_periodically() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,100000");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
+                        interval: 100000
+                    }),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_invalid() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "invalid_strategy");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_invalid_periodic() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,invalid_interval");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    ..Config::default()
+                }
+            );
             Ok(())
         });
     }
