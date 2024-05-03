@@ -46,6 +46,8 @@ const TELEMETRY_PORT: u16 = 8124;
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
+    // Skip deserialize because this field is not available in the response
+    // body, but as a header. Header is extracted and set manually.
     #[serde(skip_deserializing)]
     pub extension_id: String,
     pub account_id: String,
@@ -116,6 +118,7 @@ fn register() -> Result<RegisterResponse> {
         .to_string();
     let mut register_response = resp.into_json::<RegisterResponse>()?;
 
+    // Set manually since it's not part of the response body
     register_response.extension_id = extension_id;
 
     Ok(register_response)
