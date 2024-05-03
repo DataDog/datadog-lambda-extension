@@ -18,12 +18,12 @@ pub enum LogLevel {
     Error,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PeriodicStrategy {
     pub interval: u64,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum FlushStrategy {
     Default,
     End,
