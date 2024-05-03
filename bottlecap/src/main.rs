@@ -119,14 +119,14 @@ fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or("".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => Arc::new(Mutex::new(config)),
+        Ok(config) => Arc::new(config),
         Err(e) => {
             log::error!("Error loading configuration: {:?}", e);
             let err = Command::new("/opt/datadog-agent-go").exec();
             panic!("Error starting the extension: {:?}", err);
         }
     };
-    let log_level = &config.lock().unwrap().log_level;
+    let log_level = &config.log_level;
     SimpleLogger::init(log_level).expect("Error initializing logger");
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
@@ -151,7 +151,7 @@ fn main() -> Result<()> {
         .subscribe()
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let serverless_flush_strategy = config.lock().unwrap().serverless_flush_strategy.clone();
+    let serverless_flush_strategy = config.serverless_flush_strategy.clone();
     let mut flush_control = FlushControl::new(serverless_flush_strategy);
     let mut shutdown = false;
 
