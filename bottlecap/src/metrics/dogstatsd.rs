@@ -1,5 +1,6 @@
 use std::sync::mpsc::Sender;
 
+use crate::config;
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::constants;
@@ -16,6 +17,7 @@ pub struct DogStatsD {
 pub struct DogStatsDConfig {
     pub host: String,
     pub port: u16,
+    pub datadog_config: Arc<Mutex<config::Config>>,
 }
 
 impl DogStatsD {
@@ -26,7 +28,13 @@ impl DogStatsD {
         let serializer_aggr = Arc::clone(&aggr);
         let serve_handle =
             DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
-        let dd_api = datadog::DdApi::new();
+        let api_key = config
+            .datadog_config
+            .lock()
+            .expect("lock poisoned")
+            .api_key
+            .clone();
+        let dd_api = datadog::DdApi::new(api_key);
         DogStatsD {
             serve_handle,
             aggregator: aggr,
