@@ -1,13 +1,14 @@
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{self, Deserialize, Deserializer};
+use tracing::debug;
 
 use figment::{
     providers::{Env, Format, Yaml},
     Figment,
 };
 
-#[derive(Debug, PartialEq, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Default)]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -15,6 +16,61 @@ pub enum LogLevel {
     Info,
     Warn,
     Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PeriodicStrategy {
+    pub interval: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum FlushStrategy {
+    Default,
+    End,
+    Periodically(PeriodicStrategy),
+}
+
+// Deserialize for FlushStrategy
+// Flush Strategy can be either "end" or "periodically,<ms>"
+impl<'de> Deserialize<'de> for FlushStrategy {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        match value.as_str() {
+            "end" => Ok(FlushStrategy::End),
+            _ => {
+                let mut split_value = value.as_str().split(',');
+                // "periodically,60000"
+                match split_value.next() {
+                    Some(first_value) if first_value.starts_with("periodically") => {
+                        let interval = split_value.next();
+                        // "60000"
+                        match interval {
+                            Some(interval) => {
+                                if let Ok(parsed_interval) = interval.parse() {
+                                    return Ok(FlushStrategy::Periodically(PeriodicStrategy {
+                                        interval: parsed_interval,
+                                    }));
+                                }
+                                debug!("invalid flush interval: {}, using default", interval);
+                                Ok(FlushStrategy::Default)
+                            }
+                            None => {
+                                debug!("invalid flush strategy: {}, using default", value);
+                                Ok(FlushStrategy::Default)
+                            }
+                        }
+                    }
+                    _ => {
+                        debug!("invalid flush strategy: {}, using default", value);
+                        Ok(FlushStrategy::Default)
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Deserialize)]
@@ -28,24 +84,30 @@ pub struct Config {
     pub version: Option<String>,
     pub tags: Option<String>,
     pub log_level: LogLevel,
-    pub apm_enabled: bool,
     pub serverless_logs_enabled: bool,
-    pub handler: String,
+    pub apm_enabled: bool,
+    pub lambda_handler: String,
+    pub serverless_flush_strategy: FlushStrategy,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            apm_enabled: false,
+            // General
             site: "datadoqhq.com".to_string(),
             api_key: String::default(),
+            serverless_flush_strategy: FlushStrategy::Default,
+            // Unified Tagging
             env: None,
             service: None,
             version: None,
             tags: None,
+            // Logs
             log_level: LogLevel::default(),
             serverless_logs_enabled: true,
-            handler: String::default(),
+            // APM
+            apm_enabled: false,
+            lambda_handler: String::default(),
         }
     }
 }
@@ -59,14 +121,15 @@ pub enum ConfigError {
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
     let figment = Figment::new()
-        .merge(Env::prefixed("DD_"))
+        .merge(Yaml::file(path))
         .merge(Env::prefixed("DATADOG_"))
-        .merge(Yaml::file(path));
+        .merge(Env::prefixed("DD_"));
 
     let config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => ConfigError::UnsupportedField(field),
         _ => ConfigError::ParseError(err.to_string()),
     })?;
+
     Ok(config)
 }
 
@@ -102,6 +165,29 @@ pub mod tests {
             assert_eq!(
                 config,
                 ConfigError::UnsupportedField("unknown_field".to_string())
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_precedence() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r#"
+                apm_enabled: true
+            "#,
+            )?;
+            jail.set_env("DD_APM_ENABLED", "false");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    apm_enabled: false,
+                    ..Config::default()
+                }
             );
             Ok(())
         });
@@ -152,6 +238,92 @@ pub mod tests {
             jail.clear_env();
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config, Config::default());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_default() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_end() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "end");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    serverless_flush_strategy: FlushStrategy::End,
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_periodically() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,100000");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
+                        interval: 100000
+                    }),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_invalid() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "invalid_strategy");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_flush_strategy_invalid_periodic() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_SERVERLESS_FLUSH_STRATEGY",
+                "periodically,invalid_interval",
+            );
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    ..Config::default()
+                }
+            );
             Ok(())
         });
     }

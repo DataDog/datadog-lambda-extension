@@ -1,4 +1,5 @@
 use std::error::Error;
+use tracing::debug;
 
 use crate::{base_url, EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE};
 
@@ -24,7 +25,7 @@ impl TelemetryApiClient {
             "buffering": { // TODO: re evaluate using default values
                 "maxItems": 1000,
                 "maxBytes": 256 * 1024,
-                "timeoutMs": 1000
+                "timeoutMs": 25
             }
         });
 
@@ -33,6 +34,7 @@ impl TelemetryApiClient {
             .set(EXTENSION_ID_HEADER, &self.extension_id)
             .send_json(data);
 
+        debug!("subscribed to telemetry: {:?}", resp);
         Ok(resp?)
     }
 }
