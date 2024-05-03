@@ -31,8 +31,10 @@ use serde::Deserialize;
 
 const EXTENSION_HOST: &str = "0.0.0.0";
 const EXTENSION_NAME: &str = "datadog-agent";
+const EXTENSION_FEATURES: &str = "accountId";
 const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
 const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
+const EXTENSION_ACCEPT_FEATURE_HEADER: &str = "Lambda-Extension-Accept-Feature";
 const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 
 // todo: make sure we can override those with environment variables
@@ -41,8 +43,14 @@ const DOGSTATSD_PORT: u16 = 8185;
 const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
 const TELEMETRY_PORT: u16 = 8124;
 
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct RegisterResponse {
+    // Skip deserialize because this field is not available in the response
+    // body, but as a header. Header is extracted and set manually.
+    #[serde(skip_deserializing)]
     pub extension_id: String,
+    pub account_id: String,
 }
 
 fn base_url(route: &str) -> Result<String> {
@@ -96,6 +104,7 @@ fn register() -> Result<RegisterResponse> {
 
     let resp = ureq::post(&url)
         .set(EXTENSION_NAME_HEADER, EXTENSION_NAME)
+        .set(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
         .send_json(ureq::json!(map))
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
@@ -103,10 +112,16 @@ fn register() -> Result<RegisterResponse> {
         panic!("Unable to register extension")
     }
 
-    let ext_id = resp.header(EXTENSION_ID_HEADER).unwrap_or_default();
-    Ok(RegisterResponse {
-        extension_id: ext_id.to_string(),
-    })
+    let extension_id = resp
+        .header(EXTENSION_ID_HEADER)
+        .unwrap_or_default()
+        .to_string();
+    let mut register_response = resp.into_json::<RegisterResponse>()?;
+
+    // Set manually since it's not part of the response body
+    register_response.extension_id = extension_id;
+
+    Ok(register_response)
 }
 
 fn main() -> Result<()> {
