@@ -95,6 +95,7 @@ impl DogStatsD {
         let _ = &self
             .dd_api
             .ship(&current_points)
+            // TODO(astuyve) retry and do not panic
             .expect("failed to ship metrics to datadog");
         locked_aggr.clear();
     }

@@ -1,15 +1,21 @@
 #![deny(clippy::all)]
 mod config;
 mod event_bus;
+mod lifecycle;
 mod logger;
 mod metrics;
 mod telemetry;
+use lifecycle::flush_control::FlushControl;
 use telemetry::listener::TelemetryListenerConfig;
+use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+
 mod events;
 
 use crate::event_bus::bus::EventBus;
+use crate::events::Event;
 use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
+use crate::telemetry::events::TelemetryRecord;
 use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
 
 use std::collections::HashMap;
@@ -142,6 +148,9 @@ fn main() -> Result<()> {
         .subscribe()
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
+    let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
+    let mut shutdown = false;
+
     loop {
         let evt = next_event(&r.extension_id);
         match evt {
@@ -156,23 +165,78 @@ fn main() -> Result<()> {
                     deadline_ms,
                     invoked_function_arn
                 );
-                dogstats_client.flush();
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
                 deadline_ms,
             }) => {
                 println!("Exiting: {}, deadline: {}", shutdown_reason, deadline_ms);
-                dogstats_client.shutdown();
-                telemetry_listener.shutdown();
-                event_bus.shutdown();
-                return Ok(());
+                shutdown = true;
             }
             Err(err) => {
                 eprintln!("Error: {:?}", err);
                 println!("Exiting");
                 return Err(err);
             }
+        }
+        // Block until we get something from the telemetry API
+        // Check if flush logic says we should block and flush or not
+        if flush_control.should_flush() {
+            loop {
+                let received = event_bus.rx.recv();
+                if let Ok(event) = received {
+                    match event {
+                        Event::Metric(event) => {
+                            debug!("Metric event: {:?}", event);
+                        }
+                        Event::Telemetry(event) => {
+                            match event.record {
+                                TelemetryRecord::PlatformInitReport {
+                                    initialization_type,
+                                    phase,
+                                    metrics,
+                                } => {
+                                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                                    // write this straight to metrics aggr
+                                    // write this straight to logs aggr
+                                    // write this straight to trace aggr
+                                }
+                                TelemetryRecord::PlatformRuntimeDone {
+                                    request_id, status, ..
+                                } => {
+                                    debug!(
+                                        "Runtime done for request_id: {:?} with status: {:?}",
+                                        request_id, status
+                                    );
+                                    debug!("FLUSHING ALL");
+                                    dogstats_client.flush();
+                                    debug!("CALLING FOR NEXT EVENT");
+                                    break;
+                                }
+                                TelemetryRecord::PlatformReport {
+                                    request_id, status, ..
+                                } => {
+                                    debug!(
+                                        "Platform report for request_id: {:?} with status: {:?}",
+                                        request_id, status
+                                    );
+                                }
+                                _ => {
+                                    debug!("Unforwarded Telemetry event: {:?}", event);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                } else {
+                    error!("could not get the event");
+                }
+            }
+        }
+        if shutdown {
+            dogstats_client.shutdown();
+            telemetry_listener.shutdown();
+            return Ok(());
         }
     }
 }
