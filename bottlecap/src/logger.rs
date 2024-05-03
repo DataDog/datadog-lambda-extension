@@ -4,7 +4,7 @@ use log::{LevelFilter, Log, Metadata, Record};
 pub struct SimpleLogger {}
 
 impl SimpleLogger {
-    pub fn init(level: &LogLevel) -> Result<(), log::SetLoggerError> {
+    pub fn init(level: LogLevel) -> Result<(), log::SetLoggerError> {
         let level = match level {
             LogLevel::Trace => LevelFilter::Trace,
             LogLevel::Debug => LevelFilter::Debug,

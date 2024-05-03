@@ -126,8 +126,7 @@ fn main() -> Result<()> {
             panic!("Error starting the extension: {:?}", err);
         }
     };
-    let log_level = &config.log_level;
-    SimpleLogger::init(log_level).expect("Error initializing logger");
+    SimpleLogger::init(config.log_level).expect("Error initializing logger");
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 

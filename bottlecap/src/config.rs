@@ -8,7 +8,7 @@ use figment::{
     Figment,
 };
 
-#[derive(Debug, PartialEq, Deserialize, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Default)]
 pub enum LogLevel {
     Trace,
     Debug,
@@ -18,12 +18,12 @@ pub enum LogLevel {
     Error,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PeriodicStrategy {
     pub interval: u64,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FlushStrategy {
     Default,
     End,
