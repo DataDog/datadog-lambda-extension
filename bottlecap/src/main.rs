@@ -23,7 +23,7 @@ use std::env;
 use std::io::Error;
 use std::io::Result;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
 use logger::SimpleLogger;
