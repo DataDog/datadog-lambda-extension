@@ -313,7 +313,10 @@ pub mod tests {
     fn test_parse_flush_strategy_invalid_periodic() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,invalid_interval");
+            jail.set_env(
+                "DD_SERVERLESS_FLUSH_STRATEGY",
+                "periodically,invalid_interval",
+            );
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
