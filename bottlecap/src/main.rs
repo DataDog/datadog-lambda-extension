@@ -149,10 +149,10 @@ fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
+    let mut shutdown = false;
 
     loop {
         let evt = next_event(&r.extension_id);
-        let mut shutdown = false;
         match evt {
             Ok(NextEventResponse::Invoke {
                 request_id,
@@ -221,7 +221,9 @@ fn main() -> Result<()> {
                                         request_id, status
                                     );
                                 }
-                                _ => {}
+                                _ => {
+                                    debug!("Unforwarded Telemetry event: {:?}", event);
+                                }
                             }
                         }
                         _ => {}

@@ -55,7 +55,9 @@ impl FlushControl {
                 self.last_flush = now;
                 true
             }
-            FlushStrategy::Periodically(periodic) => self.should_periodic_flush(now, periodic.interval),
+            FlushStrategy::Periodically(periodic) => {
+                self.should_periodic_flush(now, periodic.interval)
+            }
             FlushStrategy::End => true,
         }
     }
