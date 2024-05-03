@@ -33,15 +33,18 @@ impl FlushControl {
     }
 
     pub fn should_flush(&mut self) -> bool {
-        let now = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let now = match time::SystemTime::now().duration_since(time::UNIX_EPOCH) {
+            Ok(now) => now.as_secs(),
+            Err(e) => {
+                debug!("failed to get current time: {:?}", e);
+                return false;
+            }
+        };
         self.invocation_times.add(now);
         match &self.flush_strategy {
             FlushStrategy::Default => {
                 if self.invocation_times.should_adapt_to_periodic(now) {
-                    let should_periodic_flush = self.should_periodic_flush(TWENTY_SECONDS);
+                    let should_periodic_flush = self.should_periodic_flush(now, TWENTY_SECONDS);
                     debug!(
                         "Adapting over to periodic flush strategy. should_periodic_flush: {}",
                         should_periodic_flush
@@ -52,16 +55,12 @@ impl FlushControl {
                 self.last_flush = now;
                 true
             }
-            FlushStrategy::Periodically(periodic) => self.should_periodic_flush(periodic.interval),
+            FlushStrategy::Periodically(periodic) => self.should_periodic_flush(now, periodic.interval),
             FlushStrategy::End => true,
         }
     }
 
-    fn should_periodic_flush(&mut self, interval: u64) -> bool {
-        let now = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+    fn should_periodic_flush(&mut self, now: u64, interval: u64) -> bool {
         if now - self.last_flush > (interval / 1000) {
             self.last_flush = now;
             true
