@@ -23,6 +23,7 @@ use std::env;
 use std::io::Error;
 use std::io::Result;
 
+use std::sync::Arc;
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
 use logger::SimpleLogger;
@@ -118,7 +119,7 @@ fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or("".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => config,
+        Ok(config) => Arc::new(config),
         Err(e) => {
             log::error!("Error loading configuration: {:?}", e);
             let err = Command::new("/opt/datadog-agent-go").exec();
@@ -133,6 +134,7 @@ fn main() -> Result<()> {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
+        datadog_config: Arc::clone(&config),
     };
     let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
 

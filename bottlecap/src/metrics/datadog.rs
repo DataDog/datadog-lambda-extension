@@ -1,7 +1,5 @@
 //!Types to serialize data into the Datadog API
 
-use std::env;
-
 use serde::{Serialize, Serializer};
 use serde_json;
 use tracing::error;
@@ -11,6 +9,7 @@ use ureq;
 #[derive(Debug)]
 pub struct DdApi {
     api_key: String,
+    site: String,
     ureq_agent: ureq::Agent,
 }
 /// Error relating to `ship`
@@ -30,37 +29,26 @@ pub enum ShipError {
     Json(#[from] serde_json::Error),
 }
 
-impl Default for DdApi {
-    fn default() -> Self {
-        Self {
-            api_key: env::var("DD_API_KEY").expect("unable to read envvars, catastrophic failure"),
+impl DdApi {
+    pub fn new(api_key: String, site: String) -> Self {
+        DdApi {
+            api_key,
+            site,
             ureq_agent: ureq::AgentBuilder::new().build(),
         }
-    }
-}
-
-impl DdApi {
-    /// Create a new `DdApi` instance
-    ///
-    /// # Panics
-    ///
-    /// Function will panic if `DD_API_KEY` cannot be read from the environment.
-    #[must_use]
-    pub fn new() -> Self {
-        DdApi::default()
     }
 
     /// Ship a serialized series to the API, blocking
     pub fn ship(&self, series: &Series) -> Result<(), ShipError> {
         // call inner_ship onto the runtime
-        let api_key = self.api_key.clone();
         let body = serde_json::to_vec(&series)?;
         log::info!("sending body: {:?}", &series);
 
+        let url = format!("https://api.{}/api/v2/series", &self.site);
         let resp: Result<ureq::Response, ureq::Error> = self
             .ureq_agent
-            .post("https://api.datadoghq.com/api/v2/series")
-            .set("DD-API-KEY", &api_key)
+            .post(&url)
+            .set("DD-API-KEY", &self.api_key)
             .set("Content-Type", "application/json")
             .send_bytes(body.as_slice());
         match resp {
