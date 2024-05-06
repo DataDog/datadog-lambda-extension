@@ -159,7 +159,6 @@ fn main() -> Result<()> {
     let function_arn = build_function_arn(&r.account_id, &region, &function_name);
 
     let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&config));
-    let logs_agent_tx = logs_agent.get_sender_copy();
     let event_bus = EventBus::run();
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
@@ -222,7 +221,7 @@ fn main() -> Result<()> {
                             debug!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => {
-                            if let Err(e) = logs_agent_tx.send(event.clone()) {
+                            if let Err(e) = logs_agent.send_event(event.clone()) {
                                 error!("Error sending Telemetry event to the Logs Agent: {}", e);
                             }
                             match event.record {
