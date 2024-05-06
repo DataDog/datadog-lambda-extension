@@ -221,9 +221,7 @@ fn main() -> Result<()> {
                             debug!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => {
-                            if let Err(e) = logs_agent.send_event(event.clone()) {
-                                error!("Error sending Telemetry event to the Logs Agent: {}", e);
-                            }
+                            logs_agent.send_event(event.clone());
                             match event.record {
                                 TelemetryRecord::PlatformInitReport {
                                     initialization_type,

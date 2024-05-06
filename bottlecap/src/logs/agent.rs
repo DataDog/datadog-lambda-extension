@@ -54,8 +54,10 @@ impl LogsAgent {
         }
     }
 
-    pub fn send_event(&self, event: TelemetryEvent) -> Result<(), mpsc::SendError<TelemetryEvent>> {
-        self.tx.send(event)
+    pub fn send_event(&self, event: TelemetryEvent) {
+        if let Err(e) = self.tx.send(event) {
+            error!("Error sending Telemetry event to the Logs Agent: {}", e);
+        }
     }
 
     pub fn flush(&self) {
