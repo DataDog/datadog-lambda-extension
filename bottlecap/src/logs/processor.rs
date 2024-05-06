@@ -48,12 +48,8 @@ impl Processor {
     }
 
     pub fn process(&self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
-        let service = self
-            .datadog_config
-            .service
-            .clone()
-            .unwrap_or("".to_string());
-        let tags = self.datadog_config.tags.clone().unwrap_or("".to_string());
+        let service = self.datadog_config.service.clone().unwrap_or_default();
+        let tags = self.datadog_config.tags.clone().unwrap_or_default();
         let mut log = IntakeLog {
             hostname: self.function_arn.clone(),
             source: LOGS_SOURCE.to_string(),

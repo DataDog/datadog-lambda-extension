@@ -141,7 +141,7 @@ fn main() -> Result<()> {
         .init();
 
     // First load the configuration
-    let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or("".to_string());
+    let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or_default();
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(e) => {
