@@ -28,14 +28,19 @@ impl LogsAgent {
         let (tx, rx) = mpsc::channel::<TelemetryEvent>();
         let join_handle = thread::spawn(move || loop {
             let received = rx.recv();
-            if let Ok(event) = received {
-                match processor.process(event) {
-                    Ok(log) => {
-                        cloned_aggregator.lock().expect("lock poisoned").add(log);
-                    }
-                    Err(e) => {
-                        error!("Error processing event: {}", e);
-                    }
+            // TODO(duncanista): we might need to create a Event::Shutdown
+            // to signal shutdown and make it easier to handle any floating events
+            let Ok(event) = received else {
+                debug!("Failed to received event in Logs Agent");
+                break;
+            };
+
+            match processor.process(event) {
+                Ok(log) => {
+                    cloned_aggregator.lock().expect("lock poisoned").add(log);
+                }
+                Err(e) => {
+                    error!("Error processing event: {}", e);
                 }
             }
         });
@@ -49,27 +54,34 @@ impl LogsAgent {
         }
     }
 
-    pub fn get_sender_copy(&self) -> Sender<TelemetryEvent> {
-        self.tx.clone()
+    pub fn send_event(&self, event: TelemetryEvent) -> Result<(), mpsc::SendError<TelemetryEvent>> {
+        self.tx.send(event)
     }
 
     pub fn flush(&self) {
-        let logs = self.aggregator.lock().expect("lock poisoned").get_batch();
-        self.dd_api
-            .send(&logs)
-            .expect("failed to send logs to Datadog");
+        LogsAgent::flush_internal(&self.aggregator, &self.dd_api);
+    }
+
+    fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
+        let logs = aggregator.lock().expect("lock poisoned").get_batch();
+        dd_api.send(&logs).expect("Failed to send logs to Datadog");
     }
 
     pub fn shutdown(self) {
         debug!("Shutting down LogsAgent");
-        self.flush();
+        // Dropping this sender to help close the thread
+        drop(self.tx);
         match self.join_handle.join() {
             Ok(_) => {
-                debug!("LogsAgent thread has been shutdown");
+                debug!("LogsAgent Message Receiver thread has been shutdown");
             }
             Err(e) => {
-                debug!("Error shutting down the LogsAgent thread: {:?}", e);
+                debug!(
+                    "Error shutting down the LogsAgent Message Receiver thread: {:?}",
+                    e
+                );
             }
         }
+        LogsAgent::flush_internal(&self.aggregator, &self.dd_api);
     }
 }
