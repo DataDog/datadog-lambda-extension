@@ -1,7 +1,9 @@
 use std::error::Error;
+use std::sync::Arc;
 
 use serde::Serialize;
 
+use crate::config;
 use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
 
 const LOGS_SOURCE: &str = "lambda";
@@ -34,19 +36,29 @@ pub struct IntakeLog {
 #[derive(Clone)]
 pub struct Processor {
     function_arn: String,
+    datadog_config: Arc<config::Config>,
 }
 
 impl Processor {
-    pub fn new(function_arn: String) -> Processor {
-        Processor { function_arn }
+    pub fn new(function_arn: String, datadog_config: Arc<config::Config>) -> Processor {
+        Processor {
+            function_arn,
+            datadog_config,
+        }
     }
 
     pub fn process(&self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
+        let service = self
+            .datadog_config
+            .service
+            .clone()
+            .unwrap_or("".to_string());
+        let tags = self.datadog_config.tags.clone().unwrap_or("".to_string());
         let mut log = IntakeLog {
             hostname: self.function_arn.clone(),
             source: LOGS_SOURCE.to_string(),
-            service: "placeholder-service".to_string(), // TODO: replace with config service
-            tags: "placeholder:tags".to_string(),       // TODO: replace with config tags
+            service,
+            tags,
             message: LambdaMessage {
                 message: "placeholder-message".to_string(),
                 lambda: Lambda {
@@ -72,6 +84,7 @@ impl Processor {
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
                 log.message.message = format!("INIT_START Runtime Version: {} Runtime Version ARN: {}", rv, rv_arn);
+                log.message.status = "info".to_string();
 
                 Ok(log)
             },
