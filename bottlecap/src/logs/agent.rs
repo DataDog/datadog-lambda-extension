@@ -4,24 +4,24 @@ use std::thread;
 
 use tracing::{debug, error};
 
+use crate::config;
 use crate::logs::aggregator::Aggregator;
-use crate::logs::datadog::DdApi;
+use crate::logs::datadog;
 use crate::logs::processor::Processor;
 use crate::telemetry::events::TelemetryEvent;
 
 pub struct LogsAgent {
-    function_arn: Option<String>,
-    dd_api: DdApi,
+    dd_api: datadog::DdApi,
     aggregator: Arc<Mutex<Aggregator>>,
     tx: Sender<TelemetryEvent>,
     join_handle: std::thread::JoinHandle<()>,
 }
 
 impl LogsAgent {
-    pub fn run(function_arn: &str) -> LogsAgent {
+    pub fn run(function_arn: &str, datadog_config: Arc<config::Config>) -> LogsAgent {
         let function_arn = function_arn.to_string();
-        let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::new()));
-        let processor: Processor = Processor::new(function_arn.clone());
+        let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
+        let processor: Processor = Processor::new(function_arn, Arc::clone(&datadog_config));
 
         let cloned_aggregator = Arc::clone(&aggregator);
 
@@ -39,21 +39,19 @@ impl LogsAgent {
                 }
             }
         });
+
+        let dd_api =
+            datadog::DdApi::new(datadog_config.api_key.clone(), datadog_config.site.clone());
         LogsAgent {
             tx,
             join_handle,
-            dd_api: DdApi::new(),
+            dd_api,
             aggregator,
-            function_arn: None,
         }
     }
 
     pub fn get_sender_copy(&self) -> Sender<TelemetryEvent> {
         self.tx.clone()
-    }
-
-    pub fn set_function_arn(&mut self, function_arn: String) {
-        self.function_arn = Some(function_arn);
     }
 
     pub fn flush(&self) {
