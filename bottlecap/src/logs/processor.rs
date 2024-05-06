@@ -66,7 +66,8 @@ impl Processor {
                     request_id: "placeholder-request-id".to_string(), // TODO: replace with incoming request id
                 },
                 timestamp: event.time.timestamp_millis(),
-                status: "placeholder-status".to_string(),
+                // Default status
+                status: "info".to_string(),
             },
         };
         match event.record {
@@ -84,7 +85,6 @@ impl Processor {
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
                 log.message.message = format!("INIT_START Runtime Version: {} Runtime Version ARN: {}", rv, rv_arn);
-                log.message.status = "info".to_string();
 
                 Ok(log)
             },
@@ -96,14 +96,12 @@ impl Processor {
                 log.message.message =
                     format!("START RequestId: {} Version: {}", request_id, version);
                 log.message.lambda.request_id = request_id;
-                log.message.status = "info".to_string();
 
                 Ok(log)
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , .. } => {  // TODO: check what to do with rest of the fields
                 log.message.message = format!("END RequestId: {}", request_id);
                 log.message.lambda.request_id = request_id;
-                log.message.status = "info".to_string();
                 Ok(log)
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
@@ -123,7 +121,6 @@ impl Processor {
 
                 log.message.message = message;
                 log.message.lambda.request_id = request_id;
-                log.message.status = "info".to_string();
 
                 Ok(log)
             },
