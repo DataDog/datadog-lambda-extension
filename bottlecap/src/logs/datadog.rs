@@ -4,15 +4,15 @@ use tracing::{debug, error};
 
 use crate::logs::processor::IntakeLog;
 
-pub struct DdApi {
+pub struct Api {
     api_key: String,
     site: String,
     ureq_agent: ureq::Agent,
 }
 
-impl DdApi {
+impl Api {
     pub fn new(api_key: String, site: String) -> Self {
-        DdApi {
+        Api {
             api_key,
             site,
             ureq_agent: ureq::AgentBuilder::new().build(),
