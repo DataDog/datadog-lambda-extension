@@ -11,8 +11,7 @@ impl Aggregator {
     }
 
     pub fn get_batch(&mut self) -> Vec<IntakeLog> {
-        let messages = std::mem::take(&mut self.messages);
-        messages
+        std::mem::take(&mut self.messages)
     }
 }
 
