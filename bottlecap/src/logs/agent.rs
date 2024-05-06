@@ -11,7 +11,7 @@ use crate::logs::processor::Processor;
 use crate::telemetry::events::TelemetryEvent;
 
 pub struct LogsAgent {
-    dd_api: datadog::DdApi,
+    dd_api: datadog::Api,
     aggregator: Arc<Mutex<Aggregator>>,
     tx: Sender<TelemetryEvent>,
     join_handle: std::thread::JoinHandle<()>,
@@ -23,7 +23,7 @@ impl LogsAgent {
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
         let processor: Processor = Processor::new(function_arn, Arc::clone(&datadog_config));
 
-        let cloned_aggregator = Arc::clone(&aggregator);
+        let cloned_aggregator = aggregator.clone();
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>();
         let join_handle = thread::spawn(move || loop {
@@ -40,8 +40,7 @@ impl LogsAgent {
             }
         });
 
-        let dd_api =
-            datadog::DdApi::new(datadog_config.api_key.clone(), datadog_config.site.clone());
+        let dd_api = datadog::Api::new(datadog_config.api_key.clone(), datadog_config.site.clone());
         LogsAgent {
             tx,
             join_handle,
