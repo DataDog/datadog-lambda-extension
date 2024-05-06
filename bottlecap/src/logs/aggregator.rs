@@ -1,23 +1,17 @@
 use crate::logs::processor::IntakeLog;
 
+#[derive(Default)]
 pub struct Aggregator {
     messages: Vec<IntakeLog>,
 }
 
 impl Aggregator {
-    pub fn new() -> Self {
-        Aggregator {
-            messages: Vec::new(),
-        }
-    }
-
     pub fn add(&mut self, log: IntakeLog) {
         self.messages.push(log);
     }
 
     pub fn get_batch(&mut self) -> Vec<IntakeLog> {
-        let messages = self.messages.clone();
-        self.messages.clear();
+        let messages = std::mem::take(&mut self.messages);
         messages
     }
 }
@@ -30,7 +24,7 @@ mod tests {
 
     #[test]
     fn add() {
-        let mut aggregator = Aggregator::new();
+        let mut aggregator = Aggregator::default();
         let log = IntakeLog {
             message: LambdaMessage {
                 message: "test".to_string(),
@@ -53,7 +47,7 @@ mod tests {
 
     #[test]
     fn get_batch() {
-        let mut aggregator = Aggregator::new();
+        let mut aggregator = Aggregator::default();
         let log = IntakeLog {
             message: LambdaMessage {
                 message: "test".to_string(),
