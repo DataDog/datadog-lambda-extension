@@ -14,8 +14,8 @@ use tracing_subscriber::EnvFilter;
 mod events;
 
 use crate::event_bus::bus::EventBus;
-use crate::logs::agent::LogsAgent;
 use crate::events::Event;
+use crate::logs::agent::LogsAgent;
 use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
 use crate::telemetry::events::TelemetryRecord;
 use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
@@ -126,6 +126,13 @@ fn register() -> Result<RegisterResponse> {
     Ok(register_response)
 }
 
+fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
+    format!(
+        "arn:aws:lambda:{}:{}:function:{}",
+        region, account_id, function_name
+    )
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .json()
@@ -147,7 +154,12 @@ fn main() -> Result<()> {
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let mut logs_agent = LogsAgent::run("TODO"); // todo how to add function arn?
+    let region = env::var("AWS_REGION").unwrap();
+    let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap();
+    let function_arn = build_function_arn(&r.account_id, &region, &function_name);
+
+    let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&config));
+    let logs_agent_tx = logs_agent.get_sender_copy();
     let event_bus = EventBus::run();
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
@@ -161,7 +173,7 @@ fn main() -> Result<()> {
         port: TELEMETRY_PORT,
     };
     let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, logs_agent.get_sender_copy())
+        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
             .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
@@ -210,6 +222,9 @@ fn main() -> Result<()> {
                             debug!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => {
+                            if let Err(e) = logs_agent_tx.send(event.clone()) {
+                                error!("Error sending Telemetry event to the Logs Agent: {}", e);
+                            }
                             match event.record {
                                 TelemetryRecord::PlatformInitReport {
                                     initialization_type,
@@ -229,6 +244,7 @@ fn main() -> Result<()> {
                                         request_id, status
                                     );
                                     debug!("FLUSHING ALL");
+                                    logs_agent.flush();
                                     dogstats_client.flush();
                                     debug!("CALLING FOR NEXT EVENT");
                                     break;
@@ -253,7 +269,9 @@ fn main() -> Result<()> {
                 }
             }
         }
+
         if shutdown {
+            logs_agent.shutdown();
             dogstats_client.shutdown();
             telemetry_listener.shutdown();
             return Ok(());
