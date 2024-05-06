@@ -127,7 +127,213 @@ impl Processor {
 
                 Ok(log)
             },
+            // TODO: PlatformInitRuntimeDone
+            // TODO: PlatformInitReport
+            // TODO: PlatformExtension
+            // TODO: PlatformTelemetrySubscription
+            // TODO: PlatformLogsDropped
             _ => Err("Unsupported event type".into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::telemetry::events::{
+        InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
+    };
+
+    use super::*;
+
+    use chrono::{TimeZone, Utc};
+
+    macro_rules! process_tests {
+        ($($name:ident: $value:expr,)*) => {
+            $(
+                #[test]
+                fn $name() {
+                    let (input, expected): (&TelemetryEvent, IntakeLog) = $value;
+
+                    let processor = Processor::new(
+                        "arn".to_string(),
+                        Arc::new(config::Config {
+                            service: Some("test-service".to_string()),
+                            tags: Some("test:tag,env:test".to_string()),
+                            ..config::Config::default()})
+                    );
+                    let result = processor.process(input.clone()).unwrap();
+
+                    assert_eq!(result, expected);
+                }
+            )*
+        }
+    }
+
+    process_tests! {
+        // function
+        function: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::Function("test-function".to_string())
+            },
+            IntakeLog {
+                hostname: "arn".to_string(),
+                source: "lambda".to_string(),
+                service: "test-service".to_string(),
+                tags: "test:tag,env:test".to_string(),
+                message: LambdaMessage {
+                    message: "test-function".to_string(),
+                    lambda: Lambda {
+                        arn: "arn".to_string(),
+                        request_id: "placeholder-request-id".to_string(),
+                    },
+                    timestamp: 1673061827000,
+                    status: "info".to_string(),
+                },
+            }
+        ),
+
+        // extension
+        extension: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::Extension("test-extension".to_string())
+            },
+            IntakeLog {
+                hostname: "arn".to_string(),
+                source: "lambda".to_string(),
+                service: "test-service".to_string(),
+                tags: "test:tag,env:test".to_string(),
+                message: LambdaMessage {
+                    message: "test-extension".to_string(),
+                    lambda: Lambda {
+                        arn: "arn".to_string(),
+                        request_id: "placeholder-request-id".to_string(),
+                    },
+                    timestamp: 1673061827000,
+                    status: "info".to_string(),
+                },
+            }
+        ),
+
+        // platform init start
+        platform_init_start: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformInitStart {
+                    runtime_version: Some("test-runtime-version".to_string()),
+                    runtime_version_arn: Some("test-runtime-version-arn".to_string()),
+                    initialization_type: InitType::OnDemand,
+                    phase: InitPhase::Init,
+                }
+            },
+            IntakeLog {
+                hostname: "arn".to_string(),
+                source: "lambda".to_string(),
+                service: "test-service".to_string(),
+                tags: "test:tag,env:test".to_string(),
+                message: LambdaMessage {
+                    message: "INIT_START Runtime Version: test-runtime-version Runtime Version ARN: test-runtime-version-arn".to_string(),
+                    lambda: Lambda {
+                        arn: "arn".to_string(),
+                        request_id: "placeholder-request-id".to_string(),
+                    },
+                    timestamp: 1673061827000,
+                    status: "info".to_string(),
+                },
+            }
+        ),
+
+        // platform start
+        platform_start: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformStart {
+                    request_id: "test-request-id".to_string(),
+                    version: Some("test-version".to_string()),
+                }
+            },
+            IntakeLog {
+                hostname: "arn".to_string(),
+                source: "lambda".to_string(),
+                service: "test-service".to_string(),
+                tags: "test:tag,env:test".to_string(),
+                message: LambdaMessage {
+                    message: "START RequestId: test-request-id Version: test-version".to_string(),
+                    lambda: Lambda {
+                        arn: "arn".to_string(),
+                        request_id: "test-request-id".to_string(),
+                    },
+                    timestamp: 1673061827000,
+                    status: "info".to_string(),
+                },
+            }
+        ),
+
+        // platform runtime done
+        platform_runtime_done: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformRuntimeDone {
+                    request_id: "test-request-id".to_string(),
+                    status: Status::Success,
+                    error_type: None,
+                    metrics: Some(RuntimeDoneMetrics {
+                        duration_ms: 100.0,
+                        produced_bytes: Some(42)
+                    })
+                }
+            },
+            IntakeLog {
+                hostname: "arn".to_string(),
+                source: "lambda".to_string(),
+                service: "test-service".to_string(),
+                tags: "test:tag,env:test".to_string(),
+                message: LambdaMessage {
+                    message: "END RequestId: test-request-id".to_string(),
+                    lambda: Lambda {
+                        arn: "arn".to_string(),
+                        request_id: "test-request-id".to_string(),
+                    },
+                    timestamp: 1673061827000,
+                    status: "info".to_string(),
+                },
+            }
+        ),
+
+        // platform report
+        platform_report: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    error_type: None,
+                    status: Status::Success,
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics {
+                        duration_ms: 100.0,
+                        billed_duration_ms: 128,
+                        memory_size_mb: 256,
+                        max_memory_used_mb: 64,
+                        init_duration_ms: Some(50.0),
+                        restore_duration_ms: None
+                    }
+                }
+            },
+            IntakeLog {
+                hostname: "arn".to_string(),
+                source: "lambda".to_string(),
+                service: "test-service".to_string(),
+                tags: "test:tag,env:test".to_string(),
+                message: LambdaMessage {
+                    message: "REPORT RequestId: test-request-id Duration: 100 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
+                    lambda: Lambda {
+                        arn: "arn".to_string(),
+                        request_id: "test-request-id".to_string(),
+                    },
+                    timestamp: 1673061827000,
+                    status: "info".to_string(),
+                },
+            }
+        ),
     }
 }
