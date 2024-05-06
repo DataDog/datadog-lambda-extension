@@ -3,6 +3,7 @@ mod config;
 mod event_bus;
 mod lifecycle;
 mod logger;
+mod logs;
 mod metrics;
 mod telemetry;
 use lifecycle::flush_control::FlushControl;
@@ -14,6 +15,7 @@ mod events;
 
 use crate::event_bus::bus::EventBus;
 use crate::events::Event;
+use crate::logs::agent::LogsAgent;
 use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
 use crate::telemetry::events::TelemetryRecord;
 use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
@@ -124,6 +126,13 @@ fn register() -> Result<RegisterResponse> {
     Ok(register_response)
 }
 
+fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
+    format!(
+        "arn:aws:lambda:{}:{}:function:{}",
+        region, account_id, function_name
+    )
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .json()
@@ -132,7 +141,7 @@ fn main() -> Result<()> {
         .init();
 
     // First load the configuration
-    let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or("".to_string());
+    let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or_default();
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(e) => {
@@ -145,6 +154,11 @@ fn main() -> Result<()> {
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
+    let region = env::var("AWS_REGION").unwrap();
+    let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap();
+    let function_arn = build_function_arn(&r.account_id, &region, &function_name);
+
+    let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&config));
     let event_bus = EventBus::run();
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
@@ -207,6 +221,7 @@ fn main() -> Result<()> {
                             debug!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => {
+                            logs_agent.send_event(event.clone());
                             match event.record {
                                 TelemetryRecord::PlatformInitReport {
                                     initialization_type,
@@ -226,6 +241,7 @@ fn main() -> Result<()> {
                                         request_id, status
                                     );
                                     debug!("FLUSHING ALL");
+                                    logs_agent.flush();
                                     dogstats_client.flush();
                                     debug!("CALLING FOR NEXT EVENT");
                                     break;
@@ -250,7 +266,9 @@ fn main() -> Result<()> {
                 }
             }
         }
+
         if shutdown {
+            logs_agent.shutdown();
             dogstats_client.shutdown();
             telemetry_listener.shutdown();
             return Ok(());
