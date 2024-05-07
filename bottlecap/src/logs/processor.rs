@@ -1,9 +1,10 @@
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
 use crate::config;
+use crate::logs::aggregator::Aggregator;
 use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
 
 const LOGS_SOURCE: &str = "lambda";
@@ -11,10 +12,10 @@ const LOGS_SOURCE: &str = "lambda";
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct Lambda {
     pub arn: String,
-    pub request_id: String,
+    pub request_id: Option<String>,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct LambdaMessage {
     pub message: String,
     pub lambda: Lambda,
@@ -22,7 +23,26 @@ pub struct LambdaMessage {
     pub status: String,
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+impl LambdaMessage {
+    pub fn new(
+        message: String,
+        request_id: Option<String>,
+        function_arn: String,
+        timestamp: i64,
+    ) -> LambdaMessage {
+        LambdaMessage {
+            message,
+            lambda: Lambda {
+                arn: function_arn,
+                request_id,
+            },
+            timestamp,
+            status: "info".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct IntakeLog {
     pub message: LambdaMessage,
     pub hostname: String,
@@ -36,42 +56,38 @@ pub struct IntakeLog {
 #[derive(Clone)]
 pub struct Processor {
     function_arn: String,
-    datadog_config: Arc<config::Config>,
+    request_id: Option<String>,
+    service: String,
+    tags: String,
+    // Logs which don't have a `request_id`
+    orphan_logs: Vec<IntakeLog>,
 }
 
 impl Processor {
     pub fn new(function_arn: String, datadog_config: Arc<config::Config>) -> Processor {
+        let service = datadog_config.service.clone().unwrap_or_default();
+        let tags = datadog_config.tags.clone().unwrap_or_default();
         Processor {
             function_arn,
-            datadog_config,
+            request_id: None,
+            service,
+            tags,
+            orphan_logs: Vec::new(),
         }
     }
 
-    pub fn process(&self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
-        let service = self.datadog_config.service.clone().unwrap_or_default();
-        let tags = self.datadog_config.tags.clone().unwrap_or_default();
-        let mut log = IntakeLog {
-            hostname: self.function_arn.clone(),
-            source: LOGS_SOURCE.to_string(),
-            service,
-            tags,
-            message: LambdaMessage {
-                message: "placeholder-message".to_string(),
-                lambda: Lambda {
-                    arn: self.function_arn.clone(),
-                    request_id: "placeholder-request-id".to_string(), // TODO: replace with incoming request id
-                },
-                timestamp: event.time.timestamp_millis(),
-                // Default status
-                status: "info".to_string(),
-            },
-        };
+    pub fn get_lambda_message(
+        &mut self,
+        event: TelemetryEvent,
+    ) -> Result<LambdaMessage, Box<dyn Error>> {
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
-                log.message.status = "info".to_string();
-                log.message.message = v;
-
-                Ok(log)
+                Ok(LambdaMessage::new(
+                    v,
+                    None,
+                    self.function_arn.clone(),
+                    event.time.timestamp_millis(),
+                ))
             }
             TelemetryRecord::PlatformInitStart {
                 runtime_version,
@@ -80,25 +96,37 @@ impl Processor {
             } => {
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
-                log.message.message = format!("INIT_START Runtime Version: {} Runtime Version ARN: {}", rv, rv_arn);
-
-                Ok(log)
+                Ok(LambdaMessage::new(
+                    format!("INIT_START Runtime Version: {} Runtime Version ARN: {}", rv, rv_arn),
+                    None,
+                    self.function_arn.clone(),
+                    event.time.timestamp_millis(),
+                ))
             },
+            // This is the first log where `request_id` is available
+            // So we set it here and use it in the unprocessed and following logs.
             TelemetryRecord::PlatformStart {
                 request_id,
                 version,
             } => {
-                let version = version.unwrap_or("$LATEST".to_string());
-                log.message.message =
-                    format!("START RequestId: {} Version: {}", request_id, version);
-                log.message.lambda.request_id = request_id;
+                // Set request_id for unprocessed and future logs
+                self.request_id = Some(request_id.clone());
 
-                Ok(log)
+                let version = version.unwrap_or("$LATEST".to_string());
+                Ok(LambdaMessage::new(
+                    format!("START RequestId: {} Version: {}", request_id, version),
+                    Some(request_id),
+                    self.function_arn.clone(),
+                    event.time.timestamp_millis(),
+                ))
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , .. } => {  // TODO: check what to do with rest of the fields
-                log.message.message = format!("END RequestId: {}", request_id);
-                log.message.lambda.request_id = request_id;
-                Ok(log)
+                Ok(LambdaMessage::new(
+                    format!("END RequestId: {}", request_id),
+                    Some(request_id),
+                    self.function_arn.clone(),
+                    event.time.timestamp_millis(),
+                ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
                 let mut message = format!(
@@ -115,10 +143,12 @@ impl Processor {
                     message = format!("{} Init Duration: {} ms", message, init_duration_ms)
                 }
 
-                log.message.message = message;
-                log.message.lambda.request_id = request_id;
-
-                Ok(log)
+                Ok(LambdaMessage::new(
+                    message,
+                    Some(request_id),
+                    self.function_arn.clone(),
+                    event.time.timestamp_millis(),
+                ))
             },
             // TODO: PlatformInitRuntimeDone
             // TODO: PlatformInitReport
@@ -126,6 +156,57 @@ impl Processor {
             // TODO: PlatformTelemetrySubscription
             // TODO: PlatformLogsDropped
             _ => Err("Unsupported event type".into()),
+        }
+    }
+
+    pub fn get_intake_log(
+        &mut self,
+        mut lambda_message: LambdaMessage,
+    ) -> Result<IntakeLog, Box<dyn Error>> {
+        let request_id = match lambda_message.lambda.request_id {
+            // Log already has a `request_id`
+            Some(request_id) => Some(request_id.clone()),
+            // Default to the `request_id` we've seen so far, if any.
+            None => self.request_id.clone(),
+        };
+
+        lambda_message.lambda.request_id = request_id;
+
+        let log = IntakeLog {
+            hostname: self.function_arn.clone(),
+            source: LOGS_SOURCE.to_string(),
+            service: self.service.clone(),
+            tags: self.tags.clone(),
+            message: lambda_message,
+        };
+
+        if log.message.lambda.request_id.is_some() {
+            Ok(log)
+        } else {
+            // We haven't seen a `request_id`, this is an orphan log
+            self.orphan_logs.push(log);
+            Err("No request_id available, queueing for later".into())
+        }
+    }
+
+    pub fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
+        match self.get_lambda_message(event) {
+            Ok(lambda_message) => self.get_intake_log(lambda_message),
+            // TODO: Check what to do when we can't process the event
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
+        if let Ok(log) = self.make_log(event) {
+            let mut aggregator = aggregator.lock().expect("lock poisoned");
+            aggregator.add(log);
+
+            // Process orphan logs, since we have a `request_id` now
+            for mut orphan_log in self.orphan_logs.drain(..) {
+                orphan_log.message.lambda.request_id = Some(self.request_id.clone().unwrap());
+                aggregator.add(orphan_log);
+            }
         }
     }
 }
@@ -140,21 +221,22 @@ mod tests {
 
     use chrono::{TimeZone, Utc};
 
-    macro_rules! process_tests {
+    macro_rules! get_lambda_message_tests {
         ($($name:ident: $value:expr,)*) => {
             $(
                 #[test]
                 fn $name() {
-                    let (input, expected): (&TelemetryEvent, IntakeLog) = $value;
+                    let (input, expected): (&TelemetryEvent, LambdaMessage) = $value;
 
-                    let processor = Processor::new(
+                    let mut processor = Processor::new(
                         "arn".to_string(),
                         Arc::new(config::Config {
                             service: Some("test-service".to_string()),
                             tags: Some("test:tag,env:test".to_string()),
                             ..config::Config::default()})
                     );
-                    let result = processor.process(input.clone()).unwrap();
+
+                    let result = processor.get_lambda_message(input.clone()).unwrap();
 
                     assert_eq!(result, expected);
                 }
@@ -162,28 +244,22 @@ mod tests {
         }
     }
 
-    process_tests! {
+    get_lambda_message_tests! {
         // function
         function: (
             &TelemetryEvent {
                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
                 record: TelemetryRecord::Function("test-function".to_string())
             },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
+            LambdaMessage {
                     message: "test-function".to_string(),
                     lambda: Lambda {
                         arn: "arn".to_string(),
-                        request_id: "placeholder-request-id".to_string(),
+                        request_id: None,
                     },
                     timestamp: 1673061827000,
                     status: "info".to_string(),
                 },
-            }
         ),
 
         // extension
@@ -192,21 +268,15 @@ mod tests {
                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
                 record: TelemetryRecord::Extension("test-extension".to_string())
             },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
+            LambdaMessage {
                     message: "test-extension".to_string(),
                     lambda: Lambda {
                         arn: "arn".to_string(),
-                        request_id: "placeholder-request-id".to_string(),
+                        request_id: None,
                     },
                     timestamp: 1673061827000,
                     status: "info".to_string(),
                 },
-            }
         ),
 
         // platform init start
@@ -220,21 +290,15 @@ mod tests {
                     phase: InitPhase::Init,
                 }
             },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
+            LambdaMessage {
                     message: "INIT_START Runtime Version: test-runtime-version Runtime Version ARN: test-runtime-version-arn".to_string(),
                     lambda: Lambda {
                         arn: "arn".to_string(),
-                        request_id: "placeholder-request-id".to_string(),
+                        request_id: None,
                     },
                     timestamp: 1673061827000,
                     status: "info".to_string(),
                 },
-            }
         ),
 
         // platform start
@@ -246,21 +310,15 @@ mod tests {
                     version: Some("test-version".to_string()),
                 }
             },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
+            LambdaMessage {
                     message: "START RequestId: test-request-id Version: test-version".to_string(),
                     lambda: Lambda {
                         arn: "arn".to_string(),
-                        request_id: "test-request-id".to_string(),
+                        request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1673061827000,
                     status: "info".to_string(),
                 },
-            }
         ),
 
         // platform runtime done
@@ -277,21 +335,15 @@ mod tests {
                     })
                 }
             },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
+            LambdaMessage {
                     message: "END RequestId: test-request-id".to_string(),
                     lambda: Lambda {
                         arn: "arn".to_string(),
-                        request_id: "test-request-id".to_string(),
+                        request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1673061827000,
                     status: "info".to_string(),
                 },
-            }
         ),
 
         // platform report
@@ -312,21 +364,15 @@ mod tests {
                     }
                 }
             },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
+            LambdaMessage {
                     message: "REPORT RequestId: test-request-id Duration: 100 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
                     lambda: Lambda {
                         arn: "arn".to_string(),
-                        request_id: "test-request-id".to_string(),
+                        request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1673061827000,
                     status: "info".to_string(),
                 },
-            }
         ),
     }
 }
