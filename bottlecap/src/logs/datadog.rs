@@ -1,8 +1,5 @@
 use std::error::Error;
-
 use tracing::{debug, error};
-
-use crate::logs::processor::IntakeLog;
 
 pub struct Api {
     api_key: String,
@@ -19,17 +16,18 @@ impl Api {
         }
     }
 
-    pub fn send(&self, logs: &Vec<IntakeLog>) -> Result<(), Box<dyn Error>> {
+    pub fn send(&self, data: &[u8]) -> Result<(), Box<dyn Error>> {
         let url = format!("https://http-intake.logs.{}/api/v2/logs", &self.site);
 
-        if !logs.is_empty() {
+        // It could be an empty JSON array: []
+        if data.len() > 2 {
             let resp: Result<ureq::Response, ureq::Error> = self
                 .ureq_agent
                 .post(&url)
                 .set("DD-API-KEY", &self.api_key)
                 .set("DD-PROTOCOL", "agent-json")
                 .set("Content-Type", "application/json")
-                .send_json(logs);
+                .send_bytes(data);
 
             match resp {
                 Ok(resp) => {
