@@ -11,7 +11,7 @@ env:
 
 jobs:
   test:
-    name: unit tests
+    name: cargo test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -24,7 +24,7 @@ jobs:
         run: cargo test --verbose
   
   format:
-    name: fmt
+    name: cargo fmt
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,7 +37,7 @@ jobs:
         run: cargo fmt --verbose
 
   clippy:
-    name: clippy
+    name: cargo clippy
     runs-on: ubuntu-latest
     defaults:
       run:
