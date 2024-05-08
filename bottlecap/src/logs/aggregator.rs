@@ -1,17 +1,60 @@
-use crate::logs::processor::IntakeLog;
+use std::collections::VecDeque;
+use tracing::{debug, warn};
 
+use crate::logs::constants;
+use crate::logs::processor::IntakeLog;
 #[derive(Default)]
 pub struct Aggregator {
-    messages: Vec<IntakeLog>,
+    messages: VecDeque<String>,
 }
 
 impl Aggregator {
     pub fn add(&mut self, log: IntakeLog) {
-        self.messages.push(log);
+        match serde_json::to_string(&log) {
+            Ok(log) => self.messages.push_back(log),
+            Err(e) => debug!("Failed to serialize log: {}", e),
+        }
     }
 
-    pub fn get_batch(&mut self) -> Vec<IntakeLog> {
-        std::mem::take(&mut self.messages)
+    pub fn get_batch(&mut self) -> Vec<u8> {
+        let mut buffer: Vec<u8> = Vec::with_capacity(constants::MAX_CONTENT_SIZE_BYTES);
+        buffer.extend(b"[");
+
+        // Fill the batch with logs from the messages
+        for index in 0..constants::MAX_BATCH_ENTRIES_SIZE {
+            if index > 0 {
+                buffer.extend(b",");
+            }
+
+            if let Some(log) = self.messages.pop_front() {
+                // Check if the buffer will be full after adding the log
+                if buffer.len() + log.len() > constants::MAX_CONTENT_SIZE_BYTES {
+                    // Put the log back in the queue
+                    self.messages.push_front(log);
+                    break;
+                }
+
+                if log.len() > constants::MAX_LOG_SIZE_BYTES {
+                    warn!(
+                        "Log size exceeds the 1MB limit: {}, will be truncated by the backend.",
+                        log.len()
+                    );
+                }
+
+                buffer.extend(log.as_bytes());
+            } else {
+                break;
+            }
+        }
+        // Make sure we added at least one element
+        if buffer.len() > 1 {
+            // Remove the last comma
+            buffer.pop();
+        }
+
+        buffer.extend(b"]");
+
+        buffer
     }
 }
 
@@ -41,7 +84,7 @@ mod tests {
         };
         aggregator.add(log.clone());
         assert_eq!(aggregator.messages.len(), 1);
-        assert_eq!(aggregator.messages[0], log);
+        assert_eq!(aggregator.messages[0], serde_json::to_string(&log).unwrap());
     }
 
     #[test]
@@ -65,8 +108,7 @@ mod tests {
         aggregator.add(log.clone());
         assert_eq!(aggregator.messages.len(), 1);
         let batch = aggregator.get_batch();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(batch[0], log);
-        assert_eq!(aggregator.messages.len(), 0);
+        let serialized_batch = format!("[{}]", serde_json::to_string(&log).unwrap());
+        assert_eq!(batch, serialized_batch.as_bytes());
     }
 }
