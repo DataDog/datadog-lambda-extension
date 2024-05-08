@@ -1,7 +1,7 @@
 //!Types to serialize data into the Datadog API
 
 use datadog_protos::metrics::SketchPayload;
-use protobuf::CodedOutputStream;
+use protobuf::Message;
 use serde::{Serialize, Serializer};
 use serde_json;
 use tracing::error;
@@ -68,14 +68,16 @@ impl DdApi {
     pub fn ship_distributions(&self, sketches: SketchPayload) -> Result<(), ShipError> {
         let url = format!("https://api.{}/api/beta/sketches", &self.site);
         let mut buf = Vec::new();
-
-        let mut output_stream = CodedOutputStream::vec(&mut buf);
-        // Todo(astuyve) get field number from protobuf
-        let _ = output_stream
-            .write_tag(1, protobuf::rt::WireType::LengthDelimited);
-
-        let _ = output_stream.write_message_no_tag(&sketches);
-        drop(output_stream);
+        // TODO maybe go to coded output stream if we incrementally
+        // add sketch payloads to the buffer
+        // something like this, but fix the utf-8 encoding issue
+        // {
+        //     let mut output_stream = CodedOutputStream::vec(&mut buf);
+        //     let _ = output_stream.write_tag(1, protobuf::rt::WireType::LengthDelimited);
+        //     let _ = output_stream.write_message_no_tag(&sketches);
+        //     TODO not working, has utf-8 encoding issue in dist-intake
+        //}
+        sketches.write_to_vec(&mut buf).expect("can't write to buffer");
         let resp: Result<ureq::Response, ureq::Error> = self
             .ureq_agent
             .post(&url)

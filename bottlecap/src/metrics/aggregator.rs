@@ -8,7 +8,6 @@ use crate::metrics::{
 
 use std::time;
 use datadog_protos::metrics::{Dogsketch, SketchPayload, Sketch};
-use protobuf::Chars;
 use hashbrown::hash_table;
 use tracing::error;
 use ustr::Ustr;
@@ -165,11 +164,6 @@ impl Entry {
             }
         })
     }
-
-    // #[inline]
-    // fn aged_out(self, generation: u16) -> bool {
-    //     self.generation.abs_diff(generation) >= 2
-    // }
 }
 
 #[derive(Clone)]
@@ -233,6 +227,12 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 
     pub fn distributions_to_protobuf(&self) -> SketchPayload {
         let mut sketch_payload = SketchPayload::new();
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         for entry in &self.map {
             if entry.kind != metric::Type::Distribution {
                 continue;
@@ -240,12 +240,14 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let sketch = entry.metric_value.get_sketch();
             let mut dogsketch = Dogsketch::default();
             sketch.merge_to_dogsketch(&mut dogsketch);
+            // TODO(Astuyve) allow users to specify timestamp
+            dogsketch.set_ts(now);
             let mut sketch = Sketch::default();
             sketch.set_dogsketches(vec![dogsketch]);
             let tags = entry.tags.unwrap_or_default().to_string();
             let name = entry.name.to_string();
-            sketch.set_metric(Chars::from(name));
-            sketch.set_tags(vec![Chars::from(tags)]);
+            sketch.set_metric(name.clone().into());
+            sketch.set_tags(vec![tags.clone().into()]);
             sketch_payload.sketches.push(sketch);
         }
         sketch_payload
