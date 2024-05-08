@@ -10,7 +10,7 @@ variables:
     description: "Suffix to be appended to the layer name (default empty)"
     value: ""
 
-image: 486234852809.dkr.ecr.us-east-1.amazonaws.com/docker:20.10-py3
+image: registry.ddbuild.io/images/docker:20.10-py3
 
 stages:
   - build_tools_if_needed
@@ -22,7 +22,7 @@ build_tools:
   stage: build_tools_if_needed
   variables:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
-    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+    TARGET: registry.ddbuild.io/ci/datadog-lambda-extension
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: never
@@ -39,7 +39,7 @@ build_and_deploy_layer:
   variables:
     CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
-    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+    TARGET: registry.ddbuild.io/ci/datadog-lambda-extension
   tags: ["runner:docker"]
   artifacts:
     paths:
@@ -106,7 +106,7 @@ prepare_multi_region:
     - if: $CI_PIPELINE_SOURCE == "pipeline"
     - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
   variables:
-    TARGET: 486234852809.dkr.ecr.us-east-1.amazonaws.com/ci/datadog-lambda-extension
+    TARGET: registry.ddbuild.io/ci/datadog-lambda-extension
     ROLE_TO_ASSUME: arn:aws:iam::425362996713:role/sandbox-layer-deployer
   script:
     - echo $CI_PIPELINE_SOURCE
