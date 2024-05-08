@@ -13,10 +13,12 @@ jobs:
   build:
     name: unit tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: bottlecap
     
     steps:
       - uses: actions/checkout@v3
-      - run: cd bottlecap
       
       - name: Build
         run: cargo build --verbose
