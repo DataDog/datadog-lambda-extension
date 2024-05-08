@@ -1,5 +1,7 @@
 //!Types to serialize data into the Datadog API
 
+use datadog_protos::metrics::SketchPayload;
+use protobuf::CodedOutputStream;
 use serde::{Serialize, Serializer};
 use serde_json;
 use tracing::error;
@@ -39,8 +41,7 @@ impl DdApi {
     }
 
     /// Ship a serialized series to the API, blocking
-    pub fn ship(&self, series: &Series) -> Result<(), ShipError> {
-        // call inner_ship onto the runtime
+    pub fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
         let body = serde_json::to_vec(&series)?;
         log::info!("sending body: {:?}", &series);
 
@@ -51,6 +52,36 @@ impl DdApi {
             .set("DD-API-KEY", &self.api_key)
             .set("Content-Type", "application/json")
             .send_bytes(body.as_slice());
+        match resp {
+            Ok(_resp) => Ok(()),
+            Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {
+                status: code,
+                body: response.into_string().unwrap(),
+            }),
+            Err(e) => Err(ShipError::Failure {
+                status: 500,
+                body: e.to_string(),
+            }),
+        }
+    }
+
+    pub fn ship_distributions(&self, sketches: SketchPayload) -> Result<(), ShipError> {
+        let url = format!("https://api.{}/api/beta/sketches", &self.site);
+        let mut buf = Vec::new();
+
+        let mut output_stream = CodedOutputStream::vec(&mut buf);
+        // Todo(astuyve) get field number from protobuf
+        let _ = output_stream
+            .write_tag(1, protobuf::rt::WireType::LengthDelimited);
+
+        let _ = output_stream.write_message_no_tag(&sketches);
+        drop(output_stream);
+        let resp: Result<ureq::Response, ureq::Error> = self
+            .ureq_agent
+            .post(&url)
+            .set("DD-API-KEY", &self.api_key)
+            .set("Content-Type", "application/x-protobuf")
+            .send_bytes(&buf);
         match resp {
             Ok(_resp) => Ok(()),
             Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {

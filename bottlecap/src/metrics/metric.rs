@@ -13,6 +13,7 @@ pub enum Type {
     /// Dogstatsd 'distribution' metric type, histogram
     Distribution,
 }
+
 /// Representation of a dogstatsd Metric
 ///
 /// For now this implementation covers only counters and gauges. We hope this is
@@ -46,6 +47,7 @@ pub struct Metric {
     /// is a different tagset from `b:2,a:1`.
     pub(crate) tags: Option<Ustr>,
 }
+
 
 impl Metric {
     /// Parse a metric from given input.

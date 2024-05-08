@@ -94,7 +94,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             // General
-            site: "datadoqhq.com".to_string(),
+            site: "datadoghq.com".to_string(),
             api_key: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
             // Unified Tagging
