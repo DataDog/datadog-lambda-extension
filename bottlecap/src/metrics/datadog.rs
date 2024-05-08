@@ -77,7 +77,9 @@ impl DdApi {
         //     let _ = output_stream.write_message_no_tag(&sketches);
         //     TODO not working, has utf-8 encoding issue in dist-intake
         //}
-        sketches.write_to_vec(&mut buf).expect("can't write to buffer");
+        sketches
+            .write_to_vec(&mut buf)
+            .expect("can't write to buffer");
         let resp: Result<ureq::Response, ureq::Error> = self
             .ureq_agent
             .post(&url)
@@ -124,8 +126,6 @@ pub(crate) enum DdMetricKind {
     Count,
     /// An instantaneous value
     Gauge,
-    /// A distribution of values
-    Distribution,
 }
 
 impl Serialize for DdMetricKind {
@@ -136,7 +136,6 @@ impl Serialize for DdMetricKind {
         match *self {
             DdMetricKind::Count => serializer.serialize_u32(0),
             DdMetricKind::Gauge => serializer.serialize_u32(1),
-            DdMetricKind::Distribution => serializer.serialize_u32(2),
         }
     }
 }

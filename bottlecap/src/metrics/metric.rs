@@ -48,7 +48,6 @@ pub struct Metric {
     pub(crate) tags: Option<Ustr>,
 }
 
-
 impl Metric {
     /// Parse a metric from given input.
     ///

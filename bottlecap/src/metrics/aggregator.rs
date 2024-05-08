@@ -6,9 +6,9 @@ use crate::metrics::{
     metric::{Metric, Type},
 };
 
-use std::time;
-use datadog_protos::metrics::{Dogsketch, SketchPayload, Sketch};
+use datadog_protos::metrics::{Dogsketch, Sketch, SketchPayload};
 use hashbrown::hash_table;
+use std::time;
 use tracing::error;
 use ustr::Ustr;
 
@@ -37,17 +37,17 @@ struct Entry {
 
 #[derive(Debug, Clone)]
 struct DistributionMetric {
-    pub sketch: ddsketch_agent::DDSketch
+    pub sketch: ddsketch_agent::DDSketch,
 }
 
 #[derive(Debug, Clone)]
 struct CountMetric {
-    value: f64
+    value: f64,
 }
 
 #[derive(Debug, Clone)]
 struct GaugeMetric {
-    value: f64
+    value: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -138,8 +138,12 @@ impl Entry {
         Self {
             id,
             metric_value: match metric.kind {
-                Type::Count => MetricValue::Count(CountMetric { value: new_metric_value }),
-                Type::Gauge => MetricValue::Gauge(GaugeMetric { value: new_metric_value }),
+                Type::Count => MetricValue::Count(CountMetric {
+                    value: new_metric_value,
+                }),
+                Type::Gauge => MetricValue::Gauge(GaugeMetric {
+                    value: new_metric_value,
+                }),
                 Type::Distribution => {
                     let mut empty_sketch = MetricValue::Distribution(DistributionMetric {
                         sketch: ddsketch_agent::DDSketch::default(),
@@ -216,7 +220,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             }
             hash_table::Entry::Occupied(mut entry) => {
                 entry.get_mut().metric_value.insert_metric(metric);
-            },
+            }
         }
         Ok(())
     }
