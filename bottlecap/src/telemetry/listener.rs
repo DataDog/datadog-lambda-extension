@@ -3,7 +3,7 @@ use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -118,7 +118,7 @@ pub struct TelemetryListenerConfig {
 impl TelemetryListener {
     pub fn run(
         config: &TelemetryListenerConfig,
-        event_bus: Sender<events::Event>,
+        event_bus: SyncSender<events::Event>,
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
@@ -152,7 +152,7 @@ impl TelemetryListener {
     fn handle_stream(
         stream: &mut impl Read,
         mut buf: [u8; 262144],
-        event_bus: Sender<events::Event>,
+        event_bus: SyncSender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
         #![allow(clippy::unused_io_amount)]

@@ -1,4 +1,4 @@
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 
 use tracing::{error, info};
 
@@ -23,7 +23,7 @@ pub struct DogStatsDConfig {
 }
 
 impl DogStatsD {
-    pub fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
+    pub fn run(config: &DogStatsDConfig, event_bus: SyncSender<events::Event>) -> DogStatsD {
         let aggr: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>> = Arc::new(Mutex::new(
             Aggregator::<{ constants::CONTEXTS }>::new().expect("failed to create aggregator"),
         ));
@@ -44,7 +44,7 @@ impl DogStatsD {
     fn run_server(
         host: &str,
         port: u16,
-        event_bus: Sender<events::Event>,
+        event_bus: SyncSender<events::Event>,
         aggregator: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>>,
     ) -> std::thread::JoinHandle<()> {
         let addr = format!("{}:{}", host, port);
