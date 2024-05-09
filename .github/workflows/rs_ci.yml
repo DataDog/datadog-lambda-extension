@@ -138,7 +138,7 @@ jobs:
         run: cargo nextest run --workspace
 
   format:
-    name: `cargo fmt`
+    name: Format
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
