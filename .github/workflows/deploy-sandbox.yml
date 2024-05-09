@@ -60,7 +60,7 @@ jobs:
           echo ::add-mask::"8"
           echo ::add-mask::"9"
           echo ::add-mask::"|"
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - id: auth
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
@@ -71,7 +71,7 @@ jobs:
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
           --mfa-code ${{ inputs.mfaCode }} \
           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           repository: DataDog/datadog-agent
           ref: refs/heads/${{ inputs.agentBranch }}
@@ -154,7 +154,7 @@ jobs:
           echo ::add-mask::"8"
           echo ::add-mask::"9"
           echo ::add-mask::"|"
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v3
         with:
           name: datadog-extension
