@@ -9,7 +9,6 @@ use crate::metrics::constants;
 use crate::metrics::datadog;
 use crate::metrics::metric::Metric;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
 
 pub struct DogStatsD {
     serve_handle: std::thread::JoinHandle<()>,
