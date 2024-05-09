@@ -7,6 +7,7 @@ use crate::metrics::constants;
 use crate::metrics::datadog;
 use crate::metrics::metric::Metric;
 use std::sync::{Arc, Mutex};
+use tracing::debug;
 
 pub struct DogStatsD {
     serve_handle: std::thread::JoinHandle<()>,
@@ -101,7 +102,6 @@ impl DogStatsD {
                 .ship_series(&current_points)
                 // TODO(astuyve) retry and do not panic
                 .expect("failed to ship metrics to datadog");
-                return;
         }
         if !current_distribution_points.sketches.is_empty() {
             let _ = &self
