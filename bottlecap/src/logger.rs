@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use crate::config::LogLevel;
 use log::{LevelFilter, Log, Metadata, Record};
 
@@ -24,7 +26,31 @@ impl Log for SimpleLogger {
     }
 
     fn log(&self, record: &Record) {
-        println!("[{}] {}", record.level(), record.args());
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+
+        match record.level() {
+            log::Level::Error => {
+                write!(handle, "[ERROR] ").expect("failed to write to stdout");
+                writeln!(handle, "{}", record.args()).expect("failed to write to stdout");
+            }
+            log::Level::Warn => {
+                write!(handle, "[WARN] ").expect("failed to write to stdout");
+                writeln!(handle, "{}", record.args()).expect("failed to write to stdout");
+            }
+            log::Level::Info => {
+                write!(handle, "[INFO] ").expect("failed to write to stdout");
+                writeln!(handle, "{}", record.args()).expect("failed to write to stdout");
+            }
+            log::Level::Debug => {
+                write!(handle, "[DEBUG] ").expect("failed to write to stdout");
+                writeln!(handle, "{}", record.args()).expect("failed to write to stdout");
+            }
+            log::Level::Trace => {
+                write!(handle, "[TRACE] ").expect("failed to write to stdout");
+                writeln!(handle, "{}", record.args()).expect("failed to write to stdout");
+            }
+        }
     }
 
     fn flush(&self) {}
