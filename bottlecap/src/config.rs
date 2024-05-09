@@ -150,9 +150,10 @@ pub enum ConfigError {
 
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
-    let figment = Figment::new().merge(Yaml::file(path));
-    // .merge(Env::prefixed("DATADOG_"))
-    // .merge(Env::prefixed("DD_"));
+    let figment = Figment::new()
+        .merge(Yaml::file(path))
+        .merge(Env::prefixed("DATADOG_"))
+        .merge(Env::prefixed("DD_"));
 
     let config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => ConfigError::UnsupportedField(field),
