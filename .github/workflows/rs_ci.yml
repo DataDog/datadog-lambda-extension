@@ -12,7 +12,7 @@ env:
   PB_TARGET: linux-x86_64
 
 jobs:
-  cancel previous:
+  cancel-previous:
     runs-on: ubuntu-22.04
     timeout-minutes: 3
     steps:
@@ -78,7 +78,7 @@ jobs:
       - working-directory: bottlecap
         run: cargo clippy --workspace --all-features
 
-  build all:
+  build-all:
     name: build all
     runs-on: ubuntu-22.04
     env:
