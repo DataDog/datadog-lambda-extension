@@ -1,4 +1,4 @@
-name: Continuous integration (Rust)
+name: Bottlecap (Rust)
 
 on:
   pull_request:
@@ -22,7 +22,7 @@ jobs:
           all_but_latest: true # can cancel workflows scheduled later
 
   check:
-    name: cargo check
+    name: Check
     runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
@@ -50,7 +50,7 @@ jobs:
         run: cargo check --workspace
 
   clippy:
-    name: cargo clippy
+    name: Clippy
     runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
@@ -79,7 +79,7 @@ jobs:
         run: cargo clippy --workspace --all-features
 
   build-all:
-    name: build all
+    name: Build All
     runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
@@ -138,7 +138,7 @@ jobs:
         run: cargo nextest run --workspace
 
   format:
-    name: cargo fmt
+    name: \`cargo fmt\`
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
