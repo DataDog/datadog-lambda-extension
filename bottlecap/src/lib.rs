@@ -1,4 +1,4 @@
-///! Crate for the `bottlecap` project
+//! Crate for the `bottlecap` project
 pub mod config;
 pub mod event_bus;
 pub mod events;
