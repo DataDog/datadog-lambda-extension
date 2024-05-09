@@ -2,33 +2,33 @@
 name = "bottlecap"
 version = "0.1.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+publish = false
 
 [dependencies]
+chrono = { version = "0.4.38", features = ["serde"] }
+datadog-protos = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
+ddsketch-agent = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
 figment = { version = "0.10.15", features = ["yaml", "env"] }
-serde = { version = "1.0.197", features = ["derive"], default-features = false }
-tracing = {version = "0.1.40", default-features = false }
-tracing-core = { version = "0.1.32", default-features = false }
-tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter"] }
-tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
-log = { version = "0.4.21", default-features = false, features = [] }
-ustr = { version = "1.0.0", default-features = false }
-thiserror = { version = "1.0.58", default-features = false }
 fnv = { version = "1.0.7", default-features = false }
 hashbrown = { version = "0.14.3", default-features = false, features = ["inline-more"] }
-serde_json = { version = "1.0.116", features = ["alloc"], default-features = false }
-ureq = { version = "2.9.7", features = ["tls", "json"], default-features = false }
-chrono = { version = "0.4.38", features = ["serde"] }
-ddsketch-agent = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
-datadog-protos = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
+log = { version = "0.4.21", default-features = false, features = [] }
 protobuf = { version = "3.4.0", default-features = false }
-
+serde = { version = "1.0.197", features = ["derive"], default-features = false }
+serde_json = { version = "1.0.116", features = ["alloc"], default-features = false }
+thiserror = { version = "1.0.58", default-features = false }
+tracing = {version = "0.1.40", default-features = false }
+tracing-core = { version = "0.1.32", default-features = false }
+tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
+tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter"] }
+ureq = { version = "2.9.7", features = ["tls", "json"], default-features = false }
+ustr = { version = "1.0.0", default-features = false }
 
 [dev-dependencies]
 figment = { version = "0.10.15", features = ["yaml", "env", "test"] }
 proptest = "1.4.0"
 
+[[bin]]
+name = "bottlecap"
 
 [profile.release]
 opt-level = "z"  # Optimize for size.
