@@ -332,6 +332,20 @@ mod tests {
     }
 
     #[test]
+    fn distribution_insertion() {
+        let mut aggregator = Aggregator::<2>::new().unwrap();
+
+        let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
+        let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
+
+        assert!(aggregator.insert(&metric1).is_ok());
+        assert!(aggregator.insert(&metric2).is_ok());
+
+        // Both unique contexts get one slot.
+        assert_eq!(aggregator.map.len(), 2);
+    }
+
+    #[test]
     fn overflow() {
         let mut aggregator = Aggregator::<2>::new().unwrap();
 
@@ -393,5 +407,22 @@ mod tests {
 
         assert!(aggregator.insert(&metric3).is_err());
         assert_eq!(aggregator.to_series().len(), 2);
+    }
+
+    #[test]
+    fn distributions_to_protobuf() {
+        let mut aggregator = Aggregator::<2>::new().unwrap();
+
+        let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
+        let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
+
+        assert!(aggregator.insert(&metric1).is_ok());
+        assert!(aggregator.insert(&metric2).is_ok());
+
+        assert_eq!(aggregator.map.len(), 2);
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 2);
+        assert_eq!(aggregator.map.len(), 2);
     }
 }
