@@ -13,6 +13,7 @@ pub enum Type {
     /// Dogstatsd 'distribution' metric type, histogram
     Distribution,
 }
+
 /// Representation of a dogstatsd Metric
 ///
 /// For now this implementation covers only counters and gauges. We hope this is
@@ -195,7 +196,7 @@ pub fn id(name: Ustr, tagset: Option<Ustr>) -> u64 {
     }
     hasher.finish()
 }
-// <METRIC_NAME>:<VALUE>:<VALUE>:<VALUE>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_KEY_2>:<TAG_VALUE_2>|c:<CONTAINER_ID>
+// <METRIC_NAME>:<VALUE>:<VALUE>:<VALUE>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_KEY_2>:<TAG_VALUE_2>|T<METRIC_TIMESTAMP>|c:<CONTAINER_ID>
 //
 // Types:
 //  * c -- COUNT, allows packed values, summed
