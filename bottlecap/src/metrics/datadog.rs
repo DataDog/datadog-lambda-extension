@@ -4,7 +4,7 @@ use datadog_protos::metrics::SketchPayload;
 use protobuf::Message;
 use serde::{Serialize, Serializer};
 use serde_json;
-use tracing::error;
+use tracing::{debug, error};
 use ureq;
 
 /// Interface for the DogStatsD metrics intake API.
@@ -43,7 +43,7 @@ impl DdApi {
     /// Ship a serialized series to the API, blocking
     pub fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
         let body = serde_json::to_vec(&series)?;
-        log::info!("sending series: {:?}", &series);
+        debug!("sending body: {:?}", &series);
 
         let url = format!("https://api.{}/api/v2/series", &self.site);
         let resp: Result<ureq::Response, ureq::Error> = self
