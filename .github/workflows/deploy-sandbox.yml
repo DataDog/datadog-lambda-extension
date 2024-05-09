@@ -77,7 +77,7 @@ jobs:
           ref: refs/heads/${{ inputs.agentBranch }}
           path: datadog-agent
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2.1.0
+        uses: docker/setup-qemu-action@v3
       - run: |
          ./build-tools/bin/build_tools \
          build \
