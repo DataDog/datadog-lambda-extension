@@ -13,6 +13,7 @@ env:
 
 jobs:
   cancel-previous:
+    name: Cancel Previous Jobs
     runs-on: ubuntu-22.04
     timeout-minutes: 3
     steps:
