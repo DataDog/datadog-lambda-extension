@@ -106,7 +106,7 @@ impl DogStatsD {
         if !current_distribution_points.sketches.is_empty() {
             let _ = &self
                 .dd_api
-                .ship_distributions(current_distribution_points)
+                .ship_distributions(&current_distribution_points)
                 // TODO(astuyve) retry and do not panic
                 .expect("failed to ship metrics to datadog");
         }

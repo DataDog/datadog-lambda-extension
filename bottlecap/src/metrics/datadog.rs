@@ -43,7 +43,7 @@ impl DdApi {
     /// Ship a serialized series to the API, blocking
     pub fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
         let body = serde_json::to_vec(&series)?;
-        log::info!("sending body: {:?}", &series);
+        log::info!("sending series: {:?}", &series);
 
         let url = format!("https://api.{}/api/v2/series", &self.site);
         let resp: Result<ureq::Response, ureq::Error> = self
@@ -65,9 +65,10 @@ impl DdApi {
         }
     }
 
-    pub fn ship_distributions(&self, sketches: SketchPayload) -> Result<(), ShipError> {
+    pub fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
         let url = format!("https://api.{}/api/beta/sketches", &self.site);
         let mut buf = Vec::new();
+        log::info!("sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
         // add sketch payloads to the buffer
         // something like this, but fix the utf-8 encoding issue
