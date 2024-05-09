@@ -2,7 +2,7 @@
 
 use serde::{Serialize, Serializer};
 use serde_json;
-use tracing::error;
+use tracing::{debug, error};
 use ureq;
 
 /// Interface for the DogStatsD metrics intake API.
@@ -42,7 +42,7 @@ impl DdApi {
     pub fn ship(&self, series: &Series) -> Result<(), ShipError> {
         // call inner_ship onto the runtime
         let body = serde_json::to_vec(&series)?;
-        log::info!("sending body: {:?}", &series);
+        debug!("sending body: {:?}", &series);
 
         let url = format!("https://api.{}/api/v2/series", &self.site);
         let resp: Result<ureq::Response, ureq::Error> = self

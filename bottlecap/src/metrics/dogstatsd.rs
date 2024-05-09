@@ -1,5 +1,7 @@
 use std::sync::mpsc::Sender;
 
+use tracing::{error, info};
+
 use crate::config;
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
@@ -53,25 +55,24 @@ impl DogStatsD {
                 let (amt, src) = socket.recv_from(&mut buf).expect("didn't receive data");
                 let buf = &mut buf[..amt];
                 let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
-                log::info!(
+                info!(
                     "received message: {} from {}, sending it to the bus",
-                    msg,
-                    src
+                    msg, src
                 );
                 let parsed_metric = match Metric::parse(msg) {
                     Ok(parsed_metric) => {
-                        log::info!("parsed metric: {:?}", parsed_metric);
+                        info!("parsed metric: {:?}", parsed_metric);
                         parsed_metric
                     }
                     Err(e) => {
-                        log::error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+                        error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
                         continue;
                     }
                 };
                 let first_value = match parsed_metric.first_value() {
                     Ok(val) => val,
                     Err(e) => {
-                        log::error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+                        error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
                         continue;
                     }
                 };
@@ -84,7 +85,7 @@ impl DogStatsD {
                     .lock()
                     .expect("lock poisoned")
                     .insert(&parsed_metric);
-                log::info!("inserted metric into aggregator");
+                info!("inserted metric into aggregator");
                 // Don't publish until after validation and adding metric_event to buff
                 let _ = event_bus.send(Event::Metric(metric_event)); // todo check the result
             }
@@ -109,10 +110,10 @@ impl DogStatsD {
         self.flush();
         match self.serve_handle.join() {
             Ok(_) => {
-                log::info!("DogStatsD thread has been shutdown");
+                info!("DogStatsD thread has been shutdown");
             }
             Err(e) => {
-                log::error!("Error shutting down the DogStatsD thread: {:?}", e);
+                error!("Error shutting down the DogStatsD thread: {:?}", e);
             }
         }
     }
