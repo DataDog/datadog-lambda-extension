@@ -1,5 +1,7 @@
 use std::sync::mpsc::Sender;
 
+use tracing::{error, info};
+
 use crate::config;
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
@@ -49,29 +51,29 @@ impl DogStatsD {
         std::thread::spawn(move || {
             let socket = std::net::UdpSocket::bind(addr).expect("couldn't bind to address");
             loop {
+                // TODO(astuyve) this should be dynamic
                 let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
                 let (amt, src) = socket.recv_from(&mut buf).expect("didn't receive data");
                 let buf = &mut buf[..amt];
                 let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
-                log::info!(
+                info!(
                     "received message: {} from {}, sending it to the bus",
-                    msg,
-                    src
+                    msg, src
                 );
                 let parsed_metric = match Metric::parse(msg) {
                     Ok(parsed_metric) => {
-                        log::info!("parsed metric: {:?}", parsed_metric);
+                        info!("parsed metric: {:?}", parsed_metric);
                         parsed_metric
                     }
                     Err(e) => {
-                        log::error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+                        error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
                         continue;
                     }
                 };
                 let first_value = match parsed_metric.first_value() {
                     Ok(val) => val,
                     Err(e) => {
-                        log::error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+                        error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
                         continue;
                     }
                 };
@@ -84,7 +86,6 @@ impl DogStatsD {
                     .lock()
                     .expect("lock poisoned")
                     .insert(&parsed_metric);
-                log::info!("inserted metric into aggregator");
                 // Don't publish until after validation and adding metric_event to buff
                 let _ = event_bus.send(Event::Metric(metric_event)); // todo check the result
             }
@@ -94,14 +95,21 @@ impl DogStatsD {
     pub fn flush(&mut self) {
         let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned");
         let current_points = locked_aggr.to_series();
-        if current_points.series.is_empty() {
-            return;
+        let current_distribution_points = locked_aggr.distributions_to_protobuf();
+        if !current_points.series.is_empty() {
+            let _ = &self
+                .dd_api
+                .ship_series(&current_points)
+                // TODO(astuyve) retry and do not panic
+                .expect("failed to ship metrics to datadog");
         }
-        let _ = &self
-            .dd_api
-            .ship(&current_points)
-            // TODO(astuyve) retry and do not panic
-            .expect("failed to ship metrics to datadog");
+        if !current_distribution_points.sketches.is_empty() {
+            let _ = &self
+                .dd_api
+                .ship_distributions(&current_distribution_points)
+                // TODO(astuyve) retry and do not panic
+                .expect("failed to ship metrics to datadog");
+        }
         locked_aggr.clear();
     }
 
@@ -109,10 +117,10 @@ impl DogStatsD {
         self.flush();
         match self.serve_handle.join() {
             Ok(_) => {
-                log::info!("DogStatsD thread has been shutdown");
+                info!("DogStatsD thread has been shutdown");
             }
             Err(e) => {
-                log::error!("Error shutting down the DogStatsD thread: {:?}", e);
+                error!("Error shutting down the DogStatsD thread: {:?}", e);
             }
         }
     }
