@@ -46,7 +46,7 @@ jobs:
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo check --workspace
 
   clippy:
@@ -75,7 +75,7 @@ jobs:
           components: clippy
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo clippy --workspace --all-features
 
   build all:
@@ -103,7 +103,7 @@ jobs:
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo build --all
 
   test:
@@ -134,7 +134,7 @@ jobs:
         with:
           tool: nextest@0.9
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo nextest run --workspace
 
   format:
@@ -149,5 +149,5 @@ jobs:
         with:
           components: rustfmt
           cache: false
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo fmt --all -- --check
