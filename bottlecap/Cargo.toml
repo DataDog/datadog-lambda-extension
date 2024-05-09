@@ -7,10 +7,12 @@ edition = "2021"
 
 [dependencies]
 figment = { version = "0.10.15", features = ["yaml", "env"] }
-log = "0.4.21"
 serde = { version = "1.0.197", features = ["derive"], default-features = false }
 tracing = {version = "0.1.40", default-features = false }
-tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter", "json"] }
+tracing-core = { version = "0.1.32", default-features = false }
+tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter"] }
+tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
+log = { version = "0.4.21", default-features = false, features = [] }
 ustr = { version = "1.0.0", default-features = false }
 thiserror = { version = "1.0.58", default-features = false }
 fnv = { version = "1.0.7", default-features = false }
@@ -30,4 +32,3 @@ opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
 strip = true
-
