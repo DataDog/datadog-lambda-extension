@@ -135,7 +135,6 @@ impl Metric {
     pub(crate) fn tags(&self) -> Vec<String> {
         self.tags
             .unwrap_or_default()
-            .to_string()
             .split(',')
             .map(|tag| tag.to_string())
             .collect()

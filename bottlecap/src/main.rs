@@ -276,7 +276,6 @@ fn main() -> Result<()> {
                                 }
                             }
                         }
-                        _ => {}
                     }
                 } else {
                     error!("could not get the event");
