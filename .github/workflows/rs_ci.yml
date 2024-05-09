@@ -12,7 +12,7 @@ env:
   PB_TARGET: linux-x86_64
 
 jobs:
-  cancel-previous:
+  cancel previous:
     runs-on: ubuntu-22.04
     timeout-minutes: 3
     steps:
@@ -22,11 +22,8 @@ jobs:
           all_but_latest: true # can cancel workflows scheduled later
 
   check:
-    name: Check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+    name: cargo check
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -52,11 +49,9 @@ jobs:
       - working-directory: ./bottlecap
         run: cargo check --workspace
 
-  clippy_check:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+  clippy:
+    name: cargo clippy
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -83,12 +78,9 @@ jobs:
       - working-directory: ./bottlecap
         run: cargo clippy --workspace --all-features
 
-  build_all:
-    name: Build All
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+  build all:
+    name: build all
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -116,10 +108,7 @@ jobs:
 
   test:
     name: Test Suite
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -148,8 +137,8 @@ jobs:
       - working-directory: ./bottlecap
         run: cargo nextest run --workspace
 
-  fmt:
-    name: Rustfmt
+  format:
+    name: cargo fmt
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
