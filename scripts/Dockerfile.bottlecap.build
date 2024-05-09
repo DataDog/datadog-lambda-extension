@@ -1,6 +1,8 @@
 # syntax = docker/dockerfile:experimental
 
 FROM rust:1.77-buster as bottlecap-builder
+RUN apt-get update
+RUN apt-get install -y protobuf-compiler
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap /tmp/dd/bottlecap
 RUN cd /tmp/dd/bottlecap && cargo build --release

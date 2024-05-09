@@ -1,0 +1,154 @@
+name: Bottlecap (Rust)
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+env:
+  PB_VERSION: 25.3
+  PB_URL: https://github.com/protocolbuffers/protobuf/releases/download
+  PB_TARGET: linux-x86_64
+
+jobs:
+  cancel-previous:
+    name: Cancel Previous Jobs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 3
+    steps:
+      - uses: styfle/cancel-workflow-action@0.12.1
+        with:
+          access_token: ${{ secrets.GITHUB_TOKEN }}
+          all_but_latest: true # can cancel workflows scheduled later
+
+  check:
+    name: Check
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install protobuf compiler for linux. The versions bundled with Ubuntu
+      # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
+      # so we need to download a protoc binary instead.
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y curl unzip cmake
+      - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
+        run: |
+          curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
+          unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
+          export PATH="$PATH:$HOME/.local/bin"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        with:
+          cache: false
+      - uses: mozilla-actions/sccache-action@v0.0.4
+      - working-directory: bottlecap
+        run: cargo check --workspace
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install protobuf compiler for linux. The versions bundled with Ubuntu
+      # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
+      # so we need to download a protoc binary instead.
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y curl unzip cmake
+      - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
+        run: |
+          curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
+          unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
+          export PATH="$PATH:$HOME/.local/bin"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        with:
+          components: clippy
+          cache: false
+      - uses: mozilla-actions/sccache-action@v0.0.4
+      - working-directory: bottlecap
+        run: cargo clippy --workspace --all-features
+
+  build-all:
+    name: Build All
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install protobuf compiler for linux. The versions bundled with Ubuntu
+      # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
+      # so we need to download a protoc binary instead.
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y curl unzip cmake
+      - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
+        run: |
+          curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
+          unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
+          export PATH="$PATH:$HOME/.local/bin"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        with:
+          cache: false
+      - uses: mozilla-actions/sccache-action@v0.0.4
+      - working-directory: bottlecap
+        run: cargo build --all
+
+  test:
+    name: Test Suite
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: "0"
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install protobuf compiler for linux. The versions bundled with Ubuntu
+      # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
+      # so we need to download a protoc binary instead.
+      - run: sudo apt-get update
+      - run: sudo apt-get install -y curl unzip cmake
+      - name: Install protobuf ${{ env.PB_VERSION }} compiler from binary for ${{ env.PB_TARGET }}
+        run: |
+          curl -LO "${{ env.PB_URL }}/v${{ env.PB_VERSION }}/protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip"
+          unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
+          export PATH="$PATH:$HOME/.local/bin"
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        with:
+          cache: false
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9
+      - uses: mozilla-actions/sccache-action@v0.0.4
+      - working-directory: bottlecap
+        run: cargo nextest run --workspace
+
+  format:
+    name: Format
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-22.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.8.0
+        with:
+          components: rustfmt
+          cache: false
+      - working-directory: bottlecap
+        run: cargo fmt --all -- --check

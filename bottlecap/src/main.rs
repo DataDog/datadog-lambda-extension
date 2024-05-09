@@ -2,16 +2,16 @@
 mod config;
 mod event_bus;
 mod lifecycle;
-mod logger;
 mod logs;
 mod metrics;
 mod telemetry;
 use lifecycle::flush_control::FlushControl;
 use telemetry::listener::TelemetryListenerConfig;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 mod events;
+mod logger;
 
 use crate::event_bus::bus::EventBus;
 use crate::events::Event;
@@ -28,7 +28,6 @@ use std::io::Result;
 use std::sync::Arc;
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
-use logger::SimpleLogger;
 use serde::Deserialize;
 
 const EXTENSION_HOST: &str = "0.0.0.0";
@@ -134,23 +133,43 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 }
 
 fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .json()
-        .with_env_filter(EnvFilter::from_default_env())
-        .without_time()
-        .init();
-
     // First load the configuration
-    let lambda_directory = std::env::var("LAMBDA_TASK_ROOT").unwrap_or_default();
+    let lambda_directory = env::var("LAMBDA_TASK_ROOT")
+        .expect("unable to read environment variable: LAMBDA_TASK_ROOT");
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(e) => {
-            log::error!("Error loading configuration: {:?}", e);
+            // NOTE we must print here as the logging subsystem is not enabled yet.
+            println!("Error loading configuration: {:?}", e);
             let err = Command::new("/opt/datadog-agent-go").exec();
             panic!("Error starting the extension: {:?}", err);
         }
     };
-    SimpleLogger::init(config.log_level).expect("Error initializing logger");
+
+    // Bridge any `log` logs into the tracing subsystem. Note this is a global
+    // registration.
+    tracing_log::LogTracer::builder()
+        .with_max_level(config.log_level.as_level_filter())
+        .init()
+        .expect("failed to set up log bridge");
+
+    let subscriber = tracing_subscriber::fmt::Subscriber::builder()
+        .with_env_filter(
+            EnvFilter::try_new(config.log_level)
+                .expect("could not parse log level in configuration"),
+        )
+        .with_level(true)
+        .with_thread_names(false)
+        .with_thread_ids(false)
+        .with_line_number(false)
+        .with_file(false)
+        .with_target(false)
+        .without_time()
+        .event_format(logger::Formatter)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    info!("logging subsystem enabled");
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
@@ -190,11 +209,9 @@ fn main() -> Result<()> {
                 deadline_ms,
                 invoked_function_arn,
             }) => {
-                log::info!(
+                info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                    request_id,
-                    deadline_ms,
-                    invoked_function_arn
+                    request_id, deadline_ms, invoked_function_arn
                 );
             }
             Ok(NextEventResponse::Shutdown {
@@ -262,7 +279,6 @@ fn main() -> Result<()> {
                                 }
                             }
                         }
-                        _ => {}
                     }
                 } else {
                     error!("could not get the event");

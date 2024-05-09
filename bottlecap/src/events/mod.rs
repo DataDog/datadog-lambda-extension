@@ -1,7 +1,7 @@
 use crate::telemetry::events::TelemetryEvent;
 
 #[derive(Debug)]
-
+#[allow(dead_code)] // TODO if this is ever used in practice remove this allow
 pub struct MetricEvent {
     name: String,
     value: f64,
@@ -18,5 +18,4 @@ impl MetricEvent {
 pub enum Event {
     Metric(MetricEvent),
     Telemetry(TelemetryEvent),
-    Unknown,
 }
