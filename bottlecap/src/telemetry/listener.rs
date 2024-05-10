@@ -3,7 +3,7 @@ use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -118,7 +118,7 @@ pub struct TelemetryListenerConfig {
 impl TelemetryListener {
     pub fn run(
         config: &TelemetryListenerConfig,
-        event_bus: Sender<events::Event>,
+        event_bus: SyncSender<events::Event>,
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
@@ -152,7 +152,7 @@ impl TelemetryListener {
     fn handle_stream(
         stream: &mut impl Read,
         mut buf: [u8; 262144],
-        event_bus: Sender<events::Event>,
+        event_bus: SyncSender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
         #![allow(clippy::unused_io_amount)]
@@ -294,7 +294,7 @@ mod tests {
         let mut stream = MockTcpStream {
             data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
         };
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = std::sync::mpsc::sync_channel(3);
         let buf = [0; 262144];
         let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
         let event = rx.recv().expect("No events received");
@@ -323,7 +323,7 @@ mod tests {
                     let mut stream = MockTcpStream {
                         data: $value.to_string().into_bytes(),
                     };
-                    let (tx, _) = std::sync::mpsc::channel();
+                    let (tx, _) = std::sync::mpsc::sync_channel(4);
                     let buf = [0; 262144];
                     TelemetryListener::handle_stream(&mut stream, buf, tx).unwrap()
                 }

@@ -134,8 +134,10 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 fn main() -> Result<()> {
     // First load the configuration
-    let lambda_directory = env::var("LAMBDA_TASK_ROOT")
-        .expect("unable to read environment variable: LAMBDA_TASK_ROOT");
+    let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
+        Ok(val) => val,
+        Err(_) => "/var/task".to_string(),
+    };
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(e) => {
