@@ -22,8 +22,8 @@ impl Default for Aggregator {
 }
 
 impl Aggregator {
-    // Used in testing
     #[allow(dead_code)]
+    #[allow(clippy::must_use_candidate)]
     pub fn new(
         max_batch_entries_size: usize,
         max_content_size_bytes: usize,
@@ -66,7 +66,7 @@ impl Aggregator {
                 }
 
                 buffer.extend(log.as_bytes());
-                buffer.extend(b",")
+                buffer.extend(b",");
             } else {
                 break;
             }

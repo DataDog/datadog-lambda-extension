@@ -7,7 +7,7 @@ use serde_json;
 use tracing::{debug, error};
 use ureq;
 
-/// Interface for the DogStatsD metrics intake API.
+/// Interface for the `DogStatsD` metrics intake API.
 #[derive(Debug)]
 pub struct DdApi {
     api_key: String,
@@ -32,6 +32,7 @@ pub enum ShipError {
 }
 
 impl DdApi {
+    #[must_use]
     pub fn new(api_key: String, site: String) -> Self {
         DdApi {
             api_key,
@@ -56,7 +57,9 @@ impl DdApi {
             Ok(_resp) => Ok(()),
             Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {
                 status: code,
-                body: response.into_string().unwrap(),
+                body: response
+                    .into_string()
+                    .expect("body could not be converted to string"),
             }),
             Err(e) => Err(ShipError::Failure {
                 status: 500,
@@ -91,7 +94,9 @@ impl DdApi {
             Ok(_resp) => Ok(()),
             Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {
                 status: code,
-                body: response.into_string().unwrap(),
+                body: response
+                    .into_string()
+                    .expect("body could not be converted to string"),
             }),
             Err(e) => Err(ShipError::Failure {
                 status: 500,

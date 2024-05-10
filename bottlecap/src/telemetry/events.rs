@@ -12,7 +12,7 @@ pub struct TelemetryEvent {
     pub record: TelemetryRecord,
 }
 
-/// Record in a LambdaTelemetry entry
+/// Record in a `LambdaTelemetry` entry
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "record", rename_all = "lowercase")]
 pub enum TelemetryRecord {
@@ -44,7 +44,7 @@ pub enum TelemetryRecord {
         phase: Option<InitPhase>,
         /// Status of initalization
         status: Status,
-        /// When the status = failure, the error_type describes what kind of error occurred
+        /// When the status = failure, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
     },
 
@@ -74,7 +74,7 @@ pub enum TelemetryRecord {
         request_id: String,
         /// Status of the invocation
         status: Status,
-        /// When unsuccessful, the error_type describes what kind of error occurred
+        /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
         /// Metrics corresponding to the runtime
         metrics: Option<RuntimeDoneMetrics>,
@@ -87,7 +87,7 @@ pub enum TelemetryRecord {
         request_id: String,
         /// Status of the invocation
         status: Status,
-        /// When unsuccessful, the error_type describes what kind of error occurred
+        /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
         metrics: ReportMetrics,
     },
@@ -127,19 +127,19 @@ pub enum TelemetryRecord {
 }
 
 /// Type of Initialization
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum InitType {
     /// Initialised on demand
     OnDemand,
     /// Initialized to meet the provisioned concurrency
     ProvisionedConcurrency,
-    /// SnapStart
+    /// `SnapStart`
     SnapStart,
 }
 
 /// Phase in which initialization occurs
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum InitPhase {
     /// Initialization phase
@@ -149,7 +149,7 @@ pub enum InitPhase {
 }
 
 /// Status of invocation/initialization
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Success,
@@ -159,7 +159,7 @@ pub enum Status {
 }
 
 ///Init report metrics
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitReportMetrics {
     /// Duration of initialization
@@ -167,7 +167,7 @@ pub struct InitReportMetrics {
 }
 
 /// Runtime done metrics
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeDoneMetrics {
     /// Duration in milliseconds
@@ -177,7 +177,7 @@ pub struct RuntimeDoneMetrics {
 }
 
 /// Report metrics
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportMetrics {
     /// Duration in milliseconds

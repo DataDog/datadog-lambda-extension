@@ -10,6 +10,7 @@ use crate::logs::datadog;
 use crate::logs::processor::Processor;
 use crate::telemetry::events::TelemetryEvent;
 
+#[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {
     dd_api: datadog::Api,
     aggregator: Arc<Mutex<Aggregator>>,
@@ -18,6 +19,7 @@ pub struct LogsAgent {
 }
 
 impl LogsAgent {
+    #[must_use]
     pub fn run(function_arn: &str, datadog_config: Arc<config::Config>) -> LogsAgent {
         let function_arn = function_arn.to_string();
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
@@ -40,10 +42,10 @@ impl LogsAgent {
 
         let dd_api = datadog::Api::new(datadog_config.api_key.clone(), datadog_config.site.clone());
         LogsAgent {
-            tx,
-            join_handle,
             dd_api,
             aggregator,
+            tx,
+            join_handle,
         }
     }
 
@@ -77,7 +79,7 @@ impl LogsAgent {
         // Dropping this sender to help close the thread
         drop(self.tx);
         match self.join_handle.join() {
-            Ok(_) => {
+            Ok(()) => {
                 debug!("LogsAgent Message Receiver thread has been shutdown");
             }
             Err(e) => {

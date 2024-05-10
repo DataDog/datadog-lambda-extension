@@ -1,4 +1,14 @@
 #![deny(clippy::all)]
+#![deny(clippy::pedantic)]
+#![deny(clippy::unwrap_used)]
+#![deny(unused_extern_crates)]
+#![deny(unused_allocation)]
+#![deny(unused_assignments)]
+#![deny(unused_comparisons)]
+#![deny(unreachable_pub)]
+#![deny(missing_copy_implementations)]
+#![deny(missing_debug_implementations)]
+
 use lifecycle::flush_control::FlushControl;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
@@ -32,8 +42,8 @@ struct RegisterResponse {
     // Skip deserialize because this field is not available in the response
     // body, but as a header. Header is extracted and set manually.
     #[serde(skip_deserializing)]
-    pub extension_id: String,
-    pub account_id: String,
+    extension_id: String,
+    account_id: String,
 }
 
 #[derive(Deserialize)]
@@ -60,7 +70,7 @@ enum NextEventResponse {
 fn next_event(ext_id: &str) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    let url = format!("{}/event/next", base_url);
+    let url = format!("{base_url}/event/next");
     ureq::get(&url)
         .set(EXTENSION_ID_HEADER, ext_id)
         .call()
@@ -74,7 +84,7 @@ fn register() -> Result<RegisterResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     map.insert("events", vec!["INVOKE", "SHUTDOWN"]);
-    let url = format!("{}/register", base_url);
+    let url = format!("{base_url}/register");
 
     let resp = ureq::post(&url)
         .set(EXTENSION_NAME_HEADER, EXTENSION_NAME)
@@ -82,9 +92,7 @@ fn register() -> Result<RegisterResponse> {
         .send_json(ureq::json!(map))
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if resp.status() != 200 {
-        panic!("Unable to register extension")
-    }
+    assert!(resp.status() != 200, "Unable to register extension");
 
     let extension_id = resp
         .header(EXTENSION_ID_HEADER)
@@ -99,12 +107,10 @@ fn register() -> Result<RegisterResponse> {
 }
 
 fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
-    format!(
-        "arn:aws:lambda:{}:{}:function:{}",
-        region, account_id, function_name
-    )
+    format!("arn:aws:lambda:{region}:{account_id}:function:{function_name}")
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
@@ -115,9 +121,9 @@ fn main() -> Result<()> {
         Ok(config) => Arc::new(config),
         Err(e) => {
             // NOTE we must print here as the logging subsystem is not enabled yet.
-            println!("Error loading configuration: {:?}", e);
+            println!("Error loading configuration: {e:?}");
             let err = Command::new("/opt/datadog-agent-go").exec();
-            panic!("Error starting the extension: {:?}", err);
+            panic!("Error starting the extension: {err:?}");
         }
     };
 
@@ -148,8 +154,9 @@ fn main() -> Result<()> {
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let region = env::var("AWS_REGION").unwrap();
-    let function_name = env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap();
+    let region = env::var("AWS_REGION").expect("could not read AWS_REGION");
+    let function_name =
+        env::var("AWS_LAMBDA_FUNCTION_NAME").expect("could not read AWS_LAMBDA_FUNCTION_NAME");
     let function_arn = build_function_arn(&r.account_id, &region, &function_name);
 
     let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&config));
@@ -193,11 +200,11 @@ fn main() -> Result<()> {
                 shutdown_reason,
                 deadline_ms,
             }) => {
-                println!("Exiting: {}, deadline: {}", shutdown_reason, deadline_ms);
+                println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
                 shutdown = true;
             }
             Err(err) => {
-                eprintln!("Error: {:?}", err);
+                eprintln!("Error: {err:?}");
                 println!("Exiting");
                 return Err(err);
             }

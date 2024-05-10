@@ -6,6 +6,7 @@ use tracing_subscriber::fmt::{
 };
 use tracing_subscriber::registry::LookupSpan;
 
+#[derive(Debug, Clone, Copy)]
 pub struct Formatter;
 
 impl<S, N> FormatEvent<S, N> for Formatter
@@ -40,7 +41,7 @@ where
 
                 // Skip formatting the fields if the span had no fields.
                 if !fields.is_empty() {
-                    write!(writer, "{{{}}}", fields)?;
+                    write!(writer, "{{{fields}}}")?;
                 }
                 write!(writer, ": ")?;
             }

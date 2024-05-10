@@ -20,6 +20,11 @@ const CR: u8 = b'\r';
 const LR: u8 = b'\n';
 
 impl HttpRequestParser {
+    /// Create a `HttpRequestParser` from passed `buf`
+    ///
+    /// # Errors
+    ///
+    /// Function will fail if parsing of headers or body in `buf` fail.
     pub fn from_buf(buf: &[u8]) -> Result<HttpRequestParser, Box<dyn Error>> {
         let mut parser = HttpRequestParser {
             headers: HashMap::new(),
@@ -106,6 +111,7 @@ impl HttpRequestParser {
     }
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub struct TelemetryListener {
     join_handle: std::thread::JoinHandle<()>,
 }
@@ -116,13 +122,18 @@ pub struct TelemetryListenerConfig {
 }
 
 impl TelemetryListener {
+    /// Run the `TelemetryListener`
+    ///
+    /// # Errors
+    ///
+    /// Function will error if the passed address cannot be bound.
     pub fn run(
         config: &TelemetryListenerConfig,
         event_bus: SyncSender<events::Event>,
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
-        let buf: [u8; 262144] = [0; 256 * 1024]; // Using the default limit from AWS
+        let buf: [u8; 262_144] = [0; 256 * 1024]; // Using the default limit from AWS
 
         let join_handle = std::thread::spawn(move || {
             debug!("Initializing Telemetry Listener");
@@ -151,7 +162,7 @@ impl TelemetryListener {
 
     fn handle_stream(
         stream: &mut impl Read,
-        mut buf: [u8; 262144],
+        mut buf: [u8; 262_144],
         event_bus: SyncSender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
@@ -175,7 +186,7 @@ impl TelemetryListener {
         request: Result<(), Box<dyn Error>>,
     ) -> Result<(), Box<dyn Error>> {
         match request {
-            Ok(_) => {
+            Ok(()) => {
                 stream.write(b"HTTP/1.1 200 OK\r\n\r\n")?;
             }
             Err(_) => {
@@ -187,7 +198,7 @@ impl TelemetryListener {
 
     pub fn shutdown(self) {
         match self.join_handle.join() {
-            Ok(_) => {
+            Ok(()) => {
                 debug!("Telemetry Listener thread has been shutdown");
             }
             Err(e) => {
@@ -295,7 +306,7 @@ mod tests {
             data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
         };
         let (tx, rx) = std::sync::mpsc::sync_channel(3);
-        let buf = [0; 262144];
+        let buf = [0; 262_144];
         let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
         let event = rx.recv().expect("No events received");
         let telemetry_event = match event {
@@ -308,8 +319,8 @@ mod tests {
         assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
             initialization_type: InitType::OnDemand,
             phase: InitPhase::Init,
-            runtime_version: Some("nodejs:20.v22".to_string()), 
-            runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()), 
+            runtime_version: Some("nodejs:20.v22".to_string()),
+            runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
         assert!(result.is_ok());
     }

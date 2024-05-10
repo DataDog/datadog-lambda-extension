@@ -37,7 +37,7 @@ struct Entry {
 
 #[derive(Debug, Clone)]
 struct DistributionMetric {
-    pub sketch: ddsketch_agent::DDSketch,
+    sketch: ddsketch_agent::DDSketch,
 }
 
 #[derive(Debug, Clone)]
@@ -88,8 +88,7 @@ impl InsertMetric for MetricValue {
 impl GetSketch for MetricValue {
     fn get_sketch(&self) -> &ddsketch_agent::DDSketch {
         match self {
-            MetricValue::Count(_) => unreachable!(),
-            MetricValue::Gauge(_) => unreachable!(),
+            MetricValue::Count(_) | MetricValue::Gauge(_) => unreachable!(),
             MetricValue::Distribution(distribution_metric) => &distribution_metric.sketch,
         }
     }
@@ -229,6 +228,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         self.map.clear();
     }
 
+    #[must_use]
     pub fn distributions_to_protobuf(&self) -> SketchPayload {
         let mut sketch_payload = SketchPayload::new();
         let now = time::SystemTime::now()
@@ -258,6 +258,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     #[allow(clippy::cast_precision_loss)]
+    #[must_use]
     pub fn to_series(&self) -> datadog::Series {
         // TODO it would be really slick to use a bump allocator here since
         // there's so many tiny allocations
@@ -295,7 +296,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             // These tags are interned so we don't need to clone them here but we're just doing it
             // because it's easier than dealing with the lifetimes.
             if let Some(tags) = entry.tags {
-                final_tags = tags.split(',').map(|tag| tag.to_string()).collect();
+                final_tags = tags
+                    .split(',')
+                    .map(std::string::ToString::to_string)
+                    .collect();
             }
             let metric = datadog::Metric {
                 metric: entry.name.as_str(),

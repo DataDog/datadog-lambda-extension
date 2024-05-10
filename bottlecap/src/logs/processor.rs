@@ -24,6 +24,7 @@ pub struct LambdaMessage {
 }
 
 impl LambdaMessage {
+    #[must_use]
     pub fn new(
         message: String,
         request_id: Option<String>,
@@ -64,6 +65,7 @@ pub struct Processor {
 }
 
 impl Processor {
+    #[must_use]
     pub fn new(function_arn: String, datadog_config: Arc<config::Config>) -> Processor {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = datadog_config.tags.clone().unwrap_or_default();
@@ -97,7 +99,7 @@ impl Processor {
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
                 Ok(LambdaMessage::new(
-                    format!("INIT_START Runtime Version: {} Runtime Version ARN: {}", rv, rv_arn),
+                    format!("INIT_START Runtime Version: {rv} Runtime Version ARN: {rv_arn}"),
                     None,
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
@@ -114,7 +116,7 @@ impl Processor {
 
                 let version = version.unwrap_or("$LATEST".to_string());
                 Ok(LambdaMessage::new(
-                    format!("START RequestId: {} Version: {}", request_id, version),
+                    format!("START RequestId: {request_id} Version: {version}"),
                     Some(request_id),
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
@@ -122,7 +124,7 @@ impl Processor {
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , .. } => {  // TODO: check what to do with rest of the fields
                 Ok(LambdaMessage::new(
-                    format!("END RequestId: {}", request_id),
+                    format!("END RequestId: {request_id}"),
                     Some(request_id),
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
@@ -140,7 +142,7 @@ impl Processor {
 
                 let init_duration_ms = metrics.init_duration_ms;
                 if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{} Init Duration: {} ms", message, init_duration_ms)
+                    message = format!("{message} Init Duration: {init_duration_ms} ms");
                 }
 
                 Ok(LambdaMessage::new(
@@ -204,7 +206,11 @@ impl Processor {
 
             // Process orphan logs, since we have a `request_id` now
             for mut orphan_log in self.orphan_logs.drain(..) {
-                orphan_log.message.lambda.request_id = Some(self.request_id.clone().unwrap());
+                orphan_log.message.lambda.request_id = Some(
+                    self.request_id
+                        .clone()
+                        .expect("unable to retrieve request ID"),
+                );
                 aggregator.add(orphan_log);
             }
         }
@@ -259,7 +265,7 @@ mod tests {
                         arn: "arn".to_string(),
                         request_id: None,
                     },
-                    timestamp: 1673061827000,
+                    timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
         ),
@@ -276,7 +282,7 @@ mod tests {
                         arn: "arn".to_string(),
                         request_id: None,
                     },
-                    timestamp: 1673061827000,
+                    timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
         ),
@@ -298,7 +304,7 @@ mod tests {
                         arn: "arn".to_string(),
                         request_id: None,
                     },
-                    timestamp: 1673061827000,
+                    timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
         ),
@@ -318,7 +324,7 @@ mod tests {
                         arn: "arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
-                    timestamp: 1673061827000,
+                    timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
         ),
@@ -343,7 +349,7 @@ mod tests {
                         arn: "arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
-                    timestamp: 1673061827000,
+                    timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
         ),
@@ -372,7 +378,7 @@ mod tests {
                         arn: "arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
-                    timestamp: 1673061827000,
+                    timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
         ),
@@ -410,7 +416,7 @@ mod tests {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
-                    timestamp: 1673061827000,
+                    timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
                 hostname: "test-arn".to_string(),
