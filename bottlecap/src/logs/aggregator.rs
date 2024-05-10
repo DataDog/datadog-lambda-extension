@@ -145,7 +145,7 @@ mod tests {
                 message: "test".to_string(),
                 lambda: Lambda {
                     arn: "arn".to_string(),
-                    request_id: "request_id".to_string(),
+                    request_id: Some("request_id".to_string()),
                 },
                 timestamp: 0,
                 status: "status".to_string(),
@@ -182,7 +182,7 @@ mod tests {
                 message: "test".to_string(),
                 lambda: Lambda {
                     arn: "arn".to_string(),
-                    request_id: "request_id".to_string(),
+                    request_id: Some("request_id".to_string()),
                 },
                 timestamp: 0,
                 status: "status".to_string(),
