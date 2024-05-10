@@ -136,9 +136,7 @@ fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
         Ok(val) => val,
-        Err(_) => {
-            "/var/task".to_string()
-        }
+        Err(_) => "/var/task".to_string(),
     };
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
