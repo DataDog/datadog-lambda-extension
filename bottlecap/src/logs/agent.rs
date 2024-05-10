@@ -21,7 +21,7 @@ impl LogsAgent {
     pub fn run(function_arn: &str, datadog_config: Arc<config::Config>) -> LogsAgent {
         let function_arn = function_arn.to_string();
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
-        let processor: Processor = Processor::new(function_arn, Arc::clone(&datadog_config));
+        let mut processor: Processor = Processor::new(function_arn, Arc::clone(&datadog_config));
 
         let cloned_aggregator = aggregator.clone();
 
@@ -35,14 +35,7 @@ impl LogsAgent {
                 break;
             };
 
-            match processor.process(event) {
-                Ok(log) => {
-                    cloned_aggregator.lock().expect("lock poisoned").add(log);
-                }
-                Err(e) => {
-                    error!("Error processing event: {}", e);
-                }
-            }
+            processor.process(event, &cloned_aggregator);
         });
 
         let dd_api = datadog::Api::new(datadog_config.api_key.clone(), datadog_config.site.clone());

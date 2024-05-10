@@ -107,8 +107,10 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 fn main() -> Result<()> {
     // First load the configuration
-    let lambda_directory = env::var("LAMBDA_TASK_ROOT")
-        .expect("unable to read environment variable: LAMBDA_TASK_ROOT");
+    let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
+        Ok(val) => val,
+        Err(_) => "/var/task".to_string(),
+    };
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(e) => {
@@ -202,7 +204,7 @@ fn main() -> Result<()> {
         }
         // Block until we get something from the telemetry API
         // Check if flush logic says we should block and flush or not
-        if flush_control.should_flush() {
+        if flush_control.should_flush() || shutdown {
             loop {
                 let received = event_bus.rx.recv();
                 if let Ok(event) = received {
@@ -243,6 +245,9 @@ fn main() -> Result<()> {
                                         "Platform report for request_id: {:?} with status: {:?}",
                                         request_id, status
                                     );
+                                    if shutdown {
+                                        break;
+                                    }
                                 }
                                 _ => {
                                     debug!("Unforwarded Telemetry event: {:?}", event);

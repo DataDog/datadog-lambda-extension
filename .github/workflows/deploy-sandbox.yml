@@ -60,7 +60,7 @@ jobs:
           echo ::add-mask::"8"
           echo ::add-mask::"9"
           echo ::add-mask::"|"
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - id: auth
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.GH_ACTION_PUBLISHER_AWS_ACCESS_KEY_ID }}
@@ -71,13 +71,13 @@ jobs:
           --mfa-arn ${{ secrets.GH_ACTION_PUBLISHER_MFA_DEVICE_ARN }} \
           --mfa-code ${{ inputs.mfaCode }} \
           --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           repository: DataDog/datadog-agent
           ref: refs/heads/${{ inputs.agentBranch }}
           path: datadog-agent
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2.1.0
+        uses: docker/setup-qemu-action@v3
       - run: |
          ./build-tools/bin/build_tools \
          build \
@@ -100,7 +100,7 @@ jobs:
          --layer-path ./tmp/datadog_extension.zip \
          --destination-path ./tmp/datadog_extension_signed.zip \
          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
-      - uses: actions/upload-artifact@v3.1.1
+      - uses: actions/upload-artifact@v4.3.3
         with:
           name: datadog-extension
           path: ./tmp/datadog_extension_signed.zip
@@ -154,8 +154,8 @@ jobs:
           echo ::add-mask::"8"
           echo ::add-mask::"9"
           echo ::add-mask::"|"
-      - uses: actions/checkout@v3
-      - uses: actions/download-artifact@v3
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
           name: datadog-extension
           path: ./tmp

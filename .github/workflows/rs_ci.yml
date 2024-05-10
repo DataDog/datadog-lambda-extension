@@ -1,4 +1,4 @@
-name: Continuous integration (Rust)
+name: Bottlecap (Rust)
 
 on:
   pull_request:
@@ -13,6 +13,7 @@ env:
 
 jobs:
   cancel-previous:
+    name: Cancel Previous Jobs
     runs-on: ubuntu-22.04
     timeout-minutes: 3
     steps:
@@ -23,10 +24,7 @@ jobs:
 
   check:
     name: Check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -49,14 +47,12 @@ jobs:
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo check --workspace
 
-  clippy_check:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -80,15 +76,12 @@ jobs:
           components: clippy
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo clippy --workspace --all-features
 
-  build_all:
+  build-all:
     name: Build All
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -111,15 +104,12 @@ jobs:
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo build --all
 
   test:
     name: Test Suite
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-22.04]
+    runs-on: ubuntu-22.04
     env:
       CARGO_INCREMENTAL: "0"
       SCCACHE_GHA_ENABLED: "true"
@@ -145,11 +135,11 @@ jobs:
         with:
           tool: nextest@0.9
       - uses: mozilla-actions/sccache-action@v0.0.4
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo nextest run --workspace
 
-  fmt:
-    name: Rustfmt
+  format:
+    name: Format
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -160,5 +150,5 @@ jobs:
         with:
           components: rustfmt
           cache: false
-      - working-directory: ./bottlecap
+      - working-directory: bottlecap
         run: cargo fmt --all -- --check
