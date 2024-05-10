@@ -1,48 +1,30 @@
 #![deny(clippy::all)]
-mod config;
-mod event_bus;
-mod lifecycle;
-mod logs;
-mod metrics;
-mod telemetry;
 use lifecycle::flush_control::FlushControl;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
-mod events;
-mod logger;
+use bottlecap::{
+    base_url, config,
+    event_bus::bus::EventBus,
+    events::Event,
+    lifecycle, logger,
+    logs::agent::LogsAgent,
+    metrics::dogstatsd::{DogStatsD, DogStatsDConfig},
+    telemetry::{
+        self, client::TelemetryApiClient, events::TelemetryRecord, listener::TelemetryListener,
+    },
+    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
+    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE, TELEMETRY_PORT,
+};
 
-use crate::event_bus::bus::EventBus;
-use crate::events::Event;
-use crate::logs::agent::LogsAgent;
-use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
-use crate::telemetry::events::TelemetryRecord;
-use crate::telemetry::{client::TelemetryApiClient, listener::TelemetryListener};
-
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
 use std::io::Error;
 use std::io::Result;
-
 use std::sync::Arc;
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
-
-use serde::Deserialize;
-
-const EXTENSION_HOST: &str = "0.0.0.0";
-const EXTENSION_NAME: &str = "datadog-agent";
-const EXTENSION_FEATURES: &str = "accountId";
-const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
-const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
-const EXTENSION_ACCEPT_FEATURE_HEADER: &str = "Lambda-Extension-Accept-Feature";
-const EXTENSION_ROUTE: &str = "2020-01-01/extension";
-
-// todo: make sure we can override those with environment variables
-const DOGSTATSD_PORT: u16 = 8185;
-
-const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
-const TELEMETRY_PORT: u16 = 8124;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -52,15 +34,6 @@ struct RegisterResponse {
     #[serde(skip_deserializing)]
     pub extension_id: String,
     pub account_id: String,
-}
-
-fn base_url(route: &str) -> Result<String> {
-    Ok(format!(
-        "http://{}/{}",
-        env::var("AWS_LAMBDA_RUNTIME_API")
-            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
-        route
-    ))
 }
 
 #[derive(Deserialize)]
