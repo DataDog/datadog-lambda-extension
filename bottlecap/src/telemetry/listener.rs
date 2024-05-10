@@ -126,7 +126,7 @@ impl TelemetryListener {
     ///
     /// # Errors
     ///
-    /// Fucntion will error if the passed address cannot be bound.
+    /// Function will error if the passed address cannot be bound.
     pub fn run(
         config: &TelemetryListenerConfig,
         event_bus: SyncSender<events::Event>,
