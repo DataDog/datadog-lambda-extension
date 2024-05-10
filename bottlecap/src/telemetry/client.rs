@@ -3,12 +3,14 @@ use tracing::debug;
 
 use crate::{base_url, EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE};
 
+#[allow(clippy::module_name_repetitions)]
 pub struct TelemetryApiClient {
     pub extension_id: String,
     pub port: u16,
 }
 
 impl TelemetryApiClient {
+    #[must_use]
     pub fn new(extension_id: String, port: u16) -> Self {
         TelemetryApiClient { extension_id, port }
     }

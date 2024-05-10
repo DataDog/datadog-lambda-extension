@@ -23,6 +23,7 @@ pub struct DogStatsDConfig {
 }
 
 impl DogStatsD {
+    #[must_use]
     pub fn run(config: &DogStatsDConfig, event_bus: SyncSender<events::Event>) -> DogStatsD {
         let aggr: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>> = Arc::new(Mutex::new(
             Aggregator::<{ constants::CONTEXTS }>::new().expect("failed to create aggregator"),
@@ -47,7 +48,7 @@ impl DogStatsD {
         event_bus: SyncSender<events::Event>,
         aggregator: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>>,
     ) -> std::thread::JoinHandle<()> {
-        let addr = format!("{}:{}", host, port);
+        let addr = format!("{host}:{port}");
         std::thread::spawn(move || {
             let socket = std::net::UdpSocket::bind(addr).expect("couldn't bind to address");
             loop {
@@ -97,14 +98,14 @@ impl DogStatsD {
         let current_points = locked_aggr.to_series();
         let current_distribution_points = locked_aggr.distributions_to_protobuf();
         if !current_points.series.is_empty() {
-            let _ = &self
+            let () = &self
                 .dd_api
                 .ship_series(&current_points)
                 // TODO(astuyve) retry and do not panic
                 .expect("failed to ship metrics to datadog");
         }
         if !current_distribution_points.sketches.is_empty() {
-            let _ = &self
+            let () = &self
                 .dd_api
                 .ship_distributions(&current_distribution_points)
                 // TODO(astuyve) retry and do not panic
@@ -116,7 +117,7 @@ impl DogStatsD {
     pub fn shutdown(mut self) {
         self.flush();
         match self.serve_handle.join() {
-            Ok(_) => {
+            Ok(()) => {
                 info!("DogStatsD thread has been shutdown");
             }
             Err(e) => {

@@ -37,6 +37,7 @@ impl AsRef<str> for LogLevel {
 
 impl LogLevel {
     /// Construct a `log::LevelFilter` from a `LogLevel`
+    #[must_use]
     pub fn as_level_filter(self) -> log::LevelFilter {
         match self {
             LogLevel::Error => log::LevelFilter::Error,
@@ -68,35 +69,31 @@ impl<'de> Deserialize<'de> for FlushStrategy {
         D: Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        match value.as_str() {
-            "end" => Ok(FlushStrategy::End),
-            _ => {
-                let mut split_value = value.as_str().split(',');
-                // "periodically,60000"
-                match split_value.next() {
-                    Some(first_value) if first_value.starts_with("periodically") => {
-                        let interval = split_value.next();
-                        // "60000"
-                        match interval {
-                            Some(interval) => {
-                                if let Ok(parsed_interval) = interval.parse() {
-                                    return Ok(FlushStrategy::Periodically(PeriodicStrategy {
-                                        interval: parsed_interval,
-                                    }));
-                                }
-                                debug!("invalid flush interval: {}, using default", interval);
-                                Ok(FlushStrategy::Default)
-                            }
-                            None => {
-                                debug!("invalid flush strategy: {}, using default", value);
-                                Ok(FlushStrategy::Default)
-                            }
+        if value.as_str() == "end" {
+            Ok(FlushStrategy::End)
+        } else {
+            let mut split_value = value.as_str().split(',');
+            // "periodically,60000"
+            match split_value.next() {
+                Some(first_value) if first_value.starts_with("periodically") => {
+                    let interval = split_value.next();
+                    // "60000"
+                    if let Some(interval) = interval {
+                        if let Ok(parsed_interval) = interval.parse() {
+                            return Ok(FlushStrategy::Periodically(PeriodicStrategy {
+                                interval: parsed_interval,
+                            }));
                         }
-                    }
-                    _ => {
+                        debug!("invalid flush interval: {}, using default", interval);
+                        Ok(FlushStrategy::Default)
+                    } else {
                         debug!("invalid flush strategy: {}, using default", value);
                         Ok(FlushStrategy::Default)
                     }
+                }
+                _ => {
+                    debug!("invalid flush strategy: {}, using default", value);
+                    Ok(FlushStrategy::Default)
                 }
             }
         }
@@ -143,11 +140,13 @@ impl Default for Config {
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(clippy::module_name_repetitions)]
 pub enum ConfigError {
     ParseError(String),
     UnsupportedField(String),
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
     let figment = Figment::new()
@@ -173,9 +172,9 @@ pub mod tests {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
-                r#"
+                r"
                 unknown_field: true
-            "#,
+            ",
             )?;
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
@@ -206,9 +205,9 @@ pub mod tests {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
-                r#"
+                r"
                 apm_enabled: true
-            "#,
+            ",
             )?;
             jail.set_env("DD_APM_ENABLED", "false");
             let config = get_config(Path::new("")).expect("should parse config");
@@ -229,9 +228,9 @@ pub mod tests {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
-                r#"
+                r"
                 apm_enabled: true
-            "#,
+            ",
             )?;
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
@@ -314,7 +313,7 @@ pub mod tests {
                 config,
                 Config {
                     serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
-                        interval: 100000
+                        interval: 100_000
                     }),
                     ..Config::default()
                 }

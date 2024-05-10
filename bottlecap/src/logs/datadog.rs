@@ -11,6 +11,7 @@ pub struct Api {
 }
 
 impl Api {
+    #[must_use]
     pub fn new(api_key: String, site: String) -> Self {
         Api {
             api_key,

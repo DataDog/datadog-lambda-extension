@@ -1,1 +1,1 @@
-pub const MAX_EVENTS: usize = 100;
+pub(crate) const MAX_EVENTS: usize = 100;
