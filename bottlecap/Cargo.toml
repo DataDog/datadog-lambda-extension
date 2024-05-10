@@ -23,6 +23,9 @@ tracing-subscriber = { version = "0.3.18", default-features = false, features = 
 ureq = { version = "2.9.7", features = ["tls", "json"], default-features = false }
 ustr = { version = "1.0.0", default-features = false }
 
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
+
 [dev-dependencies]
 figment = { version = "0.10.15", features = ["yaml", "env", "test"] }
 proptest = "1.4.0"
