@@ -229,7 +229,7 @@ fn main() -> Result<()> {
         }
         // Block until we get something from the telemetry API
         // Check if flush logic says we should block and flush or not
-        if flush_control.should_flush() {
+        if flush_control.should_flush() || shutdown {
             loop {
                 let received = event_bus.rx.recv();
                 if let Ok(event) = received {
@@ -270,6 +270,9 @@ fn main() -> Result<()> {
                                         "Platform report for request_id: {:?} with status: {:?}",
                                         request_id, status
                                     );
+                                    if shutdown {
+                                        break;
+                                    }
                                 }
                                 _ => {
                                     debug!("Unforwarded Telemetry event: {:?}", event);
