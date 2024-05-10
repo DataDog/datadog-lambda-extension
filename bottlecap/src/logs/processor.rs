@@ -525,7 +525,7 @@ mod tests {
             tags: "test:tags".to_string(),
         };
         let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
-        assert_eq!(batch, serialized_log.as_bytes(),);
+        assert_eq!(batch, serialized_log.as_bytes());
     }
 
     #[test]
