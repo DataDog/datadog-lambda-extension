@@ -2,7 +2,7 @@ use std::sync::mpsc::{self, SyncSender};
 
 use crate::events;
 
-use super::constants::MAX_EVENTS;
+use crate::event_bus::constants::MAX_EVENTS;
 
 pub struct EventBus {
     tx: SyncSender<events::Event>,
