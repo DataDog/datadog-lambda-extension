@@ -515,25 +515,23 @@ mod tests {
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
-        assert_eq!(batch.len(), 1);
-        assert_eq!(
-            batch[0],
-            IntakeLog {
-                message: LambdaMessage {
-                    message: "START RequestId: test-request-id Version: test".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: Some("test-request-id".to_string()),
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
+        let log = IntakeLog {
+            message: LambdaMessage {
+                message: "START RequestId: test-request-id Version: test".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
                 },
-                hostname: "test-arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tags".to_string(),
-            }
-        );
+                timestamp: 1673061827000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: "lambda".to_string(),
+            service: "test-service".to_string(),
+            tags: "test:tags".to_string(),
+        };
+        let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
+        assert_eq!(batch, serialized_log.as_bytes());
     }
 
     #[test]
@@ -558,7 +556,7 @@ mod tests {
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
-        assert_eq!(batch.len(), 0);
+        assert_eq!(batch, "[]".as_bytes());
     }
 
     #[test]
@@ -595,43 +593,41 @@ mod tests {
         // Verify aggregator logs
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
-        assert_eq!(batch.len(), 2);
-        assert_eq!(
-            batch[0],
-            IntakeLog {
-                message: LambdaMessage {
-                    message: "START RequestId: test-request-id Version: test".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: Some("test-request-id".to_string()),
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
+        let start_log = IntakeLog {
+            message: LambdaMessage {
+                message: "START RequestId: test-request-id Version: test".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
                 },
-                hostname: "test-arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tags".to_string(),
-            }
-        );
-
-        assert_eq!(
-            batch[1],
-            IntakeLog {
-                message: LambdaMessage {
-                    message: "test-function".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: Some("test-request-id".to_string()),
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
+                timestamp: 1673061827000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: "lambda".to_string(),
+            service: "test-service".to_string(),
+            tags: "test:tags".to_string(),
+        };
+        let function_log = IntakeLog {
+            message: LambdaMessage {
+                message: "test-function".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
                 },
-                hostname: "test-arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tags".to_string(),
-            }
+                timestamp: 1673061827000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: "lambda".to_string(),
+            service: "test-service".to_string(),
+            tags: "test:tags".to_string(),
+        };
+        let serialized_log = format!(
+            "[{},{}]",
+            serde_json::to_string(&start_log).unwrap(),
+            serde_json::to_string(&function_log).unwrap()
         );
+        assert_eq!(batch, serialized_log.as_bytes());
     }
 }
