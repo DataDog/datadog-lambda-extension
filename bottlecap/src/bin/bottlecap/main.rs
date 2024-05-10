@@ -92,7 +92,7 @@ fn register() -> Result<RegisterResponse> {
         .send_json(ureq::json!(map))
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    assert!(resp.status() != 200, "Unable to register extension");
+    assert!(resp.status() == 200, "Unable to register extension");
 
     let extension_id = resp
         .header(EXTENSION_ID_HEADER)
