@@ -1,5 +1,5 @@
-pub mod log_level;
 pub mod flush_strategy;
+pub mod log_level;
 
 use std::path::Path;
 
@@ -10,8 +10,8 @@ use figment::{
     Figment,
 };
 
-use crate::config::log_level::LogLevel;
 use crate::config::flush_strategy::FlushStrategy;
+use crate::config::log_level::LogLevel;
 
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
