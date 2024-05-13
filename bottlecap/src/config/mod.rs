@@ -1,104 +1,17 @@
+pub mod flush_strategy;
+pub mod log_level;
+
 use std::path::Path;
 
-use serde::{self, Deserialize, Deserializer};
-use tracing::debug;
+use serde::Deserialize;
 
 use figment::{
     providers::{Env, Format, Yaml},
     Figment,
 };
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Default)]
-pub enum LogLevel {
-    /// Designates very serious errors.
-    Error,
-    /// Designates hazardous situations.
-    Warn,
-    /// Designates useful information.
-    #[default]
-    Info,
-    /// Designates lower priority information.
-    Debug,
-    /// Designates very low priority, often extremely verbose, information.
-    Trace,
-}
-
-impl AsRef<str> for LogLevel {
-    fn as_ref(&self) -> &str {
-        match self {
-            LogLevel::Error => "ERROR",
-            LogLevel::Warn => "WARN",
-            LogLevel::Info => "INFO",
-            LogLevel::Debug => "DEBUG",
-            LogLevel::Trace => "TRACE",
-        }
-    }
-}
-
-impl LogLevel {
-    /// Construct a `log::LevelFilter` from a `LogLevel`
-    #[must_use]
-    pub fn as_level_filter(self) -> log::LevelFilter {
-        match self {
-            LogLevel::Error => log::LevelFilter::Error,
-            LogLevel::Warn => log::LevelFilter::Warn,
-            LogLevel::Info => log::LevelFilter::Info,
-            LogLevel::Debug => log::LevelFilter::Debug,
-            LogLevel::Trace => log::LevelFilter::Trace,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PeriodicStrategy {
-    pub interval: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum FlushStrategy {
-    Default,
-    End,
-    Periodically(PeriodicStrategy),
-}
-
-// Deserialize for FlushStrategy
-// Flush Strategy can be either "end" or "periodically,<ms>"
-impl<'de> Deserialize<'de> for FlushStrategy {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        if value.as_str() == "end" {
-            Ok(FlushStrategy::End)
-        } else {
-            let mut split_value = value.as_str().split(',');
-            // "periodically,60000"
-            match split_value.next() {
-                Some(first_value) if first_value.starts_with("periodically") => {
-                    let interval = split_value.next();
-                    // "60000"
-                    if let Some(interval) = interval {
-                        if let Ok(parsed_interval) = interval.parse() {
-                            return Ok(FlushStrategy::Periodically(PeriodicStrategy {
-                                interval: parsed_interval,
-                            }));
-                        }
-                        debug!("invalid flush interval: {}, using default", interval);
-                        Ok(FlushStrategy::Default)
-                    } else {
-                        debug!("invalid flush strategy: {}, using default", value);
-                        Ok(FlushStrategy::Default)
-                    }
-                }
-                _ => {
-                    debug!("invalid flush strategy: {}, using default", value);
-                    Ok(FlushStrategy::Default)
-                }
-            }
-        }
-    }
-}
+use crate::config::flush_strategy::FlushStrategy;
+use crate::config::log_level::LogLevel;
 
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -165,6 +78,8 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    use crate::config::flush_strategy::PeriodicStrategy;
 
     #[test]
     fn test_reject_unknown_fields_yaml() {

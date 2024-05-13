@@ -1,4 +1,4 @@
-use crate::config::FlushStrategy;
+use crate::config::flush_strategy::FlushStrategy;
 use crate::lifecycle::invocation_times::InvocationTimes;
 use ::std::time;
 use tracing::debug;
@@ -75,7 +75,9 @@ impl FlushControl {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{self, FlushStrategy};
+    use super::*;
+    use crate::config::flush_strategy::PeriodicStrategy;
+
     #[test]
     fn should_flush_default_end() {
         let mut flush_control = super::FlushControl::new(FlushStrategy::Default);
@@ -98,7 +100,7 @@ mod tests {
     #[test]
     fn should_flush_periodically() {
         let mut flush_control =
-            super::FlushControl::new(FlushStrategy::Periodically(config::PeriodicStrategy {
+            super::FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
                 interval: 1,
             }));
         assert!(flush_control.should_flush());
