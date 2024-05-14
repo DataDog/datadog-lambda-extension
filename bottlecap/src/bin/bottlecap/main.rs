@@ -14,6 +14,7 @@ use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
+use decoder::resolve_secrets;
 
 use bottlecap::{
     base_url, config,
@@ -46,6 +47,8 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
+use bottlecap::secrets::decoder;
+use bottlecap::secrets::decoder::{decrypt_secret_arn};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -128,17 +131,21 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     // First load the configuration
-    let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
-        Ok(val) => val,
-        Err(_) => "/var/task".to_string(),
-    };
-    let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => Arc::new(config),
+    let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let env_config = match config::get_config(Path::new(&lambda_directory)) {
+        Ok(config) => config,
         Err(e) => {
             // NOTE we must print here as the logging subsystem is not enabled yet.
             println!("Error loading configuration: {e:?}");
             let err = Command::new("/opt/datadog-agent-go").exec();
             panic!("Error starting the extension: {err:?}");
+        }
+    };
+
+    let config = match resolve_secrets(env_config, decrypt_secret_arn) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            panic!("Error resolving key: {e}");
         }
     };
 
@@ -217,10 +224,10 @@ fn main() -> Result<()> {
         let evt = next_event(&r.extension_id);
         match evt {
             Ok(NextEventResponse::Invoke {
-                request_id,
-                deadline_ms,
-                invoked_function_arn,
-            }) => {
+                   request_id,
+                   deadline_ms,
+                   invoked_function_arn,
+               }) => {
                 info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
@@ -230,9 +237,9 @@ fn main() -> Result<()> {
                 }
             }
             Ok(NextEventResponse::Shutdown {
-                shutdown_reason,
-                deadline_ms,
-            }) => {
+                   shutdown_reason,
+                   deadline_ms,
+               }) => {
                 println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
                 shutdown = true;
             }

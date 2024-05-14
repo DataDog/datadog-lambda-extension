@@ -5,6 +5,9 @@ edition = "2021"
 publish = false
 
 [dependencies]
+aws-config = "1.4.0"
+aws-sdk-secretsmanager = "1.26.0"
+aws-types = "1.2.1"
 chrono = { version = "0.4.38", features = ["serde"] }
 datadog-protos = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
 ddsketch-agent = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
@@ -17,13 +20,13 @@ regex = { version = "1.10.4", default-features = false }
 serde = { version = "1.0.197", features = ["derive"], default-features = false }
 serde_json = { version = "1.0.116", features = ["alloc"], default-features = false }
 thiserror = { version = "1.0.58", default-features = false }
-tracing = {version = "0.1.40", default-features = false }
+tracing = { version = "0.1.40", default-features = false }
 tracing-core = { version = "0.1.32", default-features = false }
 tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
 tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter"] }
 ureq = { version = "2.9.7", features = ["tls", "json"], default-features = false }
 ustr = { version = "1.0.0", default-features = false }
-
+tokio = "1.37.0"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.5"
 
