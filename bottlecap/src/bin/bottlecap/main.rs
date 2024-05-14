@@ -15,6 +15,7 @@ use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
+use decoder::resolve_secrets;
 
 use bottlecap::{
     base_url, config,
@@ -48,6 +49,8 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use bottlecap::secrets::decrypt;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
+use bottlecap::secrets::decoder;
+use bottlecap::secrets::decoder::{decrypt_secret_arn};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -141,6 +144,13 @@ fn main() -> Result<()> {
         }
     };
 
+    let config = match resolve_secrets(env_config, decrypt_secret_arn) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            panic!("Error resolving key: {e}");
+        }
+    };
+
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
@@ -228,10 +238,10 @@ fn main() -> Result<()> {
         let evt = next_event(&r.extension_id);
         match evt {
             Ok(NextEventResponse::Invoke {
-                request_id,
-                deadline_ms,
-                invoked_function_arn,
-            }) => {
+                   request_id,
+                   deadline_ms,
+                   invoked_function_arn,
+               }) => {
                 info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
@@ -241,9 +251,9 @@ fn main() -> Result<()> {
                 }
             }
             Ok(NextEventResponse::Shutdown {
-                shutdown_reason,
-                deadline_ms,
-            }) => {
+                   shutdown_reason,
+                   deadline_ms,
+               }) => {
                 println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
                 shutdown = true;
             }
