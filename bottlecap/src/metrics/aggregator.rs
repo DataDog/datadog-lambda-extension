@@ -329,7 +329,7 @@ mod tests {
     use crate::config;
     use std::collections::hash_map;
     use std::sync::Arc;
-    
+
     fn create_tags_provider() -> Arc<provider::Provider> {
         let config = Arc::new(config::Config::default());
         Arc::new(provider::Provider::new(
