@@ -65,14 +65,14 @@ pub fn decrypt_secret_arn(secret_arn: String) -> Result<String, Error> {
     }
 }
 
-fn immediate_return(secret_arn: String) -> Result<String, Error> {
-    Ok(secret_arn)
-}
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn immediate_return(secret_arn: String) -> Result<String, Error> {
+        Ok(secret_arn)
+    }
 
     #[test]
     fn test_resolve_secrets_sync() {
