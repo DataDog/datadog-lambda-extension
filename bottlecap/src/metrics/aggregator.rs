@@ -1,11 +1,13 @@
 //! The aggregation of metrics.
 
+use std::sync::Arc;
 use crate::metrics::metric;
 use crate::metrics::{
     constants, datadog, errors,
     metric::{Metric, Type},
 };
 
+use crate::tags::provider;
 use datadog_protos::metrics::{Dogsketch, Sketch, SketchPayload};
 use hashbrown::hash_table;
 use std::time;
@@ -173,6 +175,7 @@ impl Entry {
 // NOTE by construction we know that intervals and contexts do not explore the
 // full space of usize but the type system limits how we can express this today.
 pub struct Aggregator<const CONTEXTS: usize> {
+    tags_provider: Arc<provider::Provider>,
     map: hash_table::HashTable<Entry>,
 }
 
@@ -185,12 +188,13 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     /// counterparts in `constants`. This would be better as a compile-time
     /// issue, although leaving this open allows for runtime configuration.
     #[allow(clippy::cast_precision_loss)]
-    pub fn new() -> Result<Self, errors::Creation> {
+    pub fn new(tags_provider: Arc<provider::Provider>) -> Result<Self, errors::Creation> {
         if CONTEXTS > constants::MAX_CONTEXTS {
             return Err(errors::Creation::Contexts);
         }
 
         Ok(Self {
+            tags_provider,
             map: hash_table::HashTable::new(),
         })
     }
@@ -251,7 +255,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let tags = entry.tags.unwrap_or_default().to_string();
             let name = entry.name.to_string();
             sketch.set_metric(name.clone().into());
-            sketch.set_tags(vec![tags.clone().into()]);
+            sketch.set_tags(vec![tags.clone().into(), self.tags_provider.get_tags_string().into()]);
             sketch_payload.sketches.push(sketch);
         }
         sketch_payload
@@ -301,6 +305,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                     .map(std::string::ToString::to_string)
                     .collect();
             }
+            final_tags.append(&mut self.tags_provider.get_tags_vec());
             let metric = datadog::Metric {
                 metric: entry.name.as_str(),
                 resources,
@@ -320,10 +325,23 @@ mod tests {
         metric::{self, Metric},
         Aggregator,
     };
+    use crate::tags::provider;
+    use crate::config;
+    use std::collections::hash_map;
+    use std::sync::Arc;
+    
+    fn create_tags_provider() -> Arc<provider::Provider> {
+        let config = Arc::new(config::Config::default());
+        Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            "lambda".to_string(),
+            &hash_map::HashMap::new(),
+        ))
+    }
 
     #[test]
     fn insertion() {
-        let mut aggregator = Aggregator::<2>::new().unwrap();
+        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -337,7 +355,7 @@ mod tests {
 
     #[test]
     fn distribution_insertion() {
-        let mut aggregator = Aggregator::<2>::new().unwrap();
+        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
@@ -351,7 +369,7 @@ mod tests {
 
     #[test]
     fn overflow() {
-        let mut aggregator = Aggregator::<2>::new().unwrap();
+        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -379,7 +397,8 @@ mod tests {
 
     #[test]
     fn clear() {
-        let mut aggregator = Aggregator::<2>::new().unwrap();
+        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -394,7 +413,7 @@ mod tests {
 
     #[test]
     fn to_series() {
-        let mut aggregator = Aggregator::<2>::new().unwrap();
+        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -415,7 +434,7 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf() {
-        let mut aggregator = Aggregator::<2>::new().unwrap();
+        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");

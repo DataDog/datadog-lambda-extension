@@ -1,0 +1,162 @@
+use std::collections::hash_map;
+use std::sync::Arc;
+
+use crate::config;
+
+// Environment variables for Unified Service Tagging
+const ENV_ENV_VAR: &str = "DD_ENV";
+const VERSION_ENV_VAR: &str = "DD_VERSION";
+const SERVICE_ENV_VAR: &str = "DD_SERVICE";
+
+// Environment variables for the Lambda execution environment info
+const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
+// TODO(astuyve): set runtime
+// const RUNTIME_VAR: &str = "AWS_EXECUTION_ENV";
+const MEMORY_SIZE_VAR: &str = "AWS_LAMBDA_FUNCTION_MEMORY_SIZE";
+const INIT_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
+const INIT_TYPE_KEY: &str = "init_type";
+
+// FunctionARNKey is the tag key for a function's arn
+const FUNCTION_ARN_KEY: &str = "function_arn";
+// FunctionNameKey is the tag key for a function's name
+const FUNCTION_NAME_KEY: &str = "functionname";
+// ExecutedVersionKey is the tag key for a function's executed version
+const EXECUTED_VERSION_KEY: &str = "executedversion";
+// RuntimeKey is the tag key for a function's runtime (e.g node, python)
+// const RUNTIME_KEY: &str = "runtime";
+// MemorySizeKey is the tag key for a function's allocated memory size
+const MEMORY_SIZE_KEY: &str = "memorysize";
+// TODO(astuyve): fetch architecture from the runtime
+// ArchitectureKey is the tag key for a function's architecture (e.g. x86_64, arm64)
+// const ARCHITECTURE_KEY: &str = "architecture";
+
+// EnvKey is the tag key for a function's env environment variable
+const ENV_KEY: &str = "env";
+// VersionKey is the tag key for a function's version environment variable
+const VERSION_KEY: &str = "version";
+// ServiceKey is the tag key for a function's service environment variable
+const SERVICE_KEY: &str = "service";
+
+// TODO(astuyve): origin tags when tracing is supported
+// const TRACE_ORIGIN_METADATA_KEY: &str = "_dd.origin";
+// const TRACE_ORIGIN_METADATA_VALUE: &str = "lambda";
+
+// ComputeStatsKey is the tag key indicating whether trace stats should be computed
+const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
+// ComputeStatsValue is the tag value indicating trace stats should be computed
+const COMPUTE_STATS_VALUE: &str = "1";
+// TODO(astuyve) decide what to do with the version
+// const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
+
+const REGION_KEY: &str = "region";
+const ACCOUNT_ID_KEY: &str = "account_id";
+const AWS_ACCOUNT_KEY: &str = "aws_account";
+const RESOURCE_KEY: &str = "resource";
+
+// TODO(astuyve) platform tags
+// X86LambdaPlatform is for the lambda platform X86_64
+// const X86_LAMBDA_PLATFORM: &str = "x86_64";
+// ArmLambdaPlatform is for the lambda platform Arm64
+// const ARM_LAMBDA_PLATFORM: &str = "arm64";
+// AmdLambdaPlatform is for the lambda platform Amd64, which is an extension of X86_64
+// const AMD_LAMBDA_PLATFORM: &str = "amd64";
+
+#[derive(Debug, Clone)]
+pub struct LambdaTags {
+    tags_map: hash_map::HashMap<String, String>,
+}
+
+fn tags_from_env(mut tags_map: hash_map::HashMap<String, String>, metadata: &hash_map::HashMap<String, String>) -> hash_map::HashMap<String, String> {
+    if metadata.contains_key(FUNCTION_ARN_KEY) {
+        let parts = metadata[FUNCTION_ARN_KEY].split(':').collect::<Vec<&str>>();
+        if parts.len() > 6 {
+            tags_map.insert(REGION_KEY.to_string(), parts[3].to_string());
+            // TODO deprecate ACCOUNT_ID?
+            tags_map.insert(ACCOUNT_ID_KEY.to_string(), parts[4].to_string());
+            tags_map.insert(AWS_ACCOUNT_KEY.to_string(), parts[4].to_string());
+            tags_map.insert(FUNCTION_NAME_KEY.to_string(), parts[6].to_string());
+            tags_map.insert(RESOURCE_KEY.to_string(), parts[6].to_string());
+            if let Ok(qualifier) = std::env::var(QUALIFIER_ENV_VAR) {
+                if qualifier != "$LATEST" {
+                    tags_map.insert(RESOURCE_KEY.to_string(), format!("{}:{}", parts[6], qualifier));
+                    tags_map.insert(EXECUTED_VERSION_KEY.to_string(), qualifier);
+                }
+            }
+        }
+        tags_map.insert(FUNCTION_ARN_KEY.to_string(), metadata[FUNCTION_ARN_KEY].clone());
+    }
+    if let Ok(env) = std::env::var(ENV_ENV_VAR) {
+        tags_map.insert(ENV_KEY.to_string(), env);
+    }
+    if let Ok(version) = std::env::var(VERSION_ENV_VAR) {
+        tags_map.insert(VERSION_KEY.to_string(), version);
+    }
+    if let Ok(service) = std::env::var(SERVICE_ENV_VAR) {
+        tags_map.insert(SERVICE_KEY.to_string(), service);
+    }
+    if let Ok(init_type) = std::env::var(INIT_TYPE) {
+        tags_map.insert(INIT_TYPE_KEY.to_string(), init_type);
+    }
+    if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
+        tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
+    }
+    tags_map.insert(COMPUTE_STATS_KEY.to_string(), COMPUTE_STATS_VALUE.to_string());
+    tags_map
+}
+
+impl LambdaTags {
+    pub fn new_from_config(_config: Arc<config::Config>, metadata: &hash_map::HashMap<String, String>) -> Self {
+        LambdaTags {
+            tags_map: tags_from_env(hash_map::HashMap::new(), metadata),
+        }
+    }
+
+    pub fn get_tags_vec(&self) -> Vec<String> {
+        self.tags_map.iter().map(|(k, v)| format!("{}:{}", k, v)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new_from_config() {
+        let metadata = hash_map::HashMap::new();
+        let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
+        assert_eq!(tags.tags_map.len(), 1);
+        assert_eq!(tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(), COMPUTE_STATS_VALUE);
+    }
+
+    #[test]
+    fn test_new_with_function_arn_metadata() {
+        let mut metadata = hash_map::HashMap::new();
+        metadata.insert(FUNCTION_ARN_KEY.to_string(), "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string());
+        let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
+        assert_eq!(tags.tags_map.get(REGION_KEY).unwrap(), "us-west-2");
+        assert_eq!(tags.tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
+        assert_eq!(tags.tags_map.get(AWS_ACCOUNT_KEY).unwrap(), "123456789012");
+        assert_eq!(tags.tags_map.get(FUNCTION_NAME_KEY).unwrap(), "my-function");
+        assert_eq!(tags.tags_map.get(RESOURCE_KEY).unwrap(), "my-function");
+        assert_eq!(tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(), "arn:aws:lambda:us-west-2:123456789012:function:my-function");
+    }
+
+    #[test]
+    fn test_with_lambda_env_vars() {
+        let mut metadata = hash_map::HashMap::new();
+        metadata.insert(FUNCTION_ARN_KEY.to_string(), "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string());
+        std::env::set_var(ENV_ENV_VAR, "test");
+        std::env::set_var(VERSION_ENV_VAR, "1.0.0");
+        std::env::set_var(SERVICE_ENV_VAR, "my-service");
+        std::env::set_var(MEMORY_SIZE_VAR, "128");
+        let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
+        assert_eq!(tags.tags_map.get(ENV_KEY).unwrap(), "test");
+        assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
+        assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
+        assert_eq!(tags.tags_map.get(MEMORY_SIZE_KEY).unwrap(), "128");
+        std::env::remove_var(ENV_ENV_VAR);
+        std::env::remove_var(VERSION_ENV_VAR);
+        std::env::remove_var(SERVICE_ENV_VAR);
+        std::env::remove_var(MEMORY_SIZE_VAR);
+    }
+}
