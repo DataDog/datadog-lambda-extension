@@ -75,11 +75,18 @@ mod tests {
     use super::*;
 
     #[test]
-    async fn test_resolve_secrets_sync() {
+    fn test_resolve_secrets_sync() {
         let secret_arn = "arn:aws:secretsmanager:region:account-id:secret:secret-name".to_string();
 
-        let result = resolve_secrets(Config::default(), immediate_return);
+        let result = match resolve_secrets(
+            Config {
+                api_key_secret_arn: secret_arn.clone(),
+                ..Config::default()
+            }, immediate_return) {
+            Ok(config) => config.api_key,
+            Err(e) => panic!("{}", e)
+        };
 
-        assert_eq!(result?.api_key_secret_arn, secret_arn);
+        assert_eq!(result, secret_arn);
     }
 }
