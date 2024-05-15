@@ -3,11 +3,6 @@ use std::sync::Arc;
 
 use crate::config;
 
-// Environment variables for Unified Service Tagging
-const ENV_ENV_VAR: &str = "DD_ENV";
-const VERSION_ENV_VAR: &str = "DD_VERSION";
-const SERVICE_ENV_VAR: &str = "DD_SERVICE";
-
 // Environment variables for the Lambda execution environment info
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
 // TODO(astuyve): set runtime
