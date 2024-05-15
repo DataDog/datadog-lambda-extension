@@ -5,11 +5,12 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Provider {
-    pub tag_provider: Arc<Tag>,
+    pub tag_provider: Arc<TagProvider>,
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone)]
-pub enum Tag {
+pub enum TagProvider {
     Lambda(Lambda),
 }
 
@@ -23,7 +24,7 @@ impl Provider {
             "lambda" => {
                 let lambda_tabs = Lambda::new_from_config(config, metadata);
                 Provider {
-                    tag_provider: Arc::new(Tag::Lambda(lambda_tabs)),
+                    tag_provider: Arc::new(TagProvider::Lambda(lambda_tabs)),
                 }
             }
             _ => panic!("Unsupported runtime: {runtime}"),
@@ -43,10 +44,10 @@ trait GetTagsVec {
     fn get_tags_vec(&self) -> Vec<String>;
 }
 
-impl GetTagsVec for Tag {
+impl GetTagsVec for TagProvider {
     fn get_tags_vec(&self) -> Vec<String> {
         match self {
-            Tag::Lambda(lambda_tags) => lambda_tags.get_tags_vec(),
+            TagProvider::Lambda(lambda_tags) => lambda_tags.get_tags_vec(),
         }
     }
 }
