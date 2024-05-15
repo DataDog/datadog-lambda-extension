@@ -1,40 +1,40 @@
 use crate::config;
-use crate::tags::lambda::tags::LambdaTags;
+use crate::tags::lambda::tags::Lambda;
 use std::collections::hash_map;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Provider {
-    pub tag_provider: Arc<TagProvider>,
+    pub tag_provider: Arc<Tag>,
 }
 
 #[derive(Debug, Clone)]
-pub enum TagProvider {
-    Lambda(LambdaTags),
+pub enum Tag {
+    Lambda(Lambda),
 }
 
 impl Provider {
-    pub fn new(
+    #[must_use] pub fn new(
         config: Arc<config::Config>,
         runtime: String,
         metadata: &hash_map::HashMap<String, String>,
     ) -> Self {
         match runtime.as_str() {
             "lambda" => {
-                let lambda_tabs = LambdaTags::new_from_config(config, metadata);
+                let lambda_tabs = Lambda::new_from_config(config, metadata);
                 Provider {
-                    tag_provider: Arc::new(TagProvider::Lambda(lambda_tabs)),
+                    tag_provider: Arc::new(Tag::Lambda(lambda_tabs)),
                 }
             }
-            _ => panic!("Unsupported runtime: {}", runtime),
+            _ => panic!("Unsupported runtime: {runtime}"),
         }
     }
 
-    pub fn get_tags_vec(&self) -> Vec<String> {
+    #[must_use] pub fn get_tags_vec(&self) -> Vec<String> {
         self.tag_provider.get_tags_vec()
     }
 
-    pub fn get_tags_string(&self) -> String {
+    #[must_use] pub fn get_tags_string(&self) -> String {
         self.get_tags_vec().join(",")
     }
 }
@@ -43,10 +43,10 @@ trait GetTagsVec {
     fn get_tags_vec(&self) -> Vec<String>;
 }
 
-impl GetTagsVec for TagProvider {
+impl GetTagsVec for Tag {
     fn get_tags_vec(&self) -> Vec<String> {
         match self {
-            TagProvider::Lambda(lambda_tags) => lambda_tags.get_tags_vec(),
+            Tag::Lambda(lambda_tags) => lambda_tags.get_tags_vec(),
         }
     }
 }

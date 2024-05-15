@@ -57,7 +57,7 @@ const RESOURCE_KEY: &str = "resource";
 // const AMD_LAMBDA_PLATFORM: &str = "amd64";
 
 #[derive(Debug, Clone)]
-pub struct LambdaTags {
+pub struct Lambda {
     tags_map: hash_map::HashMap<String, String>,
 }
 
@@ -112,20 +112,20 @@ fn tags_from_env(
     tags_map
 }
 
-impl LambdaTags {
-    pub fn new_from_config(
+impl Lambda {
+    #[must_use] pub fn new_from_config(
         config: Arc<config::Config>,
         metadata: &hash_map::HashMap<String, String>,
     ) -> Self {
-        LambdaTags {
+        Lambda {
             tags_map: tags_from_env(hash_map::HashMap::new(), config, metadata),
         }
     }
 
-    pub fn get_tags_vec(&self) -> Vec<String> {
+    #[must_use] pub fn get_tags_vec(&self) -> Vec<String> {
         self.tags_map
             .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
+            .map(|(k, v)| format!("{k}:{v}"))
             .collect()
     }
 }
@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
-        let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
+        let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
         assert_eq!(tags.tags_map.len(), 1);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
@@ -153,7 +153,7 @@ mod tests {
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
         );
-        let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
+        let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
         assert_eq!(tags.tags_map.get(REGION_KEY).unwrap(), "us-west-2");
         assert_eq!(tags.tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
         assert_eq!(tags.tags_map.get(AWS_ACCOUNT_KEY).unwrap(), "123456789012");
@@ -180,7 +180,7 @@ mod tests {
             ..config::Config::default()
         });
         std::env::set_var(MEMORY_SIZE_VAR, "128");
-        let tags = LambdaTags::new_from_config(config, &metadata);
+        let tags = Lambda::new_from_config(config, &metadata);
         assert_eq!(tags.tags_map.get(ENV_KEY).unwrap(), "test");
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
