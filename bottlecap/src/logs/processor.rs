@@ -2,8 +2,10 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
+use tracing::debug;
 
 use crate::config;
+use crate::config::processing_rule;
 use crate::logs::aggregator::Aggregator;
 use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
 
@@ -54,6 +56,13 @@ pub struct IntakeLog {
     pub source: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct Rule {
+    kind: processing_rule::Kind,
+    regex: regex::Regex,
+    placeholder: String,
+}
+
 #[derive(Clone)]
 pub struct Processor {
     function_arn: String,
@@ -62,6 +71,8 @@ pub struct Processor {
     tags: String,
     // Logs which don't have a `request_id`
     orphan_logs: Vec<IntakeLog>,
+    // Global Processing Rules
+    rules: Option<Vec<Rule>>,
 }
 
 impl Processor {
@@ -69,12 +80,88 @@ impl Processor {
     pub fn new(function_arn: String, datadog_config: Arc<config::Config>) -> Processor {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = datadog_config.tags.clone().unwrap_or_default();
+
+        // let data = &datadog_config.logs_config_processing_rules.clone().unwrap_or_default();
+
+        // let processing_rules = serde_json::from_str::<Vec<ProcessingRule>>(data).expect("Failed to parse logs_config_processing_rules");
+        let processing_rules = &datadog_config.logs_config_processing_rules;
+        let rules = Processor::compile_rules(processing_rules);
         Processor {
             function_arn,
             request_id: None,
             service,
             tags,
             orphan_logs: Vec::new(),
+            rules,
+        }
+    }
+
+    fn apply_rules(&self, log: &mut IntakeLog) -> bool {
+        match &self.rules {
+            // No need to apply if there are no rules
+            None => true,
+            Some(rules) => {
+                // If rules are empty, we don't need to apply them
+                if rules.is_empty() {
+                    return true;
+                }
+
+                // Process rules
+                for rule in rules {
+                    let message = &log.message.message;
+                    match rule.kind {
+                        processing_rule::Kind::ExcludeAtMatch => {
+                            if rule.regex.is_match(message) {
+                                return false;
+                            }
+                        }
+                        processing_rule::Kind::IncludeAtMatch => {
+                            if !rule.regex.is_match(message) {
+                                return false;
+                            }
+                        }
+                        processing_rule::Kind::MaskSequences => {
+                            log.message.message = rule
+                                .regex
+                                .replace_all(message, rule.placeholder.as_str())
+                                .to_string();
+                        }
+                    }
+                }
+                true
+            }
+        }
+    }
+
+    fn compile_rules(
+        rules: &Option<Vec<config::processing_rule::ProcessingRule>>,
+    ) -> Option<Vec<Rule>> {
+        match rules {
+            None => None,
+            Some(rules) => {
+                if rules.is_empty() {
+                    return None;
+                }
+                let mut compiled_rules = Vec::new();
+
+                for rule in rules {
+                    match regex::Regex::new(&rule.pattern) {
+                        Ok(regex) => {
+                            let placeholder = rule.replace_placeholder.clone().unwrap_or_default();
+                            compiled_rules.push(Rule {
+                                kind: rule.kind,
+                                regex,
+                                placeholder,
+                            });
+                        }
+                        Err(e) => {
+                            debug!("Failed to compile rule: {}", e);
+                        }
+                    }
+                }
+
+                Some(compiled_rules)
+            }
         }
     }
 
@@ -200,9 +287,12 @@ impl Processor {
     }
 
     pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
-        if let Ok(log) = self.make_log(event) {
+        if let Ok(mut log) = self.make_log(event) {
             let mut aggregator = aggregator.lock().expect("lock poisoned");
-            aggregator.add(log);
+            let should_send_log = self.apply_rules(&mut log);
+            if should_send_log {
+                aggregator.add(log);
+            }
 
             // Process orphan logs, since we have a `request_id` now
             for mut orphan_log in self.orphan_logs.drain(..) {
@@ -211,7 +301,9 @@ impl Processor {
                         .clone()
                         .expect("unable to retrieve request ID"),
                 );
-                aggregator.add(orphan_log);
+                if should_send_log {
+                    aggregator.add(orphan_log);
+                }
             }
         }
     }
