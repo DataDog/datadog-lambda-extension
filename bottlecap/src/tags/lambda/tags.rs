@@ -113,7 +113,8 @@ fn tags_from_env(
 }
 
 impl Lambda {
-    #[must_use] pub fn new_from_config(
+    #[must_use]
+    pub fn new_from_config(
         config: Arc<config::Config>,
         metadata: &hash_map::HashMap<String, String>,
     ) -> Self {
@@ -122,7 +123,8 @@ impl Lambda {
         }
     }
 
-    #[must_use] pub fn get_tags_vec(&self) -> Vec<String> {
+    #[must_use]
+    pub fn get_tags_vec(&self) -> Vec<String> {
         self.tags_map
             .iter()
             .map(|(k, v)| format!("{k}:{v}"))

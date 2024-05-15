@@ -15,7 +15,8 @@ pub enum TagProvider {
 }
 
 impl Provider {
-    #[must_use] pub fn new(
+    #[must_use]
+    pub fn new(
         config: Arc<config::Config>,
         runtime: String,
         metadata: &hash_map::HashMap<String, String>,
@@ -31,11 +32,13 @@ impl Provider {
         }
     }
 
-    #[must_use] pub fn get_tags_vec(&self) -> Vec<String> {
+    #[must_use]
+    pub fn get_tags_vec(&self) -> Vec<String> {
         self.tag_provider.get_tags_vec()
     }
 
-    #[must_use] pub fn get_tags_string(&self) -> String {
+    #[must_use]
+    pub fn get_tags_string(&self) -> String {
         self.get_tags_vec().join(",")
     }
 }
