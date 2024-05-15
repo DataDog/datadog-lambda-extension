@@ -13,6 +13,7 @@ fnv = { version = "1.0.7", default-features = false }
 hashbrown = { version = "0.14.3", default-features = false, features = ["inline-more"] }
 log = { version = "0.4.21", default-features = false, features = [] }
 protobuf = { version = "3.4.0", default-features = false }
+regex = { version = "1.10.4", default-features = false }
 serde = { version = "1.0.197", features = ["derive"], default-features = false }
 serde_json = { version = "1.0.116", features = ["alloc"], default-features = false }
 thiserror = { version = "1.0.58", default-features = false }
