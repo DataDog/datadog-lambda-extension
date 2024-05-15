@@ -59,13 +59,17 @@ mod tests {
 
     #[test]
     fn test_provider_new() {
-        let config = Arc::new(Config::default());
+        let config = Arc::new(Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tag,env:test".to_string()),
+            ..config::Config::default()
+        });
         let mut metadata = HashMap::new();
         metadata.insert(
             "function_arn".to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
         );
         let provider = Provider::new(config, "lambda".to_string(), &metadata);
-        assert_eq!(provider.get_tags_string().len(), "_dd.compute_stats:1,resource:my-function,functionname:my-function,account_id:123456789012,aws_account:123456789012,region:us-west-2,function_arn:arn:aws:lambda:us-west-2:123456789012:function:my-function".len());
+        assert!(provider.get_tags_string().contains("service:test-service"));
     }
 }

@@ -68,6 +68,7 @@ pub struct LambdaTags {
 
 fn tags_from_env(
     mut tags_map: hash_map::HashMap<String, String>,
+    config: Arc<config::Config>,
     metadata: &hash_map::HashMap<String, String>,
 ) -> hash_map::HashMap<String, String> {
     if metadata.contains_key(FUNCTION_ARN_KEY) {
@@ -94,14 +95,14 @@ fn tags_from_env(
             metadata[FUNCTION_ARN_KEY].clone(),
         );
     }
-    if let Ok(env) = std::env::var(ENV_ENV_VAR) {
-        tags_map.insert(ENV_KEY.to_string(), env);
+    if let Some(version) = &config.version {
+        tags_map.insert(VERSION_KEY.to_string(), version.to_string());
     }
-    if let Ok(version) = std::env::var(VERSION_ENV_VAR) {
-        tags_map.insert(VERSION_KEY.to_string(), version);
+    if let Some(env) = &config.env {
+        tags_map.insert(ENV_KEY.to_string(), env.to_string());
     }
-    if let Ok(service) = std::env::var(SERVICE_ENV_VAR) {
-        tags_map.insert(SERVICE_KEY.to_string(), service);
+    if let Some(service) = &config.service {
+        tags_map.insert(SERVICE_KEY.to_string(), service.to_string());
     }
     if let Ok(init_type) = std::env::var(INIT_TYPE) {
         tags_map.insert(INIT_TYPE_KEY.to_string(), init_type);
@@ -118,11 +119,11 @@ fn tags_from_env(
 
 impl LambdaTags {
     pub fn new_from_config(
-        _config: Arc<config::Config>,
+        config: Arc<config::Config>,
         metadata: &hash_map::HashMap<String, String>,
     ) -> Self {
         LambdaTags {
-            tags_map: tags_from_env(hash_map::HashMap::new(), metadata),
+            tags_map: tags_from_env(hash_map::HashMap::new(), config, metadata),
         }
     }
 
@@ -137,6 +138,7 @@ impl LambdaTags {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     #[test]
     fn test_new_from_config() {
@@ -175,18 +177,19 @@ mod tests {
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
         );
-        std::env::set_var(ENV_ENV_VAR, "test");
-        std::env::set_var(VERSION_ENV_VAR, "1.0.0");
-        std::env::set_var(SERVICE_ENV_VAR, "my-service");
+        let config = Arc::new(Config {
+            service: Some("my-service".to_string()),
+            tags: Some("test:tag,env:test".to_string()),
+            env: Some("test".to_string()),
+            version: Some("1.0.0".to_string()),
+            ..config::Config::default()
+        });
         std::env::set_var(MEMORY_SIZE_VAR, "128");
-        let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
+        let tags = LambdaTags::new_from_config(config, &metadata);
         assert_eq!(tags.tags_map.get(ENV_KEY).unwrap(), "test");
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
         assert_eq!(tags.tags_map.get(MEMORY_SIZE_KEY).unwrap(), "128");
-        std::env::remove_var(ENV_ENV_VAR);
-        std::env::remove_var(VERSION_ENV_VAR);
-        std::env::remove_var(SERVICE_ENV_VAR);
         std::env::remove_var(MEMORY_SIZE_VAR);
     }
 }
