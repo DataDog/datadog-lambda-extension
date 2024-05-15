@@ -10,7 +10,7 @@
 # or
 # VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
 
-set -e
+set -ex
 
 if [ -z "$VERSION" ]; then
     echo "Extension version not specified"
@@ -52,7 +52,7 @@ cd $AGENT_PATH/..
 tar --exclude=.git -czf $ROOT_DIR/scripts/.src/datadog-agent.tgz datadog-agent
 cd $ROOT_DIR
 
-MAIN_AGENT_BUILD_FILE=Dockerfile.build
+MAIN_AGENT_BUILD_FILE=bottlecap-goagent.Dockerfile
 BOTTLECAP_BUILD_FILE=Dockerfile.bottlecap.build
 CMD_PATH="cmd/serverless"
 
@@ -69,6 +69,7 @@ function docker_build_agent_zip {
         --build-arg CMD_PATH="${CMD_PATH}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \
         . --load
+
     dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
     docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip
     unzip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip -d $TARGET_DIR/datadog_extension-${arch}${suffix}
