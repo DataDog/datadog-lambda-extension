@@ -304,25 +304,24 @@ pub mod tests {
     }
 
     #[test]
-    fn test_parse_logs_config_processing_rules() {
+    fn test_parse_logs_config_processing_rules_from_yaml() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             // TODO(duncanista): Update to use YAML configuration field `logs_config`: `processing_rules`: - ...
             jail.create_file(
                 "datadog.yaml",
                 r#"
-                logs_config:
-                    processing_rules:
-                     - type: exclude_at_match
-                       name: "exclude"
-                       pattern: "exclude"
-                     - type: include_at_match
-                       name: "include"
-                       pattern: "include"
-                     - type: mask_sequences
-                       name: "mask"
-                       pattern: "mask"
-                       replace_placeholder: "REPLACED"
+                logs_config_processing_rules:
+                   - type: exclude_at_match
+                     name: "exclude"
+                     pattern: "exclude"
+                   - type: include_at_match
+                     name: "include"
+                     pattern: "include"
+                   - type: mask_sequences
+                     name: "mask"
+                     pattern: "mask"
+                     replace_placeholder: "REPLACED"
             "#,
             )?;
             let config = get_config(Path::new("")).expect("should parse config");
