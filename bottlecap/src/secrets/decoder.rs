@@ -61,7 +61,8 @@ pub fn decrypt_secret_arn(secret_arn: String) -> Result<String, Error> {
                 None => Err(Error::new(std::io::ErrorKind::Other, "No secret found"))
             }
         }
-        Err(_) => Err(Error::new(std::io::ErrorKind::Other, "No secret found"))
+        Err(e) => Err(Error::new(std::io::ErrorKind::Other,
+                                 format!("No secret found: {}", e)))
     }
 }
 
