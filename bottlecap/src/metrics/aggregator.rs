@@ -1,11 +1,11 @@
 //! The aggregation of metrics.
 
-use std::sync::Arc;
 use crate::metrics::metric;
 use crate::metrics::{
     constants, datadog, errors,
     metric::{Metric, Type},
 };
+use std::sync::Arc;
 
 use crate::tags::provider;
 use datadog_protos::metrics::{Dogsketch, Sketch, SketchPayload};
@@ -255,7 +255,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let tags = entry.tags.unwrap_or_default().to_string();
             let name = entry.name.to_string();
             sketch.set_metric(name.clone().into());
-            sketch.set_tags(vec![tags.clone().into(), self.tags_provider.get_tags_string().into()]);
+            sketch.set_tags(vec![
+                tags.clone().into(),
+                self.tags_provider.get_tags_string().into(),
+            ]);
             sketch_payload.sketches.push(sketch);
         }
         sketch_payload
@@ -321,12 +324,12 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 
 #[cfg(test)]
 mod tests {
+    use crate::config;
     use crate::metrics::aggregator::{
         metric::{self, Metric},
         Aggregator,
     };
     use crate::tags::provider;
-    use crate::config;
     use std::collections::hash_map;
     use std::sync::Arc;
 
@@ -398,7 +401,6 @@ mod tests {
     #[test]
     fn clear() {
         let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
-
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");

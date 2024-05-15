@@ -28,9 +28,9 @@ pub struct DogStatsDConfig {
 impl DogStatsD {
     #[must_use]
     pub fn run(config: &DogStatsDConfig, event_bus: SyncSender<events::Event>) -> DogStatsD {
-
         let aggr: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>> = Arc::new(Mutex::new(
-            Aggregator::<{ constants::CONTEXTS }>::new(config.tags_provider.clone()).expect("failed to create aggregator"),
+            Aggregator::<{ constants::CONTEXTS }>::new(config.tags_provider.clone())
+                .expect("failed to create aggregator"),
         ));
         let serializer_aggr = Arc::clone(&aggr);
         let serve_handle =

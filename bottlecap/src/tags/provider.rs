@@ -1,11 +1,11 @@
 use crate::config;
 use crate::tags::lambda::tags::LambdaTags;
-use std::sync::Arc;
 use std::collections::hash_map;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct Provider {
-    pub tag_provider: Arc<TagProvider>
+    pub tag_provider: Arc<TagProvider>,
 }
 
 #[derive(Debug, Clone)]
@@ -14,11 +14,17 @@ pub enum TagProvider {
 }
 
 impl Provider {
-    pub fn new(config: Arc<config::Config>, runtime: String, metadata: &hash_map::HashMap<String, String>) -> Self {
+    pub fn new(
+        config: Arc<config::Config>,
+        runtime: String,
+        metadata: &hash_map::HashMap<String, String>,
+    ) -> Self {
         match runtime.as_str() {
             "lambda" => {
                 let lambda_tabs = LambdaTags::new_from_config(config, metadata);
-                Provider { tag_provider: Arc::new(TagProvider::Lambda(lambda_tabs)) }
+                Provider {
+                    tag_provider: Arc::new(TagProvider::Lambda(lambda_tabs)),
+                }
             }
             _ => panic!("Unsupported runtime: {}", runtime),
         }
@@ -55,7 +61,10 @@ mod tests {
     fn test_provider_new() {
         let config = Arc::new(Config::default());
         let mut metadata = HashMap::new();
-        metadata.insert("function_arn".to_string(), "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string());
+        metadata.insert(
+            "function_arn".to_string(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+        );
         let provider = Provider::new(config, "lambda".to_string(), &metadata);
         assert_eq!(provider.get_tags_string().len(), "_dd.compute_stats:1,resource:my-function,functionname:my-function,account_id:123456789012,aws_account:123456789012,region:us-west-2,function_arn:arn:aws:lambda:us-west-2:123456789012:function:my-function".len());
     }

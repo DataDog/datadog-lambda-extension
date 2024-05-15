@@ -66,7 +66,10 @@ pub struct LambdaTags {
     tags_map: hash_map::HashMap<String, String>,
 }
 
-fn tags_from_env(mut tags_map: hash_map::HashMap<String, String>, metadata: &hash_map::HashMap<String, String>) -> hash_map::HashMap<String, String> {
+fn tags_from_env(
+    mut tags_map: hash_map::HashMap<String, String>,
+    metadata: &hash_map::HashMap<String, String>,
+) -> hash_map::HashMap<String, String> {
     if metadata.contains_key(FUNCTION_ARN_KEY) {
         let parts = metadata[FUNCTION_ARN_KEY].split(':').collect::<Vec<&str>>();
         if parts.len() > 6 {
@@ -78,12 +81,18 @@ fn tags_from_env(mut tags_map: hash_map::HashMap<String, String>, metadata: &has
             tags_map.insert(RESOURCE_KEY.to_string(), parts[6].to_string());
             if let Ok(qualifier) = std::env::var(QUALIFIER_ENV_VAR) {
                 if qualifier != "$LATEST" {
-                    tags_map.insert(RESOURCE_KEY.to_string(), format!("{}:{}", parts[6], qualifier));
+                    tags_map.insert(
+                        RESOURCE_KEY.to_string(),
+                        format!("{}:{}", parts[6], qualifier),
+                    );
                     tags_map.insert(EXECUTED_VERSION_KEY.to_string(), qualifier);
                 }
             }
         }
-        tags_map.insert(FUNCTION_ARN_KEY.to_string(), metadata[FUNCTION_ARN_KEY].clone());
+        tags_map.insert(
+            FUNCTION_ARN_KEY.to_string(),
+            metadata[FUNCTION_ARN_KEY].clone(),
+        );
     }
     if let Ok(env) = std::env::var(ENV_ENV_VAR) {
         tags_map.insert(ENV_KEY.to_string(), env);
@@ -100,19 +109,28 @@ fn tags_from_env(mut tags_map: hash_map::HashMap<String, String>, metadata: &has
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
-    tags_map.insert(COMPUTE_STATS_KEY.to_string(), COMPUTE_STATS_VALUE.to_string());
+    tags_map.insert(
+        COMPUTE_STATS_KEY.to_string(),
+        COMPUTE_STATS_VALUE.to_string(),
+    );
     tags_map
 }
 
 impl LambdaTags {
-    pub fn new_from_config(_config: Arc<config::Config>, metadata: &hash_map::HashMap<String, String>) -> Self {
+    pub fn new_from_config(
+        _config: Arc<config::Config>,
+        metadata: &hash_map::HashMap<String, String>,
+    ) -> Self {
         LambdaTags {
             tags_map: tags_from_env(hash_map::HashMap::new(), metadata),
         }
     }
 
     pub fn get_tags_vec(&self) -> Vec<String> {
-        self.tags_map.iter().map(|(k, v)| format!("{}:{}", k, v)).collect()
+        self.tags_map
+            .iter()
+            .map(|(k, v)| format!("{}:{}", k, v))
+            .collect()
     }
 }
 
@@ -125,26 +143,38 @@ mod tests {
         let metadata = hash_map::HashMap::new();
         let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
         assert_eq!(tags.tags_map.len(), 1);
-        assert_eq!(tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(), COMPUTE_STATS_VALUE);
+        assert_eq!(
+            tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
+            COMPUTE_STATS_VALUE
+        );
     }
 
     #[test]
     fn test_new_with_function_arn_metadata() {
         let mut metadata = hash_map::HashMap::new();
-        metadata.insert(FUNCTION_ARN_KEY.to_string(), "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string());
+        metadata.insert(
+            FUNCTION_ARN_KEY.to_string(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+        );
         let tags = LambdaTags::new_from_config(Arc::new(config::Config::default()), &metadata);
         assert_eq!(tags.tags_map.get(REGION_KEY).unwrap(), "us-west-2");
         assert_eq!(tags.tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
         assert_eq!(tags.tags_map.get(AWS_ACCOUNT_KEY).unwrap(), "123456789012");
         assert_eq!(tags.tags_map.get(FUNCTION_NAME_KEY).unwrap(), "my-function");
         assert_eq!(tags.tags_map.get(RESOURCE_KEY).unwrap(), "my-function");
-        assert_eq!(tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(), "arn:aws:lambda:us-west-2:123456789012:function:my-function");
+        assert_eq!(
+            tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function"
+        );
     }
 
     #[test]
     fn test_with_lambda_env_vars() {
         let mut metadata = hash_map::HashMap::new();
-        metadata.insert(FUNCTION_ARN_KEY.to_string(), "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string());
+        metadata.insert(
+            FUNCTION_ARN_KEY.to_string(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+        );
         std::env::set_var(ENV_ENV_VAR, "test");
         std::env::set_var(VERSION_ENV_VAR, "1.0.0");
         std::env::set_var(SERVICE_ENV_VAR, "my-service");
