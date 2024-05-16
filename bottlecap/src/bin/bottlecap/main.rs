@@ -27,7 +27,8 @@ use bottlecap::{
         self, client::TelemetryApiClient, events::TelemetryRecord, listener::TelemetryListener,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
-    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE, TELEMETRY_PORT,
+    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
+    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 
 use serde::Deserialize;
@@ -173,7 +174,7 @@ fn main() -> Result<()> {
     )]);
     let tags_provider = Arc::new(provider::Provider::new(
         Arc::clone(&config),
-        "lambda".to_string(),
+        LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
     let logs_agent = LogsAgent::run(

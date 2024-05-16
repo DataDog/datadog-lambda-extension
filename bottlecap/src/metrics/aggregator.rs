@@ -330,6 +330,7 @@ mod tests {
         Aggregator,
     };
     use crate::tags::provider;
+    use crate::LAMBDA_RUNTIME_SLUG;
     use std::collections::hash_map;
     use std::sync::Arc;
 
@@ -337,7 +338,7 @@ mod tests {
         let config = Arc::new(config::Config::default());
         Arc::new(provider::Provider::new(
             Arc::clone(&config),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &hash_map::HashMap::new(),
         ))
     }

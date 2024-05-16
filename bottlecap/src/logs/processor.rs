@@ -7,8 +7,7 @@ use crate::config;
 use crate::logs::aggregator::Aggregator;
 use crate::tags::provider;
 use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
-
-const LOGS_SOURCE: &str = "lambda";
+use crate::LAMBDA_RUNTIME_SLUG;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct Lambda {
@@ -181,7 +180,7 @@ impl Processor {
 
         let log = IntakeLog {
             hostname: self.function_arn.clone(),
-            source: LOGS_SOURCE.to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: self.service.clone(),
             tags: self.tags.clone(),
             message: lambda_message,
@@ -229,6 +228,7 @@ mod tests {
     use crate::telemetry::events::{
         InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
     };
+    use crate::LAMBDA_RUNTIME_SLUG;
     use std::collections::hash_map::HashMap;
 
     use super::*;
@@ -248,7 +248,7 @@ mod tests {
                         ..config::Config::default()
                     });
 
-                    let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &HashMap::new()));
+                    let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), LAMBDA_RUNTIME_SLUG.to_string(), &HashMap::new()));
 
                     let mut processor = Processor::new(
                         "arn".to_string(),
@@ -411,7 +411,7 @@ mod tests {
 
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::new(),
         ));
         let mut processor =
@@ -428,7 +428,7 @@ mod tests {
         let lambda_message = processor.get_lambda_message(event.clone()).unwrap();
         let intake_log = processor.get_intake_log(lambda_message).unwrap();
 
-        assert_eq!(intake_log.source, "lambda".to_string());
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
         assert_eq!(intake_log.hostname, "test-arn".to_string());
         assert_eq!(intake_log.service, "test-service".to_string());
         assert!(intake_log.tags.contains("test:tags"));
@@ -456,7 +456,7 @@ mod tests {
 
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::new(),
         ));
         let mut processor =
@@ -488,7 +488,7 @@ mod tests {
 
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::new(),
         ));
         let mut processor =
@@ -530,7 +530,7 @@ mod tests {
 
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::new(),
         ));
         let mut processor = Processor::new(
@@ -562,7 +562,7 @@ mod tests {
                 status: "info".to_string(),
             },
             hostname: "test-arn".to_string(),
-            source: "lambda".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
             tags: tags_provider.get_tags_string(),
         };
@@ -581,7 +581,7 @@ mod tests {
 
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::new(),
         ));
         let mut processor =
@@ -611,7 +611,7 @@ mod tests {
 
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-            "lambda".to_string(),
+            LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::new(),
         ));
         let mut processor = Processor::new(
@@ -653,7 +653,7 @@ mod tests {
                 status: "info".to_string(),
             },
             hostname: "test-arn".to_string(),
-            source: "lambda".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
             tags: tags_provider.get_tags_string(),
         };
@@ -668,7 +668,7 @@ mod tests {
                 status: "info".to_string(),
             },
             hostname: "test-arn".to_string(),
-            source: "lambda".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
             tags: tags_provider.get_tags_string(),
         };
