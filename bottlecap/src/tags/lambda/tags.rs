@@ -105,6 +105,16 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
+
+    if let Some(tags) = &config.tags {
+        for tag in tags.split(',') {
+            let parts = tag.split(':').collect::<Vec<&str>>();
+            if parts.len() == 2 {
+                tags_map.insert(parts[0].to_string(), parts[1].to_string());
+            }
+        }
+    }
+
     tags_map.insert(
         COMPUTE_STATS_KEY.to_string(),
         COMPUTE_STATS_VALUE.to_string(),

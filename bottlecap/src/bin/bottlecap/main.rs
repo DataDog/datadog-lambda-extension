@@ -167,21 +167,20 @@ fn main() -> Result<()> {
     let function_name =
         env::var("AWS_LAMBDA_FUNCTION_NAME").expect("could not read AWS_LAMBDA_FUNCTION_NAME");
     let function_arn = build_function_arn(&r.account_id, &region, &function_name);
-
-    let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&config));
-    let event_bus = EventBus::run();
     let metadata_hash = hash_map::HashMap::from([(
         lambda::tags::FUNCTION_ARN_KEY.to_string(),
         function_arn.clone(),
     )]);
     let tags_provider =
-        provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &metadata_hash);
+        Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &metadata_hash));
+    let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&tags_provider), Arc::clone(&config));
+    let event_bus = EventBus::run();
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
         datadog_config: Arc::clone(&config),
         function_arn: function_arn.clone(),
-        tags_provider: Arc::new(tags_provider),
+        tags_provider: Arc::clone(&tags_provider),
     };
     let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
 
