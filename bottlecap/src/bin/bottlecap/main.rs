@@ -10,6 +10,7 @@
 #![deny(missing_debug_implementations)]
 
 use lifecycle::flush_control::FlushControl;
+use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
@@ -21,6 +22,7 @@ use bottlecap::{
     lifecycle, logger,
     logs::agent::LogsAgent,
     metrics::dogstatsd::{DogStatsD, DogStatsDConfig},
+    tags::{lambda, provider},
     telemetry::{
         self, client::TelemetryApiClient, events::TelemetryRecord, listener::TelemetryListener,
     },
@@ -168,10 +170,18 @@ fn main() -> Result<()> {
 
     let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&config));
     let event_bus = EventBus::run();
+    let metadata_hash = hash_map::HashMap::from([(
+        lambda::tags::FUNCTION_ARN_KEY.to_string(),
+        function_arn.clone(),
+    )]);
+    let tags_provider =
+        provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &metadata_hash);
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
         datadog_config: Arc::clone(&config),
+        function_arn: function_arn.clone(),
+        tags_provider: Arc::new(tags_provider),
     };
     let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
 
@@ -235,9 +245,6 @@ fn main() -> Result<()> {
                                     metrics,
                                 } => {
                                     debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                    // write this straight to metrics aggr
-                                    // write this straight to logs aggr
-                                    // write this straight to trace aggr
                                 }
                                 TelemetryRecord::PlatformRuntimeDone {
                                     request_id, status, ..

@@ -8,6 +8,7 @@ use crate::metrics::aggregator::Aggregator;
 use crate::metrics::constants;
 use crate::metrics::datadog;
 use crate::metrics::metric::Metric;
+use crate::tags::provider;
 use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
@@ -20,13 +21,16 @@ pub struct DogStatsDConfig {
     pub host: String,
     pub port: u16,
     pub datadog_config: Arc<config::Config>,
+    pub tags_provider: Arc<provider::Provider>,
+    pub function_arn: String,
 }
 
 impl DogStatsD {
     #[must_use]
     pub fn run(config: &DogStatsDConfig, event_bus: SyncSender<events::Event>) -> DogStatsD {
         let aggr: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>> = Arc::new(Mutex::new(
-            Aggregator::<{ constants::CONTEXTS }>::new().expect("failed to create aggregator"),
+            Aggregator::<{ constants::CONTEXTS }>::new(config.tags_provider.clone())
+                .expect("failed to create aggregator"),
         ));
         let serializer_aggr = Arc::clone(&aggr);
         let serve_handle =

@@ -163,13 +163,13 @@ mod tests {
         // The batch should only contain the first 2 logs
         let first_batch = aggregator.get_batch();
         let serialized_log = serde_json::to_string(&log).unwrap();
-        let serialized_batch = format!("[{},{}]", serialized_log, serialized_log);
+        let serialized_batch = format!("[{serialized_log},{serialized_log}]");
         assert_eq!(first_batch, serialized_batch.as_bytes());
         assert_eq!(aggregator.messages.len(), 1);
 
         // The second batch should only contain the last log
         let second_batch = aggregator.get_batch();
-        let serialized_batch = format!("[{}]", serialized_log);
+        let serialized_batch = format!("[{serialized_log}]");
         assert_eq!(second_batch, serialized_batch.as_bytes());
         assert_eq!(aggregator.messages.len(), 0);
     }
@@ -202,7 +202,7 @@ mod tests {
 
         let first_batch = aggregator.get_batch();
         let serialized_log = serde_json::to_string(&log).unwrap();
-        let serialized_batch = format!("[{}]", serialized_log);
+        let serialized_batch = format!("[{serialized_log}]");
         assert_eq!(first_batch, serialized_batch.as_bytes());
 
         // I really doubt someone would make a log that is 5MB long,
