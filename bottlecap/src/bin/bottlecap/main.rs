@@ -163,8 +163,7 @@ fn main() -> Result<()> {
 
     let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&config));
     let event_bus = EventBus::run();
-    let mut metadata_hash = hash_map::HashMap::new();
-    metadata_hash.insert("function_arn".to_string(), function_arn.clone());
+    let metadata_hash = hash_map::HashMap::from([("function_arn".to_string(), function_arn.clone())]);
     let tags_provider =
         provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &metadata_hash);
     let dogstatsd_config = DogStatsDConfig {
