@@ -14,5 +14,4 @@ function publish {
   echo "DONE: Published version $version_nbr of layer $LAYER_NAME to region $REGION"
 }
 
-validate_arg
 publish
