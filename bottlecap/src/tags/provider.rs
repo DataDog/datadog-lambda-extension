@@ -1,5 +1,5 @@
-use crate::config;
 use crate::tags::lambda::tags::Lambda;
+use crate::{config, LAMBDA_RUNTIME_SLUG};
 use std::collections::hash_map;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ impl Provider {
         metadata: &hash_map::HashMap<String, String>,
     ) -> Self {
         match runtime.as_str() {
-            "lambda" => {
+            LAMBDA_RUNTIME_SLUG => {
                 let lambda_tabs = Lambda::new_from_config(config, metadata);
                 Provider {
                     tag_provider: Arc::new(TagProvider::Lambda(lambda_tabs)),
@@ -59,6 +59,7 @@ impl GetTagsVec for TagProvider {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use crate::LAMBDA_RUNTIME_SLUG;
     use std::collections::hash_map::HashMap;
 
     #[test]
@@ -73,7 +74,7 @@ mod tests {
             "function_arn".to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
         );
-        let provider = Provider::new(config, "lambda".to_string(), &metadata);
+        let provider = Provider::new(config, LAMBDA_RUNTIME_SLUG.to_string(), &metadata);
         assert!(provider.get_tags_string().contains("service:test-service"));
     }
 }

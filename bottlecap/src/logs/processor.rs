@@ -5,9 +5,9 @@ use serde::Serialize;
 
 use crate::config;
 use crate::logs::aggregator::Aggregator;
+use crate::tags::provider;
 use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
-
-const LOGS_SOURCE: &str = "lambda";
+use crate::LAMBDA_RUNTIME_SLUG;
 
 #[derive(Serialize, Debug, Clone, PartialEq)]
 pub struct Lambda {
@@ -66,9 +66,13 @@ pub struct Processor {
 
 impl Processor {
     #[must_use]
-    pub fn new(function_arn: String, datadog_config: Arc<config::Config>) -> Processor {
+    pub fn new(
+        function_arn: String,
+        tags_provider: Arc<provider::Provider>,
+        datadog_config: Arc<config::Config>,
+    ) -> Processor {
         let service = datadog_config.service.clone().unwrap_or_default();
-        let tags = datadog_config.tags.clone().unwrap_or_default();
+        let tags = tags_provider.get_tags_string();
         Processor {
             function_arn,
             request_id: None,
@@ -176,7 +180,7 @@ impl Processor {
 
         let log = IntakeLog {
             hostname: self.function_arn.clone(),
-            source: LOGS_SOURCE.to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: self.service.clone(),
             tags: self.tags.clone(),
             message: lambda_message,
@@ -220,9 +224,12 @@ impl Processor {
 #[cfg(test)]
 mod tests {
     use crate::logs::aggregator::Aggregator;
+    use crate::tags::provider;
     use crate::telemetry::events::{
         InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
     };
+    use crate::LAMBDA_RUNTIME_SLUG;
+    use std::collections::hash_map::HashMap;
 
     use super::*;
 
@@ -235,8 +242,17 @@ mod tests {
                 fn $name() {
                     let (input, expected): (&TelemetryEvent, LambdaMessage) = $value;
 
+                    let config = Arc::new(config::Config {
+                        service: Some("test-service".to_string()),
+                        tags: Some("test:tags".to_string()),
+                        ..config::Config::default()
+                    });
+
+                    let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), LAMBDA_RUNTIME_SLUG.to_string(), &HashMap::new()));
+
                     let mut processor = Processor::new(
                         "arn".to_string(),
+                        tags_provider,
                         Arc::new(config::Config {
                             service: Some("test-service".to_string()),
                             tags: Some("test:tag,env:test".to_string()),
@@ -387,14 +403,19 @@ mod tests {
     // get_intake_log
     #[test]
     fn test_get_intake_log() {
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            Arc::new(config::Config {
-                service: Some("test-service".to_string()),
-                tags: Some("test:tags".to_string()),
-                ..config::Config::default()
-            }),
-        );
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -407,36 +428,39 @@ mod tests {
         let lambda_message = processor.get_lambda_message(event.clone()).unwrap();
         let intake_log = processor.get_intake_log(lambda_message).unwrap();
 
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        assert!(intake_log.tags.contains("test:tags"));
         assert_eq!(
-            intake_log,
-            IntakeLog {
-                message: LambdaMessage {
-                    message: "START RequestId: test-request-id Version: test".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: Some("test-request-id".to_string()),
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
+            intake_log.message,
+            LambdaMessage {
+                message: "START RequestId: test-request-id Version: test".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
                 },
-                hostname: "test-arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tags".to_string(),
-            }
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
         );
     }
 
     #[test]
     fn test_get_intake_log_errors_with_orphan() {
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            Arc::new(config::Config {
-                service: Some("test-service".to_string()),
-                tags: Some("test:tags".to_string()),
-                ..config::Config::default()
-            }),
-        );
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -456,15 +480,19 @@ mod tests {
 
     #[test]
     fn test_get_intake_log_no_orphan_after_seeing_request_id() {
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            Arc::new(config::Config {
-                service: Some("test-service".to_string()),
-                tags: Some("test:tags".to_string()),
-                ..config::Config::default()
-            }),
-        );
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
 
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::PlatformStart {
@@ -494,13 +522,21 @@ mod tests {
     #[test]
     fn test_process() {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
         let mut processor = Processor::new(
             "test-arn".to_string(),
-            Arc::new(config::Config {
-                service: Some("test-service".to_string()),
-                tags: Some("test:tags".to_string()),
-                ..config::Config::default()
-            }),
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
         );
 
         let event = TelemetryEvent {
@@ -526,9 +562,9 @@ mod tests {
                 status: "info".to_string(),
             },
             hostname: "test-arn".to_string(),
-            source: "lambda".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: "test:tags".to_string(),
+            tags: tags_provider.get_tags_string(),
         };
         let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
         assert_eq!(batch, serialized_log.as_bytes());
@@ -537,14 +573,19 @@ mod tests {
     #[test]
     fn test_process_log_with_no_request_id() {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            Arc::new(config::Config {
-                service: Some("test-service".to_string()),
-                tags: Some("test:tags".to_string()),
-                ..config::Config::default()
-            }),
-        );
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -562,13 +603,21 @@ mod tests {
     #[test]
     fn test_process_logs_after_seeing_request_id() {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
         let mut processor = Processor::new(
             "test-arn".to_string(),
-            Arc::new(config::Config {
-                service: Some("test-service".to_string()),
-                tags: Some("test:tags".to_string()),
-                ..config::Config::default()
-            }),
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
         );
 
         let start_event = TelemetryEvent {
@@ -604,9 +653,9 @@ mod tests {
                 status: "info".to_string(),
             },
             hostname: "test-arn".to_string(),
-            source: "lambda".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: "test:tags".to_string(),
+            tags: tags_provider.get_tags_string(),
         };
         let function_log = IntakeLog {
             message: LambdaMessage {
@@ -619,9 +668,9 @@ mod tests {
                 status: "info".to_string(),
             },
             hostname: "test-arn".to_string(),
-            source: "lambda".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: "test-service".to_string(),
-            tags: "test:tags".to_string(),
+            tags: tags_provider.get_tags_string(),
         };
         let serialized_log = format!(
             "[{},{}]",
