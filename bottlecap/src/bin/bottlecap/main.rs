@@ -144,13 +144,6 @@ fn main() -> Result<()> {
         }
     };
 
-    let config = match resolve_secrets(env_config, decrypt_secret_arn) {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            panic!("Error resolving key: {e}");
-        }
-    };
-
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
