@@ -10,7 +10,7 @@
 # or
 # VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
 
-set -ex
+set -e
 
 if [ -z "$VERSION" ]; then
     echo "Extension version not specified"
@@ -35,30 +35,26 @@ cd $ROOT_DIR
 EXTENSION_DIR=".layers"
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
 
-
-MAIN_AGENT_BUILD_FILE=Dockerfile.build
-BOTTLECAP_BUILD_FILE=Dockerfile.bottlecap.build
-CMD_PATH="cmd/serverless"
-
 # Make sure the folder does not exist
 rm -rf $EXTENSION_DIR 2>/dev/null
 
 mkdir -p $EXTENSION_DIR
 
-function copy_agent_code {
-  # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
-  mkdir -p $ROOT_DIR/scripts/.src $ROOT_DIR/scripts/.cache
-  echo "Copy mod files to build a cache"
-  cp $AGENT_PATH/go.mod $ROOT_DIR/scripts/.cache
-  cp $AGENT_PATH/go.sum $ROOT_DIR/scripts/.cache
+# First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
+mkdir -p $ROOT_DIR/scripts/.src $ROOT_DIR/scripts/.cache
+echo "Copy mod files to build a cache"
+cp $AGENT_PATH/go.mod $ROOT_DIR/scripts/.cache
+cp $AGENT_PATH/go.sum $ROOT_DIR/scripts/.cache
 
-  echo "Compressing all files to speed up docker copy"
-  touch $ROOT_DIR/scripts/.src/datadog-agent.tgz
-  cd $AGENT_PATH/..
-  tar --exclude=.git -czf $ROOT_DIR/scripts/.src/datadog-agent.tgz datadog-agent
-  cd $ROOT_DIR
-}
+echo "Compressing all files to speed up docker copy"
+touch $ROOT_DIR/scripts/.src/datadog-agent.tgz
+cd $AGENT_PATH/..
+tar --exclude=.git -czf $ROOT_DIR/scripts/.src/datadog-agent.tgz datadog-agent
+cd $ROOT_DIR
 
+MAIN_AGENT_BUILD_FILE=Dockerfile.build
+BOTTLECAP_BUILD_FILE=Dockerfile.bottlecap.build
+CMD_PATH="cmd/serverless"
 
 function docker_build_agent_zip {
     arch=$1
@@ -73,7 +69,6 @@ function docker_build_agent_zip {
         --build-arg CMD_PATH="${CMD_PATH}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \
         . --load
-
     dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
     docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip
     unzip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip -d $TARGET_DIR/datadog_extension-${arch}${suffix}
@@ -95,50 +90,10 @@ function docker_build_bottlecap_zip {
     unzip $TARGET_DIR/datadog_bottlecap-${arch}${suffix}.zip -d $TARGET_DIR/datadog_bottlecap-${arch}${suffix}
 }
 
-function use_local_bottlecap {
-    arch=$1
-    suffix=$2
-    echo "Skipping bottlecap build"
-    mkdir -p $TARGET_DIR/datadog_bottlecap-${arch}${suffix}/extensions
-    cp bottlecap/bottlecap $TARGET_DIR/datadog_bottlecap-${arch}${suffix}/extensions/datadog-agent
-    cp $TARGET_DIR/datadog_extension-${arch}${suffix}/extensions/datadog-agent $TARGET_DIR/datadog_bottlecap-${arch}${suffix}/datadog-agent-go
-    zip -r $TARGET_DIR/datadog_bottlecap-${arch}${suffix}.zip $TARGET_DIR/datadog_bottlecap-${arch}${suffix}
-
-}
-
-function use_published_agent_zip {
-        arch=$1
-        suffix=$2
-
-        DOCKER_BUILDKIT=1
-        docker buildx build --platform linux/${arch} \
-            -t datadog/build-lambda-extension-${arch}:$VERSION \
-            -f ./scripts/bottlecap-goagent.Dockerfile \
-            --build-arg EXTENSION_VERSION="${VERSION}" \
-            --build-arg AGENT_VERSION="${AGENT_VERSION}" \
-            --build-arg CMD_PATH="${CMD_PATH}" \
-            --build-arg BUILD_TAGS="${BUILD_TAGS}" \
-            . --load
-
-        dockerId=$(docker create datadog/build-lambda-extension-${arch}:$VERSION)
-        docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip
-        docker rm -f $dockerId
-        unzip $TARGET_DIR/datadog_extension-${arch}${suffix}.zip -d $TARGET_DIR/datadog_extension-${arch}${suffix}
-}
-
-
-if [ "$NO_BUILD" != "true" ]; then
-  copy_agent_code
-fi
-
-if [ "$NO_BUILD" == "true" ]; then
-    echo "Building for amd64 only, no building agent or bottlecap"
-    use_published_agent_zip amd64
-    use_local_bottlecap amd64
-elif [ "$ARCHITECTURE" == "amd64" ]; then
+if [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Building for amd64 only"
     docker_build_agent_zip amd64
-    use_local_bottlecap amd64
+    docker_build_bottlecap_zip amd64
 elif [ "$ARCHITECTURE" == "arm64" ]; then
     echo "Building for arm64 only"
     docker_build_agent_zip arm64
