@@ -24,6 +24,7 @@ pub mod lifecycle;
 pub mod logger;
 pub mod logs;
 pub mod metrics;
+pub mod tags;
 pub mod telemetry;
 
 use std::{env, io};
@@ -35,6 +36,7 @@ pub const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
 pub const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
 pub const EXTENSION_ACCEPT_FEATURE_HEADER: &str = "Lambda-Extension-Accept-Feature";
 pub const EXTENSION_ROUTE: &str = "2020-01-01/extension";
+pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";
 
 // todo: make sure we can override those with environment variables
 pub const DOGSTATSD_PORT: u16 = 8185;
