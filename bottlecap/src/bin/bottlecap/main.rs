@@ -242,9 +242,6 @@ fn main() -> Result<()> {
                                     metrics,
                                 } => {
                                     debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                    // write this straight to metrics aggr
-                                    // write this straight to logs aggr
-                                    // write this straight to trace aggr
                                 }
                                 TelemetryRecord::PlatformRuntimeDone {
                                     request_id, status, ..
