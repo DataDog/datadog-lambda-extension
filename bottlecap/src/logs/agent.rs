@@ -5,10 +5,10 @@ use std::thread;
 use tracing::{debug, error};
 
 use crate::config;
-use crate::tags::provider;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::datadog;
 use crate::logs::processor::Processor;
+use crate::tags::provider;
 use crate::telemetry::events::TelemetryEvent;
 
 #[allow(clippy::module_name_repetitions)]
@@ -21,10 +21,15 @@ pub struct LogsAgent {
 
 impl LogsAgent {
     #[must_use]
-    pub fn run(function_arn: &str, tags_provider: Arc<provider::Provider>, datadog_config: Arc<config::Config>) -> LogsAgent {
+    pub fn run(
+        function_arn: &str,
+        tags_provider: Arc<provider::Provider>,
+        datadog_config: Arc<config::Config>,
+    ) -> LogsAgent {
         let function_arn = function_arn.to_string();
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
-        let mut processor: Processor = Processor::new(function_arn, tags_provider, Arc::clone(&datadog_config));
+        let mut processor: Processor =
+            Processor::new(function_arn, tags_provider, Arc::clone(&datadog_config));
 
         let cloned_aggregator = aggregator.clone();
 

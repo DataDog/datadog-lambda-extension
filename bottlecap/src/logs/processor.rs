@@ -4,8 +4,8 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 
 use crate::config;
-use crate::tags::provider;
 use crate::logs::aggregator::Aggregator;
+use crate::tags::provider;
 use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
 
 const LOGS_SOURCE: &str = "lambda";
@@ -67,7 +67,11 @@ pub struct Processor {
 
 impl Processor {
     #[must_use]
-    pub fn new(function_arn: String, tags_provider: Arc<provider::Provider>, datadog_config: Arc<config::Config>) -> Processor {
+    pub fn new(
+        function_arn: String,
+        tags_provider: Arc<provider::Provider>,
+        datadog_config: Arc<config::Config>,
+    ) -> Processor {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
         Processor {
@@ -221,11 +225,11 @@ impl Processor {
 #[cfg(test)]
 mod tests {
     use crate::logs::aggregator::Aggregator;
-    use std::collections::hash_map::HashMap;
     use crate::tags::provider;
     use crate::telemetry::events::{
         InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
     };
+    use std::collections::hash_map::HashMap;
 
     use super::*;
 
@@ -405,12 +409,13 @@ mod tests {
             ..config::Config::default()
         });
 
-        let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &HashMap::new()));
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            tags_provider,
+        let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-        );
+            "lambda".to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -449,12 +454,13 @@ mod tests {
             ..config::Config::default()
         });
 
-        let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &HashMap::new()));
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            tags_provider,
+        let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-        );
+            "lambda".to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -480,12 +486,13 @@ mod tests {
             ..config::Config::default()
         });
 
-        let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &HashMap::new()));
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            tags_provider,
+        let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-        );
+            "lambda".to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::PlatformStart {
@@ -521,7 +528,11 @@ mod tests {
             ..config::Config::default()
         });
 
-        let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &HashMap::new()));
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            "lambda".to_string(),
+            &HashMap::new(),
+        ));
         let mut processor = Processor::new(
             "test-arn".to_string(),
             Arc::clone(&tags_provider),
@@ -568,12 +579,13 @@ mod tests {
             ..config::Config::default()
         });
 
-        let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &HashMap::new()));
-        let mut processor = Processor::new(
-            "test-arn".to_string(),
-            tags_provider,
+        let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
-        );
+            "lambda".to_string(),
+            &HashMap::new(),
+        ));
+        let mut processor =
+            Processor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -597,7 +609,11 @@ mod tests {
             ..config::Config::default()
         });
 
-        let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &HashMap::new()));
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            "lambda".to_string(),
+            &HashMap::new(),
+        ));
         let mut processor = Processor::new(
             "test-arn".to_string(),
             Arc::clone(&tags_provider),

@@ -171,9 +171,16 @@ fn main() -> Result<()> {
         lambda::tags::FUNCTION_ARN_KEY.to_string(),
         function_arn.clone(),
     )]);
-    let tags_provider =
-        Arc::new(provider::Provider::new(Arc::clone(&config), "lambda".to_string(), &metadata_hash));
-    let logs_agent = LogsAgent::run(&function_arn, Arc::clone(&tags_provider), Arc::clone(&config));
+    let tags_provider = Arc::new(provider::Provider::new(
+        Arc::clone(&config),
+        "lambda".to_string(),
+        &metadata_hash,
+    ));
+    let logs_agent = LogsAgent::run(
+        &function_arn,
+        Arc::clone(&tags_provider),
+        Arc::clone(&config),
+    );
     let event_bus = EventBus::run();
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
