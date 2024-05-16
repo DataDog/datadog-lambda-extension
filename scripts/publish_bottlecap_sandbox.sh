@@ -14,11 +14,6 @@
 
 set -e
 
-if [ -z $ARCHITECTURE ]; then
-    echo "No architecture specified, defaulting to amd64"
-    ARCHITECTURE="amd64"
-fi
-
 if [ "$ARCHITECTURE" == "amd64" ]; then
     echo "Publishing for amd64 only"
     LAYER_PATH=".layers/datadog_bottlecap-amd64.zip"
@@ -27,6 +22,10 @@ elif [ "$ARCHITECTURE" == "arm64" ]; then
     echo "Publishing for arm64 only"
     LAYER_PATH=".layers/datadog_bottlecap-arm64.zip"
     LAYER_NAME="Datadog-Bottlecap-Beta-ARM"
+fi
+if [ -z $ARCHITECTURE ]; then
+    echo "No architecture specified, defaulting to amd64"
+    ARCHITECTURE="amd64"
 fi
 
 if [ ! -z "$SUFFIX" ]; then
