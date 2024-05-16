@@ -142,23 +142,16 @@ fn main() -> Result<()> {
         }
     };
 
-    let config = match resolve_secrets(env_config, decrypt_secret_arn) {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            panic!("Error resolving key: {e}");
-        }
-    };
-
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
-        .with_max_level(config.log_level.as_level_filter())
+        .with_max_level(env_config.log_level.as_level_filter())
         .init()
         .expect("failed to set up log bridge");
 
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_new(config.log_level)
+            EnvFilter::try_new(env_config.log_level)
                 .expect("could not parse log level in configuration"),
         )
         .with_level(true)
@@ -173,6 +166,15 @@ fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     info!("logging subsystem enabled");
+
+    let config = match resolve_secrets(env_config, decrypt_secret_arn) {
+        Ok(c) => {
+            Arc::new(c)
+        }
+        Err(e) => {
+            panic!("Error resolving key: {e}");
+        }
+    };
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
