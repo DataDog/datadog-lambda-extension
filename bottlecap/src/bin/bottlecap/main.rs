@@ -14,7 +14,7 @@ use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
-use decoder::resolve_secrets;
+use decrypt::resolve_secrets;
 
 use bottlecap::{
     base_url, config,
@@ -47,8 +47,8 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
-use bottlecap::secrets::decoder;
-use bottlecap::secrets::decoder::{decrypt_secret_arn};
+use bottlecap::secrets::decrypt;
+use bottlecap::secrets::decrypt::{decrypt_secret_arn};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
