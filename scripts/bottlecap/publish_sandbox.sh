@@ -1,9 +1,10 @@
 #!/bin/bash
 set -e
 
+ARCH="amd64"
 REGION="us-east-1"
 LAYER_NAME="Datadog-Bottlecap-Beta-ag"
-LAYER_PATH=../../.layers/datadog_bottlecap-amd64.zip
+LAYER_PATH=../../.layers/datadog_bottlecap-$ARCH.zip
 
 function publish {
   version_nbr=$(aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda publish-layer-version \
