@@ -12,7 +12,7 @@ const INIT_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
 const INIT_TYPE_KEY: &str = "init_type";
 
 // FunctionARNKey is the tag key for a function's arn
-const FUNCTION_ARN_KEY: &str = "function_arn";
+pub const FUNCTION_ARN_KEY: &str = "function_arn";
 // FunctionNameKey is the tag key for a function's name
 const FUNCTION_NAME_KEY: &str = "functionname";
 // ExecutedVersionKey is the tag key for a function's executed version
