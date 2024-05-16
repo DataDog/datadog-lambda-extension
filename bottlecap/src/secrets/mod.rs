@@ -1,1 +1,1 @@
-pub mod decoder;
+pub mod decrypt;

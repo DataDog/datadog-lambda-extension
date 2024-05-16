@@ -7,9 +7,9 @@ use tracing::debug;
 use std::thread;
 
 
-type DecoderFn = fn(String) -> Result<String, Error>;
+type ResolveFn = fn(String) -> Result<String, Error>;
 
-pub fn resolve_secrets(config: Config, decoder: DecoderFn) -> Result<Config, String> {
+pub fn resolve_secrets(config: Config, decoder: ResolveFn) -> Result<Config, String> {
     if !config.api_key.is_empty() {
         debug!("DD_API_KEY found, not trying to resolve secrets");
         Ok(config)
