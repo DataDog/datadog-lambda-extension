@@ -1,17 +1,18 @@
 pub mod flush_strategy;
 pub mod log_level;
+pub mod processing_rule;
 
 use std::path::Path;
-
-use serde::Deserialize;
 
 use figment::{
     providers::{Env, Format, Yaml},
     Figment,
 };
+use serde::Deserialize;
 
 use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::LogLevel;
+use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -25,6 +26,8 @@ pub struct Config {
     pub tags: Option<String>,
     pub log_level: LogLevel,
     pub serverless_logs_enabled: bool,
+    #[serde(deserialize_with = "deserialize_processing_rules")]
+    pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub apm_enabled: bool,
     pub lambda_handler: String,
     pub serverless_flush_strategy: FlushStrategy,
@@ -45,6 +48,8 @@ impl Default for Config {
             // Logs
             log_level: LogLevel::default(),
             serverless_logs_enabled: true,
+            // TODO(duncanista): Add serializer for YAML
+            logs_config_processing_rules: None,
             // APM
             apm_enabled: false,
             lambda_handler: String::default(),
@@ -80,6 +85,7 @@ pub mod tests {
     use super::*;
 
     use crate::config::flush_strategy::PeriodicStrategy;
+    use crate::config::processing_rule;
 
     #[test]
     fn test_reject_unknown_fields_yaml() {
@@ -265,6 +271,83 @@ pub mod tests {
             assert_eq!(
                 config,
                 Config {
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_logs_config_processing_rules_from_env() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_LOGS_CONFIG_PROCESSING_RULES",
+                r#"[{"type":"exclude_at_match","name":"exclude","pattern":"exclude"}]"#,
+            );
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    logs_config_processing_rules: Some(vec![ProcessingRule {
+                        kind: processing_rule::Kind::ExcludeAtMatch,
+                        name: "exclude".to_string(),
+                        pattern: "exclude".to_string(),
+                        replace_placeholder: None
+                    }]),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_logs_config_processing_rules_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            // TODO(duncanista): Update to use YAML configuration field `logs_config`: `processing_rules`: - ...
+            jail.create_file(
+                "datadog.yaml",
+                r#"
+                logs_config_processing_rules:
+                   - type: exclude_at_match
+                     name: "exclude"
+                     pattern: "exclude"
+                   - type: include_at_match
+                     name: "include"
+                     pattern: "include"
+                   - type: mask_sequences
+                     name: "mask"
+                     pattern: "mask"
+                     replace_placeholder: "REPLACED"
+            "#,
+            )?;
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    logs_config_processing_rules: Some(vec![
+                        ProcessingRule {
+                            kind: processing_rule::Kind::ExcludeAtMatch,
+                            name: "exclude".to_string(),
+                            pattern: "exclude".to_string(),
+                            replace_placeholder: None
+                        },
+                        ProcessingRule {
+                            kind: processing_rule::Kind::IncludeAtMatch,
+                            name: "include".to_string(),
+                            pattern: "include".to_string(),
+                            replace_placeholder: None
+                        },
+                        ProcessingRule {
+                            kind: processing_rule::Kind::MaskSequences,
+                            name: "mask".to_string(),
+                            pattern: "mask".to_string(),
+                            replace_placeholder: Some("REPLACED".to_string())
+                        }
+                    ]),
                     ..Config::default()
                 }
             );
