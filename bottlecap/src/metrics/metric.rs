@@ -49,7 +49,8 @@ pub struct Metric {
 }
 
 impl Metric {
-    #[must_use] pub fn new(name: Ustr, kind: Type, values: Ustr, tags: Option<Ustr>) -> Self {
+    #[must_use]
+    pub fn new(name: Ustr, kind: Type, values: Ustr, tags: Option<Ustr>) -> Self {
         Self {
             name,
             kind,
