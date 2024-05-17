@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::sync::{Arc, Mutex};
 
-use crate::config::{self, processing_rule};
+use crate::config;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
@@ -23,44 +23,7 @@ pub struct LambdaProcessor {
     rules: Option<Vec<Rule>>,
 }
 
-impl Processor<IntakeLog> for LambdaProcessor {
-    fn apply_rules(&self, log: &mut IntakeLog) -> bool {
-        match &self.rules {
-            // No need to apply if there are no rules
-            None => true,
-            Some(rules) => {
-                // If rules are empty, we don't need to apply them
-                if rules.is_empty() {
-                    return true;
-                }
-
-                // Process rules
-                for rule in rules {
-                    let message = &log.message.message;
-                    match rule.kind {
-                        processing_rule::Kind::ExcludeAtMatch => {
-                            if rule.regex.is_match(message) {
-                                return false;
-                            }
-                        }
-                        processing_rule::Kind::IncludeAtMatch => {
-                            if !rule.regex.is_match(message) {
-                                return false;
-                            }
-                        }
-                        processing_rule::Kind::MaskSequences => {
-                            log.message.message = rule
-                                .regex
-                                .replace_all(message, rule.placeholder.as_str())
-                                .to_string();
-                        }
-                    }
-                }
-                true
-            }
-        }
-    }
-}
+impl Processor<IntakeLog> for LambdaProcessor {}
 
 impl LambdaProcessor {
     #[must_use]
@@ -205,7 +168,8 @@ impl LambdaProcessor {
     pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
         if let Ok(mut log) = self.make_log(event) {
             let mut aggregator = aggregator.lock().expect("lock poisoned");
-            let should_send_log = self.apply_rules(&mut log);
+            let should_send_log =
+                LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
             if should_send_log {
                 aggregator.add(log);
             }

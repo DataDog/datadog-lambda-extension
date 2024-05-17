@@ -11,7 +11,42 @@ pub struct Rule {
 }
 
 pub trait Processor<L> {
-    fn apply_rules(&self, message: &mut L) -> bool;
+    fn apply_rules(rules: &Option<Vec<Rule>>, message: &mut String) -> bool {
+        match &rules {
+            // No need to apply if there are no rules
+            None => true,
+            Some(rules) => {
+                // If rules are empty, we don't need to apply them
+                if rules.is_empty() {
+                    return true;
+                }
+
+                // Process rules
+                for rule in rules {
+                    match rule.kind {
+                        processing_rule::Kind::ExcludeAtMatch => {
+                            if rule.regex.is_match(message) {
+                                return false;
+                            }
+                        }
+                        processing_rule::Kind::IncludeAtMatch => {
+                            if !rule.regex.is_match(message) {
+                                return false;
+                            }
+                        }
+                        processing_rule::Kind::MaskSequences => {
+                            *message = rule
+                                .regex
+                                .replace_all(message, rule.placeholder.as_str())
+                                .to_string();
+                        }
+                    }
+                }
+                true
+            }
+        }
+    }
+
     fn compile_rules(
         rules: &Option<Vec<config::processing_rule::ProcessingRule>>,
     ) -> Option<Vec<Rule>> {
@@ -50,10 +85,50 @@ mod tests {
     use super::*;
 
     struct TestProcessor;
-    impl Processor<String> for TestProcessor {
-        fn apply_rules(&self, _: &mut String) -> bool {
-            true
-        }
+    impl Processor<String> for TestProcessor {}
+
+    #[test]
+    fn test_apply_rules_mask_sequences() {
+        let rules = vec![Rule {
+            kind: processing_rule::Kind::MaskSequences,
+            regex: regex::Regex::new("replace-me").unwrap(),
+            placeholder: "test-placeholder".to_string(),
+        }];
+        let mut message = "do-not-replace replace-me".to_string();
+
+        let should_include = TestProcessor::apply_rules(&Some(rules), &mut message);
+        assert!(should_include);
+        assert_eq!(message, "do-not-replace test-placeholder");
+    }
+
+    #[test]
+    fn test_apply_rules_exclude_at_match() {
+        let rules = vec![Rule {
+            kind: processing_rule::Kind::ExcludeAtMatch,
+            regex: regex::Regex::new("exclude-me").unwrap(),
+            placeholder: "test-placeholder".to_string(),
+        }];
+        let mut message = "exclude-me".to_string();
+
+        let should_include = TestProcessor::apply_rules(&Some(rules), &mut message);
+        assert!(!should_include);
+    }
+
+    #[test]
+    fn test_apply_rules_include_at_match() {
+        let rules = Some(vec![Rule {
+            kind: processing_rule::Kind::IncludeAtMatch,
+            regex: regex::Regex::new("include-me").unwrap(),
+            placeholder: "test-placeholder".to_string(),
+        }]);
+
+        let mut message = "include-me".to_string();
+        let should_include = TestProcessor::apply_rules(&rules, &mut message);
+        assert!(should_include);
+
+        let mut message = "do-not-include-me".to_string();
+        let should_include = TestProcessor::apply_rules(&rules, &mut message);
+        assert!(should_include);
     }
 
     #[test]
