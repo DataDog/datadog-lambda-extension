@@ -257,7 +257,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let mut base_tag_vec = self.tags_provider.get_tags_vec();
             let mut tags = tags_string_to_vector(entry.tags);
             base_tag_vec.append(&mut tags); // TODO split on comma
-            sketch.set_tags(base_tag_vec.into_iter().map(|s| s.into()).collect());
+            sketch.set_tags(base_tag_vec.into_iter().map(std::convert::Into::into).collect());
             sketch_payload.sketches.push(sketch);
         }
         sketch_payload

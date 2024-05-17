@@ -68,7 +68,7 @@ mod tests {
             .lock()
             .expect("lock poisoned")
             .distributions_to_protobuf();
-        let _ = pbuf.sketches().into_iter().map(|sketch| {
+        let _ = pbuf.sketches().iter().map(|sketch| {
             assert_eq!(sketch.metric, constants::INVOCATIONS_METRIC.into());
         });
     }
@@ -82,7 +82,7 @@ mod tests {
             .lock()
             .expect("lock poisoned")
             .distributions_to_protobuf();
-        let _ = pbuf.sketches().into_iter().map(|sketch| {
+        let _ = pbuf.sketches().iter().map(|sketch| {
             assert_eq!(sketch.metric, constants::ERRORS_METRIC.into());
         });
     }

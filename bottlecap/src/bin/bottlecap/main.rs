@@ -230,7 +230,7 @@ fn main() -> Result<()> {
                     request_id, deadline_ms, invoked_function_arn
                 );
                 match lambda_enhanced_metrics.increment_invocation_metric() {
-                    Ok(_) => {}
+                    Ok(()) => {}
                     Err(e) => {
                         error!("Failed to increment invocation metric: {e:?}");
                     }
