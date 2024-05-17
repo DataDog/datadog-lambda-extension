@@ -21,6 +21,7 @@ pub struct DogStatsDConfig {
     pub host: String,
     pub port: u16,
     pub datadog_config: Arc<config::Config>,
+    pub aggregator: Arc<Mutex<Aggregator<1024>>>,
     pub tags_provider: Arc<provider::Provider>,
     pub function_arn: String,
 }
@@ -28,11 +29,7 @@ pub struct DogStatsDConfig {
 impl DogStatsD {
     #[must_use]
     pub fn run(config: &DogStatsDConfig, event_bus: SyncSender<events::Event>) -> DogStatsD {
-        let aggr: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>> = Arc::new(Mutex::new(
-            Aggregator::<{ constants::CONTEXTS }>::new(config.tags_provider.clone())
-                .expect("failed to create aggregator"),
-        ));
-        let serializer_aggr = Arc::clone(&aggr);
+        let serializer_aggr = Arc::clone(&config.aggregator);
         let serve_handle =
             DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
         let dd_api = datadog::DdApi::new(
@@ -41,7 +38,7 @@ impl DogStatsD {
         );
         DogStatsD {
             serve_handle,
-            aggregator: aggr,
+            aggregator: config.aggregator.clone(),
             dd_api,
         }
     }

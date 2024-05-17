@@ -252,13 +252,12 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             dogsketch.set_ts(now);
             let mut sketch = Sketch::default();
             sketch.set_dogsketches(vec![dogsketch]);
-            let tags = entry.tags.unwrap_or_default().to_string();
             let name = entry.name.to_string();
             sketch.set_metric(name.clone().into());
-            sketch.set_tags(vec![
-                tags.clone().into(),
-                self.tags_provider.get_tags_string().into(),
-            ]);
+            let mut base_tag_vec = self.tags_provider.get_tags_vec();
+            let mut tags = tags_string_to_vector(entry.tags);
+            base_tag_vec.append(&mut tags); // TODO split on comma
+            sketch.set_tags(base_tag_vec.into_iter().map(|s| s.into()).collect());
             sketch_payload.sketches.push(sketch);
         }
         sketch_payload
@@ -320,6 +319,17 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         }
         series
     }
+}
+
+fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
+    if tags.is_none() {
+        return Vec::new();
+    }
+    tags
+        .unwrap_or_default()
+        .split(',')
+        .map(std::string::ToString::to_string)
+        .collect()
 }
 
 #[cfg(test)]
