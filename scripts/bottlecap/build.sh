@@ -21,9 +21,12 @@ function zip_extension {
 
   chmod 755 datadog_wrapper datadog-agent-go extensions/datadog-agent
 
+  du -hs datadog_wrapper datadog-agent-go extensions/datadog-agent
+
   zip -r datadog_bottlecap-$ARCH.zip datadog_wrapper datadog-agent-go extensions/datadog-agent
   cd ..
   mv datadog_bottlecap-$ARCH/datadog_bottlecap-$ARCH.zip .
+  du -hs datadog_bottlecap-$ARCH.zip
 }
 
-zip_extension
+time zip_extension
