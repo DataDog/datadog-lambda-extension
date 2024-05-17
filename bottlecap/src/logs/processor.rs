@@ -11,7 +11,7 @@ pub struct Rule {
 }
 
 pub trait Processor<L> {
-    fn apply_rules(&self, log: &mut L) -> bool;
+    fn apply_rules(&self, message: &mut L) -> bool;
     fn compile_rules(
         rules: &Option<Vec<config::processing_rule::ProcessingRule>>,
     ) -> Option<Vec<Rule>> {
@@ -42,5 +42,59 @@ pub trait Processor<L> {
                 Some(compiled_rules)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct TestProcessor;
+    impl Processor<String> for TestProcessor {
+        fn apply_rules(&self, _: &mut String) -> bool {
+            true
+        }
+    }
+
+    #[test]
+    fn test_compile_rules() {
+        let rules = vec![processing_rule::ProcessingRule {
+            kind: processing_rule::Kind::MaskSequences,
+            name: "test".to_string(),
+            pattern: "test-pattern".to_string(),
+            replace_placeholder: Some("test-placeholder".to_string()),
+        }];
+
+        let compiled_rules = TestProcessor::compile_rules(&Some(rules));
+        assert!(compiled_rules.is_some());
+        assert_eq!(compiled_rules.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_compile_rules_empty() {
+        let rules = vec![];
+
+        let compiled_rules = TestProcessor::compile_rules(&Some(rules));
+        assert!(compiled_rules.is_none());
+    }
+
+    #[test]
+    fn test_compile_rules_none() {
+        let compiled_rules = TestProcessor::compile_rules(&None);
+        assert!(compiled_rules.is_none());
+    }
+
+    #[test]
+    fn test_compile_rules_invalid_regex() {
+        let rules = vec![processing_rule::ProcessingRule {
+            kind: processing_rule::Kind::MaskSequences,
+            name: "test".to_string(),
+            pattern: "(".to_string(),
+            replace_placeholder: Some("test-placeholder".to_string()),
+        }];
+
+        let compiled_rules = TestProcessor::compile_rules(&Some(rules));
+        assert!(compiled_rules.is_some());
+        assert_eq!(compiled_rules.unwrap().len(), 0);
     }
 }
