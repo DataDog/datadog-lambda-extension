@@ -325,8 +325,7 @@ fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
     if tags.is_none() {
         return Vec::new();
     }
-    tags
-        .unwrap_or_default()
+    tags.unwrap_or_default()
         .split(',')
         .map(std::string::ToString::to_string)
         .collect()
