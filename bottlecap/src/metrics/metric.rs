@@ -49,6 +49,15 @@ pub struct Metric {
 }
 
 impl Metric {
+    #[must_use]
+    pub fn new(name: Ustr, kind: Type, values: Ustr, tags: Option<Ustr>) -> Self {
+        Self {
+            name,
+            kind,
+            values,
+            tags,
+        }
+    }
     /// Parse a metric from given input.
     ///
     /// This function parses a passed `&str` into a `Metric`. We assume that
