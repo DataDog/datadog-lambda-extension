@@ -7,7 +7,7 @@ use tracing::{debug, error};
 use crate::config;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::datadog;
-use crate::logs::processor::Processor;
+use crate::logs::lambda::processor::LambdaProcessor;
 use crate::tags::provider;
 use crate::telemetry::events::TelemetryEvent;
 
@@ -28,8 +28,8 @@ impl LogsAgent {
     ) -> LogsAgent {
         let function_arn = function_arn.to_string();
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
-        let mut processor: Processor =
-            Processor::new(function_arn, tags_provider, Arc::clone(&datadog_config));
+        let mut processor: LambdaProcessor =
+            LambdaProcessor::new(function_arn, tags_provider, Arc::clone(&datadog_config));
 
         let cloned_aggregator = aggregator.clone();
 
