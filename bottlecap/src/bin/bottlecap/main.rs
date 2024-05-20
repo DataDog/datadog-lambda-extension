@@ -28,7 +28,8 @@ use bottlecap::{
     },
     tags::{lambda, provider},
     telemetry::{
-        self, client::TelemetryApiClient, events::TelemetryRecord, listener::TelemetryListener,
+        self, client::TelemetryApiClient, events::Status, events::TelemetryRecord,
+        listener::TelemetryListener,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
@@ -229,11 +230,8 @@ fn main() -> Result<()> {
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
-                match lambda_enhanced_metrics.increment_invocation_metric() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        error!("Failed to increment invocation metric: {e:?}");
-                    }
+                if let Err(e) = lambda_enhanced_metrics.increment_invocation_metric() {
+                    error!("Failed to increment invocation metric: {e:?}");
                 }
             }
             Ok(NextEventResponse::Shutdown {
@@ -272,14 +270,26 @@ fn main() -> Result<()> {
                                 TelemetryRecord::PlatformRuntimeDone {
                                     request_id, status, ..
                                 } => {
+                                    if status != Status::Success {
+                                        if let Err(e) =
+                                            lambda_enhanced_metrics.increment_errors_metric()
+                                        {
+                                            error!("Failed to increment error metric: {e:?}");
+                                        }
+                                        if status == Status::Timeout {
+                                            if let Err(e) =
+                                                lambda_enhanced_metrics.increment_timeout_metric()
+                                            {
+                                                error!("Failed to increment timeout metric: {e:?}");
+                                            }
+                                        }
+                                    }
                                     debug!(
                                         "Runtime done for request_id: {:?} with status: {:?}",
                                         request_id, status
                                     );
-                                    debug!("FLUSHING ALL");
                                     logs_agent.flush();
                                     dogstats_client.flush();
-                                    debug!("CALLING FOR NEXT EVENT");
                                     break;
                                 }
                                 TelemetryRecord::PlatformReport {
