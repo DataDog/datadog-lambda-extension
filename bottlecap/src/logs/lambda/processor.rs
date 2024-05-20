@@ -14,13 +14,21 @@ use crate::logs::lambda::{IntakeLog, Message};
 #[derive(Clone, Debug)]
 pub struct LambdaProcessor {
     function_arn: String,
-    request_id: Option<String>,
     service: String,
     tags: String,
-    // Logs which don't have a `request_id`
-    orphan_logs: Vec<IntakeLog>,
     // Global Processing Rules
     rules: Option<Vec<Rule>>,
+    // Current Invocation Context
+    execution_context: ExecutionContext,
+}
+
+#[derive(Clone, Debug)]
+struct ExecutionContext {
+    request_id: Option<String>,
+    start_time: Option<i64>,
+    end_time: Option<i64>,
+    // Logs which don't have a `request_id`
+    orphan_logs: Vec<IntakeLog>,
 }
 
 impl Processor<IntakeLog> for LambdaProcessor {}
@@ -39,15 +47,38 @@ impl LambdaProcessor {
         let rules = LambdaProcessor::compile_rules(processing_rules);
         LambdaProcessor {
             function_arn,
-            request_id: None,
             service,
             tags,
-            orphan_logs: Vec::new(),
             rules,
+            execution_context: ExecutionContext {
+                request_id: None,
+                start_time: None,
+                end_time: None,
+                orphan_logs: Vec::new(),
+            },
         }
     }
 
-    pub fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
+    fn calculate_runtime_and_post_duration(&self, duration_ms: f64) -> (f64, f64) {
+        if let (Some(start_time), Some(end_time)) = (
+            self.execution_context.start_time,
+            self.execution_context.end_time,
+        ) {
+            if start_time == 0 || end_time == 0 {
+                return (0.0, 0.0);
+            }
+
+            let runtime_duration_ms = (end_time - start_time) as f64;
+            let post_runtime_duration_ms = duration_ms - runtime_duration_ms;
+
+            return (runtime_duration_ms, post_runtime_duration_ms);
+        }
+
+        // If any of the times are missing, return 0
+        (0.0, 0.0)
+    }
+
+    fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
                 Ok(Message::new(
@@ -78,7 +109,8 @@ impl LambdaProcessor {
                 version,
             } => {
                 // Set request_id for unprocessed and future logs
-                self.request_id = Some(request_id.clone());
+                self.execution_context.request_id = Some(request_id.clone());
+                self.execution_context.start_time = Some(event.time.timestamp_millis());
 
                 let version = version.unwrap_or("$LATEST".to_string());
                 Ok(Message::new(
@@ -89,6 +121,7 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , .. } => {  // TODO: check what to do with rest of the fields
+                self.execution_context.end_time = Some(event.time.timestamp_millis());
                 Ok(Message::new(
                     format!("END RequestId: {request_id}"),
                     Some(request_id),
@@ -97,10 +130,15 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
+                let (runtime_duration_ms, post_runtime_duration_ms) = self.calculate_runtime_and_post_duration(
+                    metrics.duration_ms);
+
                 let mut message = format!(
-                    "REPORT RequestId: {} Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
+                    "REPORT RequestId: {} Duration: {} ms Runtime Duration: {} ms Post Runtime Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
                     request_id,
                     metrics.duration_ms,
+                    runtime_duration_ms,
+                    post_runtime_duration_ms,
                     metrics.billed_duration_ms,
                     metrics.memory_size_mb,
                     metrics.max_memory_used_mb,
@@ -127,15 +165,12 @@ impl LambdaProcessor {
         }
     }
 
-    pub fn get_intake_log(
-        &mut self,
-        mut lambda_message: Message,
-    ) -> Result<IntakeLog, Box<dyn Error>> {
+    fn get_intake_log(&mut self, mut lambda_message: Message) -> Result<IntakeLog, Box<dyn Error>> {
         let request_id = match lambda_message.lambda.request_id {
             // Log already has a `request_id`
             Some(request_id) => Some(request_id.clone()),
             // Default to the `request_id` we've seen so far, if any.
-            None => self.request_id.clone(),
+            None => self.execution_context.request_id.clone(),
         };
 
         lambda_message.lambda.request_id = request_id;
@@ -152,12 +187,12 @@ impl LambdaProcessor {
             Ok(log)
         } else {
             // We haven't seen a `request_id`, this is an orphan log
-            self.orphan_logs.push(log);
+            self.execution_context.orphan_logs.push(log);
             Err("No request_id available, queueing for later".into())
         }
     }
 
-    pub fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
+    fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
         match self.get_message(event) {
             Ok(lambda_message) => self.get_intake_log(lambda_message),
             // TODO: Check what to do when we can't process the event
@@ -175,9 +210,10 @@ impl LambdaProcessor {
             }
 
             // Process orphan logs, since we have a `request_id` now
-            for mut orphan_log in self.orphan_logs.drain(..) {
+            for mut orphan_log in self.execution_context.orphan_logs.drain(..) {
                 orphan_log.message.lambda.request_id = Some(
-                    self.request_id
+                    self.execution_context
+                        .request_id
                         .clone()
                         .expect("unable to retrieve request ID"),
                 );
@@ -443,7 +479,7 @@ mod tests {
             intake_log.to_string(),
             "No request_id available, queueing for later"
         );
-        assert_eq!(processor.orphan_logs.len(), 1);
+        assert_eq!(processor.execution_context.orphan_logs.len(), 1);
     }
 
     #[test]
@@ -559,7 +595,7 @@ mod tests {
         };
 
         processor.process(event.clone(), &aggregator);
-        assert_eq!(processor.orphan_logs.len(), 1);
+        assert_eq!(processor.execution_context.orphan_logs.len(), 1);
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
@@ -592,7 +628,10 @@ mod tests {
         };
 
         processor.process(start_event.clone(), &aggregator);
-        assert_eq!(processor.request_id, Some("test-request-id".to_string()));
+        assert_eq!(
+            processor.execution_context.request_id,
+            Some("test-request-id".to_string())
+        );
 
         // This could be any event that doesn't have a `request_id`
         let event = TelemetryEvent {
