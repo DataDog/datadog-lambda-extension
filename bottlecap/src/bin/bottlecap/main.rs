@@ -178,7 +178,6 @@ fn main() -> Result<()> {
         &metadata_hash,
     ));
     let logs_agent = LogsAgent::run(
-        &function_arn,
         Arc::clone(&tags_provider),
         Arc::clone(&config),
     );
@@ -187,7 +186,6 @@ fn main() -> Result<()> {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
         datadog_config: Arc::clone(&config),
-        function_arn: function_arn.clone(),
         tags_provider: Arc::clone(&tags_provider),
     };
     let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
