@@ -1,8 +1,9 @@
+use serde::Serialize;
 use std::collections::VecDeque;
 use tracing::{debug, warn};
 
 use crate::logs::constants;
-use crate::logs::processor::IntakeLog;
+
 pub struct Aggregator {
     messages: VecDeque<String>,
     max_batch_entries_size: usize,
@@ -37,7 +38,7 @@ impl Aggregator {
         }
     }
 
-    pub fn add(&mut self, log: IntakeLog) {
+    pub fn add<T: Serialize>(&mut self, log: T) {
         match serde_json::to_string(&log) {
             Ok(log) => self.messages.push_back(log),
             Err(e) => debug!("Failed to serialize log: {}", e),
@@ -85,15 +86,15 @@ impl Aggregator {
 
 #[cfg(test)]
 mod tests {
-    use crate::logs::processor::{Lambda, LambdaMessage};
-
     use super::*;
+
+    use crate::logs::lambda::{IntakeLog, Lambda, Message};
 
     #[test]
     fn test_add() {
         let mut aggregator = Aggregator::default();
         let log = IntakeLog {
-            message: LambdaMessage {
+            message: Message {
                 message: "test".to_string(),
                 lambda: Lambda {
                     arn: "arn".to_string(),
@@ -116,7 +117,7 @@ mod tests {
     fn test_get_batch() {
         let mut aggregator = Aggregator::default();
         let log = IntakeLog {
-            message: LambdaMessage {
+            message: Message {
                 message: "test".to_string(),
                 lambda: Lambda {
                     arn: "arn".to_string(),
@@ -141,7 +142,7 @@ mod tests {
     fn test_get_batch_full_entries() {
         let mut aggregator = Aggregator::new(2, 1_024, 1_024);
         let log = IntakeLog {
-            message: LambdaMessage {
+            message: Message {
                 message: "test".to_string(),
                 lambda: Lambda {
                     arn: "arn".to_string(),
@@ -178,7 +179,7 @@ mod tests {
     fn test_get_batch_full_payload() {
         let mut aggregator = Aggregator::new(2, 256, 1_024);
         let log = IntakeLog {
-            message: LambdaMessage {
+            message: Message {
                 message: "test".to_string(),
                 lambda: Lambda {
                     arn: "arn".to_string(),
