@@ -246,7 +246,7 @@ mod tests {
             Message {
                     message: "test-function".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: None,
                     },
                     timestamp: 1_673_061_827_000,
@@ -263,7 +263,7 @@ mod tests {
             Message {
                     message: "test-extension".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: None,
                     },
                     timestamp: 1_673_061_827_000,
@@ -285,7 +285,7 @@ mod tests {
             Message {
                     message: "INIT_START Runtime Version: test-runtime-version Runtime Version ARN: test-runtime-version-arn".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: None,
                     },
                     timestamp: 1_673_061_827_000,
@@ -305,7 +305,7 @@ mod tests {
             Message {
                     message: "START RequestId: test-request-id Version: test-version".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
@@ -330,7 +330,7 @@ mod tests {
             Message {
                     message: "END RequestId: test-request-id".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
@@ -359,7 +359,7 @@ mod tests {
             Message {
                     message: "REPORT RequestId: test-request-id Duration: 100 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
