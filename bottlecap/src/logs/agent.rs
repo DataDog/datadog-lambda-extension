@@ -4,9 +4,7 @@ use std::thread;
 
 use tracing::{debug, error};
 
-use crate::logs::aggregator::Aggregator;
-use crate::logs::datadog;
-use crate::logs::processor;
+use crate::logs::{aggregator::Aggregator, datadog, processor};
 use crate::tags;
 use crate::telemetry::events::TelemetryEvent;
 use crate::{config, LAMBDA_RUNTIME_SLUG};
