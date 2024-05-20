@@ -230,11 +230,8 @@ fn main() -> Result<()> {
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
-                match lambda_enhanced_metrics.increment_invocation_metric() {
-                    Ok(()) => {}
-                    Err(e) => {
-                        error!("Failed to increment invocation metric: {e:?}");
-                    }
+                if let Err(e) = lambda_enhanced_metrics.increment_invocation_metric() {
+                    error!("Failed to increment invocation metric: {e:?}");
                 }
             }
             Ok(NextEventResponse::Shutdown {
@@ -274,21 +271,16 @@ fn main() -> Result<()> {
                                     request_id, status, ..
                                 } => {
                                     if status != Status::Success {
-                                        match lambda_enhanced_metrics.increment_errors_metric() {
-                                            Ok(()) => {}
-                                            Err(e) => {
-                                                error!("Failed to increment error metric: {e:?}");
-                                            }
+                                        if let Err(e) =
+                                            lambda_enhanced_metrics.increment_errors_metric()
+                                        {
+                                            error!("Failed to increment error metric: {e:?}");
                                         }
                                         if status == Status::Timeout {
-                                            match lambda_enhanced_metrics.increment_timeout_metric()
+                                            if let Err(e) =
+                                                lambda_enhanced_metrics.increment_timeout_metric()
                                             {
-                                                Ok(()) => {}
-                                                Err(e) => {
-                                                    error!(
-                                                        "Failed to increment timeout metric: {e:?}"
-                                                    );
-                                                }
+                                                error!("Failed to increment timeout metric: {e:?}");
                                             }
                                         }
                                     }
