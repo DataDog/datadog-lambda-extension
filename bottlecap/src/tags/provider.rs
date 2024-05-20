@@ -41,16 +41,28 @@ impl Provider {
     pub fn get_tags_string(&self) -> String {
         self.get_tags_vec().join(",")
     }
+
+    #[must_use]
+    pub fn get_canonical_id(&self) -> Option<String> {
+        self.tag_provider.get_canonical_id()
+    }
 }
 
-trait GetTagsVec {
+trait GetTags {
     fn get_tags_vec(&self) -> Vec<String>;
+    fn get_canonical_id(&self) -> Option<String>;
 }
 
-impl GetTagsVec for TagProvider {
+impl GetTags for TagProvider {
     fn get_tags_vec(&self) -> Vec<String> {
         match self {
             TagProvider::Lambda(lambda_tags) => lambda_tags.get_tags_vec(),
+        }
+    }
+
+    fn get_canonical_id(&self) -> Option<String> {
+        match self {
+            TagProvider::Lambda(lambda_tags) => lambda_tags.get_function_arn().cloned(),
         }
     }
 }

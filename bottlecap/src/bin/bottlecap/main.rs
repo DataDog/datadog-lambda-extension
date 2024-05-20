@@ -182,11 +182,7 @@ fn main() -> Result<()> {
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
-    let logs_agent = LogsAgent::run(
-        &function_arn,
-        Arc::clone(&tags_provider),
-        Arc::clone(&config),
-    );
+    let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
     let event_bus = EventBus::run();
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
@@ -197,7 +193,6 @@ fn main() -> Result<()> {
         port: DOGSTATSD_PORT,
         datadog_config: Arc::clone(&config),
         aggregator: Arc::clone(&metrics_aggr),
-        function_arn: function_arn.clone(),
         tags_provider: Arc::clone(&tags_provider),
     };
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));

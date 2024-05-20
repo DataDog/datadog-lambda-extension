@@ -23,7 +23,6 @@ pub struct DogStatsDConfig {
     pub datadog_config: Arc<config::Config>,
     pub aggregator: Arc<Mutex<Aggregator<1024>>>,
     pub tags_provider: Arc<provider::Provider>,
-    pub function_arn: String,
 }
 
 impl DogStatsD {

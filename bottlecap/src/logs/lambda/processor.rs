@@ -11,7 +11,7 @@ use crate::LAMBDA_RUNTIME_SLUG;
 use crate::logs::lambda::{IntakeLog, Message};
 
 #[allow(clippy::module_name_repetitions)]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LambdaProcessor {
     function_arn: String,
     request_id: Option<String>,
@@ -28,12 +28,12 @@ impl Processor<IntakeLog> for LambdaProcessor {}
 impl LambdaProcessor {
     #[must_use]
     pub fn new(
-        function_arn: String,
         tags_provider: Arc<provider::Provider>,
         datadog_config: Arc<config::Config>,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
+        let function_arn = tags_provider.get_canonical_id().unwrap_or_default();
 
         let processing_rules = &datadog_config.logs_config_processing_rules;
         let rules = LambdaProcessor::compile_rules(processing_rules);
@@ -214,10 +214,12 @@ mod tests {
                         ..config::Config::default()
                     });
 
-                    let tags_provider = Arc::new(provider::Provider::new(Arc::clone(&config), LAMBDA_RUNTIME_SLUG.to_string(), &HashMap::new()));
+                    let tags_provider = Arc::new(
+                        provider::Provider::new(Arc::clone(&config),
+                        LAMBDA_RUNTIME_SLUG.to_string(),
+                        &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
 
                     let mut processor = LambdaProcessor::new(
-                        "arn".to_string(),
                         tags_provider,
                         Arc::new(config::Config {
                             service: Some("test-service".to_string()),
@@ -244,7 +246,7 @@ mod tests {
             Message {
                     message: "test-function".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: None,
                     },
                     timestamp: 1_673_061_827_000,
@@ -261,7 +263,7 @@ mod tests {
             Message {
                     message: "test-extension".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: None,
                     },
                     timestamp: 1_673_061_827_000,
@@ -283,7 +285,7 @@ mod tests {
             Message {
                     message: "INIT_START Runtime Version: test-runtime-version Runtime Version ARN: test-runtime-version-arn".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: None,
                     },
                     timestamp: 1_673_061_827_000,
@@ -303,7 +305,7 @@ mod tests {
             Message {
                     message: "START RequestId: test-request-id Version: test-version".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
@@ -328,7 +330,7 @@ mod tests {
             Message {
                     message: "END RequestId: test-request-id".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
@@ -357,7 +359,7 @@ mod tests {
             Message {
                     message: "REPORT RequestId: test-request-id Duration: 100 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
                     lambda: Lambda {
-                        arn: "arn".to_string(),
+                        arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
@@ -378,10 +380,10 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
-        let mut processor =
-            LambdaProcessor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
+
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -423,10 +425,10 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
-        let mut processor =
-            LambdaProcessor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
+
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -455,10 +457,11 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
-        let mut processor =
-            LambdaProcessor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
+
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::PlatformStart {
@@ -497,13 +500,10 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
-        let mut processor = LambdaProcessor::new(
-            "test-arn".to_string(),
-            Arc::clone(&tags_provider),
-            Arc::clone(&config),
-        );
+
+        let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -548,10 +548,10 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
-        let mut processor =
-            LambdaProcessor::new("test-arn".to_string(), tags_provider, Arc::clone(&config));
+
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -578,13 +578,10 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
-        let mut processor = LambdaProcessor::new(
-            "test-arn".to_string(),
-            Arc::clone(&tags_provider),
-            Arc::clone(&config),
-        );
+
+        let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
