@@ -1,7 +1,43 @@
+use std::sync::{Arc, Mutex};
+
 use tracing::debug;
 
-use crate::config;
 use crate::config::processing_rule;
+use crate::tags;
+use crate::telemetry::events::TelemetryEvent;
+use crate::{config, LAMBDA_RUNTIME_SLUG};
+
+use crate::logs::aggregator::Aggregator;
+use crate::logs::lambda::processor::LambdaProcessor;
+
+impl ProcessorType {
+    #[must_use]
+    pub fn new(
+        config: Arc<config::Config>,
+        tags_provider: Arc<tags::provider::Provider>,
+        runtime: String,
+    ) -> Self {
+        match runtime.as_str() {
+            LAMBDA_RUNTIME_SLUG => {
+                let lambda_processor = LambdaProcessor::new(tags_provider, config);
+                ProcessorType::Lambda(lambda_processor)
+            }
+            _ => panic!("Unsupported runtime: {runtime}"),
+        }
+    }
+
+    pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
+        match self {
+            ProcessorType::Lambda(lambda_processor) => lambda_processor.process(event, aggregator),
+        }
+    }
+}
+
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone, Debug)]
+pub enum ProcessorType {
+    Lambda(LambdaProcessor),
+}
 
 #[derive(Clone, Debug)]
 pub struct Rule {

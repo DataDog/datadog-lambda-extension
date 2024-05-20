@@ -4,12 +4,12 @@ use std::thread;
 
 use tracing::{debug, error};
 
-use crate::config;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::datadog;
-use crate::logs::lambda::processor::LambdaProcessor;
-use crate::tags::provider;
+use crate::logs::processor;
+use crate::tags;
 use crate::telemetry::events::TelemetryEvent;
+use crate::{config, LAMBDA_RUNTIME_SLUG};
 
 #[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {
@@ -22,14 +22,15 @@ pub struct LogsAgent {
 impl LogsAgent {
     #[must_use]
     pub fn run(
-        function_arn: &str,
-        tags_provider: Arc<provider::Provider>,
+        tags_provider: Arc<tags::provider::Provider>,
         datadog_config: Arc<config::Config>,
     ) -> LogsAgent {
-        let function_arn = function_arn.to_string();
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
-        let mut processor: LambdaProcessor =
-            LambdaProcessor::new(function_arn, tags_provider, Arc::clone(&datadog_config));
+        let mut processor = processor::ProcessorType::new(
+            Arc::clone(&datadog_config),
+            tags_provider,
+            LAMBDA_RUNTIME_SLUG.to_string(),
+        );
 
         let cloned_aggregator = aggregator.clone();
 
