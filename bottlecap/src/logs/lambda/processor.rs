@@ -393,7 +393,7 @@ mod tests {
                 }
             },
             Message {
-                    message: "REPORT RequestId: test-request-id Duration: 100 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
+                    message: "REPORT RequestId: test-request-id Duration: 100 ms Runtime Duration: 0 ms Post Runtime Duration: 0 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
