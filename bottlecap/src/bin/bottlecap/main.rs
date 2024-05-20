@@ -177,10 +177,7 @@ fn main() -> Result<()> {
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
-    let logs_agent = LogsAgent::run(
-        Arc::clone(&tags_provider),
-        Arc::clone(&config),
-    );
+    let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
     let event_bus = EventBus::run();
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),

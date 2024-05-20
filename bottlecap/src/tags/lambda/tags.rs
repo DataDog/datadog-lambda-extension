@@ -140,6 +140,11 @@ impl Lambda {
             .map(|(k, v)| format!("{k}:{v}"))
             .collect()
     }
+
+    #[must_use]
+    pub fn get_function_arn(&self) -> Option<&String> {
+        self.tags_map.get(FUNCTION_ARN_KEY)
+    }
 }
 
 #[cfg(test)]
