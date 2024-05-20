@@ -22,7 +22,6 @@ pub struct DogStatsDConfig {
     pub port: u16,
     pub datadog_config: Arc<config::Config>,
     pub tags_provider: Arc<provider::Provider>,
-    pub function_arn: String,
 }
 
 impl DogStatsD {
