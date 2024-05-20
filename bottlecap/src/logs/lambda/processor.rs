@@ -217,7 +217,7 @@ mod tests {
                     let tags_provider = Arc::new(
                         provider::Provider::new(Arc::clone(&config),
                         LAMBDA_RUNTIME_SLUG.to_string(),
-                        &HashMap::from([("function_arn".to_string(), "arn".to_string())])));
+                        &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
 
                     let mut processor = LambdaProcessor::new(
                         tags_provider,
@@ -425,7 +425,7 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "arn".to_string())]),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
@@ -457,7 +457,7 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "arn".to_string())]),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
@@ -548,7 +548,7 @@ mod tests {
         let tags_provider = Arc::new(provider::Provider::new(
             Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "arn".to_string())]),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));

@@ -21,7 +21,11 @@ use bottlecap::{
     events::Event,
     lifecycle, logger,
     logs::agent::LogsAgent,
-    metrics::dogstatsd::{DogStatsD, DogStatsDConfig},
+    metrics::{
+        aggregator as metrics_aggregator, constants,
+        dogstatsd::{DogStatsD, DogStatsDConfig},
+        enhanced::lambda::Lambda as enhanced_metrics,
+    },
     tags::{lambda, provider},
     telemetry::{
         self, client::TelemetryApiClient, events::TelemetryRecord, listener::TelemetryListener,
@@ -36,7 +40,7 @@ use std::collections::HashMap;
 use std::env;
 use std::io::Error;
 use std::io::Result;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
 #[cfg(not(target_env = "msvc"))]
@@ -179,12 +183,18 @@ fn main() -> Result<()> {
     ));
     let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
     let event_bus = EventBus::run();
+    let metrics_aggr = Arc::new(Mutex::new(
+        metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
+            .expect("failed to create aggregator"),
+    ));
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
         datadog_config: Arc::clone(&config),
+        aggregator: Arc::clone(&metrics_aggr),
         tags_provider: Arc::clone(&tags_provider),
     };
+    let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
     let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
 
     let telemetry_listener_config = TelemetryListenerConfig {
@@ -214,6 +224,12 @@ fn main() -> Result<()> {
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
+                match lambda_enhanced_metrics.increment_invocation_metric() {
+                    Ok(()) => {}
+                    Err(e) => {
+                        error!("Failed to increment invocation metric: {e:?}");
+                    }
+                }
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
