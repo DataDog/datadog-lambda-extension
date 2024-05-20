@@ -10,7 +10,7 @@ use crate::{config, LAMBDA_RUNTIME_SLUG};
 use crate::logs::aggregator::Aggregator;
 use crate::logs::lambda::processor::LambdaProcessor;
 
-impl ProcessorType {
+impl LogsProcessor {
     #[must_use]
     pub fn new(
         config: Arc<config::Config>,
@@ -20,7 +20,7 @@ impl ProcessorType {
         match runtime.as_str() {
             LAMBDA_RUNTIME_SLUG => {
                 let lambda_processor = LambdaProcessor::new(tags_provider, config);
-                ProcessorType::Lambda(lambda_processor)
+                LogsProcessor::Lambda(lambda_processor)
             }
             _ => panic!("Unsupported runtime: {runtime}"),
         }
@@ -28,14 +28,14 @@ impl ProcessorType {
 
     pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
         match self {
-            ProcessorType::Lambda(lambda_processor) => lambda_processor.process(event, aggregator),
+            LogsProcessor::Lambda(lambda_processor) => lambda_processor.process(event, aggregator),
         }
     }
 }
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone, Debug)]
-pub enum ProcessorType {
+pub enum LogsProcessor {
     Lambda(LambdaProcessor),
 }
 

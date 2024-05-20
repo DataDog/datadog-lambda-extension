@@ -4,7 +4,7 @@ use std::thread;
 
 use tracing::{debug, error};
 
-use crate::logs::{aggregator::Aggregator, datadog, processor};
+use crate::logs::{aggregator::Aggregator, datadog, processor::LogsProcessor};
 use crate::tags;
 use crate::telemetry::events::TelemetryEvent;
 use crate::{config, LAMBDA_RUNTIME_SLUG};
@@ -24,7 +24,7 @@ impl LogsAgent {
         datadog_config: Arc<config::Config>,
     ) -> LogsAgent {
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
-        let mut processor = processor::ProcessorType::new(
+        let mut processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
             tags_provider,
             LAMBDA_RUNTIME_SLUG.to_string(),
