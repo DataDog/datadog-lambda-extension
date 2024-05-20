@@ -21,6 +21,10 @@ impl Lambda {
         self.increment_metric(constants::ERRORS_METRIC)
     }
 
+    pub fn increment_timeout_metric(&self) -> Result<(), errors::Insert> {
+        self.increment_metric(constants::TIMEOUTS_METRIC)
+    }
+
     fn increment_metric(&self, metric_name: &str) -> Result<(), errors::Insert> {
         let metric = metric::Metric::new(
             metric_name.into(),
