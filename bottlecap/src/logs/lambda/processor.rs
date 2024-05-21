@@ -112,8 +112,8 @@ impl LambdaProcessor {
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
                 let mut post_runtime_duration_ms = 0.0;
+                // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
                 if self.execution_context.runtime_duration_ms > 0.0 {
-                    // We've seen a `runtime_duration_ms` in the `PlatformRuntimeDone` event
                     post_runtime_duration_ms = metrics.duration_ms - self.execution_context.runtime_duration_ms;
                 }
 
