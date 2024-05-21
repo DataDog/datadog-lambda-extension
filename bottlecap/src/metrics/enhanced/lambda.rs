@@ -1,7 +1,8 @@
-use super::constants;
+use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::{errors, metric};
 use crate::telemetry::events::ReportMetrics;
+use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use tracing::error;
 
@@ -38,6 +39,75 @@ impl Lambda {
             .lock()
             .expect("lock poisoned")
             .insert(&metric)
+    }
+
+    pub fn set_runtime_duration_metric(&self, duration_ms: f64) {
+        let metric = metric::Metric::new(
+            constants::RUNTIME_DURATION_METRIC.into(),
+            metric::Type::Distribution,
+            (duration_ms * constants::MS_TO_SEC).to_string().into(),
+            None,
+        );
+        if let Err(e) = self
+            .aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(&metric)
+        {
+            error!("failed to insert runtime duration metric: {}", e);
+        }
+    }
+
+    pub fn set_post_runtime_duration_metric(&self, duration_ms: f64) {
+        let metric = metric::Metric::new(
+            constants::POST_RUNTIME_DURATION_METRIC.into(),
+            metric::Type::Distribution,
+            (duration_ms * constants::MS_TO_SEC).to_string().into(),
+            None,
+        );
+        if let Err(e) = self
+            .aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(&metric)
+        {
+            error!("failed to insert post runtime duration metric: {}", e);
+        }
+    }
+
+    fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
+        let gb_seconds = billed_duration_ms as f64 * constants::MS_TO_SEC * memory_size_mb as f64
+            / constants::MB_TO_GB;
+
+        let price_per_gb = match ARCH {
+            "x86_64" => constants::X86_LAMBDA_PRICE_PER_GB_SECOND,
+            "aarch_64" => constants::ARM_LAMBDA_PRICE_PER_GB_SECOND,
+            _ => {
+                error!("unsupported architecture: {}", ARCH);
+                return 0.0;
+            }
+        };
+
+        ((BASE_LAMBDA_INVOCATION_PRICE + (gb_seconds * price_per_gb)) * 1e12).round() / 1e12
+    }
+
+    pub fn set_estimated_cost_metric(&self, billed_duration_ms: u64, memory_size_mb: u64) {
+        let cost_usd = Self::calculate_estimated_cost_usd(billed_duration_ms, memory_size_mb);
+
+        let metric = metric::Metric::new(
+            constants::ESTIMATED_COST_METRIC.into(),
+            metric::Type::Distribution,
+            cost_usd.to_string().into(),
+            None,
+        );
+        if let Err(e) = self
+            .aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(&metric)
+        {
+            error!("failed to insert estimated cost metric: {}", e);
+        }
     }
 
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
