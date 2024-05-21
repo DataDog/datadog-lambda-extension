@@ -25,8 +25,7 @@ pub struct LambdaProcessor {
 #[derive(Clone, Debug)]
 struct ExecutionContext {
     request_id: Option<String>,
-    start_time: Option<i64>,
-    end_time: Option<i64>,
+    runtime_duration_ms: f64,
     // Logs which don't have a `request_id`
     orphan_logs: Vec<IntakeLog>,
 }
@@ -52,30 +51,10 @@ impl LambdaProcessor {
             rules,
             execution_context: ExecutionContext {
                 request_id: None,
-                start_time: None,
-                end_time: None,
+                runtime_duration_ms: 0.0,
                 orphan_logs: Vec::new(),
             },
         }
-    }
-
-    fn calculate_runtime_and_post_duration(&self, duration_ms: f64) -> (f64, f64) {
-        if let (Some(start_time), Some(end_time)) = (
-            self.execution_context.start_time,
-            self.execution_context.end_time,
-        ) {
-            if start_time == 0 || end_time == 0 {
-                return (0.0, 0.0);
-            }
-
-            let runtime_duration_ms = (end_time - start_time) as f64;
-            let post_runtime_duration_ms = duration_ms - runtime_duration_ms;
-
-            return (runtime_duration_ms, post_runtime_duration_ms);
-        }
-
-        // If any of the times are missing, return 0
-        (0.0, 0.0)
     }
 
     fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
@@ -110,7 +89,6 @@ impl LambdaProcessor {
             } => {
                 // Set request_id for unprocessed and future logs
                 self.execution_context.request_id = Some(request_id.clone());
-                self.execution_context.start_time = Some(event.time.timestamp_millis());
 
                 let version = version.unwrap_or("$LATEST".to_string());
                 Ok(Message::new(
@@ -120,8 +98,11 @@ impl LambdaProcessor {
                     event.time.timestamp_millis(),
                 ))
             },
-            TelemetryRecord::PlatformRuntimeDone { request_id , .. } => {  // TODO: check what to do with rest of the fields
-                self.execution_context.end_time = Some(event.time.timestamp_millis());
+            TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
+                if let Some(metrics) = metrics {
+                    self.execution_context.runtime_duration_ms = metrics.duration_ms;
+                }
+
                 Ok(Message::new(
                     format!("END RequestId: {request_id}"),
                     Some(request_id),
@@ -130,14 +111,17 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
-                let (runtime_duration_ms, post_runtime_duration_ms) = self.calculate_runtime_and_post_duration(
-                    metrics.duration_ms);
+                let mut post_runtime_duration_ms = 0.0;
+                if self.execution_context.runtime_duration_ms > 0.0 {
+                    // We've seen a `runtime_duration_ms` in the `PlatformRuntimeDone` event
+                    post_runtime_duration_ms = metrics.duration_ms - self.execution_context.runtime_duration_ms;
+                }
 
                 let mut message = format!(
                     "REPORT RequestId: {} Duration: {} ms Runtime Duration: {} ms Post Runtime Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
                     request_id,
                     metrics.duration_ms,
-                    runtime_duration_ms,
+                    self.execution_context.runtime_duration_ms,
                     post_runtime_duration_ms,
                     metrics.billed_duration_ms,
                     metrics.memory_size_mb,
