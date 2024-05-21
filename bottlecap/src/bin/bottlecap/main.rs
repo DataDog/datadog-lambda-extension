@@ -330,13 +330,13 @@ fn main() -> Result<()> {
                                         if invocation_context.runtime_duration_ms > 0.0 {
                                             let post_runtime_duration_ms = metrics.duration_ms
                                                 - invocation_context.runtime_duration_ms;
-                                            lambda_enhanced_metrics.set_post_runtime_duration_metric(
-                                                post_runtime_duration_ms,
-                                            );
+                                            lambda_enhanced_metrics
+                                                .set_post_runtime_duration_metric(
+                                                    post_runtime_duration_ms,
+                                                );
                                         } else {
                                             debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
                                         }
-                                        
                                     }
 
                                     if shutdown {
