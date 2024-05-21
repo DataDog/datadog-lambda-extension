@@ -324,6 +324,26 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         }
         series
     }
+
+    #[cfg(test)]
+    pub fn get_value_by_id(
+        &mut self,
+        name: Ustr,
+        tags: Option<Ustr>,
+    ) -> Option<ddsketch_agent::DDSketch> {
+        let id = metric::id(name, tags);
+
+        match self.map.entry(
+            id,
+            |m| m.id == id,
+            |m| crate::metrics::metric::id(m.name, m.tags),
+        ) {
+            hash_table::Entry::Vacant(_) => None,
+            hash_table::Entry::Occupied(entry) => {
+                Some(entry.get().metric_value.get_sketch().clone())
+            }
+        }
+    }
 }
 
 fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
