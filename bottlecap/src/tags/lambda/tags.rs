@@ -62,6 +62,13 @@ pub struct Lambda {
     tags_map: hash_map::HashMap<String, String>,
 }
 
+fn arch_to_platform<'a>() -> &'a str {
+    match ARCH {
+        "aarch64" => "arm64",
+        _ => ARCH,
+    }
+}
+
 fn tags_from_env(
     mut tags_map: hash_map::HashMap<String, String>,
     config: Arc<config::Config>,
@@ -106,12 +113,8 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
-    let arch = match ARCH {
-        "aarch64" => "arm64",
-        _ => ARCH,
-    };
 
-    tags_map.insert(ARCHITECTURE_KEY.to_string(), arch.to_string());
+    tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
 
     if let Some(tags) = &config.tags {
         for tag in tags.split(',') {
@@ -163,10 +166,15 @@ mod tests {
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 1);
+        assert_eq!(tags.tags_map.len(), 2);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
             COMPUTE_STATS_VALUE
+        );
+        let arch = arch_to_platform();
+        assert_eq!(
+            tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),
+            &arch.to_string()
         );
     }
 
