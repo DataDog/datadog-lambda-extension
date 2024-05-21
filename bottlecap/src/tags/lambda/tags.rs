@@ -1,5 +1,6 @@
 use std::collections::hash_map;
 use std::sync::Arc;
+use std::env::consts::ARCH;
 
 use crate::config;
 
@@ -23,7 +24,7 @@ const EXECUTED_VERSION_KEY: &str = "executedversion";
 const MEMORY_SIZE_KEY: &str = "memorysize";
 // TODO(astuyve): fetch architecture from the runtime
 // ArchitectureKey is the tag key for a function's architecture (e.g. x86_64, arm64)
-// const ARCHITECTURE_KEY: &str = "architecture";
+const ARCHITECTURE_KEY: &str = "architecture";
 
 // EnvKey is the tag key for a function's env environment variable
 const ENV_KEY: &str = "env";
@@ -105,6 +106,12 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
+    let arch = match ARCH {
+        "aarch64" => "arm64",
+        _ => ARCH,
+    };
+
+    tags_map.insert(ARCHITECTURE_KEY.to_string(), arch.to_string());
 
     if let Some(tags) = &config.tags {
         for tag in tags.split(',') {
