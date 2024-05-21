@@ -170,7 +170,7 @@ pub struct InitReportMetrics {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeDoneMetrics {
-    /// Duration in milliseconds
+    /// Runtime duration in milliseconds
     pub duration_ms: f64,
     /// Number of bytes produced as a result of the invocation
     pub produced_bytes: Option<u64>,
@@ -180,7 +180,8 @@ pub struct RuntimeDoneMetrics {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportMetrics {
-    /// Duration in milliseconds
+    /// Total duration in milliseconds, includes Extension
+    /// and Lambda execution time.
     pub duration_ms: f64,
     /// Billed duration in milliseconds
     pub billed_duration_ms: u64,
