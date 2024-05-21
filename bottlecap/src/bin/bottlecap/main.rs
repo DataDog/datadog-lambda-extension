@@ -288,12 +288,16 @@ fn main() -> Result<()> {
                                     break;
                                 }
                                 TelemetryRecord::PlatformReport {
-                                    request_id, status, ..
+                                    request_id,
+                                    status,
+                                    metrics,
+                                    ..
                                 } => {
                                     debug!(
                                         "Platform report for request_id: {:?} with status: {:?}",
                                         request_id, status
                                     );
+                                    lambda_enhanced_metrics.set_report_log_metrics(&metrics);
                                     if shutdown {
                                         break;
                                     }
