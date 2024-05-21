@@ -31,7 +31,9 @@ use bottlecap::{
     },
     tags::{lambda, provider},
     telemetry::{
-        self, client::TelemetryApiClient, events::Status, events::TelemetryRecord,
+        self,
+        client::TelemetryApiClient,
+        events::{Status, TelemetryRecord},
         listener::TelemetryListener,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -325,11 +327,16 @@ fn main() -> Result<()> {
                                     if let Some(invocation_context) =
                                         invocation_context_buffer.get(&request_id)
                                     {
-                                        let post_runtime_duration_ms = metrics.duration_ms
-                                            - invocation_context.runtime_duration_ms;
-                                        lambda_enhanced_metrics.set_post_runtime_duration_metric(
-                                            post_runtime_duration_ms,
-                                        );
+                                        if invocation_context.runtime_duration_ms > 0.0 {
+                                            let post_runtime_duration_ms = metrics.duration_ms
+                                                - invocation_context.runtime_duration_ms;
+                                            lambda_enhanced_metrics.set_post_runtime_duration_metric(
+                                                post_runtime_duration_ms,
+                                            );
+                                        } else {
+                                            debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
+                                        }
+                                        
                                     }
 
                                     if shutdown {
