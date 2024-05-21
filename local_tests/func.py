@@ -7,6 +7,10 @@ def handler(event, context):
     with tracer.trace("self.monitoring"):
         time.sleep(0.1)
 
+    X = 10
+    Y = 0
+    print(X/Y)
+
     # submit a custom metric
     lambda_metric(metric_name='self.monitoring', value=1)
 

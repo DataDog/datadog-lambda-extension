@@ -27,4 +27,6 @@ ENV DD_SERVICE=integration-test-service
 ENV DD_TRACE_ENABLED=true
 ENV DD_LOCAL_TEST=1
 
+ENV DD_EXCEPTION_DEBUGGING_ENABLED=true
+
 CMD [ "datadog_lambda.handler.handler" ]  
