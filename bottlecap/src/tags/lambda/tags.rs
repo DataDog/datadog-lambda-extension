@@ -1,4 +1,5 @@
 use std::collections::hash_map;
+use std::env::consts::ARCH;
 use std::sync::Arc;
 
 use crate::config;
@@ -23,7 +24,7 @@ const EXECUTED_VERSION_KEY: &str = "executedversion";
 const MEMORY_SIZE_KEY: &str = "memorysize";
 // TODO(astuyve): fetch architecture from the runtime
 // ArchitectureKey is the tag key for a function's architecture (e.g. x86_64, arm64)
-// const ARCHITECTURE_KEY: &str = "architecture";
+const ARCHITECTURE_KEY: &str = "architecture";
 
 // EnvKey is the tag key for a function's env environment variable
 const ENV_KEY: &str = "env";
@@ -59,6 +60,13 @@ const RESOURCE_KEY: &str = "resource";
 #[derive(Debug, Clone)]
 pub struct Lambda {
     tags_map: hash_map::HashMap<String, String>,
+}
+
+fn arch_to_platform<'a>() -> &'a str {
+    match ARCH {
+        "aarch64" => "arm64",
+        _ => ARCH,
+    }
 }
 
 fn tags_from_env(
@@ -105,6 +113,8 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
+
+    tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
 
     if let Some(tags) = &config.tags {
         for tag in tags.split(',') {
@@ -156,10 +166,15 @@ mod tests {
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 1);
+        assert_eq!(tags.tags_map.len(), 2);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
             COMPUTE_STATS_VALUE
+        );
+        let arch = arch_to_platform();
+        assert_eq!(
+            tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),
+            &arch.to_string()
         );
     }
 
