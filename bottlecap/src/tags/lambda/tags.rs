@@ -1,6 +1,6 @@
 use std::collections::hash_map;
-use std::sync::Arc;
 use std::env::consts::ARCH;
+use std::sync::Arc;
 
 use crate::config;
 
