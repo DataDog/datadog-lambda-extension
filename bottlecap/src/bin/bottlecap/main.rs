@@ -9,7 +9,10 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use lifecycle::flush_control::FlushControl;
+use lifecycle::{
+    flush_control::FlushControl,
+    invocation_context::{InvocationContext, InvocationContextBuffer},
+};
 use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
@@ -211,6 +214,7 @@ fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
+    let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
 
     loop {
@@ -255,6 +259,12 @@ fn main() -> Result<()> {
                         Event::Telemetry(event) => {
                             logs_agent.send_event(event.clone());
                             match event.record {
+                                TelemetryRecord::PlatformStart { request_id, .. } => {
+                                    invocation_context_buffer.insert(InvocationContext {
+                                        request_id,
+                                        runtime_duration_ms: 0.0,
+                                    });
+                                }
                                 TelemetryRecord::PlatformInitReport {
                                     initialization_type,
                                     phase,
@@ -263,8 +273,18 @@ fn main() -> Result<()> {
                                     debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
                                 }
                                 TelemetryRecord::PlatformRuntimeDone {
-                                    request_id, status, ..
+                                    request_id,
+                                    status,
+                                    metrics,
+                                    ..
                                 } => {
+                                    if let Some(metrics) = metrics {
+                                        invocation_context_buffer
+                                            .add_runtime_duration(&request_id, metrics.duration_ms);
+                                        lambda_enhanced_metrics
+                                            .set_runtime_duration_metric(metrics.duration_ms);
+                                    }
+
                                     if status != Status::Success {
                                         if let Err(e) =
                                             lambda_enhanced_metrics.increment_errors_metric()
@@ -298,6 +318,20 @@ fn main() -> Result<()> {
                                         request_id, status
                                     );
                                     lambda_enhanced_metrics.set_report_log_metrics(&metrics);
+                                    lambda_enhanced_metrics.set_estimated_cost_metric(
+                                        metrics.billed_duration_ms,
+                                        metrics.memory_size_mb,
+                                    );
+                                    if let Some(invocation_context) =
+                                        invocation_context_buffer.get(&request_id)
+                                    {
+                                        let post_runtime_duration_ms = metrics.duration_ms
+                                            - invocation_context.runtime_duration_ms;
+                                        lambda_enhanced_metrics.set_post_runtime_duration_metric(
+                                            post_runtime_duration_ms,
+                                        );
+                                    }
+
                                     if shutdown {
                                         break;
                                     }
