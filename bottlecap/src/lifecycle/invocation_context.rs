@@ -36,9 +36,17 @@ impl InvocationContextBuffer {
         }
     }
 
-    fn remove(&mut self, request_id: &String) {
-        self.buffer
-            .retain(|context| context.request_id != *request_id);
+    pub fn remove(&mut self, request_id: &String) -> Option<InvocationContext> {
+        if let Some(i) = self
+            .buffer
+            .iter()
+            .position(|context| context.request_id == *request_id)
+        {
+            return self.buffer.remove(i);
+        }
+        debug!("Context for request_id: {:?} not found", request_id);
+
+        None
     }
 
     #[must_use]
