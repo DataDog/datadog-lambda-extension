@@ -325,7 +325,7 @@ fn main() -> Result<()> {
                                         metrics.memory_size_mb,
                                     );
                                     if let Some(invocation_context) =
-                                        invocation_context_buffer.get(&request_id)
+                                        invocation_context_buffer.remove(&request_id)
                                     {
                                         if invocation_context.runtime_duration_ms > 0.0 {
                                             let post_runtime_duration_ms = metrics.duration_ms
