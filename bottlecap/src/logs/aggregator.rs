@@ -38,10 +38,16 @@ impl Aggregator {
         }
     }
 
-    pub fn add<T: Serialize>(&mut self, log: T) {
+    fn add<T: Serialize>(&mut self, log: T) {
         match serde_json::to_string(&log) {
             Ok(log) => self.messages.push_back(log),
             Err(e) => debug!("Failed to serialize log: {}", e),
+        }
+    }
+
+    pub fn add_batch<T: Serialize>(&mut self, logs: Vec<T>) {
+        for log in logs {
+            self.add(log);
         }
     }
 
