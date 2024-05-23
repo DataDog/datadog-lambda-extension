@@ -85,6 +85,7 @@ fn manual_decrypt(secret_arn: String) -> String {
 
     let access_key = env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set");
     let secret_key = env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY not set");
+    let session_token = env::var("AWS_SESSION_TOKEN").expect("AWS_SESSION_TOKEN is not set!");
 
     let service = "secretsmanager";
     let host = format!("secretsmanager.{}.amazonaws.com", region);
@@ -95,15 +96,18 @@ fn manual_decrypt(secret_arn: String) -> String {
     let date_stamp = t.format("%Y%m%d").to_string();
 
     let canonical_uri = "/";
-    let canonical_querystring = format!("SecretId={}", secret_arn.split(":secret:").nth(1).unwrap());
-    let canonical_headers = format!("host:{}\nx-amz-date:{}\nx-amz-target:secretsmanager.GetSecretValue\n",
-                                    host, amz_date);
-    let signed_headers = "host;x-amz-date;x-amz-target";
-    let payload_hash = Sha256::digest("".as_bytes());
+    let canonical_querystring = "";
+    let canonical_headers = format!(
+        "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:secretsmanager.getsScretValue\n",
+        host, amz_date, session_token);
+    let signed_headers = "content-type;host;x-amz-date;x-amz-security-token;x-amz-target";
+    let json_body = &serde_json::json!({ "SecretId": secret_arn.split(":secret:").nth(1).unwrap()});
+
+    let payload_hash = Sha256::digest(json_body.to_string().as_bytes());
     let payload_hash_hex = hex::encode(payload_hash);
 
     let canonical_request = format!(
-        "GET\n{}\n{}\n{}\n{}\n{}",
+        "POST\n{}\n{}\n{}\n{}\n{}",
         canonical_uri, canonical_querystring, canonical_headers, signed_headers, payload_hash_hex
     );
 
@@ -119,9 +123,7 @@ fn manual_decrypt(secret_arn: String) -> String {
 
     let signing_key = get_signature_key(&secret_key, &date_stamp, region, service);
 
-    let mut mac = HmacSha256::new_from_slice(&signing_key).expect("HMAC can take key of any size");
-    mac.update(string_to_sign.as_bytes());
-    let signature = hex::encode(mac.finalize().into_bytes());
+    let signature = hex::encode(sign(&signing_key, &string_to_sign));
 
     let authorization_header = format!(
         "{} Credential={}/{}, SignedHeaders={}, Signature={}",
@@ -130,32 +132,34 @@ fn manual_decrypt(secret_arn: String) -> String {
 
     let client = reqwest::Client::new();
     let mut headers = HeaderMap::new();
+    headers.insert("host", HeaderValue::from_str(&host).unwrap());
     headers.insert("x-amz-date", HeaderValue::from_str(&amz_date).unwrap());
     headers.insert("Authorization", HeaderValue::from_str(&authorization_header).unwrap());
     headers.insert("x-amz-target", HeaderValue::from_str("secretsmanager.GetSecretValue").unwrap());
     headers.insert("Content-Type", HeaderValue::from_str("application/x-amz-json-1.1").unwrap());
+    headers.insert("X-Amz-Security-Token", HeaderValue::from_str(&session_token).unwrap());
 
-    let request_url = format!("{}/?{}", endpoint, canonical_querystring);
     let this_thread_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
 
-    let json_body = &serde_json::json!({ "SecretId": secret_arn.split(":secret:").nth(1).unwrap()});
-    println!("json body {}", json_body);
-
     let req = client
-        .post(&request_url)
-        .body(json_body.to_string())
+        .post(&endpoint)
+        .json(json_body)
         .headers(headers);
 
     println!("Request: {:?}", req);
 
-    let body = this_thread_runtime.block_on(req.send()).unwrap();
+    let resp = this_thread_runtime.block_on(req.send()).unwrap();
 
-    println!("Response: {:?}", body);
+    println!("Response: {:?}", resp);
 
-    return "test".to_string();
+    let body = this_thread_runtime.block_on(resp.text()).unwrap();
+
+    println!("Body: {:?}", body);
+
+    return body;
 }
 
 pub fn decrypt_secret_arn(secret_arn: String) -> Result<String, Error> {
