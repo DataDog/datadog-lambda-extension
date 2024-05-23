@@ -182,8 +182,12 @@ fn main() -> Result<()> {
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
-    let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
     let event_bus = EventBus::run();
+    let logs_agent = LogsAgent::run(
+        Arc::clone(&tags_provider),
+        Arc::clone(&config),
+        event_bus.get_sender_copy(),
+    );
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -252,8 +256,11 @@ fn main() -> Result<()> {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
                         }
+                        Event::LogsBatch(logs) => {
+                            logs_agent.send_events_batch(logs);
+                        }
                         Event::Telemetry(event) => {
-                            logs_agent.send_event(event.clone());
+                            // logs_agent.send_event(event.clone());
                             match event.record {
                                 TelemetryRecord::PlatformInitReport {
                                     initialization_type,
