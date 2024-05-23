@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-function zip_extension {
+zip_extension() {
   local ARCH=amd64
   local LAYER_DIR=../../.layers/datadog_bottlecap-$ARCH
   mkdir -p $LAYER_DIR
@@ -14,19 +14,17 @@ function zip_extension {
 
   mkdir -p $LAYER_DIR/extensions
   cd ../../bottlecap/target/release/
-  cargo build --release
+    cargo build --release
   cd -
+
   cp ../../bottlecap/target/release/bottlecap $LAYER_DIR/extensions/datadog-agent
+
   cd $LAYER_DIR
+    chmod 755 datadog_wrapper datadog-agent-go extensions/datadog-agent
+    du -hs datadog_wrapper datadog-agent-go extensions/datadog-agent
+    zip -r datadog_bottlecap-$ARCH.zip datadog_wrapper datadog-agent-go extensions/datadog-agent
+    mv datadog_bottlecap-$ARCH.zip ..
+  cd -
 
-  chmod 755 datadog_wrapper datadog-agent-go extensions/datadog-agent
-
-  du -hs datadog_wrapper datadog-agent-go extensions/datadog-agent
-
-  zip -r datadog_bottlecap-$ARCH.zip datadog_wrapper datadog-agent-go extensions/datadog-agent
-  cd ..
-  mv datadog_bottlecap-$ARCH/datadog_bottlecap-$ARCH.zip .
-  du -hs datadog_bottlecap-$ARCH.zip
+  du -hs $LAYER_DIR/../datadog_bottlecap-$ARCH.zip
 }
-
-time zip_extension
