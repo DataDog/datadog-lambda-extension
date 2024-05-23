@@ -68,17 +68,28 @@ impl LogsAgent {
     }
 
     fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
-        let logs = aggregator.lock().expect("lock poisoned").get_batch();
+        debug!("[agent][flush_internal] Acquiring lock");
+        let mut guard = aggregator.lock().expect("lock poisoned");
+        let logs = guard.get_batch();
+        drop(guard);
+        debug!("[agent][flush_internal] Releasing lock");
         dd_api.send(&logs).expect("Failed to send logs to Datadog");
     }
 
     fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
-        let mut aggregator = aggregator.lock().expect("lock poisoned");
-        let mut logs = aggregator.get_batch();
+        debug!("[agent][flush_internal] Acquiring lock");
+        let mut guard = aggregator.lock().expect("lock poisoned");
+        let mut logs = guard.get_batch();
+        drop(guard);
+        debug!("[agent][flush_internal] Releasing lock");
         // It could be an empty JSON array: []
         while logs.len() > 2 {
             dd_api.send(&logs).expect("Failed to send logs to Datadog");
-            logs = aggregator.get_batch();
+            debug!("[agent][flush_internal] Acquiring lock");
+            guard = aggregator.lock().expect("lock poisoned");
+            logs = guard.get_batch();
+            drop(guard);
+            debug!("[agent][flush_internal] Releasing lock");
         }
     }
 
