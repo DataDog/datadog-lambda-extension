@@ -88,7 +88,7 @@ fn manual_decrypt(secret_arn: String) -> String {
     let session_token = env::var("AWS_SESSION_TOKEN").expect("AWS_SESSION_TOKEN is not set!");
 
     let service = "secretsmanager";
-    let host = format!("secretsmanager.{}.amazonaws.com", region);
+    let host = format!("{}.{}.amazonaws.com", service, region);
     let endpoint = format!("https://{}", host);
 
     let t = Utc::now();
@@ -98,7 +98,7 @@ fn manual_decrypt(secret_arn: String) -> String {
     let canonical_uri = "/";
     let canonical_querystring = "";
     let canonical_headers = format!(
-        "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:secretsmanager.getsScretValue\n",
+        "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:secretsmanager.GetSecretValue",
         host, amz_date, session_token);
     let signed_headers = "content-type;host;x-amz-date;x-amz-security-token;x-amz-target";
     let json_body = &serde_json::json!({ "SecretId": secret_arn.split(":secret:").nth(1).unwrap()});
@@ -110,6 +110,8 @@ fn manual_decrypt(secret_arn: String) -> String {
         "POST\n{}\n{}\n{}\n{}\n{}",
         canonical_uri, canonical_querystring, canonical_headers, signed_headers, payload_hash_hex
     );
+
+    println!("Canonical request: {:?}", canonical_request);
 
     let algorithm = "AWS4-HMAC-SHA256";
     let credential_scope = format!("{}/{}/{}/aws4_request", date_stamp, region, service);
@@ -125,6 +127,8 @@ fn manual_decrypt(secret_arn: String) -> String {
 
     let signature = hex::encode(sign(&signing_key, &string_to_sign));
 
+    println!("Signature: {:?}", signature);
+
     let authorization_header = format!(
         "{} Credential={}/{}, SignedHeaders={}, Signature={}",
         algorithm, access_key, credential_scope, signed_headers, signature
@@ -132,12 +136,12 @@ fn manual_decrypt(secret_arn: String) -> String {
 
     let client = reqwest::Client::new();
     let mut headers = HeaderMap::new();
-    headers.insert("host", HeaderValue::from_str(&host).unwrap());
-    headers.insert("x-amz-date", HeaderValue::from_str(&amz_date).unwrap());
     headers.insert("Authorization", HeaderValue::from_str(&authorization_header).unwrap());
-    headers.insert("x-amz-target", HeaderValue::from_str("secretsmanager.GetSecretValue").unwrap());
+    headers.insert("host", HeaderValue::from_str(&host).unwrap());
     headers.insert("Content-Type", HeaderValue::from_str("application/x-amz-json-1.1").unwrap());
-    headers.insert("X-Amz-Security-Token", HeaderValue::from_str(&session_token).unwrap());
+    headers.insert("x-amz-date", HeaderValue::from_str(&amz_date).unwrap());
+    headers.insert("x-amz-target", HeaderValue::from_str("secretsmanager.GetSecretValue").unwrap());
+    headers.insert("x-amz-security-token", HeaderValue::from_str(&session_token).unwrap());
 
     let this_thread_runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
