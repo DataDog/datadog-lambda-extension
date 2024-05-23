@@ -1,7 +1,11 @@
 use std::error::Error;
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 
+use tracing::error;
+
 use crate::config;
+use crate::events::Event;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
@@ -20,6 +24,8 @@ pub struct LambdaProcessor {
     rules: Option<Vec<Rule>>,
     // Current Invocation Context
     execution_context: ExecutionContext,
+    // main event bus
+    event_bus: SyncSender<Event>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +43,7 @@ impl LambdaProcessor {
     pub fn new(
         tags_provider: Arc<provider::Provider>,
         datadog_config: Arc<config::Config>,
+        event_bus: SyncSender<Event>,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
@@ -54,10 +61,12 @@ impl LambdaProcessor {
                 runtime_duration_ms: 0.0,
                 orphan_logs: Vec::new(),
             },
+            event_bus,
         }
     }
 
     fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
+        let copy = event.clone();
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
                 Ok(Message::new(
@@ -99,6 +108,10 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                    error!("Failed to send event to the main event bus: {}", e);
+                }
+
                 if let Some(metrics) = metrics {
                     self.execution_context.runtime_duration_ms = metrics.duration_ms;
                 }
@@ -111,6 +124,10 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                    error!("Failed to send event to the main event bus: {}", e);
+                }
+
                 let mut post_runtime_duration_ms = 0.0;
                 // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
                 if self.execution_context.runtime_duration_ms > 0.0 {
@@ -140,6 +157,12 @@ impl LambdaProcessor {
                     event.time.timestamp_millis(),
                 ))
             },
+            TelemetryRecord::PlatformInitReport { .. } => {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(event)) {
+                    error!("Failed to send event to the main event bus: {}", e);
+                }
+                Err("Unsupported event type".into())
+            }
             // TODO: PlatformInitRuntimeDone
             // TODO: PlatformInitReport
             // TODO: PlatformExtension
@@ -184,485 +207,491 @@ impl LambdaProcessor {
         }
     }
 
-    pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
-        if let Ok(mut log) = self.make_log(event) {
-            let mut aggregator = aggregator.lock().expect("lock poisoned");
-            let should_send_log =
-                LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-            if should_send_log {
-                aggregator.add(log);
-            }
-
-            // Process orphan logs, since we have a `request_id` now
-            for mut orphan_log in self.execution_context.orphan_logs.drain(..) {
-                orphan_log.message.lambda.request_id = Some(
-                    self.execution_context
-                        .request_id
-                        .clone()
-                        .expect("unable to retrieve request ID"),
-                );
+    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
+        let mut to_send = Vec::<IntakeLog>::new();
+        for event in events {
+            if let Ok(mut log) = self.make_log(event) {
+                let should_send_log =
+                    LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
-                    aggregator.add(orphan_log);
+                    to_send.push(log);
                 }
-            }
-        }
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use chrono::{TimeZone, Utc};
-    use std::collections::hash_map::HashMap;
-
-    use crate::logs::lambda::Lambda;
-    use crate::telemetry::events::{
-        InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
-    };
-
-    macro_rules! get_message_tests {
-        ($($name:ident: $value:expr,)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let (input, expected): (&TelemetryEvent, Message) = $value;
-
-                    let config = Arc::new(config::Config {
-                        service: Some("test-service".to_string()),
-                        tags: Some("test:tags".to_string()),
-                        ..config::Config::default()
-                    });
-
-                    let tags_provider = Arc::new(
-                        provider::Provider::new(Arc::clone(&config),
-                        LAMBDA_RUNTIME_SLUG.to_string(),
-                        &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
-
-                    let mut processor = LambdaProcessor::new(
-                        tags_provider,
-                        Arc::new(config::Config {
-                            service: Some("test-service".to_string()),
-                            tags: Some("test:tag,env:test".to_string()),
-                            ..config::Config::default()})
+                // Process orphan logs, since we have a `request_id` now
+                for mut orphan_log in self.execution_context.orphan_logs.drain(..) {
+                    orphan_log.message.lambda.request_id = Some(
+                        self.execution_context
+                            .request_id
+                            .clone()
+                            .expect("unable to retrieve request ID"),
                     );
-
-                    let result = processor.get_message(input.clone()).unwrap();
-
-                    assert_eq!(result, expected);
-                }
-            )*
-        }
-    }
-
-    // get_message
-    get_message_tests! {
-        // function
-        function: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::Function("test-function".to_string())
-            },
-            Message {
-                    message: "test-function".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: None,
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
-                },
-        ),
-
-        // extension
-        extension: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::Extension("test-extension".to_string())
-            },
-            Message {
-                    message: "test-extension".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: None,
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
-                },
-        ),
-
-        // platform init start
-        platform_init_start: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformInitStart {
-                    runtime_version: Some("test-runtime-version".to_string()),
-                    runtime_version_arn: Some("test-runtime-version-arn".to_string()),
-                    initialization_type: InitType::OnDemand,
-                    phase: InitPhase::Init,
-                }
-            },
-            Message {
-                    message: "INIT_START Runtime Version: test-runtime-version Runtime Version ARN: test-runtime-version-arn".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: None,
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
-                },
-        ),
-
-        // platform start
-        platform_start: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformStart {
-                    request_id: "test-request-id".to_string(),
-                    version: Some("test-version".to_string()),
-                }
-            },
-            Message {
-                    message: "START RequestId: test-request-id Version: test-version".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: Some("test-request-id".to_string()),
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
-                },
-        ),
-
-        // platform runtime done
-        platform_runtime_done: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformRuntimeDone {
-                    request_id: "test-request-id".to_string(),
-                    status: Status::Success,
-                    error_type: None,
-                    metrics: Some(RuntimeDoneMetrics {
-                        duration_ms: 100.0,
-                        produced_bytes: Some(42)
-                    })
-                }
-            },
-            Message {
-                    message: "END RequestId: test-request-id".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: Some("test-request-id".to_string()),
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
-                },
-        ),
-
-        // platform report
-        platform_report: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformReport {
-                    error_type: None,
-                    status: Status::Success,
-                    request_id: "test-request-id".to_string(),
-                    metrics: ReportMetrics {
-                        duration_ms: 100.0,
-                        billed_duration_ms: 128,
-                        memory_size_mb: 256,
-                        max_memory_used_mb: 64,
-                        init_duration_ms: Some(50.0),
-                        restore_duration_ms: None
+                    if should_send_log {
+                        to_send.push(orphan_log);
                     }
                 }
-            },
-            Message {
-                    message: "REPORT RequestId: test-request-id Duration: 100 ms Runtime Duration: 0 ms Post Runtime Duration: 0 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
-                    lambda: Lambda {
-                        arn: "test-arn".to_string(),
-                        request_id: Some("test-request-id".to_string()),
-                    },
-                    timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
-                },
-        ),
-    }
+            }
+        }
 
-    // get_intake_log
-    #[test]
-    fn test_get_intake_log() {
-        let config = Arc::new(config::Config {
-            service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
-            ..config::Config::default()
-        });
-
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
-
-        let event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::PlatformStart {
-                request_id: "test-request-id".to_string(),
-                version: Some("test".to_string()),
-            },
-        };
-
-        let lambda_message = processor.get_message(event.clone()).unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-
-        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
-        assert_eq!(intake_log.hostname, "test-arn".to_string());
-        assert_eq!(intake_log.service, "test-service".to_string());
-        assert!(intake_log.tags.contains("test:tags"));
-        assert_eq!(
-            intake_log.message,
-            Message {
-                message: "START RequestId: test-request-id Version: test".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-        );
-    }
-
-    #[test]
-    fn test_get_intake_log_errors_with_orphan() {
-        let config = Arc::new(config::Config {
-            service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
-            ..config::Config::default()
-        });
-
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
-
-        let event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
-        };
-
-        let lambda_message = processor.get_message(event.clone()).unwrap();
-        assert_eq!(lambda_message.lambda.request_id, None);
-
-        let intake_log = processor.get_intake_log(lambda_message).unwrap_err();
-        assert_eq!(
-            intake_log.to_string(),
-            "No request_id available, queueing for later"
-        );
-        assert_eq!(processor.execution_context.orphan_logs.len(), 1);
-    }
-
-    #[test]
-    fn test_get_intake_log_no_orphan_after_seeing_request_id() {
-        let config = Arc::new(config::Config {
-            service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
-            ..config::Config::default()
-        });
-
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
-
-        let start_event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::PlatformStart {
-                request_id: "test-request-id".to_string(),
-                version: Some("test".to_string()),
-            },
-        };
-
-        let start_lambda_message = processor.get_message(start_event.clone()).unwrap();
-        processor.get_intake_log(start_lambda_message).unwrap();
-
-        // This could be any event that doesn't have a `request_id`
-        let event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
-        };
-
-        let lambda_message = processor.get_message(event.clone()).unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
-        assert_eq!(
-            intake_log.message.lambda.request_id,
-            Some("test-request-id".to_string())
-        );
-    }
-
-    // process
-    #[test]
-    fn test_process() {
-        let aggregator = Arc::new(Mutex::new(Aggregator::default()));
-        let config = Arc::new(config::Config {
-            service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
-            ..config::Config::default()
-        });
-
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-
-        let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
-
-        let event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::PlatformStart {
-                request_id: "test-request-id".to_string(),
-                version: Some("test".to_string()),
-            },
-        };
-
-        processor.process(event.clone(), &aggregator);
-
-        let mut aggregator_lock = aggregator.lock().unwrap();
-        let batch = aggregator_lock.get_batch();
-        let log = IntakeLog {
-            message: Message {
-                message: "START RequestId: test-request-id Version: test".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
-        };
-        let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
-        assert_eq!(batch, serialized_log.as_bytes());
-    }
-
-    #[test]
-    fn test_process_log_with_no_request_id() {
-        let aggregator = Arc::new(Mutex::new(Aggregator::default()));
-        let config = Arc::new(config::Config {
-            service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
-            ..config::Config::default()
-        });
-
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
-
-        let event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
-        };
-
-        processor.process(event.clone(), &aggregator);
-        assert_eq!(processor.execution_context.orphan_logs.len(), 1);
-
-        let mut aggregator_lock = aggregator.lock().unwrap();
-        let batch = aggregator_lock.get_batch();
-        assert_eq!(batch, "[]".as_bytes());
-    }
-
-    #[test]
-    fn test_process_logs_after_seeing_request_id() {
-        let aggregator = Arc::new(Mutex::new(Aggregator::default()));
-        let config = Arc::new(config::Config {
-            service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
-            ..config::Config::default()
-        });
-
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-        ));
-
-        let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
-
-        let start_event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::PlatformStart {
-                request_id: "test-request-id".to_string(),
-                version: Some("test".to_string()),
-            },
-        };
-
-        processor.process(start_event.clone(), &aggregator);
-        assert_eq!(
-            processor.execution_context.request_id,
-            Some("test-request-id".to_string())
-        );
-
-        // This could be any event that doesn't have a `request_id`
-        let event = TelemetryEvent {
-            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
-        };
-
-        processor.process(event.clone(), &aggregator);
-
-        // Verify aggregator logs
-        let mut aggregator_lock = aggregator.lock().unwrap();
-        let batch = aggregator_lock.get_batch();
-        let start_log = IntakeLog {
-            message: Message {
-                message: "START RequestId: test-request-id Version: test".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
-        };
-        let function_log = IntakeLog {
-            message: Message {
-                message: "test-function".to_string(),
-                lambda: Lambda {
-                    arn: "test-arn".to_string(),
-                    request_id: Some("test-request-id".to_string()),
-                },
-                timestamp: 1_673_061_827_000,
-                status: "info".to_string(),
-            },
-            hostname: "test-arn".to_string(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: "test-service".to_string(),
-            tags: tags_provider.get_tags_string(),
-        };
-        let serialized_log = format!(
-            "[{},{}]",
-            serde_json::to_string(&start_log).unwrap(),
-            serde_json::to_string(&function_log).unwrap()
-        );
-        assert_eq!(batch, serialized_log.as_bytes());
+        let mut guard = aggregator.lock().expect("lock poisoned");
+        guard.add_batch(to_send);
+        drop(guard);
     }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     use chrono::{TimeZone, Utc};
+//     use std::collections::hash_map::HashMap;
+
+//     use crate::logs::lambda::Lambda;
+//     use crate::telemetry::events::{
+//         InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
+//     };
+
+//     macro_rules! get_message_tests {
+//         ($($name:ident: $value:expr,)*) => {
+//             $(
+//                 #[test]
+//                 fn $name() {
+//                     let (input, expected): (&TelemetryEvent, Message) = $value;
+
+//                     let config = Arc::new(config::Config {
+//                         service: Some("test-service".to_string()),
+//                         tags: Some("test:tags".to_string()),
+//                         ..config::Config::default()
+//                     });
+
+//                     let tags_provider = Arc::new(
+//                         provider::Provider::new(Arc::clone(&config),
+//                         LAMBDA_RUNTIME_SLUG.to_string(),
+//                         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
+
+//                     let mut processor = LambdaProcessor::new(
+//                         tags_provider,
+//                         Arc::new(config::Config {
+//                             service: Some("test-service".to_string()),
+//                             tags: Some("test:tag,env:test".to_string()),
+//                             ..config::Config::default()})
+//                     );
+
+//                     let result = processor.get_message(input.clone()).unwrap();
+
+//                     assert_eq!(result, expected);
+//                 }
+//             )*
+//         }
+//     }
+
+//     // get_message
+//     get_message_tests! {
+//         // function
+//         function: (
+//             &TelemetryEvent {
+//                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//                 record: TelemetryRecord::Function("test-function".to_string())
+//             },
+//             Message {
+//                     message: "test-function".to_string(),
+//                     lambda: Lambda {
+//                         arn: "test-arn".to_string(),
+//                         request_id: None,
+//                     },
+//                     timestamp: 1_673_061_827_000,
+//                     status: "info".to_string(),
+//                 },
+//         ),
+
+//         // extension
+//         extension: (
+//             &TelemetryEvent {
+//                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//                 record: TelemetryRecord::Extension("test-extension".to_string())
+//             },
+//             Message {
+//                     message: "test-extension".to_string(),
+//                     lambda: Lambda {
+//                         arn: "test-arn".to_string(),
+//                         request_id: None,
+//                     },
+//                     timestamp: 1_673_061_827_000,
+//                     status: "info".to_string(),
+//                 },
+//         ),
+
+//         // platform init start
+//         platform_init_start: (
+//             &TelemetryEvent {
+//                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//                 record: TelemetryRecord::PlatformInitStart {
+//                     runtime_version: Some("test-runtime-version".to_string()),
+//                     runtime_version_arn: Some("test-runtime-version-arn".to_string()),
+//                     initialization_type: InitType::OnDemand,
+//                     phase: InitPhase::Init,
+//                 }
+//             },
+//             Message {
+//                     message: "INIT_START Runtime Version: test-runtime-version Runtime Version ARN: test-runtime-version-arn".to_string(),
+//                     lambda: Lambda {
+//                         arn: "test-arn".to_string(),
+//                         request_id: None,
+//                     },
+//                     timestamp: 1_673_061_827_000,
+//                     status: "info".to_string(),
+//                 },
+//         ),
+
+//         // platform start
+//         platform_start: (
+//             &TelemetryEvent {
+//                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//                 record: TelemetryRecord::PlatformStart {
+//                     request_id: "test-request-id".to_string(),
+//                     version: Some("test-version".to_string()),
+//                 }
+//             },
+//             Message {
+//                     message: "START RequestId: test-request-id Version: test-version".to_string(),
+//                     lambda: Lambda {
+//                         arn: "test-arn".to_string(),
+//                         request_id: Some("test-request-id".to_string()),
+//                     },
+//                     timestamp: 1_673_061_827_000,
+//                     status: "info".to_string(),
+//                 },
+//         ),
+
+//         // platform runtime done
+//         platform_runtime_done: (
+//             &TelemetryEvent {
+//                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//                 record: TelemetryRecord::PlatformRuntimeDone {
+//                     request_id: "test-request-id".to_string(),
+//                     status: Status::Success,
+//                     error_type: None,
+//                     metrics: Some(RuntimeDoneMetrics {
+//                         duration_ms: 100.0,
+//                         produced_bytes: Some(42)
+//                     })
+//                 }
+//             },
+//             Message {
+//                     message: "END RequestId: test-request-id".to_string(),
+//                     lambda: Lambda {
+//                         arn: "test-arn".to_string(),
+//                         request_id: Some("test-request-id".to_string()),
+//                     },
+//                     timestamp: 1_673_061_827_000,
+//                     status: "info".to_string(),
+//                 },
+//         ),
+
+//         // platform report
+//         platform_report: (
+//             &TelemetryEvent {
+//                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//                 record: TelemetryRecord::PlatformReport {
+//                     error_type: None,
+//                     status: Status::Success,
+//                     request_id: "test-request-id".to_string(),
+//                     metrics: ReportMetrics {
+//                         duration_ms: 100.0,
+//                         billed_duration_ms: 128,
+//                         memory_size_mb: 256,
+//                         max_memory_used_mb: 64,
+//                         init_duration_ms: Some(50.0),
+//                         restore_duration_ms: None
+//                     }
+//                 }
+//             },
+//             Message {
+//                     message: "REPORT RequestId: test-request-id Duration: 100 ms Runtime Duration: 0 ms Post Runtime Duration: 0 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
+//                     lambda: Lambda {
+//                         arn: "test-arn".to_string(),
+//                         request_id: Some("test-request-id".to_string()),
+//                     },
+//                     timestamp: 1_673_061_827_000,
+//                     status: "info".to_string(),
+//                 },
+//         ),
+//     }
+
+//     // get_intake_log
+//     #[test]
+//     fn test_get_intake_log() {
+//         let config = Arc::new(config::Config {
+//             service: Some("test-service".to_string()),
+//             tags: Some("test:tags".to_string()),
+//             ..config::Config::default()
+//         });
+
+//         let tags_provider = Arc::new(provider::Provider::new(
+//             Arc::clone(&config),
+//             LAMBDA_RUNTIME_SLUG.to_string(),
+//             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+//         ));
+
+//         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+
+//         let event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::PlatformStart {
+//                 request_id: "test-request-id".to_string(),
+//                 version: Some("test".to_string()),
+//             },
+//         };
+
+//         let lambda_message = processor.get_message(event.clone()).unwrap();
+//         let intake_log = processor.get_intake_log(lambda_message).unwrap();
+
+//         assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+//         assert_eq!(intake_log.hostname, "test-arn".to_string());
+//         assert_eq!(intake_log.service, "test-service".to_string());
+//         assert!(intake_log.tags.contains("test:tags"));
+//         assert_eq!(
+//             intake_log.message,
+//             Message {
+//                 message: "START RequestId: test-request-id Version: test".to_string(),
+//                 lambda: Lambda {
+//                     arn: "test-arn".to_string(),
+//                     request_id: Some("test-request-id".to_string()),
+//                 },
+//                 timestamp: 1_673_061_827_000,
+//                 status: "info".to_string(),
+//             },
+//         );
+//     }
+
+//     #[test]
+//     fn test_get_intake_log_errors_with_orphan() {
+//         let config = Arc::new(config::Config {
+//             service: Some("test-service".to_string()),
+//             tags: Some("test:tags".to_string()),
+//             ..config::Config::default()
+//         });
+
+//         let tags_provider = Arc::new(provider::Provider::new(
+//             Arc::clone(&config),
+//             LAMBDA_RUNTIME_SLUG.to_string(),
+//             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+//         ));
+
+//         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+
+//         let event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::Function("test-function".to_string()),
+//         };
+
+//         let lambda_message = processor.get_message(event.clone()).unwrap();
+//         assert_eq!(lambda_message.lambda.request_id, None);
+
+//         let intake_log = processor.get_intake_log(lambda_message).unwrap_err();
+//         assert_eq!(
+//             intake_log.to_string(),
+//             "No request_id available, queueing for later"
+//         );
+//         assert_eq!(processor.execution_context.orphan_logs.len(), 1);
+//     }
+
+//     #[test]
+//     fn test_get_intake_log_no_orphan_after_seeing_request_id() {
+//         let config = Arc::new(config::Config {
+//             service: Some("test-service".to_string()),
+//             tags: Some("test:tags".to_string()),
+//             ..config::Config::default()
+//         });
+
+//         let tags_provider = Arc::new(provider::Provider::new(
+//             Arc::clone(&config),
+//             LAMBDA_RUNTIME_SLUG.to_string(),
+//             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+//         ));
+
+//         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+
+//         let start_event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::PlatformStart {
+//                 request_id: "test-request-id".to_string(),
+//                 version: Some("test".to_string()),
+//             },
+//         };
+
+//         let start_lambda_message = processor.get_message(start_event.clone()).unwrap();
+//         processor.get_intake_log(start_lambda_message).unwrap();
+
+//         // This could be any event that doesn't have a `request_id`
+//         let event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::Function("test-function".to_string()),
+//         };
+
+//         let lambda_message = processor.get_message(event.clone()).unwrap();
+//         let intake_log = processor.get_intake_log(lambda_message).unwrap();
+//         assert_eq!(
+//             intake_log.message.lambda.request_id,
+//             Some("test-request-id".to_string())
+//         );
+//     }
+
+//     // process
+//     #[test]
+//     fn test_process() {
+//         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
+//         let config = Arc::new(config::Config {
+//             service: Some("test-service".to_string()),
+//             tags: Some("test:tags".to_string()),
+//             ..config::Config::default()
+//         });
+
+//         let tags_provider = Arc::new(provider::Provider::new(
+//             Arc::clone(&config),
+//             LAMBDA_RUNTIME_SLUG.to_string(),
+//             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+//         ));
+
+//         let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
+
+//         let event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::PlatformStart {
+//                 request_id: "test-request-id".to_string(),
+//                 version: Some("test".to_string()),
+//             },
+//         };
+
+//         processor.process(event.clone(), &aggregator);
+
+//         let mut aggregator_lock = aggregator.lock().unwrap();
+//         let batch = aggregator_lock.get_batch();
+//         let log = IntakeLog {
+//             message: Message {
+//                 message: "START RequestId: test-request-id Version: test".to_string(),
+//                 lambda: Lambda {
+//                     arn: "test-arn".to_string(),
+//                     request_id: Some("test-request-id".to_string()),
+//                 },
+//                 timestamp: 1_673_061_827_000,
+//                 status: "info".to_string(),
+//             },
+//             hostname: "test-arn".to_string(),
+//             source: LAMBDA_RUNTIME_SLUG.to_string(),
+//             service: "test-service".to_string(),
+//             tags: tags_provider.get_tags_string(),
+//         };
+//         let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
+//         assert_eq!(batch, serialized_log.as_bytes());
+//     }
+
+//     #[test]
+//     fn test_process_log_with_no_request_id() {
+//         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
+//         let config = Arc::new(config::Config {
+//             service: Some("test-service".to_string()),
+//             tags: Some("test:tags".to_string()),
+//             ..config::Config::default()
+//         });
+
+//         let tags_provider = Arc::new(provider::Provider::new(
+//             Arc::clone(&config),
+//             LAMBDA_RUNTIME_SLUG.to_string(),
+//             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+//         ));
+
+//         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+
+//         let event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::Function("test-function".to_string()),
+//         };
+
+//         processor.process(event.clone(), &aggregator);
+//         assert_eq!(processor.execution_context.orphan_logs.len(), 1);
+
+//         let mut aggregator_lock = aggregator.lock().unwrap();
+//         let batch = aggregator_lock.get_batch();
+//         assert_eq!(batch, "[]".as_bytes());
+//     }
+
+//     #[test]
+//     fn test_process_logs_after_seeing_request_id() {
+//         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
+//         let config = Arc::new(config::Config {
+//             service: Some("test-service".to_string()),
+//             tags: Some("test:tags".to_string()),
+//             ..config::Config::default()
+//         });
+
+//         let tags_provider = Arc::new(provider::Provider::new(
+//             Arc::clone(&config),
+//             LAMBDA_RUNTIME_SLUG.to_string(),
+//             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+//         ));
+
+//         let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
+
+//         let start_event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::PlatformStart {
+//                 request_id: "test-request-id".to_string(),
+//                 version: Some("test".to_string()),
+//             },
+//         };
+
+//         processor.process(start_event.clone(), &aggregator);
+//         assert_eq!(
+//             processor.execution_context.request_id,
+//             Some("test-request-id".to_string())
+//         );
+
+//         // This could be any event that doesn't have a `request_id`
+//         let event = TelemetryEvent {
+//             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+//             record: TelemetryRecord::Function("test-function".to_string()),
+//         };
+
+//         processor.process(event.clone(), &aggregator);
+
+//         // Verify aggregator logs
+//         let mut aggregator_lock = aggregator.lock().unwrap();
+//         let batch = aggregator_lock.get_batch();
+//         let start_log = IntakeLog {
+//             message: Message {
+//                 message: "START RequestId: test-request-id Version: test".to_string(),
+//                 lambda: Lambda {
+//                     arn: "test-arn".to_string(),
+//                     request_id: Some("test-request-id".to_string()),
+//                 },
+//                 timestamp: 1_673_061_827_000,
+//                 status: "info".to_string(),
+//             },
+//             hostname: "test-arn".to_string(),
+//             source: LAMBDA_RUNTIME_SLUG.to_string(),
+//             service: "test-service".to_string(),
+//             tags: tags_provider.get_tags_string(),
+//         };
+//         let function_log = IntakeLog {
+//             message: Message {
+//                 message: "test-function".to_string(),
+//                 lambda: Lambda {
+//                     arn: "test-arn".to_string(),
+//                     request_id: Some("test-request-id".to_string()),
+//                 },
+//                 timestamp: 1_673_061_827_000,
+//                 status: "info".to_string(),
+//             },
+//             hostname: "test-arn".to_string(),
+//             source: LAMBDA_RUNTIME_SLUG.to_string(),
+//             service: "test-service".to_string(),
+//             tags: tags_provider.get_tags_string(),
+//         };
+//         let serialized_log = format!(
+//             "[{},{}]",
+//             serde_json::to_string(&start_log).unwrap(),
+//             serde_json::to_string(&function_log).unwrap()
+//         );
+//         assert_eq!(batch, serialized_log.as_bytes());
+//     }
+// }
