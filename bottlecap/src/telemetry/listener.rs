@@ -171,10 +171,8 @@ impl TelemetryListener {
 
         let p = HttpRequestParser::from_buf(&buf)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
-        for event in telemetry_events {
-            if let Err(e) = event_bus.send(events::Event::Telemetry(event)) {
-                error!("Error sending Telemetry event to the event bus: {}", e);
-            }
+        if let Err(e) = event_bus.send(events::Event::LogsBatch(telemetry_events)) {
+            error!("Error sending Telemetry events to the event bus: {}", e);
         }
 
         Ok(())
