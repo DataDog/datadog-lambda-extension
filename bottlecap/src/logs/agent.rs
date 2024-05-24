@@ -66,12 +66,31 @@ impl LogsAgent {
     }
 
     fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
-        let mut guard = aggregator.lock().expect("lock poisoned");
-        let logs = guard.get_batch();
-        drop(guard);
-        dd_api.send(&logs).expect("Failed to send logs to Datadog");
+        debug!("[agent][flush_internal] Acquiring lock");
+        let guard = aggregator.try_lock();
+        match guard {
+            Ok(mut guard) => {
+                debug!("[agent][flush_internal] Lock acquired");
+                let logs = guard.get_batch();
+                drop(guard);
+                dd_api.send(&logs).expect("Failed to send logs to Datadog");
+            }
+            Err(e) => {
+                match e {
+                    std::sync::TryLockError::WouldBlock => {
+                        debug!("[agent][flush_internal] Lock is already acquired, blocking");
+                        let mut guard = aggregator.lock().expect("lock poisoned");
+                        let logs = guard.get_batch();
+                        drop(guard);
+                        dd_api.send(&logs).expect("Failed to send logs to Datadog");
+                    }
+                    std::sync::TryLockError::Poisoned(_) => {
+                        debug!("[agent][flush_internal] Lock is poisoned");
+                    }
+                }
+            }
+        }
     }
-
     fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
         let mut guard = aggregator.lock().expect("lock poisoned");
         let mut logs = guard.get_batch();

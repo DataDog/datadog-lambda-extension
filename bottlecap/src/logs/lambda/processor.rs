@@ -237,9 +237,26 @@ impl LambdaProcessor {
             return;
         }
 
-        let mut guard = aggregator.lock().expect("lock poisoned");
-        guard.add_batch(to_send);
-        drop(guard);
+        let guard = aggregator.try_lock();
+        match guard {
+            Ok(mut guard) => {
+                guard.add_batch(to_send);
+                drop(guard);
+            },
+            Err(e) => {
+                match e {
+                    std::sync::TryLockError::WouldBlock => {
+                        error!("Failed to acquire lock on aggregator, will block");
+                        let mut guard = aggregator.lock().expect("lock poisoned");
+                        guard.add_batch(to_send);
+                        drop(guard);
+                    },
+                    _ => {
+                        error!("lock poisoned");
+                    },
+                }
+            }
+        }
     }
 }
 
