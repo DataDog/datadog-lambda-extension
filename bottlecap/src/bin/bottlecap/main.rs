@@ -207,7 +207,7 @@ fn main() -> Result<()> {
         port: TELEMETRY_PORT,
     };
     let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
+        TelemetryListener::run(&telemetry_listener_config, logs_agent.get_sender_copy())
             .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
@@ -255,9 +255,6 @@ fn main() -> Result<()> {
                     match event {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
-                        }
-                        Event::LogsBatch(logs) => {
-                            logs_agent.send_events_batch(logs);
                         }
                         Event::Telemetry(event) => {
                             // logs_agent.send_event(event.clone());
