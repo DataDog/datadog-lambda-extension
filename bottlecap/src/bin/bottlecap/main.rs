@@ -257,7 +257,6 @@ fn main() -> Result<()> {
                             debug!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => {
-                            // logs_agent.send_event(event.clone());
                             match event.record {
                                 TelemetryRecord::PlatformInitReport {
                                     initialization_type,
