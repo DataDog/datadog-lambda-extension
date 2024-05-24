@@ -54,7 +54,6 @@ impl Aggregator {
     pub fn get_batch(&mut self) -> Vec<u8> {
         let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes);
         buffer.extend(b"[");
-
         // Fill the batch with logs from the messages
         for _ in 0..self.max_batch_entries_size {
             if let Some(log) = self.messages.pop_front() {
@@ -85,7 +84,6 @@ impl Aggregator {
         }
 
         buffer.extend(b"]");
-
         buffer
     }
 }
