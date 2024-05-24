@@ -19,5 +19,4 @@ impl MetricEvent {
 pub enum Event {
     Metric(MetricEvent),
     Telemetry(TelemetryEvent),
-    LogsBatch(Vec<TelemetryEvent>),
 }
