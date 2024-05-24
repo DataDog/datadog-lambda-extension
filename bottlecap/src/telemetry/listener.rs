@@ -206,160 +206,157 @@ impl TelemetryListener {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use chrono::DateTime;
+#[cfg(test)]
+mod tests {
+    use chrono::DateTime;
 
-//     use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
+    use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
 
-//     use super::*;
+    use super::*;
 
-//     #[test]
-//     fn test_parse_headers() {
-//         let mut parser = HttpRequestParser {
-//             headers: HashMap::new(),
-//             body: String::new(),
-//         };
-//         let buf = b"GET /path HTTP/1.1\r\nContent-Length: 10\r\nHeader1: Value1\r\n\r\n";
-//         let result = parser.parse_headers(buf);
-//         assert!(result.is_ok());
-//         assert_eq!(parser.headers.len(), 2);
-//         assert_eq!(
-//             parser.headers.get("content-length"),
-//             Some(&"10".to_string())
-//         );
-//         assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
-//     }
+    #[test]
+    fn test_parse_headers() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf = b"GET /path HTTP/1.1\r\nContent-Length: 10\r\nHeader1: Value1\r\n\r\n";
+        let result = parser.parse_headers(buf);
+        assert!(result.is_ok());
+        assert_eq!(parser.headers.len(), 2);
+        assert_eq!(
+            parser.headers.get("content-length"),
+            Some(&"10".to_string())
+        );
+        assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
+    }
 
-//     #[test]
-//     #[should_panic(expected = "content-length header not found")]
-//     fn test_parse_headers_no_content_length() {
-//         let mut parser = HttpRequestParser {
-//             headers: HashMap::new(),
-//             body: String::new(),
-//         };
-//         let buf = b"GET /path HTTP/1.1\r\nHeader1: Value1\r\n\r\n";
-//         let body_start_index = parser.parse_headers(buf).unwrap();
-//         parser.parse_body(buf, body_start_index).unwrap();
-//     }
+    #[test]
+    #[should_panic(expected = "content-length header not found")]
+    fn test_parse_headers_no_content_length() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf = b"GET /path HTTP/1.1\r\nHeader1: Value1\r\n\r\n";
+        let body_start_index = parser.parse_headers(buf).unwrap();
+        parser.parse_body(buf, body_start_index).unwrap();
+    }
 
-//     #[test]
-//     #[should_panic(expected = "content-length header is greater than the buffer length")]
-//     fn test_parse_headers_wrong_content_length() {
-//         let mut parser = HttpRequestParser {
-//             headers: HashMap::new(),
-//             body: String::new(),
-//         };
-//         let buf =
-//             b"GET /path HTTP/1.1\r\nContent-Length: 56\r\nHeader1: Value1\r\n\r\nHello, World!";
-//         let body_start_index = parser.parse_headers(buf).unwrap();
-//         parser.parse_body(buf, body_start_index).unwrap();
-//     }
+    #[test]
+    #[should_panic(expected = "content-length header is greater than the buffer length")]
+    fn test_parse_headers_wrong_content_length() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf =
+            b"GET /path HTTP/1.1\r\nContent-Length: 56\r\nHeader1: Value1\r\n\r\nHello, World!";
+        let body_start_index = parser.parse_headers(buf).unwrap();
+        parser.parse_body(buf, body_start_index).unwrap();
+    }
 
-//     #[test]
-//     #[should_panic(
-//         expected = "called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }"
-//     )]
-//     fn test_parse_headers_invalid_content_length() {
-//         let mut parser = HttpRequestParser {
-//             headers: HashMap::new(),
-//             body: String::new(),
-//         };
-//         let buf = b"GET /path HTTP/1.1\r\nContent-Length: Bottlecap!\r\nHeader1: Value1\r\n\r\nHello, World!";
-//         let body_start_index = parser.parse_headers(buf).unwrap();
-//         parser.parse_body(buf, body_start_index).unwrap();
-//     }
+    #[test]
+    #[should_panic(
+        expected = "called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }"
+    )]
+    fn test_parse_headers_invalid_content_length() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        let buf = b"GET /path HTTP/1.1\r\nContent-Length: Bottlecap!\r\nHeader1: Value1\r\n\r\nHello, World!";
+        let body_start_index = parser.parse_headers(buf).unwrap();
+        parser.parse_body(buf, body_start_index).unwrap();
+    }
 
-//     #[test]
-//     fn test_parse_body() {
-//         let mut parser = HttpRequestParser {
-//             headers: HashMap::new(),
-//             body: String::new(),
-//         };
-//         parser
-//             .headers
-//             .insert("content-length".to_string(), "13".to_string());
-//         let buf = b"Hello, World!";
-//         let result = parser.parse_body(buf, 0);
-//         assert!(result.is_ok());
-//         assert_eq!(parser.body, "Hello, World!".to_string());
-//     }
+    #[test]
+    fn test_parse_body() {
+        let mut parser = HttpRequestParser {
+            headers: HashMap::new(),
+            body: String::new(),
+        };
+        parser
+            .headers
+            .insert("content-length".to_string(), "13".to_string());
+        let buf = b"Hello, World!";
+        let result = parser.parse_body(buf, 0);
+        assert!(result.is_ok());
+        assert_eq!(parser.body, "Hello, World!".to_string());
+    }
 
-//     struct MockTcpStream {
-//         data: Vec<u8>,
-//     }
+    struct MockTcpStream {
+        data: Vec<u8>,
+    }
 
-//     impl Read for MockTcpStream {
-//         fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
-//             let len = std::cmp::min(buf.len(), self.data.len());
-//             buf.write_all(&self.data[..len])?;
-//             self.data = self.data.split_off(len);
-//             Ok(len)
-//         }
-//     }
+    impl Read for MockTcpStream {
+        fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
+            let len = std::cmp::min(buf.len(), self.data.len());
+            buf.write_all(&self.data[..len])?;
+            self.data = self.data.split_off(len);
+            Ok(len)
+        }
+    }
 
-//     #[test]
-//     fn test_handle_stream() {
-//         let mut stream = MockTcpStream {
-//             data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
-//         };
-//         let (tx, rx) = std::sync::mpsc::sync_channel(3);
-//         let buf = [0; 262_144];
-//         let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
-//         let event = rx.recv().expect("No events received");
-//         let telemetry_event = match event {
-//             events::Event::Telemetry(te) => te,
-//             _ => panic!("Expected Telemetry Event"),
-//         };
+    #[test]
+    fn test_handle_stream() {
+        let mut stream = MockTcpStream {
+            data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        let buf = [0; 262_144];
+        let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
+        let events = rx.recv().expect("No events received");
+        let telemetry_event = &events[0];
 
-//         let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
-//         assert_eq!(telemetry_event.time, expected_time);
-//         assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
-//             initialization_type: InitType::OnDemand,
-//             phase: InitPhase::Init,
-//             runtime_version: Some("nodejs:20.v22".to_string()),
-//             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
-//         });
-//         assert!(result.is_ok());
-//     }
+        let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
+        assert_eq!(telemetry_event.time, expected_time);
+        assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
+            initialization_type: InitType::OnDemand,
+            phase: InitPhase::Init,
+            runtime_version: Some("nodejs:20.v22".to_string()),
+            runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
+        });
+        assert!(result.is_ok());
+    }
 
-//     macro_rules! test_handle_stream_invalid_body {
-//         ($($name:ident: $value:tt,)*) => {
-//             $(
-//                 #[test]
-//                 #[should_panic]
-//                 fn $name() {
-//                     let mut stream = MockTcpStream {
-//                         data: $value.to_string().into_bytes(),
-//                     };
-//                     let (tx, _) = std::sync::mpsc::sync_channel(4);
-//                     let buf = [0; 262144];
-//                     TelemetryListener::handle_stream(&mut stream, buf, tx).unwrap()
-//                 }
-//             )*
-//         }
-//     }
+    macro_rules! test_handle_stream_invalid_body {
+        ($($name:ident: $value:tt,)*) => {
+            $(
+                #[test]
+                #[should_panic]
+                fn $name() {
+                    let mut stream = MockTcpStream {
+                        data: $value.to_string().into_bytes(),
+                    };
+                    let (tx, _) = std::sync::mpsc::channel();
+                    let buf = [0; 262144];
+                    TelemetryListener::handle_stream(&mut stream, buf, tx).unwrap()
+                }
+            )*
+        }
+    }
 
-//     test_handle_stream_invalid_body! {
-//         invalid_json: "POST /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!",
-//         empty_json: "POST /path HTTP/1.1\r\nContent-Length: 2\r\nHeader1: Value1\r\n\r\n{}",
-//         json_array_with_empty_json: "POST /path HTTP/1.1\r\nContent-Length: 4\r\nHeader1: Value1\r\n\r\n[{}]",
+    test_handle_stream_invalid_body! {
+        invalid_json: "POST /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!",
+        empty_json: "POST /path HTTP/1.1\r\nContent-Length: 2\r\nHeader1: Value1\r\n\r\n{}",
+        json_array_with_empty_json: "POST /path HTTP/1.1\r\nContent-Length: 4\r\nHeader1: Value1\r\n\r\n[{}]",
 
-//     }
+    }
 
-//     #[test]
-//     fn test_from_buf() {
-//         let buf =
-//             b"GET /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!";
-//         let result = HttpRequestParser::from_buf(buf);
-//         assert!(result.is_ok());
-//         let parser = result.unwrap();
-//         assert_eq!(parser.headers.len(), 2);
-//         assert_eq!(
-//             parser.headers.get("content-length"),
-//             Some(&"13".to_string())
-//         );
-//         assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
-//         assert_eq!(parser.body, "Hello, World!".to_string());
-//     }
-// }
+    #[test]
+    fn test_from_buf() {
+        let buf =
+            b"GET /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!";
+        let result = HttpRequestParser::from_buf(buf);
+        assert!(result.is_ok());
+        let parser = result.unwrap();
+        assert_eq!(parser.headers.len(), 2);
+        assert_eq!(
+            parser.headers.get("content-length"),
+            Some(&"13".to_string())
+        );
+        assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
+        assert_eq!(parser.body, "Hello, World!".to_string());
+    }
+}
