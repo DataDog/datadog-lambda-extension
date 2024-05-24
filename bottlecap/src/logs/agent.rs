@@ -1,8 +1,8 @@
-use std::sync::mpsc::{self, Sender, SyncSender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{Sender, SyncSender};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::events::Event;
 use crate::logs::{aggregator::Aggregator, datadog, processor::LogsProcessor};
@@ -44,7 +44,6 @@ impl LogsAgent {
                 debug!("Failed to received event in Logs Agent");
                 break;
             };
-
             processor.process(events, &cloned_aggregator);
         });
 
@@ -57,39 +56,32 @@ impl LogsAgent {
         }
     }
 
-    pub fn send_events_batch(&self, events: Vec<TelemetryEvent>) {
-        if let Err(e) = self.tx.send(events) {
-            error!("Error sending Telemetry events to the Logs Agent: {}", e);
-        }
-    }
-
     pub fn flush(&self) {
         LogsAgent::flush_internal(&self.aggregator, &self.dd_api);
     }
 
+    #[must_use]
+    pub fn get_sender_copy(&self) -> Sender<Vec<TelemetryEvent>> {
+        self.tx.clone()
+    }
+
     fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
-        debug!("[agent][flush_internal] Acquiring lock");
         let mut guard = aggregator.lock().expect("lock poisoned");
         let logs = guard.get_batch();
         drop(guard);
-        debug!("[agent][flush_internal] Releasing lock");
         dd_api.send(&logs).expect("Failed to send logs to Datadog");
     }
 
     fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
-        debug!("[agent][flush_internal] Acquiring lock");
         let mut guard = aggregator.lock().expect("lock poisoned");
         let mut logs = guard.get_batch();
         drop(guard);
-        debug!("[agent][flush_internal] Releasing lock");
         // It could be an empty JSON array: []
         while logs.len() > 2 {
             dd_api.send(&logs).expect("Failed to send logs to Datadog");
-            debug!("[agent][flush_internal] Acquiring lock");
             guard = aggregator.lock().expect("lock poisoned");
             logs = guard.get_batch();
             drop(guard);
-            debug!("[agent][flush_internal] Releasing lock");
         }
     }
 
