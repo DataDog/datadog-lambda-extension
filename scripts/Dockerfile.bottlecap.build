@@ -1,8 +1,13 @@
 # syntax = docker/dockerfile:experimental
 
-FROM rust:1.77-buster as bottlecap-builder
-RUN apt-get update
-RUN apt-get install -y protobuf-compiler
+FROM public.ecr.aws/lambda/provided:al2 as bottlecap-builder
+RUN yum install -y curl gcc gcc-c++ make unzip
+# Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
+COPY ./scripts/install-protoc.sh /
+RUN chmod +x /install-protoc.sh && /install-protoc.sh
+RUN curl https://sh.rustup.rs -sSf | \
+    sh -s -- --default-toolchain stable -y
+    ENV PATH=/root/.cargo/bin:$PATH
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap /tmp/dd/bottlecap
 RUN cd /tmp/dd/bottlecap && cargo build --release
