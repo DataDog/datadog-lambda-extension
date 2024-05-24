@@ -2,7 +2,7 @@ use std::error::Error;
 use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 
-use tracing::{debug, error};
+use tracing::error;
 
 use crate::config;
 use crate::events::Event;
@@ -232,11 +232,14 @@ impl LambdaProcessor {
             }
         }
 
-        debug!("[processor][add] Acquiring lock");
+        // Nothing to send
+        if to_send.is_empty() {
+            return;
+        }
+
         let mut guard = aggregator.lock().expect("lock poisoned");
         guard.add_batch(to_send);
         drop(guard);
-        debug!("[processor][add] Releasing lock");
     }
 }
 
