@@ -3,8 +3,7 @@ set -e
 
 FUNCTION_NAME="agbtc2-bottlecap-busy-node20-lambda"
 
-source publish_sandbox.sh
-source build.sh
+source deploy_steps.sh
 
 update() {
   aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda update-function-configuration \
