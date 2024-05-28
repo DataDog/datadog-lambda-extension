@@ -50,7 +50,6 @@ use bottlecap::secrets::decrypt;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 use bottlecap::secrets::decrypt;
-use bottlecap::secrets::decrypt::{decrypt_secret_arn};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
