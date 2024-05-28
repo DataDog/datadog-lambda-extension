@@ -70,7 +70,7 @@ fn manual_decrypt(secret_arn: String) -> String {
     let region = "us-east-1";
 
     let access_key = env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set");
-    // let secret_key = env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY not set");
+    let secret_key = env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY not set");
     let session_token = env::var("AWS_SESSION_TOKEN").expect("AWS_SESSION_TOKEN is not set!");
 
     let service = "secretsmanager";
@@ -109,7 +109,7 @@ fn manual_decrypt(secret_arn: String) -> String {
         hex::encode(Sha256::digest(canonical_request.as_bytes()))
     );
 
-    let signing_key = get_signature_key(&access_key, &date_stamp, region, service);
+    let signing_key = get_signature_key(&secret_key, &date_stamp, region, service);
 
     let signature = hex::encode(sign(&signing_key, &string_to_sign));
 
