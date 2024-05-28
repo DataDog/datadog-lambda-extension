@@ -1,10 +1,10 @@
+use std::env;
 use std::io::Error;
 use crate::config::Config;
 use aws_config;
 use aws_sdk_secretsmanager::Client;
 use aws_sdk_secretsmanager;
 use tracing::debug;
-use std::{env, thread};
 use std::time::Instant;
 
 use chrono::{Utc};
@@ -20,31 +20,14 @@ pub fn resolve_secrets(config: Config, decoder: ResolveFn) -> Result<Config, Str
         Ok(config)
     } else {
         if !config.api_key_secret_arn.is_empty() {
+            let config_clone = config.clone();
             debug!("DD_API_KEY_SECRET_ARN found, trying to resolve ARN secret");
             let string = config.api_key_secret_arn.clone();
 
             let before_awssm = Instant::now();
 
-            let wait_fot_ret = thread::spawn(move || { decoder(string) });
-            let res = match wait_fot_ret.join() {
-                Ok(Ok(secret)) => {
-                    Ok(Config {
-                        api_key: secret,
-                        ..config.clone()
-                    })
-                }
-                Ok(Err(e)) => { Err(e.to_string()) }
 
-                Err(e) => {
-                    if let Some(s) = e.downcast_ref::<&str>() {
-                        Err(format!("Thread panicked with message: {}", s))
-                    } else if let Some(s) = e.downcast_ref::<String>() {
-                        Err(format!("Thread panicked with message: {}", s))
-                    } else {
-                        Err("Thread panicked".to_string())
-                    }
-                }
-            };
+            let result = decoder(string).unwrap();
 
             let duration_awssm = before_awssm.elapsed();
             println!("AWS SM took {}ms", duration_awssm.as_millis());
@@ -54,9 +37,12 @@ pub fn resolve_secrets(config: Config, decoder: ResolveFn) -> Result<Config, Str
             let duration_manual = before_manual.elapsed();
             println!("Manual took {}ms", duration_manual.as_millis());
 
-            println!("Secrets are equal? {}", res.clone().unwrap().api_key == manual_res);
+            println!("Secrets are equal? {}", result == manual_res);
 
-            return res;
+            return Ok(Config {
+                api_key: result,
+                ..config_clone.clone()
+            });
         } else {
             Err("No API key or secret ARN found".to_string())
         }
