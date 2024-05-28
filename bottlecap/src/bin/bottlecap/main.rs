@@ -48,7 +48,6 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 use bottlecap::secrets::decrypt;
-use bottlecap::secrets::decrypt::{decrypt_secret_arn};
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -167,7 +166,7 @@ fn main() -> Result<()> {
 
     info!("logging subsystem enabled");
 
-    let config = match resolve_secrets(env_config, decrypt_secret_arn) {
+    let config = match resolve_secrets(env_config) {
         Ok(c) => {
             Arc::new(c)
         }
