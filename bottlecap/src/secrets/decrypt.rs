@@ -93,7 +93,7 @@ fn manual_decrypt(secret_arn: String) -> String {
     let payload_hash_hex = hex::encode(payload_hash);
 
     let canonical_request = format!(
-        "POST\n{}\n{}\n{}\n{}\n{}",
+        "POST\n{}\n{}\n{}\n\n{}\n{}",
         canonical_uri, canonical_querystring, canonical_headers, signed_headers, payload_hash_hex
     );
 
