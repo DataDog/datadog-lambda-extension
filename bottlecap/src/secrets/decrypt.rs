@@ -54,6 +54,8 @@ fn get_signature_key(key: &str, date_stamp: &str, region_name: &str, service_nam
 
 
 fn manual_decrypt(secret_arn: String) -> String {
+    let start = Instant::now();
+
     let region = "us-east-1";
 
     let access_key = env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set");
@@ -74,10 +76,21 @@ fn manual_decrypt(secret_arn: String) -> String {
         "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:secretsmanager.GetSecretValue",
         host, amz_date, session_token);
     let signed_headers = "content-type;host;x-amz-date;x-amz-security-token;x-amz-target";
-    let json_body = &serde_json::json!({ "SecretId": "agbtc2-shared-name-ddapikey"});
+
+
+    let step1 = start.elapsed();
+    let start1 = Instant::now();
+
+    let json_body = &serde_json::json!({ "SecretId": secret_arn});
+
+    let step2 = start1.elapsed();
+    let start2 = Instant::now();
 
     let payload_hash = Sha256::digest(json_body.to_string().as_bytes());
     let payload_hash_hex = hex::encode(payload_hash);
+
+    let step3 = start2.elapsed();
+    let start3 = Instant::now();
 
     let canonical_request = format!(
         "POST\n{}\n{}\n{}\n\n{}\n{}",
@@ -107,7 +120,14 @@ fn manual_decrypt(secret_arn: String) -> String {
         algorithm, access_key, credential_scope, signed_headers, signature
     );
 
+    let step4 = start3.elapsed();
+    let start4 = Instant::now();
+
     let client = reqwest::blocking::Client::new();
+
+    let step5 = start4.elapsed();
+    let start5 = Instant::now();
+
     let mut headers = HeaderMap::new();
     headers.insert("Authorization", HeaderValue::from_str(&authorization_header).unwrap());
     headers.insert("host", HeaderValue::from_str(&host).unwrap());
@@ -115,6 +135,9 @@ fn manual_decrypt(secret_arn: String) -> String {
     headers.insert("x-amz-date", HeaderValue::from_str(&amz_date).unwrap());
     headers.insert("x-amz-target", HeaderValue::from_str("secretsmanager.GetSecretValue").unwrap());
     headers.insert("x-amz-security-token", HeaderValue::from_str(&session_token).unwrap());
+
+    let step6 = start5.elapsed();
+    let start6 = Instant::now();
 
     let req = client
         .post(&endpoint)
@@ -129,14 +152,23 @@ fn manual_decrypt(secret_arn: String) -> String {
 
     let body = resp.unwrap().text().unwrap();
 
-    println!("Body: {:?}", body);
+    // println!("Body: {:?}", body);
+    let step7 = start6.elapsed();
+    let start7 = Instant::now();
 
     let v: serde_json::Value = serde_json::from_str(&body).expect("Failed to parse JSON");
+
+    let step8 = start7.elapsed();
+
+    println!("Steps took {}, {}, {}, {}, {}, {}, {}, {}",
+             step1.as_millis(), step2.as_millis(), step3.as_millis(), step4.as_millis(), step5.as_millis(),
+             step6.as_millis(), step7.as_millis(), step8.as_millis());
+
+    let mut to_ret = "".to_string();
     if let Some(secret_string) = v["SecretString"].as_str() {
-        return secret_string.to_string();
-    } else {
-        return "".to_string();
+        to_ret = secret_string.to_string();
     }
+    return to_ret;
 }
 
 #[cfg(test)]
