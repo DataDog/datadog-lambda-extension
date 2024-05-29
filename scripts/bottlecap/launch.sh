@@ -33,7 +33,7 @@ all(){
   time zip_extension
   version_nbr=$(publish)
   update "$version_nbr"
-  invoke FUNCTION_NAME
+  invoke $FUNCTION_NAME
 }
 
 cold_call() {
