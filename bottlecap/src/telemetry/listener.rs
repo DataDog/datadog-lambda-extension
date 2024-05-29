@@ -135,22 +135,22 @@ impl TelemetryListener {
         let buf: [u8; 262_144] = [0; 256 * 1024]; // Using the default limit from AWS
 
         let join_handle = std::thread::spawn(move || {
-            debug!("Initializing Telemetry Listener");
+            debug!("[jordan] Initializing Telemetry Listener");
 
             loop {
                 for stream in listener.incoming() {
-                    debug!("Received a Telemetry API connection");
+                    debug!("[jordan] Received a Telemetry API connection");
 
                     let cloned_event_bus = event_bus.clone();
                     if let Ok(mut stream) = stream {
                         std::thread::spawn(move || {
                             let r = Self::handle_stream(&mut stream, buf, cloned_event_bus);
                             if let Err(e) = Self::acknowledge_request(stream, r) {
-                                error!("Error acknowledging Telemetry request: {:?}", e);
+                                error!("[jordan] Error acknowledging Telemetry request: {:?}", e);
                             }
                         });
                     } else {
-                        error!("Error accepting connection");
+                        error!("[jordan] Error accepting connection");
                     }
                 }
             }
@@ -169,8 +169,14 @@ impl TelemetryListener {
         stream.read(&mut buf)?;
 
         let p = HttpRequestParser::from_buf(&buf)?;
-        let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
+        debug!("[jordan][listener] Received headers: {:?}", p.headers);
+        debug!("[jordan][listener] Received body: {:?}", p.body);
 
+        let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
+        debug!(
+            "[jordan][listener] received {} events",
+            telemetry_events.len()
+        );
         if let Err(e) = event_bus.send(telemetry_events) {
             error!("Error sending Telemetry events to the event bus: {}", e);
         }
@@ -187,8 +193,9 @@ impl TelemetryListener {
             Ok(()) => {
                 stream.write(b"HTTP/1.1 200 OK\r\n\r\n")?;
             }
-            Err(_) => {
-                stream.write(b"HTTP/1.1 400 Bad Request\r\n\r\n")?;
+            Err(e) => {
+                debug!("[jordan][listener] failed to parse request, sending 400 Bad Request response: {}", e);
+                stream.write(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n")?;
             }
         }
         Ok(())

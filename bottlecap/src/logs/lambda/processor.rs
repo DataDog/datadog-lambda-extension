@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::sync::mpsc::SyncSender;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::config;
 use crate::events::Event;
@@ -207,14 +207,16 @@ impl LambdaProcessor {
         }
     }
 
-    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
-        let mut to_send = Vec::<IntakeLog>::new();
+    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: Arc<Aggregator>) {
+        let mut to_send = Vec::<String>::new();
         for event in events {
             if let Ok(mut log) = self.make_log(event) {
                 let should_send_log =
                     LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
-                    to_send.push(log);
+                    if let Ok(serialized_log) = serde_json::to_string(&log) {
+                        to_send.push(serialized_log);
+                    }
                 }
 
                 // Process orphan logs, since we have a `request_id` now
@@ -226,7 +228,9 @@ impl LambdaProcessor {
                             .expect("unable to retrieve request ID"),
                     );
                     if should_send_log {
-                        to_send.push(orphan_log);
+                        if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
+                            to_send.push(serialized_log);
+                        }
                     }
                 }
             }
@@ -237,26 +241,29 @@ impl LambdaProcessor {
             return;
         }
 
-        let guard = aggregator.try_lock();
-        match guard {
-            Ok(mut guard) => {
-                guard.add_batch(to_send);
-                drop(guard);
-            },
-            Err(e) => {
-                match e {
-                    std::sync::TryLockError::WouldBlock => {
-                        error!("Failed to acquire lock on aggregator, will block");
-                        let mut guard = aggregator.lock().expect("lock poisoned");
-                        guard.add_batch(to_send);
-                        drop(guard);
-                    },
-                    _ => {
-                        error!("lock poisoned");
-                    },
-                }
-            }
-        }
+        debug!("[jordan][process] queueing {} logs", to_send.len());
+
+        // Send logs to aggregator
+        aggregator.add_batch(to_send);
+
+        // let guard = aggregator.try_lock();
+        // match guard {
+        //     Ok(mut guard) => {
+        //         guard.add_string_batch(&mut to_send);
+        //         drop(guard);
+        //     }
+        //     Err(e) => match e {
+        //         std::sync::TryLockError::WouldBlock => {
+        //             error!("Failed to acquire lock on aggregator, will block");
+        //             let mut guard = aggregator.lock().expect("lock poisoned");
+        //             guard.add_string_batch(&mut to_send);
+        //             drop(guard);
+        //         }
+        //         std::sync::TryLockError::Poisoned(_) => {
+        //             error!("lock poisoned");
+        //         }
+        //     },
+        // }
     }
 }
 

@@ -1,5 +1,5 @@
 use std::sync::mpsc::SyncSender;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use tracing::debug;
 
@@ -29,7 +29,7 @@ impl LogsProcessor {
         }
     }
 
-    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: Arc<Aggregator>) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => lambda_processor.process(events, aggregator),
         }

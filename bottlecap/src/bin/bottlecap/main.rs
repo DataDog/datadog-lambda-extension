@@ -285,6 +285,7 @@ fn main() -> Result<()> {
                                     "Runtime done for request_id: {:?} with status: {:?}",
                                     request_id, status
                                 );
+                                debug!("[jordan][main] runtime is done, flushing");
                                 logs_agent.flush();
                                 dogstats_client.flush();
                                 break;

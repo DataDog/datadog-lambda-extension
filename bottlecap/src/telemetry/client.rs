@@ -25,9 +25,9 @@ impl TelemetryApiClient {
             },
             "types": ["function", "platform"],
             "buffering": { // TODO: re evaluate using default values
-                "maxItems": 1000,
+                "maxItems": 2000,
                 "maxBytes": 256 * 1024,
-                "timeoutMs": 25
+                "timeoutMs": 50
             }
         });
 
