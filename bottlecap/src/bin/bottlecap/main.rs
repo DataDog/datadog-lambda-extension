@@ -82,38 +82,41 @@ enum NextEventResponse {
     },
 }
 
-fn next_event(ext_id: &str) -> Result<NextEventResponse> {
+async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
-    ureq::get(&url)
-        .set(EXTENSION_ID_HEADER, ext_id)
-        .call()
+    client
+        .get(&url)
+        .header(EXTENSION_ID_HEADER, ext_id)
+        .send()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?
-        .into_json()
+        .json()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
 }
 
-fn register() -> Result<RegisterResponse> {
+async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
     let mut map = HashMap::new();
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     map.insert("events", vec!["INVOKE", "SHUTDOWN"]);
     let url = format!("{base_url}/register");
 
-    let resp = ureq::post(&url)
-        .set(EXTENSION_NAME_HEADER, EXTENSION_NAME)
-        .set(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
-        .send_json(ureq::json!(map))
+    let resp = client
+        .post(&url)
+        .header(EXTENSION_NAME_HEADER, EXTENSION_NAME)
+        .header(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
+        .json(&map)
+        .send()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     assert!(resp.status() == 200, "Unable to register extension");
 
-    let extension_id = resp
-        .header(EXTENSION_ID_HEADER)
-        .unwrap_or_default()
-        .to_string();
-    let mut register_response = resp.into_json::<RegisterResponse>()?;
+    let extension_id = resp.headers().get(EXTENSION_ID_HEADER).unwrap().to_str().expect("Can't convert header to string").to_string();
+    let mut register_response: RegisterResponse = resp.json::<RegisterResponse>().await.map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     // Set manually since it's not part of the response body
     register_response.extension_id = extension_id;
@@ -126,7 +129,8 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 }
 
 #[allow(clippy::too_many_lines)]
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
         Ok(val) => val,
@@ -166,8 +170,9 @@ fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     info!("logging subsystem enabled");
+    let client = reqwest::Client::new();
 
-    let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let r = register(&client).await.map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let region = env::var("AWS_REGION").expect("could not read AWS_REGION");
     let function_name =
@@ -183,7 +188,7 @@ fn main() -> Result<()> {
         &metadata_hash,
     ));
     let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
-    let event_bus = EventBus::run();
+    let mut event_bus = EventBus::run();
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -203,18 +208,19 @@ fn main() -> Result<()> {
         port: TELEMETRY_PORT,
     };
     let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
+        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy()).await
             .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
         .subscribe()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut shutdown = false;
 
     loop {
-        let evt = next_event(&r.extension_id);
+        let evt = next_event(&client, &r.extension_id).await;
         match evt {
             Ok(NextEventResponse::Invoke {
                 request_id,
@@ -246,8 +252,8 @@ fn main() -> Result<()> {
         // Check if flush logic says we should block and flush or not
         if flush_control.should_flush() || shutdown {
             loop {
-                let received = event_bus.rx.recv();
-                if let Ok(event) = received {
+                let received = event_bus.rx.recv().await;
+                if let Some(event) = received {
                     match event {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
@@ -283,8 +289,8 @@ fn main() -> Result<()> {
                                         "Runtime done for request_id: {:?} with status: {:?}",
                                         request_id, status
                                     );
-                                    logs_agent.flush();
-                                    dogstats_client.flush();
+                                    logs_agent.flush().await;
+                                    dogstats_client.flush().await;
                                     break;
                                 }
                                 TelemetryRecord::PlatformReport {
@@ -315,8 +321,8 @@ fn main() -> Result<()> {
         }
 
         if shutdown {
-            logs_agent.shutdown();
-            dogstats_client.shutdown();
+            logs_agent.shutdown().await;
+            dogstats_client.shutdown().await;
             telemetry_listener.shutdown();
             return Ok(());
         }

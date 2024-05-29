@@ -3,7 +3,7 @@ use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::mpsc::SyncSender;
+use tokio::sync::mpsc::Sender;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -127,9 +127,9 @@ impl TelemetryListener {
     /// # Errors
     ///
     /// Function will error if the passed address cannot be bound.
-    pub fn run(
+    pub async fn run(
         config: &TelemetryListenerConfig,
-        event_bus: SyncSender<events::Event>,
+        event_bus: Sender<events::Event>,
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
@@ -144,8 +144,8 @@ impl TelemetryListener {
 
                     let cloned_event_bus = event_bus.clone();
                     if let Ok(mut stream) = stream {
-                        std::thread::spawn(move || {
-                            let r = Self::handle_stream(&mut stream, buf, cloned_event_bus);
+                        tokio::spawn(async move {
+                            let r = Self::handle_stream(&mut stream, buf, cloned_event_bus).await;
                             if let Err(e) = Self::acknowledge_request(stream, r) {
                                 error!("Error acknowledging Telemetry request: {:?}", e);
                             }
@@ -160,10 +160,10 @@ impl TelemetryListener {
         Ok(TelemetryListener { join_handle })
     }
 
-    fn handle_stream(
+    async fn handle_stream(
         stream: &mut impl Read,
         mut buf: [u8; 262_144],
-        event_bus: SyncSender<events::Event>,
+        event_bus: Sender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         // Read into buffer
         #![allow(clippy::unused_io_amount)]
@@ -172,7 +172,7 @@ impl TelemetryListener {
         let p = HttpRequestParser::from_buf(&buf)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
         for event in telemetry_events {
-            if let Err(e) = event_bus.send(events::Event::Telemetry(event)) {
+            if let Err(e) = event_bus.send(events::Event::Telemetry(event)).await {
                 error!("Error sending Telemetry event to the event bus: {}", e);
             }
         }
@@ -300,15 +300,15 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_handle_stream() {
+    #[tokio::test]
+    async fn test_handle_stream() {
         let mut stream = MockTcpStream {
             data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
         };
-        let (tx, rx) = std::sync::mpsc::sync_channel(3);
+        let (tx, mut rx) = tokio::sync::mpsc::channel(3);
         let buf = [0; 262_144];
-        let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
-        let event = rx.recv().expect("No events received");
+        let result = TelemetryListener::handle_stream(&mut stream, buf, tx).await;
+        let event = rx.recv().await.expect("No events received");
         let telemetry_event = match event {
             events::Event::Telemetry(te) => te,
             _ => panic!("Expected Telemetry Event"),
@@ -328,15 +328,15 @@ mod tests {
     macro_rules! test_handle_stream_invalid_body {
         ($($name:ident: $value:tt,)*) => {
             $(
-                #[test]
+                #[tokio::test]
                 #[should_panic]
-                fn $name() {
+                async fn $name() {
                     let mut stream = MockTcpStream {
                         data: $value.to_string().into_bytes(),
                     };
-                    let (tx, _) = std::sync::mpsc::sync_channel(4);
+                    let (tx, _) = tokio::sync::mpsc::channel(4);
                     let buf = [0; 262144];
-                    TelemetryListener::handle_stream(&mut stream, buf, tx).unwrap()
+                    TelemetryListener::handle_stream(&mut stream, buf, tx).await.unwrap()
                 }
             )*
         }

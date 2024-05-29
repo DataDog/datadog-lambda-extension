@@ -1,10 +1,11 @@
 use std::error::Error;
 use tracing::{debug, error};
+use reqwest;
 
 pub struct Api {
     api_key: String,
     site: String,
-    ureq_agent: ureq::Agent,
+    client: reqwest::Client,
 }
 
 impl Api {
@@ -13,22 +14,25 @@ impl Api {
         Api {
             api_key,
             site,
-            ureq_agent: ureq::AgentBuilder::new().build(),
+            client: reqwest::Client::new(),
         }
     }
 
-    pub fn send(&self, data: &[u8]) -> Result<(), Box<dyn Error>> {
+    pub async fn send(&self, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
         let url = format!("https://http-intake.logs.{}/api/v2/logs", &self.site);
 
         // It could be an empty JSON array: []
         if data.len() > 2 {
-            let resp: Result<ureq::Response, ureq::Error> = self
-                .ureq_agent
+            let resp: Result<reqwest::Response, reqwest::Error> = self
+                .client
                 .post(&url)
-                .set("DD-API-KEY", &self.api_key)
-                .set("DD-PROTOCOL", "agent-json")
-                .set("Content-Type", "application/json")
-                .send_bytes(data);
+                .header("DD-API-KEY", &self.api_key)
+                .header("DD-PROTOCOL", "agent-json")
+                .header("Content-Type", "application/json")
+                .body(data)
+                .send()
+                .await;
+
 
             match resp {
                 Ok(resp) => {

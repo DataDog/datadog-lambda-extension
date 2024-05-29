@@ -1,4 +1,4 @@
-use std::sync::mpsc::SyncSender;
+use tokio::sync::mpsc::Sender;
 
 use tracing::{error, info};
 
@@ -27,7 +27,7 @@ pub struct DogStatsDConfig {
 
 impl DogStatsD {
     #[must_use]
-    pub fn run(config: &DogStatsDConfig, event_bus: SyncSender<events::Event>) -> DogStatsD {
+    pub fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
         let serializer_aggr = Arc::clone(&config.aggregator);
         let serve_handle =
             DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
@@ -45,7 +45,7 @@ impl DogStatsD {
     fn run_server(
         host: &str,
         port: u16,
-        event_bus: SyncSender<events::Event>,
+        event_bus: Sender<events::Event>,
         aggregator: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>>,
     ) -> std::thread::JoinHandle<()> {
         let addr = format!("{host}:{port}");
@@ -93,7 +93,7 @@ impl DogStatsD {
         })
     }
 
-    pub fn flush(&mut self) {
+    pub async fn flush(&mut self) {
         let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned");
         let current_points = locked_aggr.to_series();
         let current_distribution_points = locked_aggr.distributions_to_protobuf();
@@ -101,6 +101,7 @@ impl DogStatsD {
             let () = &self
                 .dd_api
                 .ship_series(&current_points)
+                .await
                 // TODO(astuyve) retry and do not panic
                 .expect("failed to ship metrics to datadog");
         }
@@ -108,14 +109,15 @@ impl DogStatsD {
             let () = &self
                 .dd_api
                 .ship_distributions(&current_distribution_points)
+                .await
                 // TODO(astuyve) retry and do not panic
                 .expect("failed to ship metrics to datadog");
         }
         locked_aggr.clear();
     }
 
-    pub fn shutdown(mut self) {
-        self.flush();
+    pub async fn shutdown(mut self) {
+        self.flush().await;
         match self.serve_handle.join() {
             Ok(()) => {
                 info!("DogStatsD thread has been shutdown");

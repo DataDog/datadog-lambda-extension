@@ -5,14 +5,14 @@ use protobuf::Message;
 use serde::{Serialize, Serializer};
 use serde_json;
 use tracing::{debug, error};
-use ureq;
+use reqwest;
 
 /// Interface for the `DogStatsD` metrics intake API.
 #[derive(Debug)]
 pub struct DdApi {
     api_key: String,
     site: String,
-    ureq_agent: ureq::Agent,
+    client: reqwest::Client,
 }
 /// Error relating to `ship`
 #[derive(thiserror::Error, Debug)]
@@ -37,30 +37,33 @@ impl DdApi {
         DdApi {
             api_key,
             site,
-            ureq_agent: ureq::AgentBuilder::new().build(),
+            client: reqwest::Client::new(),
         }
     }
 
     /// Ship a serialized series to the API, blocking
-    pub fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
+    pub async fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
         let body = serde_json::to_vec(&series)?;
         debug!("sending body: {:?}", &series);
 
         let url = format!("https://api.{}/api/v2/series", &self.site);
-        let resp: Result<ureq::Response, ureq::Error> = self
-            .ureq_agent
+        let resp = self
+            .client
             .post(&url)
-            .set("DD-API-KEY", &self.api_key)
-            .set("Content-Type", "application/json")
-            .send_bytes(body.as_slice());
+            .header("DD-API-KEY", &self.api_key)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await;
+
         match resp {
-            Ok(_resp) => Ok(()),
-            Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {
-                status: code,
-                body: response
-                    .into_string()
-                    .expect("body could not be converted to string"),
-            }),
+            Ok(resp) => match resp.status() {
+                reqwest::StatusCode::OK => Ok(()),
+                _ => Err(ShipError::Failure {
+                    status: resp.status().as_u16(),
+                    body: resp.text().await.unwrap_or_default(),
+                }),
+            }
             Err(e) => Err(ShipError::Failure {
                 status: 500,
                 body: e.to_string(),
@@ -68,7 +71,7 @@ impl DdApi {
         }
     }
 
-    pub fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
+    pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
         let url = format!("https://api.{}/api/beta/sketches", &self.site);
         let mut buf = Vec::new();
         log::info!("sending distributions: {:?}", &sketches);
@@ -84,20 +87,22 @@ impl DdApi {
         sketches
             .write_to_vec(&mut buf)
             .expect("can't write to buffer");
-        let resp: Result<ureq::Response, ureq::Error> = self
-            .ureq_agent
+        let resp = self
+            .client
             .post(&url)
-            .set("DD-API-KEY", &self.api_key)
-            .set("Content-Type", "application/x-protobuf")
-            .send_bytes(&buf);
+            .header("DD-API-KEY", &self.api_key)
+            .header("Content-Type", "application/x-protobuf")
+            .body(buf)
+            .send()
+            .await;
         match resp {
-            Ok(_resp) => Ok(()),
-            Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {
-                status: code,
-                body: response
-                    .into_string()
-                    .expect("body could not be converted to string"),
-            }),
+            Ok(resp) => match resp.status() {
+                reqwest::StatusCode::OK => Ok(()),
+                _ => Err(ShipError::Failure {
+                    status: resp.status().as_u16(),
+                    body: resp.text().await.unwrap_or_default(),
+                }),
+            }
             Err(e) => Err(ShipError::Failure {
                 status: 500,
                 body: e.to_string(),

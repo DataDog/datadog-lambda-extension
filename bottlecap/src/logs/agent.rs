@@ -60,26 +60,26 @@ impl LogsAgent {
         }
     }
 
-    pub fn flush(&self) {
-        LogsAgent::flush_internal(&self.aggregator, &self.dd_api);
+    pub async fn flush(&self) {
+        LogsAgent::flush_internal(&self.aggregator, &self.dd_api).await;
     }
 
-    fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
+    async fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
         let logs = aggregator.lock().expect("lock poisoned").get_batch();
-        dd_api.send(&logs).expect("Failed to send logs to Datadog");
+        dd_api.send(logs).await.expect("Failed to send logs to Datadog");
     }
 
-    fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
+    async fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
         let mut aggregator = aggregator.lock().expect("lock poisoned");
         let mut logs = aggregator.get_batch();
         // It could be an empty JSON array: []
         while logs.len() > 2 {
-            dd_api.send(&logs).expect("Failed to send logs to Datadog");
+            dd_api.send(logs).await.expect("Failed to send logs to Datadog");
             logs = aggregator.get_batch();
         }
     }
 
-    pub fn shutdown(self) {
+    pub async fn shutdown(self) {
         debug!("Shutting down LogsAgent");
         // Dropping this sender to help close the thread
         drop(self.tx);
@@ -94,6 +94,6 @@ impl LogsAgent {
                 );
             }
         }
-        LogsAgent::flush_shutdown(&self.aggregator, &self.dd_api);
+        LogsAgent::flush_shutdown(&self.aggregator, &self.dd_api).await;
     }
 }
