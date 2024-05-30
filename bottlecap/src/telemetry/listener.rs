@@ -22,7 +22,7 @@ const LR: u8 = b'\n';
 const HEADERS_BUFFER_SIZE: usize = 256;
 
 impl HttpRequestParser {
-    /// Create a `HttpRequestParser` from a `TcpStream`
+    /// Create a `HttpRequestParser` from passed `TcpStream`
     ///
     /// # Errors
     ///
