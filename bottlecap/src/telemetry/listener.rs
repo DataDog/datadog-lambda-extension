@@ -259,6 +259,8 @@ impl TelemetryListener {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
     use chrono::DateTime;
 
     use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
@@ -336,27 +338,25 @@ mod tests {
         assert_eq!(parser.body, "Hello, World!".to_string());
     }
 
-    struct MockTcpStream {
-        data: Vec<u8>,
-    }
-
-    impl Read for MockTcpStream {
-        fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
-            let len = std::cmp::min(buf.len(), self.data.len());
-            buf.write_all(&self.data[..len])?;
-            self.data = self.data.split_off(len);
-            Ok(len)
-        }
-    }
-
     #[test]
     fn test_handle_stream() {
-        let mut stream = MockTcpStream {
-            data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
-        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]";
+            stream.write_all(request).unwrap();
+            tx.send(()).unwrap(); // Signal that the request has been sent
+        });
+
+        let stream = TcpStream::connect(addr).unwrap();
+        rx.recv().unwrap(); // Wait for the signal from the spawned thread
+
         let (tx, rx) = std::sync::mpsc::sync_channel(3);
         let buf = [0; 262_144];
-        let result = TelemetryListener::handle_stream(&mock_stream, buf, tx);
+        let result = TelemetryListener::handle_stream(&stream, buf, tx);
         let event = rx.recv().expect("No events received");
         let telemetry_event = match event {
             events::Event::Telemetry(te) => te,
@@ -380,9 +380,21 @@ mod tests {
                 #[test]
                 #[should_panic]
                 fn $name() {
-                    let mut stream = MockTcpStream {
-                        data: $value.to_string().into_bytes(),
-                    };
+                    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                    let addr = listener.local_addr().unwrap();
+
+                    let (tx, rx) = std::sync::mpsc::channel();
+                    thread::spawn(move || {
+                        let (mut stream, _) = listener.accept().unwrap();
+                        let request = $value;
+                        stream.write_all(request).unwrap();
+                        tx.send(()).unwrap(); // Signal that the request has been sent
+                    });
+
+                    let stream = TcpStream::connect(addr).unwrap();
+                    rx.recv().unwrap(); // Wait for the signal from the spawned thread
+
+
                     let (tx, _) = std::sync::mpsc::sync_channel(4);
                     let buf = [0; 262144];
                     TelemetryListener::handle_stream(&stream, buf, tx).unwrap()
@@ -392,9 +404,9 @@ mod tests {
     }
 
     test_handle_stream_invalid_body! {
-        invalid_json: "POST /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!",
-        empty_json: "POST /path HTTP/1.1\r\nContent-Length: 2\r\nHeader1: Value1\r\n\r\n{}",
-        json_array_with_empty_json: "POST /path HTTP/1.1\r\nContent-Length: 4\r\nHeader1: Value1\r\n\r\n[{}]",
+        invalid_json: b"POST /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!",
+        empty_json: b"POST /path HTTP/1.1\r\nContent-Length: 2\r\nHeader1: Value1\r\n\r\n{}",
+        json_array_with_empty_json: b"POST /path HTTP/1.1\r\nContent-Length: 4\r\nHeader1: Value1\r\n\r\n[{}]",
 
     }
 
@@ -412,5 +424,36 @@ mod tests {
         );
         assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
         assert_eq!(parser.body, "Hello, World!".to_string());
+    }
+
+    #[test]
+    fn test_from_stream() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let request = b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]";
+            stream.write_all(request).unwrap();
+            tx.send(()).unwrap(); // Signal that the request has been sent
+        });
+
+        let stream = TcpStream::connect(addr).unwrap();
+        rx.recv().unwrap(); // Wait for the signal from the spawned thread
+
+        let mut buf = [0; 262_144];
+        let result = HttpRequestParser::from_stream(&stream, &mut buf);
+
+        assert!(result.is_ok());
+        let parser = result.unwrap();
+        assert_eq!(parser.headers.len(), 2);
+        assert_eq!(
+            parser.headers.get("content-length"),
+            Some(&"335".to_string())
+        );
+        assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
+
+        assert_eq!(parser.body, "[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string());
     }
 }
