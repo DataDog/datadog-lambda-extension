@@ -82,29 +82,34 @@ function docker_build_zip {
 }
 
 if [[ "$SERVERLESS_INIT" == "true" && "$ALPINE" == "false" ]]; then
-    echo "Building serverless init for non-alpine amd64 & arm64"
+    echo "Building serverless init for non-alpine amd64 & arm64 with $BUILD_TAGS tags"
     docker_build_zip amd64
     docker_build_zip arm64
 elif [[ "$SERVERLESS_INIT" == "true" && "$ALPINE" == "true" ]]; then
-    echo "Building serverless init for alpine amd64 & arm64"
+    echo "Building serverless init for alpine amd64 & arm64 with $BUILD_TAGS tags"
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
     docker_build_zip arm64 -alpine
 elif [ "$ARCHITECTURE" == "amd64" ]; then
-    echo "Building for amd64 only"
+    echo "Building for amd64 only with $BUILD_TAGS tags"
     docker_build_zip amd64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
 elif [ "$ARCHITECTURE" == "arm64" ]; then
-    echo "Building for arm64 only"
+    echo "Building for arm64 only with $BUILD_TAGS tags"
     docker_build_zip arm64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip arm64 -alpine
 else
-    echo "Building for both amd64 and arm64"
+    echo "Building for both amd64 and arm64 with $BUILD_TAGS tags"
     docker_build_zip amd64
     docker_build_zip arm64
     BUILD_FILE=Dockerfile.alpine.build
     docker_build_zip amd64 -alpine
     docker_build_zip arm64 -alpine
+fi
+
+if [ "$PRINT_BINARY_SIZE" = "true" ]; then
+    binary_size=$(stat -c "%s" "$TARGET_DIR/datadog_extension-${arch}${suffix}/extensions/datadog-agent")
+    echo "Binary size: $binary_size"
 fi

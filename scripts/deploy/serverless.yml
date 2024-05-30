@@ -14,15 +14,15 @@ provider:
     DD_TRACE_ENABLED: "true"
     DD_LOG_LEVEL: "debug"
     DD_API_KEY: ${env:DD_API_KEY}
-    # GODEBUG: inittrace=1
+    GODEBUG: inittrace=1
 
 functions:
   pierre-bench:
     runtime: nodejs20.x
     name: ${env:FUNCTION_NAME}
     # in order to disable the tracer, set handler to index.handler, and comment the tracer layer line
-    handler: /opt/nodejs/node_modules/datadog-lambda-js/handler.handler
-    # handler: index.handler
+    # handler: /opt/nodejs/node_modules/datadog-lambda-js/handler.handler
+    handler: index.handler
     layers:
-      - arn:aws:lambda:sa-east-1:464622532012:layer:Datadog-Node20-x:104
+      # - arn:aws:lambda:sa-east-1:464622532012:layer:Datadog-Node20-x:104
       - ${env:EXTENSION_ARN}
