@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde"] }
+crossbeam = { version = "0.8.4", features = ["crossbeam-queue"]}
 datadog-protos = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
 ddsketch-agent = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
 figment = { version = "0.10.15", features = ["yaml", "env"] }
