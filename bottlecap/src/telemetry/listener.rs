@@ -20,6 +20,59 @@ const CR: u8 = b'\r';
 const LR: u8 = b'\n';
 
 impl HttpRequestParser {
+    /// Create a `HttpRequestParser` from a `TcpStream`
+    ///
+    /// # Errors
+    ///
+    /// Function will fail if reading from the stream fails.
+    ///
+    /// It will retry reading from the stream 3 times before giving up.
+    ///
+    /// It will also fail if parsing of headers or body in the buffer fails.
+    pub fn from_stream(
+        mut stream: &TcpStream,
+        buf: &mut [u8],
+    ) -> Result<HttpRequestParser, Box<dyn Error>> {
+        stream.set_nonblocking(true)?;
+        let mut total_bytes_read = 0;
+        let mut retries = 3;
+        loop {
+            if retries == 0 {
+                break;
+            }
+
+            let mut temp_buf = [0u8; 32_768];
+            let bytes_read = match stream.read(&mut temp_buf) {
+                Ok(n) => n,
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    // No data available at the moment, retry
+                    retries -= 1;
+                    continue;
+                }
+                Err(e) => {
+                    error!("Error reading from stream: {}", e);
+                    break;
+                }
+            };
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            // Copy the read bytes into the buffer
+            buf[total_bytes_read..(total_bytes_read + bytes_read)]
+                .copy_from_slice(&temp_buf[..bytes_read]);
+            total_bytes_read += bytes_read;
+
+            if total_bytes_read >= 262_144 {
+                break;
+            }
+        }
+
+        let p = HttpRequestParser::from_buf(buf)?;
+        Ok(p)
+    }
+
     /// Create a `HttpRequestParser` from passed `buf`
     ///
     /// # Errors
@@ -143,9 +196,9 @@ impl TelemetryListener {
                     debug!("Received a Telemetry API connection");
 
                     let cloned_event_bus = event_bus.clone();
-                    if let Ok(mut stream) = stream {
+                    if let Ok(stream) = stream {
                         std::thread::spawn(move || {
-                            let r = Self::handle_stream(&mut stream, buf, cloned_event_bus);
+                            let r = Self::handle_stream(&stream, buf, cloned_event_bus);
                             if let Err(e) = Self::acknowledge_request(stream, r) {
                                 error!("Error acknowledging Telemetry request: {:?}", e);
                             }
@@ -161,15 +214,11 @@ impl TelemetryListener {
     }
 
     fn handle_stream(
-        stream: &mut impl Read,
+        stream: &TcpStream,
         mut buf: [u8; 262_144],
         event_bus: SyncSender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
-        // Read into buffer
-        #![allow(clippy::unused_io_amount)]
-        stream.read(&mut buf)?;
-
-        let p = HttpRequestParser::from_buf(&buf)?;
+        let p = HttpRequestParser::from_stream(stream, &mut buf)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
         for event in telemetry_events {
             if let Err(e) = event_bus.send(events::Event::Telemetry(event)) {
@@ -307,7 +356,7 @@ mod tests {
         };
         let (tx, rx) = std::sync::mpsc::sync_channel(3);
         let buf = [0; 262_144];
-        let result = TelemetryListener::handle_stream(&mut stream, buf, tx);
+        let result = TelemetryListener::handle_stream(&mock_stream, buf, tx);
         let event = rx.recv().expect("No events received");
         let telemetry_event = match event {
             events::Event::Telemetry(te) => te,
@@ -336,7 +385,7 @@ mod tests {
                     };
                     let (tx, _) = std::sync::mpsc::sync_channel(4);
                     let buf = [0; 262144];
-                    TelemetryListener::handle_stream(&mut stream, buf, tx).unwrap()
+                    TelemetryListener::handle_stream(&stream, buf, tx).unwrap()
                 }
             )*
         }
