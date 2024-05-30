@@ -18,6 +18,8 @@ pub struct HttpRequestParser {
 
 const CR: u8 = b'\r';
 const LR: u8 = b'\n';
+const MAX_BUFFER_SIZE: usize = 262_144;
+const CHUNK_SIZE: usize = 32_768;
 
 impl HttpRequestParser {
     /// Create a `HttpRequestParser` from a `TcpStream`
@@ -41,7 +43,7 @@ impl HttpRequestParser {
                 break;
             }
 
-            let mut temp_buf = [0u8; 32_768];
+            let mut temp_buf = [0u8; CHUNK_SIZE];
             let bytes_read = match stream.read(&mut temp_buf) {
                 Ok(n) => n,
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -64,7 +66,7 @@ impl HttpRequestParser {
                 .copy_from_slice(&temp_buf[..bytes_read]);
             total_bytes_read += bytes_read;
 
-            if total_bytes_read >= 262_144 {
+            if total_bytes_read >= MAX_BUFFER_SIZE {
                 break;
             }
         }
@@ -186,7 +188,7 @@ impl TelemetryListener {
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
-        let buf: [u8; 262_144] = [0; 256 * 1024]; // Using the default limit from AWS
+        let buf = [0; MAX_BUFFER_SIZE]; // Using the default limit from AWS
 
         let join_handle = std::thread::spawn(move || {
             debug!("Initializing Telemetry Listener");
@@ -215,7 +217,7 @@ impl TelemetryListener {
 
     fn handle_stream(
         stream: &TcpStream,
-        mut buf: [u8; 262_144],
+        mut buf: [u8; MAX_BUFFER_SIZE],
         event_bus: SyncSender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
         let p = HttpRequestParser::from_stream(stream, &mut buf)?;
@@ -338,24 +340,29 @@ mod tests {
         assert_eq!(parser.body, "Hello, World!".to_string());
     }
 
-    #[test]
-    fn test_handle_stream() {
+    fn get_stream(data: Vec<u8>) -> TcpStream {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
 
         let (tx, rx) = std::sync::mpsc::channel();
         thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
-            let request = b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]";
-            stream.write_all(request).unwrap();
+            stream.write_all(&data).unwrap();
             tx.send(()).unwrap(); // Signal that the request has been sent
         });
 
         let stream = TcpStream::connect(addr).unwrap();
         rx.recv().unwrap(); // Wait for the signal from the spawned thread
 
+        stream
+    }
+
+    #[test]
+    fn test_handle_stream() {
+        let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
+
         let (tx, rx) = std::sync::mpsc::sync_channel(3);
-        let buf = [0; 262_144];
+        let buf = [0; MAX_BUFFER_SIZE];
         let result = TelemetryListener::handle_stream(&stream, buf, tx);
         let event = rx.recv().expect("No events received");
         let telemetry_event = match event {
@@ -380,23 +387,11 @@ mod tests {
                 #[test]
                 #[should_panic]
                 fn $name() {
-                    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-                    let addr = listener.local_addr().unwrap();
-
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    thread::spawn(move || {
-                        let (mut stream, _) = listener.accept().unwrap();
-                        let request = $value;
-                        stream.write_all(request).unwrap();
-                        tx.send(()).unwrap(); // Signal that the request has been sent
-                    });
-
-                    let stream = TcpStream::connect(addr).unwrap();
-                    rx.recv().unwrap(); // Wait for the signal from the spawned thread
+                    let stream = get_stream($value.to_vec());
 
 
                     let (tx, _) = std::sync::mpsc::sync_channel(4);
-                    let buf = [0; 262144];
+                    let buf = [0; MAX_BUFFER_SIZE];
                     TelemetryListener::handle_stream(&stream, buf, tx).unwrap()
                 }
             )*
@@ -428,21 +423,9 @@ mod tests {
 
     #[test]
     fn test_from_stream() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
+        let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
 
-        let (tx, rx) = std::sync::mpsc::channel();
-        thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let request = b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]";
-            stream.write_all(request).unwrap();
-            tx.send(()).unwrap(); // Signal that the request has been sent
-        });
-
-        let stream = TcpStream::connect(addr).unwrap();
-        rx.recv().unwrap(); // Wait for the signal from the spawned thread
-
-        let mut buf = [0; 262_144];
+        let mut buf = [0; MAX_BUFFER_SIZE];
         let result = HttpRequestParser::from_stream(&stream, &mut buf);
 
         assert!(result.is_ok());
