@@ -46,4 +46,11 @@ call() {
   invoke $FUNCTION_NAME
 }
 
+format () {
+  cd ../../bottlecap
+  cargo fmt
+  cargo clippy --workspace --all-features
+  cargo clippy --fix
+}
+
 "$@"

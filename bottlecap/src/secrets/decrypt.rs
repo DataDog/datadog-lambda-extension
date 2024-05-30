@@ -28,7 +28,7 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
                     .expect("AWS_SESSION_TOKEN is not set!"),
             },
         )
-        .unwrap();
+        .expect("Failed to decrypt secret");
         debug!("AWS decrypt took {}ms", before_manual.elapsed().as_millis());
 
         Ok(Config {
@@ -58,15 +58,21 @@ fn manual_decrypt(secret_arn: String, aws_config: AwsConfig) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
         .use_rustls_tls()
         .build()
-        .unwrap();
+        .expect("Failed to create reqwest client for aws decrypt");
 
     let req = client
-        .post(format!("https://{}", &headers["host"].to_str().unwrap()))
+        .post(format!(
+            "https://{}",
+            &headers["host"].to_str().expect("invalid host")
+        ))
         .json(json_body)
         .headers(headers);
 
     let resp = req.send();
-    let body = resp.unwrap().text().unwrap();
+    let body = resp
+        .expect("Failed to get response body")
+        .text()
+        .expect("Cannot deserialize body");
     let v: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
 
     return if let Some(secret_string) = v["SecretString"].as_str() {
@@ -128,21 +134,24 @@ fn build_get_secret_signed_headers(
     let mut headers = HeaderMap::new();
     headers.insert(
         "Authorization",
-        HeaderValue::from_str(&authorization_header).unwrap(),
+        HeaderValue::from_str(&authorization_header).expect("invalid authorization"),
     );
-    headers.insert("host", HeaderValue::from_str(&host).unwrap());
+    headers.insert("host", HeaderValue::from_str(&host).expect("invalid host"));
     headers.insert(
         "Content-Type",
-        HeaderValue::from_str("application/x-amz-json-1.1").unwrap(),
+        HeaderValue::from_str("application/x-amz-json-1.1").expect("invalid content-type"),
     );
-    headers.insert("x-amz-date", HeaderValue::from_str(&amz_date).unwrap());
+    headers.insert(
+        "x-amz-date",
+        HeaderValue::from_str(&amz_date).expect("invalid x-amz-date"),
+    );
     headers.insert(
         "x-amz-target",
-        HeaderValue::from_str("secretsmanager.GetSecretValue").unwrap(),
+        HeaderValue::from_str("secretsmanager.GetSecretValue").expect("invalid x-amz-target"),
     );
     headers.insert(
         "x-amz-security-token",
-        HeaderValue::from_str(&aws_config.aws_session_token).unwrap(),
+        HeaderValue::from_str(&aws_config.aws_session_token).expect("invalid x-amz-security-token"),
     );
     headers
 }
