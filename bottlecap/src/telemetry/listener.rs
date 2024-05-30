@@ -403,4 +403,13 @@ mod tests {
 
         assert_eq!(parser.body, "[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string());
     }
+
+    #[test]
+    #[should_panic]
+    fn test_from_stream_invalid_data() {
+        let stream = get_stream([0; 1024].to_vec());
+
+        let mut buf = [0; MAX_BUFFER_SIZE];
+        HttpRequestParser::from_stream(&stream, &mut buf).unwrap();
+    }
 }
