@@ -14,12 +14,13 @@ use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::LogLevel;
 use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub struct Config {
     pub site: String,
     pub api_key: String,
+    pub api_key_secret_arn: String,
     pub env: Option<String>,
     pub service: Option<String>,
     pub version: Option<String>,
@@ -39,6 +40,7 @@ impl Default for Config {
             // General
             site: "datadoghq.com".to_string(),
             api_key: String::default(),
+            api_key_secret_arn: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
             // Unified Tagging
             env: None,
