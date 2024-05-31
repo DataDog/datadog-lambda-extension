@@ -1,9 +1,8 @@
-use crate::events;
 use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
 use std::error::Error;
-use std::sync::mpsc::SyncSender;
+use std::sync::mpsc::Sender;
 use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream},
@@ -170,7 +169,7 @@ impl TelemetryListener {
     /// Function will error if the passed address cannot be bound.
     pub fn run(
         config: &TelemetryListenerConfig,
-        event_bus: SyncSender<events::Event>,
+        event_bus: Sender<Vec<TelemetryEvent>>,
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
@@ -202,14 +201,15 @@ impl TelemetryListener {
 
     fn handle_stream(
         stream: &TcpStream,
-        event_bus: SyncSender<events::Event>,
+        event_bus: Sender<Vec<TelemetryEvent>>,
     ) -> Result<(), Box<dyn Error>> {
         let p = HttpRequestParser::from_stream(stream)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
-        for event in telemetry_events {
-            if let Err(e) = event_bus.send(events::Event::Telemetry(event)) {
-                error!("Error sending Telemetry event to the event bus: {}", e);
-            }
+        if let Err(e) = event_bus.send(telemetry_events) {
+            error!(
+                "Error sending Telemetry events to the Logs Agent event bus: {}",
+                e
+            );
         }
 
         Ok(())
@@ -345,13 +345,10 @@ mod tests {
     fn test_handle_stream() {
         let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
 
-        let (tx, rx) = std::sync::mpsc::sync_channel(3);
+        let (tx, rx) = std::sync::mpsc::channel();
         let result = TelemetryListener::handle_stream(&stream, tx);
-        let event = rx.recv().expect("No events received");
-        let telemetry_event = match event {
-            events::Event::Telemetry(te) => te,
-            _ => panic!("Expected Telemetry Event"),
-        };
+        let events = rx.recv().expect("No events received");
+        let telemetry_event = events.get(0).expect("failed to get event");
 
         let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
         assert_eq!(telemetry_event.time, expected_time);
@@ -372,7 +369,7 @@ mod tests {
                 fn $name() {
                     let stream = get_stream($value.to_vec());
 
-                    let (tx, _) = std::sync::mpsc::sync_channel(4);
+                    let (tx, _) = std::sync::mpsc::channel();
                     TelemetryListener::handle_stream(&stream, tx).unwrap()
                 }
             )*
