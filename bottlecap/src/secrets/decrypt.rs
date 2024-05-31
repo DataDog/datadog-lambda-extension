@@ -1,4 +1,5 @@
 use crate::config::Config;
+use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use reqwest::blocking::Client;
@@ -9,7 +10,6 @@ use std::env;
 use std::io::{Error, Result};
 use std::time::Instant;
 use tracing::debug;
-use base64::prelude::*;
 
 pub fn resolve_secrets(config: Config) -> Result<Config> {
     if !config.api_key.is_empty() {
@@ -35,9 +35,11 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
         };
 
         let decrypted_key: String = if config.api_key_secret_arn.is_empty() {
-            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config).expect("Failed to decrypt secret")
+            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config)
+                .expect("Failed to decrypt secret")
         } else {
-            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config).expect("Failed to decrypt secret")
+            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config)
+                .expect("Failed to decrypt secret")
         };
 
         debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
@@ -53,7 +55,6 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
         ))
     }
 }
-
 
 struct RequestArgs<'a> {
     service: String,
@@ -89,8 +90,12 @@ fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Re
     let v = request(json_body, headers, client);
 
     return if let Some(secret_string_b64) = v["Plaintext"].as_str() {
-        let secret_string = String::from_utf8(BASE64_STANDARD.decode(secret_string_b64)
-            .expect("Failed to decode base64")).expect("Failed to convert to string");
+        let secret_string = String::from_utf8(
+            BASE64_STANDARD
+                .decode(secret_string_b64)
+                .expect("Failed to decode base64"),
+        )
+        .expect("Failed to convert to string");
         Ok(secret_string)
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
