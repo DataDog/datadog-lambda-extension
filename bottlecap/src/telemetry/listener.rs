@@ -60,7 +60,7 @@ impl HttpRequestParser {
         let content_length = parser
             .headers
             .get("content-length")
-            .expect("unfallible")
+            .expect("infallible")
             .parse::<usize>()?;
         let body_bytes_read = headers_buf.len() - body_start_index;
         let missing_body_lenght = content_length - body_bytes_read;
