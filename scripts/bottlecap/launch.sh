@@ -48,9 +48,8 @@ call() {
 
 format () {
   cd ../../bottlecap
+  cargo clippy --fix --workspace --all-features
   cargo fmt
-  cargo clippy --workspace --all-features
-  cargo clippy --fix
 }
 
 "$@"
