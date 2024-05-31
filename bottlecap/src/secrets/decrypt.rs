@@ -34,7 +34,7 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
                 .expect("AWS_LAMBDA_FUNCTION_NAME is not set!"),
         };
 
-        let resolved_key: String = if config.api_key_secret_arn.is_empty() {
+        let decrypted_key: String = if config.api_key_secret_arn.is_empty() {
             decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config).expect("Failed to decrypt secret")
         } else {
             decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config).expect("Failed to decrypt secret")
@@ -43,7 +43,7 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
         debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
 
         Ok(Config {
-            api_key: resolved_key,
+            api_key: decrypted_key,
             ..config.clone()
         })
     } else {
