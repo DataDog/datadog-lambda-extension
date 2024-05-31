@@ -188,8 +188,13 @@ fn main() -> Result<()> {
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
-    let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
+
     let event_bus = EventBus::run();
+    let logs_agent = LogsAgent::run(
+        Arc::clone(&tags_provider),
+        Arc::clone(&config),
+        event_bus.get_sender_copy(),
+    );
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -209,7 +214,7 @@ fn main() -> Result<()> {
         port: TELEMETRY_PORT,
     };
     let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
+        TelemetryListener::run(&telemetry_listener_config, logs_agent.get_sender_copy())
             .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
@@ -258,61 +263,58 @@ fn main() -> Result<()> {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
                         }
-                        Event::Telemetry(event) => {
-                            logs_agent.send_event(event.clone());
-                            match event.record {
-                                TelemetryRecord::PlatformInitReport {
-                                    initialization_type,
-                                    phase,
-                                    metrics,
-                                } => {
-                                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                }
-                                TelemetryRecord::PlatformRuntimeDone {
-                                    request_id, status, ..
-                                } => {
-                                    if status != Status::Success {
+                        Event::Telemetry(event) => match event.record {
+                            TelemetryRecord::PlatformInitReport {
+                                initialization_type,
+                                phase,
+                                metrics,
+                            } => {
+                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                            }
+                            TelemetryRecord::PlatformRuntimeDone {
+                                request_id, status, ..
+                            } => {
+                                if status != Status::Success {
+                                    if let Err(e) =
+                                        lambda_enhanced_metrics.increment_errors_metric()
+                                    {
+                                        error!("Failed to increment error metric: {e:?}");
+                                    }
+                                    if status == Status::Timeout {
                                         if let Err(e) =
-                                            lambda_enhanced_metrics.increment_errors_metric()
+                                            lambda_enhanced_metrics.increment_timeout_metric()
                                         {
-                                            error!("Failed to increment error metric: {e:?}");
-                                        }
-                                        if status == Status::Timeout {
-                                            if let Err(e) =
-                                                lambda_enhanced_metrics.increment_timeout_metric()
-                                            {
-                                                error!("Failed to increment timeout metric: {e:?}");
-                                            }
+                                            error!("Failed to increment timeout metric: {e:?}");
                                         }
                                     }
-                                    debug!(
-                                        "Runtime done for request_id: {:?} with status: {:?}",
-                                        request_id, status
-                                    );
-                                    logs_agent.flush();
-                                    dogstats_client.flush();
+                                }
+                                debug!(
+                                    "Runtime done for request_id: {:?} with status: {:?}",
+                                    request_id, status
+                                );
+                                logs_agent.flush();
+                                dogstats_client.flush();
+                                break;
+                            }
+                            TelemetryRecord::PlatformReport {
+                                request_id,
+                                status,
+                                metrics,
+                                ..
+                            } => {
+                                debug!(
+                                    "Platform report for request_id: {:?} with status: {:?}",
+                                    request_id, status
+                                );
+                                lambda_enhanced_metrics.set_report_log_metrics(&metrics);
+                                if shutdown {
                                     break;
                                 }
-                                TelemetryRecord::PlatformReport {
-                                    request_id,
-                                    status,
-                                    metrics,
-                                    ..
-                                } => {
-                                    debug!(
-                                        "Platform report for request_id: {:?} with status: {:?}",
-                                        request_id, status
-                                    );
-                                    lambda_enhanced_metrics.set_report_log_metrics(&metrics);
-                                    if shutdown {
-                                        break;
-                                    }
-                                }
-                                _ => {
-                                    debug!("Unforwarded Telemetry event: {:?}", event);
-                                }
                             }
-                        }
+                            _ => {
+                                debug!("Unforwarded Telemetry event: {:?}", event);
+                            }
+                        },
                     }
                 } else {
                     error!("could not get the event");
