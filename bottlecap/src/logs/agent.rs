@@ -67,7 +67,9 @@ impl LogsAgent {
     }
 
     fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
-        let logs = aggregator.lock().expect("lock poisoned").get_batch();
+        let mut guard = aggregator.lock().expect("lock poisoned");
+        let logs = guard.get_batch();
+        drop(guard);
         dd_api.send(&logs).expect("Failed to send logs to Datadog");
     }
 
