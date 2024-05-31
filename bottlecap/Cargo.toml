@@ -14,21 +14,22 @@ hashbrown = { version = "0.14.3", default-features = false, features = ["inline-
 log = { version = "0.4.21", default-features = false }
 protobuf = { version = "3.4.0", default-features = false }
 regex = { version = "1.10.4", default-features = false }
-reqwest = { version = "0.12.4", features = ["json", "http2", "rustls-tls"], default-features = false }
 serde = { version = "1.0.197", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.116", default-features = false, features = ["alloc"] }
 thiserror = { version = "1.0.58", default-features = false }
-tokio = { version = "1.37.0", default-features = false, features = ["macros", "rt-multi-thread"] }
-tokio-util = { version = "0.7.11", default-features = false }
 tracing = { version = "0.1.40", default-features = false }
 tracing-core = { version = "0.1.32", default-features = false }
 tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
 tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter"] }
+ureq = { version = "2.9.7", default-features = false, features = ["tls", "json"] }
 ustr = { version = "1.0.0", default-features = false }
 hmac = { version = "0.12.1", default-features = false }
+reqwest = { version = "0.12.4", default-features = false, features = ["json", "blocking", "rustls-tls"] }
 sha2 = { version = "0.10.8", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["std"] }
 base64 = { version = "0.22.0", default-features = false }
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
 
 [dev-dependencies]
 figment = { version = "0.10.15", default-features = false, features = ["yaml", "env", "test"] }
