@@ -1,6 +1,5 @@
-use serde::Serialize;
 use std::collections::VecDeque;
-use tracing::{debug, warn};
+use tracing::warn;
 
 use crate::logs::constants;
 
@@ -38,10 +37,9 @@ impl Aggregator {
         }
     }
 
-    pub fn add<T: Serialize>(&mut self, log: T) {
-        match serde_json::to_string(&log) {
-            Ok(log) => self.messages.push_back(log),
-            Err(e) => debug!("Failed to serialize log: {}", e),
+    pub fn add_batch(&mut self, logs: Vec<String>) {
+        for log in logs {
+            self.messages.push_back(log);
         }
     }
 
@@ -91,7 +89,7 @@ mod tests {
     use crate::logs::lambda::{IntakeLog, Lambda, Message};
 
     #[test]
-    fn test_add() {
+    fn test_add_batch() {
         let mut aggregator = Aggregator::default();
         let log = IntakeLog {
             message: Message {
@@ -108,9 +106,10 @@ mod tests {
             tags: "tags".to_string(),
             source: "source".to_string(),
         };
-        aggregator.add(log.clone());
+        let serialized_log = serde_json::to_string(&log).unwrap();
+        aggregator.add_batch(vec![serialized_log.clone()]);
         assert_eq!(aggregator.messages.len(), 1);
-        assert_eq!(aggregator.messages[0], serde_json::to_string(&log).unwrap());
+        assert_eq!(aggregator.messages[0], serialized_log);
     }
 
     #[test]
@@ -131,7 +130,8 @@ mod tests {
             tags: "tags".to_string(),
             source: "source".to_string(),
         };
-        aggregator.add(log.clone());
+        let serialized_log = serde_json::to_string(&log).unwrap();
+        aggregator.add_batch(vec![serialized_log.clone()]);
         assert_eq!(aggregator.messages.len(), 1);
         let batch = aggregator.get_batch();
         let serialized_batch = format!("[{}]", serde_json::to_string(&log).unwrap());
@@ -157,9 +157,12 @@ mod tests {
             source: "source".to_string(),
         };
         // Add 3 logs
-        aggregator.add(log.clone());
-        aggregator.add(log.clone());
-        aggregator.add(log.clone());
+        let serialized_log = serde_json::to_string(&log).unwrap();
+        aggregator.add_batch(vec![
+            serialized_log.clone(),
+            serialized_log.clone(),
+            serialized_log.clone(),
+        ]);
 
         // The batch should only contain the first 2 logs
         let first_batch = aggregator.get_batch();
@@ -194,12 +197,14 @@ mod tests {
             source: "source".to_string(),
         };
         // Add 2 logs
-        aggregator.add(log.clone());
+        let serialized_log = serde_json::to_string(&log).unwrap();
+        aggregator.add_batch(vec![serialized_log.clone()]);
 
         // This log will exceed the max content size
         let mut big_log = log.clone();
         big_log.message.message = "a".repeat(256);
-        aggregator.add(big_log.clone());
+        let serialized_big_log = serde_json::to_string(&log).unwrap();
+        aggregator.add_batch(vec![serialized_big_log.clone()]);
 
         let first_batch = aggregator.get_batch();
         let serialized_log = serde_json::to_string(&log).unwrap();
