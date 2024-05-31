@@ -18,76 +18,62 @@ pub struct HttpRequestParser {
 
 const CR: u8 = b'\r';
 const LR: u8 = b'\n';
-const MAX_BUFFER_SIZE: usize = 262_144;
-const CHUNK_SIZE: usize = 32_768;
+/// It is guaranteed that the headers will be less than 256 bytes.
+const HEADERS_BUFFER_SIZE: usize = 256;
 
 impl HttpRequestParser {
     /// Create a `HttpRequestParser` from a `TcpStream`
     ///
     /// # Errors
     ///
-    /// Function will fail if reading from the stream fails.
+    /// Function will error if the stream cannot be read from.
     ///
-    /// It will retry reading from the stream 3 times before giving up.
+    /// It will also error if the headers cannot be parsed.
     ///
-    /// It will also fail if parsing of headers or body in the buffer fails.
-    pub fn from_stream(
-        mut stream: &TcpStream,
-        buf: &mut [u8],
-    ) -> Result<HttpRequestParser, Box<dyn Error>> {
+    /// Or if the body cannot be parsed.
+    pub fn from_stream(mut stream: &TcpStream) -> Result<HttpRequestParser, Box<dyn Error>> {
         stream.set_nonblocking(true)?;
-        let mut total_bytes_read = 0;
-        let mut retries = 3;
-        loop {
-            if retries == 0 {
-                break;
-            }
-
-            let mut temp_buf = [0u8; CHUNK_SIZE];
-            let bytes_read = match stream.read(&mut temp_buf) {
-                Ok(n) => n,
-                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    // No data available at the moment, retry
-                    retries -= 1;
-                    continue;
-                }
-                Err(e) => {
-                    error!("Error reading from stream: {}", e);
-                    break;
-                }
-            };
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            // Copy the read bytes into the buffer
-            buf[total_bytes_read..(total_bytes_read + bytes_read)]
-                .copy_from_slice(&temp_buf[..bytes_read]);
-            total_bytes_read += bytes_read;
-
-            if total_bytes_read >= MAX_BUFFER_SIZE {
-                break;
-            }
-        }
-
-        let p = HttpRequestParser::from_buf(buf)?;
-        Ok(p)
-    }
-
-    /// Create a `HttpRequestParser` from passed `buf`
-    ///
-    /// # Errors
-    ///
-    /// Function will fail if parsing of headers or body in `buf` fail.
-    pub fn from_buf(buf: &[u8]) -> Result<HttpRequestParser, Box<dyn Error>> {
         let mut parser = HttpRequestParser {
             headers: HashMap::new(),
             body: String::new(),
         };
 
-        let body_start_index = parser.parse_headers(buf)?;
-        parser.parse_body(buf, body_start_index)?;
+        let mut headers_buf = [0u8; HEADERS_BUFFER_SIZE];
+        loop {
+            match stream.read(&mut headers_buf) {
+                Ok(_) => {}
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(e) => {
+                    error!("Error reading from stream: {}", e);
+                }
+            }
+
+            let _ = parser.parse_headers(&headers_buf);
+            if parser.headers.contains_key("content-length") {
+                break;
+            }
+        }
+
+        let body_start_index = parser.parse_headers(&headers_buf)?;
+        let content_length = parser
+            .headers
+            .get("content-length")
+            .expect("unfallible")
+            .parse::<usize>()?;
+        let body_bytes_read = headers_buf.len() - body_start_index;
+        let missing_body_lenght = content_length - body_bytes_read;
+        let mut body_buf = vec![0u8; missing_body_lenght];
+
+        stream.read_exact(&mut body_buf)?;
+
+        let total_bytes_read = headers_buf.len() + missing_body_lenght;
+        let mut buf = vec![0u8; total_bytes_read];
+        buf[..headers_buf.len()].copy_from_slice(&headers_buf);
+        buf[headers_buf.len()..].copy_from_slice(&body_buf);
+
+        parser.parse_body(&buf, body_start_index)?;
 
         Ok(parser)
     }
@@ -188,7 +174,6 @@ impl TelemetryListener {
     ) -> Result<TelemetryListener, Box<dyn Error>> {
         let addr = format!("{}:{}", &config.host, &config.port);
         let listener = TcpListener::bind(addr)?;
-        let buf = [0; MAX_BUFFER_SIZE]; // Using the default limit from AWS
 
         let join_handle = std::thread::spawn(move || {
             debug!("Initializing Telemetry Listener");
@@ -200,7 +185,7 @@ impl TelemetryListener {
                     let cloned_event_bus = event_bus.clone();
                     if let Ok(stream) = stream {
                         std::thread::spawn(move || {
-                            let r = Self::handle_stream(&stream, buf, cloned_event_bus);
+                            let r = Self::handle_stream(&stream, cloned_event_bus);
                             if let Err(e) = Self::acknowledge_request(stream, r) {
                                 error!("Error acknowledging Telemetry request: {:?}", e);
                             }
@@ -217,10 +202,9 @@ impl TelemetryListener {
 
     fn handle_stream(
         stream: &TcpStream,
-        mut buf: [u8; MAX_BUFFER_SIZE],
         event_bus: SyncSender<events::Event>,
     ) -> Result<(), Box<dyn Error>> {
-        let p = HttpRequestParser::from_stream(stream, &mut buf)?;
+        let p = HttpRequestParser::from_stream(stream)?;
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
         for event in telemetry_events {
             if let Err(e) = event_bus.send(events::Event::Telemetry(event)) {
@@ -362,8 +346,7 @@ mod tests {
         let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
 
         let (tx, rx) = std::sync::mpsc::sync_channel(3);
-        let buf = [0; MAX_BUFFER_SIZE];
-        let result = TelemetryListener::handle_stream(&stream, buf, tx);
+        let result = TelemetryListener::handle_stream(&stream, tx);
         let event = rx.recv().expect("No events received");
         let telemetry_event = match event {
             events::Event::Telemetry(te) => te,
@@ -389,10 +372,8 @@ mod tests {
                 fn $name() {
                     let stream = get_stream($value.to_vec());
 
-
                     let (tx, _) = std::sync::mpsc::sync_channel(4);
-                    let buf = [0; MAX_BUFFER_SIZE];
-                    TelemetryListener::handle_stream(&stream, buf, tx).unwrap()
+                    TelemetryListener::handle_stream(&stream, tx).unwrap()
                 }
             )*
         }
@@ -406,27 +387,10 @@ mod tests {
     }
 
     #[test]
-    fn test_from_buf() {
-        let buf =
-            b"GET /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!";
-        let result = HttpRequestParser::from_buf(buf);
-        assert!(result.is_ok());
-        let parser = result.unwrap();
-        assert_eq!(parser.headers.len(), 2);
-        assert_eq!(
-            parser.headers.get("content-length"),
-            Some(&"13".to_string())
-        );
-        assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
-        assert_eq!(parser.body, "Hello, World!".to_string());
-    }
-
-    #[test]
     fn test_from_stream() {
         let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
 
-        let mut buf = [0; MAX_BUFFER_SIZE];
-        let result = HttpRequestParser::from_stream(&stream, &mut buf);
+        let result = HttpRequestParser::from_stream(&stream);
 
         assert!(result.is_ok());
         let parser = result.unwrap();
@@ -438,14 +402,5 @@ mod tests {
         assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
 
         assert_eq!(parser.body, "[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string());
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_from_stream_invalid_data() {
-        let stream = get_stream([0; 1024].to_vec());
-
-        let mut buf = [0; MAX_BUFFER_SIZE];
-        HttpRequestParser::from_stream(&stream, &mut buf).unwrap();
     }
 }
