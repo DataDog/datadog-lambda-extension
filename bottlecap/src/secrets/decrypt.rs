@@ -92,7 +92,7 @@ fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Re
 
     let v = request(json_body, headers, client);
 
-    return if let Some(secret_string) = v["CiphertextBlob"].as_str() {
+    return if let Some(secret_string) = v["Plaintext"].as_str() {
         debug!("{}", secret_string.to_string());
         Ok(secret_string.to_string())
     } else {
