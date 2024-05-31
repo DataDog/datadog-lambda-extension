@@ -138,6 +138,7 @@ dependencies = [
 name = "bottlecap"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.0",
  "chrono",
  "datadog-protos",
  "ddsketch-agent",

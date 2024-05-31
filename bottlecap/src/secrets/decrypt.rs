@@ -1,6 +1,8 @@
 use crate::config::Config;
+use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
+use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -9,28 +11,38 @@ use std::io::{Error, Result};
 use std::time::Instant;
 use tracing::debug;
 
-pub async fn resolve_secrets(config: Config) -> Result<Config> {
+pub fn resolve_secrets(config: Config) -> Result<Config> {
     if !config.api_key.is_empty() {
         debug!("DD_API_KEY found, not trying to resolve secrets");
         Ok(config)
-    } else if !config.api_key_secret_arn.is_empty() {
-        let before_manual = Instant::now();
+    } else if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
+        let before_decrypt = Instant::now();
 
-        let resolved_key = manual_decrypt(
-            config.api_key_secret_arn.clone(),
-            AwsConfig {
-                region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
-                aws_access_key_id: env::var("AWS_ACCESS_KEY_ID")
-                    .expect("AWS_ACCESS_KEY_ID not set"),
-                aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
-                    .expect("AWS_SECRET_ACCESS_KEY not set"),
-                aws_session_token: env::var("AWS_SESSION_TOKEN")
-                    .expect("AWS_SESSION_TOKEN is not set!"),
-            },
-        )
-        .await
-        .expect("Failed to decrypt secret");
-        debug!("AWS decrypt took {}ms", before_manual.elapsed().as_millis());
+        let client = Client::builder()
+            .use_rustls_tls()
+            .build()
+            .expect("Failed to create reqwest client for aws decrypt");
+
+        let aws_config = AwsConfig {
+            region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
+            aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
+            aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
+                .expect("AWS_SECRET_ACCESS_KEY not set"),
+            aws_session_token: env::var("AWS_SESSION_TOKEN")
+                .expect("AWS_SESSION_TOKEN is not set!"),
+            function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
+                .expect("AWS_LAMBDA_FUNCTION_NAME is not set!"),
+        };
+
+        let decrypt_method = if config.api_key_secret_arn.is_empty() {
+            decrypt_aws_kms
+        } else {
+            decrypt_aws_sm
+        };
+
+        let resolved_key = decrypt_method(client, config.api_key_secret_arn.clone(), aws_config)
+            .expect("Failed to decrypt secret");
+        debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
 
         Ok(Config {
             api_key: resolved_key,
@@ -44,38 +56,64 @@ pub async fn resolve_secrets(config: Config) -> Result<Config> {
     }
 }
 
+
+struct RequestArgs<'a> {
+    service: String,
+    body: &'a Value,
+    time: DateTime<Utc>,
+    x_amz_target: String,
+}
+
 struct AwsConfig {
     region: String,
     aws_access_key_id: String,
     aws_secret_access_key: String,
     aws_session_token: String,
+    function_name: String,
 }
 
-async fn manual_decrypt(secret_arn: String, aws_config: AwsConfig) -> Result<String> {
+fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Result<String> {
+    let decoded_key = BASE64_STANDARD
+        .decode(kms_key)
+        .expect("Failed to decode base64 string");
+    let decoded_key_str = String::from_utf8(decoded_key).expect("Failed to convert to String");
+
+    let json_body = &serde_json::json!({ "CiphertextBlob": decoded_key_str });
+
+    let headers = build_get_secret_signed_headers(
+        &aws_config,
+        RequestArgs {
+            service: format!("kms.{}.amazonaws.com", aws_config.region),
+            body: json_body,
+            time: Utc::now(),
+            x_amz_target: "TrentService.Decrypt".to_string(),
+        },
+    );
+
+    let v = request(json_body, headers, client);
+
+    return if let Some(secret_string) = v["CiphertextBlob"].as_str() {
+        debug!("{}", secret_string.to_string());
+        Ok(secret_string.to_string())
+    } else {
+        Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
+    };
+}
+
+fn decrypt_aws_sm(client: Client, secret_arn: String, aws_config: AwsConfig) -> Result<String> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
-    let headers = build_get_secret_signed_headers(&aws_config, json_body, Utc::now());
+    let headers = build_get_secret_signed_headers(
+        &aws_config,
+        RequestArgs {
+            service: "secretsmanager".to_string(),
+            body: json_body,
+            time: Utc::now(),
+            x_amz_target: "secretsmanager.GetSecretValue".to_string(),
+        },
+    );
 
-    let client = reqwest::Client::builder()
-        .use_rustls_tls()
-        .build()
-        .expect("Failed to create reqwest client for aws decrypt");
-
-    let req = client
-        .post(format!(
-            "https://{}",
-            &headers["host"].to_str().expect("invalid host")
-        ))
-        .json(json_body)
-        .headers(headers);
-
-    let resp = req.send().await;
-    let body = resp
-        .expect("Failed to get response body")
-        .text()
-        .await
-        .expect("Cannot deserialize body");
-    let v: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
+    let v = request(json_body, headers, client);
 
     return if let Some(secret_string) = v["SecretString"].as_str() {
         Ok(secret_string.to_string())
@@ -84,24 +122,43 @@ async fn manual_decrypt(secret_arn: String, aws_config: AwsConfig) -> Result<Str
     };
 }
 
+fn request(json_body: &Value, headers: HeaderMap, client: Client) -> Value {
+    let req = client
+        .post(format!(
+            "https://{}",
+            &headers["host"].to_str().expect("invalid host")
+        ))
+        .json(json_body)
+        .headers(headers);
+
+    let resp = req.send();
+    let body = resp
+        .expect("Failed to get response body")
+        .text()
+        .expect("Cannot deserialize body");
+    let v: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
+    v
+}
+
 fn build_get_secret_signed_headers(
     aws_config: &AwsConfig,
-    json_body: &Value,
-    t: DateTime<Utc>,
+    header_values: RequestArgs,
 ) -> HeaderMap {
-    let service = "secretsmanager";
-    let amz_date = t.format("%Y%m%dT%H%M%SZ").to_string();
-    let date_stamp = t.format("%Y%m%d").to_string();
-    let host = format!("{}.{}.amazonaws.com", service, aws_config.region);
+    let amz_date = header_values.time.format("%Y%m%dT%H%M%SZ").to_string();
+    let date_stamp = header_values.time.format("%Y%m%d").to_string();
+    let host = format!(
+        "{}.{}.amazonaws.com",
+        header_values.service, aws_config.region
+    );
 
     let canonical_uri = "/";
     let canonical_querystring = "";
     let canonical_headers = format!(
-        "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:secretsmanager.GetSecretValue",
-        host, amz_date, aws_config.aws_session_token);
+        "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:{}",
+        host, amz_date, aws_config.aws_session_token, header_values.x_amz_target);
     let signed_headers = "content-type;host;x-amz-date;x-amz-security-token;x-amz-target";
 
-    let payload_hash = Sha256::digest(json_body.to_string().as_bytes());
+    let payload_hash = Sha256::digest(header_values.body.to_string().as_bytes());
     let payload_hash_hex = hex::encode(payload_hash);
 
     let canonical_request = format!(
@@ -110,7 +167,7 @@ fn build_get_secret_signed_headers(
     let algorithm = "AWS4-HMAC-SHA256";
     let credential_scope = format!(
         "{}/{}/{}/aws4_request",
-        date_stamp, aws_config.region, service
+        date_stamp, aws_config.region, header_values.service
     );
     let string_to_sign = format!(
         "{}\n{}\n{}\n{}",
@@ -124,7 +181,7 @@ fn build_get_secret_signed_headers(
         &aws_config.aws_secret_access_key,
         &date_stamp,
         aws_config.region.as_str(),
-        service,
+        header_values.service.as_str(),
     );
 
     let signature = hex::encode(sign(&signing_key, &string_to_sign));
@@ -149,7 +206,7 @@ fn build_get_secret_signed_headers(
     );
     headers.insert(
         "x-amz-target",
-        HeaderValue::from_str("secretsmanager.GetSecretValue").expect("invalid x-amz-target"),
+        HeaderValue::from_str(header_values.x_amz_target.as_str()).expect("invalid x-amz-target"),
     );
     headers.insert(
         "x-amz-security-token",
@@ -192,9 +249,14 @@ mod tests {
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
+                function_name: "arn:some-function".to_string(),
             },
-            &serde_json::json!({ "SecretId": "arn:aws:secretsmanager:region:account-id:secret:secret-name"}),
-            time,
+            RequestArgs {
+                service: "secretsmanager.us-east-1.amazonaws.com".to_string(),
+                body: &serde_json::json!({ "SecretId": "arn:aws:secretsmanager:region:account-id:secret:secret-name"}),
+                time,
+                x_amz_target: "secretsmanager.GetSecretValue".to_string(),
+            },
         );
 
         let mut expected_headers = HeaderMap::new();
