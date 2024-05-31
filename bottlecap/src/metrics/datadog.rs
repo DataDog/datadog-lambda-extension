@@ -2,10 +2,10 @@
 
 use datadog_protos::metrics::SketchPayload;
 use protobuf::Message;
+use reqwest;
 use serde::{Serialize, Serializer};
 use serde_json;
 use tracing::{debug, error};
-use reqwest;
 
 /// Interface for the `DogStatsD` metrics intake API.
 #[derive(Debug)]
@@ -63,7 +63,7 @@ impl DdApi {
                     status: resp.status().as_u16(),
                     body: resp.text().await.unwrap_or_default(),
                 }),
-            }
+            },
             Err(e) => Err(ShipError::Failure {
                 status: 500,
                 body: e.to_string(),
@@ -102,7 +102,7 @@ impl DdApi {
                     status: resp.status().as_u16(),
                     body: resp.text().await.unwrap_or_default(),
                 }),
-            }
+            },
             Err(e) => Err(ShipError::Failure {
                 status: 500,
                 body: e.to_string(),

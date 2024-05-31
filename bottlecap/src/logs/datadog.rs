@@ -1,6 +1,6 @@
+use reqwest;
 use std::error::Error;
 use tracing::{debug, error};
-use reqwest;
 
 pub struct Api {
     api_key: String,
@@ -32,7 +32,6 @@ impl Api {
                 .body(data)
                 .send()
                 .await;
-
 
             match resp {
                 Ok(resp) => {

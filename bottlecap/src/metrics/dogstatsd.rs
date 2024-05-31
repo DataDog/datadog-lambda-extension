@@ -12,7 +12,8 @@ use crate::tags::provider;
 use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
-    serve_handle: std::thread::JoinHandle<()>,
+    cancel_token: tokio_util::sync::CancellationToken,
+    serve_handle: tokio::task::JoinHandle<()>,
     aggregator: Arc<Mutex<Aggregator<1024>>>,
     dd_api: datadog::DdApi,
 }
@@ -27,29 +28,38 @@ pub struct DogStatsDConfig {
 
 impl DogStatsD {
     #[must_use]
-    pub fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
+    pub async fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
         let serializer_aggr = Arc::clone(&config.aggregator);
-        let serve_handle =
-            DogStatsD::run_server(&config.host, config.port, event_bus, serializer_aggr);
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        let serve_handle = DogStatsD::run_server(
+            &config.host,
+            config.port,
+            event_bus,
+            serializer_aggr,
+            cancel_token.clone(),
+        )
+        .await;
         let dd_api = datadog::DdApi::new(
             config.datadog_config.api_key.clone(),
             config.datadog_config.site.clone(),
         );
         DogStatsD {
             serve_handle,
+            cancel_token,
             aggregator: config.aggregator.clone(),
             dd_api,
         }
     }
 
-    fn run_server(
+    async fn run_server(
         host: &str,
         port: u16,
         event_bus: Sender<events::Event>,
         aggregator: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>>,
-    ) -> std::thread::JoinHandle<()> {
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> tokio::task::JoinHandle<()> {
         let addr = format!("{host}:{port}");
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             let socket = std::net::UdpSocket::bind(addr).expect("couldn't bind to address");
             loop {
                 // TODO(astuyve) this should be dynamic
@@ -89,6 +99,10 @@ impl DogStatsD {
                     .insert(&parsed_metric);
                 // Don't publish until after validation and adding metric_event to buff
                 let _ = event_bus.send(Event::Metric(metric_event)); // todo check the result
+                if cancel_token.is_cancelled() {
+                    error!("ASTUYVE shutting down DogStatsD server");
+                    break;
+                }
             }
         })
     }
@@ -117,8 +131,9 @@ impl DogStatsD {
     }
 
     pub async fn shutdown(mut self) {
+        self.cancel_token.cancel();
         self.flush().await;
-        match self.serve_handle.join() {
+        match self.serve_handle.await {
             Ok(()) => {
                 info!("DogStatsD thread has been shutdown");
             }

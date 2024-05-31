@@ -3,11 +3,9 @@ use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
 use std::error::Error;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
-use std::{
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
-};
 
 use tracing::{debug, error};
 
@@ -25,7 +23,7 @@ impl HttpRequestParser {
     /// # Errors
     ///
     /// Function will fail if parsing of headers or body in `buf` fail.
-    pub fn from_buf(buf: &[u8]) -> Result<HttpRequestParser, Box<dyn Error>> {
+    pub fn from_buf(buf: &[u8]) -> Result<HttpRequestParser, String> {
         let mut parser = HttpRequestParser {
             headers: HashMap::new(),
             body: String::new(),
@@ -37,7 +35,7 @@ impl HttpRequestParser {
         Ok(parser)
     }
 
-    fn parse_headers(&mut self, buf: &[u8]) -> Result<usize, Box<dyn Error>> {
+    fn parse_headers(&mut self, buf: &[u8]) -> Result<usize, String> {
         let mut last_start = 0;
         let mut i = 0;
 
@@ -61,7 +59,7 @@ impl HttpRequestParser {
             if buf[i] == CR && buf[i + 1] == LR {
                 // Slice the header from the buffer, not using i+1
                 // because we don't want to include '\r\n' in the value
-                let header = std::str::from_utf8(&buf[last_start..i])?;
+                let header = std::str::from_utf8(&buf[last_start..i]).map_err(|e| e.to_string())?;
                 let mut header_parts = header.split(": ");
 
                 if let (Some(key), Some(value)) = (header_parts.next(), header_parts.next()) {
@@ -91,21 +89,21 @@ impl HttpRequestParser {
         Ok(last_start)
     }
 
-    fn parse_body(&mut self, buf: &[u8], start_index: usize) -> Result<(), Box<dyn Error>> {
+    fn parse_body(&mut self, buf: &[u8], start_index: usize) -> Result<(), String> {
         let content_length = match self.headers.get("content-length") {
-            Some(length) => length.parse::<usize>()?,
-            None => return Err(Box::from("content-length header not found")),
+            Some(length) => length.parse::<usize>().map_err(|e| e.to_string())?,
+            None => return Err("content-length header not found".to_string()),
         };
 
         let end_index = start_index + content_length;
 
         if end_index > buf.len() {
-            return Err(Box::from(
-                "content-length header is greater than the buffer length",
-            ));
+            return Err("content-length header is greater than the buffer length".to_string());
         }
 
-        self.body = std::str::from_utf8(&buf[start_index..end_index])?.to_string();
+        self.body = std::str::from_utf8(&buf[start_index..end_index])
+            .map_err(|e| e.to_string())?
+            .to_string();
 
         Ok(())
     }
@@ -113,7 +111,9 @@ impl HttpRequestParser {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct TelemetryListener {
-    join_handle: std::thread::JoinHandle<()>,
+    event_bus: Sender<events::Event>,
+    cancel_token: tokio_util::sync::CancellationToken,
+    listener: TcpListener,
 }
 
 pub struct TelemetryListenerConfig {
@@ -127,84 +127,92 @@ impl TelemetryListener {
     /// # Errors
     ///
     /// Function will error if the passed address cannot be bound.
-    pub async fn run(
+    pub async fn new(
         config: &TelemetryListenerConfig,
         event_bus: Sender<events::Event>,
-    ) -> Result<TelemetryListener, Box<dyn Error>> {
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> Result<TelemetryListener, String> {
         let addr = format!("{}:{}", &config.host, &config.port);
-        let listener = TcpListener::bind(addr)?;
-        let buf: [u8; 262_144] = [0; 256 * 1024]; // Using the default limit from AWS
+        let listener = TcpListener::bind(addr).await.map_err(|e| e.to_string())?;
 
-        let join_handle = std::thread::spawn(move || {
-            debug!("Initializing Telemetry Listener");
+        Ok(TelemetryListener {
+            event_bus,
+            listener,
+            cancel_token,
+        })
+    }
 
-            loop {
-                for stream in listener.incoming() {
+    pub async fn spin(self) {
+        loop {
+            match self.listener.accept().await {
+                Ok((mut stream, _)) => {
                     debug!("Received a Telemetry API connection");
 
-                    let cloned_event_bus = event_bus.clone();
-                    if let Ok(mut stream) = stream {
-                        tokio::spawn(async move {
-                            let r = Self::handle_stream(&mut stream, buf, cloned_event_bus).await;
-                            if let Err(e) = Self::acknowledge_request(stream, r) {
-                                error!("Error acknowledging Telemetry request: {:?}", e);
-                            }
-                        });
-                    } else {
-                        error!("Error accepting connection");
-                    }
+                    let cloned_event_bus = self.event_bus.clone();
+                    let cancel_token_clone = self.cancel_token.clone();
+                    tokio::spawn(async move {
+                        let buf = vec![0; 256 * 1024];
+                        let r = Self::handle_stream(
+                            &mut stream,
+                            buf,
+                            cloned_event_bus,
+                            cancel_token_clone,
+                        )
+                        .await;
+                        if let Err(e) = Self::acknowledge_request(stream, r).await {
+                            error!("Error acknowledging Telemetry request: {:?}", e);
+                        } else {
+                            debug!("ASTUYVE Telemetry request acknowledged");
+                        }
+                    });
+                }
+                Err(e) => {
+                    error!("Error accepting connection: {:?}", e);
                 }
             }
-        });
-
-        Ok(TelemetryListener { join_handle })
+        }
     }
 
     async fn handle_stream(
-        stream: &mut impl Read,
-        mut buf: [u8; 262_144],
+        stream: &mut TcpStream,
+        mut buf: Vec<u8>,
         event_bus: Sender<events::Event>,
-    ) -> Result<(), Box<dyn Error>> {
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> Result<(), String> {
         // Read into buffer
-        #![allow(clippy::unused_io_amount)]
-        stream.read(&mut buf)?;
-
-        let p = HttpRequestParser::from_buf(&buf)?;
-        let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)?;
-        for event in telemetry_events {
-            if let Err(e) = event_bus.send(events::Event::Telemetry(event)).await {
-                error!("Error sending Telemetry event to the event bus: {}", e);
+        loop {
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    return Ok(());
+                }
+                _ = stream.read(&mut buf) => {
+                    let p = HttpRequestParser::from_buf(&buf)?;
+                    let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| e.to_string())?;
+                    for event in telemetry_events {
+                        error!("ASTUYVE sending telemetry event to main thread: {:?}", event);
+                        if let Err(e) = event_bus.send(events::Event::Telemetry(event)).await {
+                            error!("Error sending Telemetry event to the event bus: {}", e);
+                        }
+                    }
+                }
             }
         }
-
-        Ok(())
     }
 
     #[allow(clippy::unused_io_amount)]
-    fn acknowledge_request(
+    async fn acknowledge_request(
         mut stream: TcpStream,
-        request: Result<(), Box<dyn Error>>,
-    ) -> Result<(), Box<dyn Error>> {
+        request: Result<(), String>,
+    ) -> Result<(), String> {
         match request {
             Ok(()) => {
-                stream.write(b"HTTP/1.1 200 OK\r\n\r\n")?;
+                let _ = stream.write(b"HTTP/1.1 200 OK\r\n\r\n").await;
             }
             Err(_) => {
-                stream.write(b"HTTP/1.1 400 Bad Request\r\n\r\n")?;
+                let _ = stream.write(b"HTTP/1.1 400 Bad Request\r\n\r\n").await;
             }
         }
         Ok(())
-    }
-
-    pub fn shutdown(self) {
-        match self.join_handle.join() {
-            Ok(()) => {
-                debug!("Telemetry Listener thread has been shutdown");
-            }
-            Err(e) => {
-                debug!("Error shutting down the Telemetry Listener thread: {:?}", e);
-            }
-        }
     }
 }
 
@@ -306,7 +314,7 @@ mod tests {
             data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
         };
         let (tx, mut rx) = tokio::sync::mpsc::channel(3);
-        let buf = [0; 262_144];
+        let buf = vec![0; 262_144];
         let result = TelemetryListener::handle_stream(&mut stream, buf, tx).await;
         let event = rx.recv().await.expect("No events received");
         let telemetry_event = match event {
@@ -335,7 +343,7 @@ mod tests {
                         data: $value.to_string().into_bytes(),
                     };
                     let (tx, _) = tokio::sync::mpsc::channel(4);
-                    let buf = [0; 262144];
+                    let buf = vec![0; 256 * 1024];
                     TelemetryListener::handle_stream(&mut stream, buf, tx).await.unwrap()
                 }
             )*

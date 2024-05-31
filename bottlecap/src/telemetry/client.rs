@@ -1,7 +1,7 @@
+use reqwest::Response;
+use serde_json;
 use std::error::Error;
 use tracing::debug;
-use serde_json;
-use reqwest::Response;
 
 use crate::{base_url, EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE};
 

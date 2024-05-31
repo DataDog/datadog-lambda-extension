@@ -115,8 +115,17 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
 
     assert!(resp.status() == 200, "Unable to register extension");
 
-    let extension_id = resp.headers().get(EXTENSION_ID_HEADER).unwrap().to_str().expect("Can't convert header to string").to_string();
-    let mut register_response: RegisterResponse = resp.json::<RegisterResponse>().await.map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let extension_id = resp
+        .headers()
+        .get(EXTENSION_ID_HEADER)
+        .unwrap()
+        .to_str()
+        .expect("Can't convert header to string")
+        .to_string();
+    let mut register_response: RegisterResponse = resp
+        .json::<RegisterResponse>()
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     // Set manually since it's not part of the response body
     register_response.extension_id = extension_id;
@@ -172,7 +181,9 @@ async fn main() -> Result<()> {
     info!("logging subsystem enabled");
     let client = reqwest::Client::new();
 
-    let r = register(&client).await.map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let r = register(&client)
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let region = env::var("AWS_REGION").expect("could not read AWS_REGION");
     let function_name =
@@ -201,15 +212,23 @@ async fn main() -> Result<()> {
         tags_provider: Arc::clone(&tags_provider),
     };
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
-    let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
+    let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy()).await;
 
     let telemetry_listener_config = TelemetryListenerConfig {
         host: EXTENSION_HOST.to_string(),
         port: TELEMETRY_PORT,
     };
-    let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy()).await
-            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
+    let telemetry_listener = TelemetryListener::new(
+        &telemetry_listener_config,
+        event_bus.get_sender_copy(),
+        telemetry_listener_cancel_token.clone(),
+    )
+    .await
+    .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    tokio::spawn(async move {
+        telemetry_listener.spin().await;
+    });
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
         .subscribe()
@@ -253,6 +272,7 @@ async fn main() -> Result<()> {
         if flush_control.should_flush() || shutdown {
             loop {
                 let received = event_bus.rx.recv().await;
+                error!("ASTUYVE: main bus received: {:?}", received);
                 if let Some(event) = received {
                     match event {
                         Event::Metric(event) => {
@@ -321,9 +341,8 @@ async fn main() -> Result<()> {
         }
 
         if shutdown {
-            logs_agent.shutdown().await;
-            dogstats_client.shutdown().await;
-            telemetry_listener.shutdown();
+            tokio::join!(logs_agent.shutdown(), dogstats_client.shutdown());
+            telemetry_listener_cancel_token.cancel();
             return Ok(());
         }
     }

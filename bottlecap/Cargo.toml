@@ -19,6 +19,7 @@ serde = { version = "1.0.197", features = ["derive"], default-features = false }
 serde_json = { version = "1.0.116", features = ["alloc"], default-features = false }
 thiserror = { version = "1.0.58", default-features = false }
 tokio = { version = "1.37.0", features = ["full"] }
+tokio-util = "0.7.11"
 tracing = {version = "0.1.40", default-features = false }
 tracing-core = { version = "0.1.32", default-features = false }
 tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
