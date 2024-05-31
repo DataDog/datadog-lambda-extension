@@ -1,7 +1,11 @@
 use std::error::Error;
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 
+use tracing::error;
+
 use crate::config;
+use crate::events::Event;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
@@ -20,6 +24,8 @@ pub struct LambdaProcessor {
     rules: Option<Vec<Rule>>,
     // Current Invocation Context
     execution_context: ExecutionContext,
+    // Main event bus
+    event_bus: SyncSender<Event>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +43,7 @@ impl LambdaProcessor {
     pub fn new(
         tags_provider: Arc<provider::Provider>,
         datadog_config: Arc<config::Config>,
+        event_bus: SyncSender<Event>,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
@@ -54,10 +61,12 @@ impl LambdaProcessor {
                 runtime_duration_ms: 0.0,
                 orphan_logs: Vec::new(),
             },
+            event_bus,
         }
     }
 
     fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
+        let copy = event.clone();
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
                 Ok(Message::new(
@@ -81,6 +90,14 @@ impl LambdaProcessor {
                     event.time.timestamp_millis(),
                 ))
             },
+            // TODO: check if we could do anything with the fields from `PlatformInitReport`
+            TelemetryRecord::PlatformInitReport { .. } => {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(event)) {
+                    error!("Failed to send PlatformInitReport to the main event bus: {}", e);
+                }
+                // We don't need to process any log for this event
+                Err("Unsupported event type".into())
+            }
             // This is the first log where `request_id` is available
             // So we set it here and use it in the unprocessed and following logs.
             TelemetryRecord::PlatformStart {
@@ -99,6 +116,10 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                    error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
+                }
+
                 if let Some(metrics) = metrics {
                     self.execution_context.runtime_duration_ms = metrics.duration_ms;
                 }
@@ -111,6 +132,10 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                    error!("Failed to send PlatformReport to the main event bus: {}", e);
+                }
+
                 let mut post_runtime_duration_ms = 0.0;
                 // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
                 if self.execution_context.runtime_duration_ms > 0.0 {
@@ -184,28 +209,41 @@ impl LambdaProcessor {
         }
     }
 
-    pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
-        if let Ok(mut log) = self.make_log(event) {
-            let mut aggregator = aggregator.lock().expect("lock poisoned");
-            let should_send_log =
-                LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-            if should_send_log {
-                aggregator.add(log);
-            }
+    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
+        let mut to_send = Vec::<String>::new();
 
-            // Process orphan logs, since we have a `request_id` now
-            for mut orphan_log in self.execution_context.orphan_logs.drain(..) {
-                orphan_log.message.lambda.request_id = Some(
-                    self.execution_context
-                        .request_id
-                        .clone()
-                        .expect("unable to retrieve request ID"),
-                );
+        for event in events {
+            if let Ok(mut log) = self.make_log(event) {
+                let should_send_log =
+                    LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
-                    aggregator.add(orphan_log);
+                    if let Ok(serialized_log) = serde_json::to_string(&log) {
+                        to_send.push(serialized_log);
+                    }
+                }
+
+                // Process orphan logs, since we have a `request_id` now
+                for mut orphan_log in self.execution_context.orphan_logs.drain(..) {
+                    orphan_log.message.lambda.request_id = Some(
+                        self.execution_context
+                            .request_id
+                            .clone()
+                            .expect("unable to retrieve request ID"),
+                    );
+                    if should_send_log {
+                        if let Ok(serialized_log) = serde_json::to_string(&log) {
+                            to_send.push(serialized_log);
+                        }
+                    }
                 }
             }
         }
+
+        if to_send.is_empty() {
+            return;
+        }
+        let mut aggregator = aggregator.lock().expect("lock poisoned");
+        aggregator.add_batch(to_send);
     }
 }
 
@@ -239,12 +277,15 @@ mod tests {
                         LAMBDA_RUNTIME_SLUG.to_string(),
                         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
 
+                    let (tx, _) = std::sync::mpsc::sync_channel(2);
+
                     let mut processor = LambdaProcessor::new(
                         tags_provider,
                         Arc::new(config::Config {
                             service: Some("test-service".to_string()),
                             tags: Some("test:tag,env:test".to_string()),
-                            ..config::Config::default()})
+                            ..config::Config::default()}),
+                        tx.clone(),
                     );
 
                     let result = processor.get_message(input.clone()).unwrap();
@@ -403,7 +444,8 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -448,7 +490,8 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -480,7 +523,8 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -523,7 +567,10 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
+        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+
+        let mut processor =
+            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -533,7 +580,7 @@ mod tests {
             },
         };
 
-        processor.process(event.clone(), &aggregator);
+        processor.process(vec![event.clone()], &aggregator);
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
@@ -571,14 +618,16 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config));
+        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::Function("test-function".to_string()),
         };
 
-        processor.process(event.clone(), &aggregator);
+        processor.process(vec![event.clone()], &aggregator);
         assert_eq!(processor.execution_context.orphan_logs.len(), 1);
 
         let mut aggregator_lock = aggregator.lock().unwrap();
@@ -601,7 +650,10 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let mut processor = LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config));
+        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+
+        let mut processor =
+            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -611,7 +663,7 @@ mod tests {
             },
         };
 
-        processor.process(start_event.clone(), &aggregator);
+        processor.process(vec![start_event.clone()], &aggregator);
         assert_eq!(
             processor.execution_context.request_id,
             Some("test-request-id".to_string())
@@ -623,7 +675,7 @@ mod tests {
             record: TelemetryRecord::Function("test-function".to_string()),
         };
 
-        processor.process(event.clone(), &aggregator);
+        processor.process(vec![event.clone()], &aggregator);
 
         // Verify aggregator logs
         let mut aggregator_lock = aggregator.lock().unwrap();
