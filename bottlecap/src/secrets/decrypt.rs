@@ -252,7 +252,7 @@ mod tests {
                 function_name: "arn:some-function".to_string(),
             },
             RequestArgs {
-                service: "secretsmanager.us-east-1.amazonaws.com".to_string(),
+                service: "secretsmanager".to_string(),
                 body: &serde_json::json!({ "SecretId": "arn:aws:secretsmanager:region:account-id:secret:secret-name"}),
                 time,
                 x_amz_target: "secretsmanager.GetSecretValue".to_string(),
