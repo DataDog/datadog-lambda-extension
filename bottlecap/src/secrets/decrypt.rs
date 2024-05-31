@@ -34,18 +34,18 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
                 .expect("AWS_LAMBDA_FUNCTION_NAME is not set!"),
         };
 
-        let decrypted_key: String = if config.api_key_secret_arn.is_empty() {
-            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config)
-                .expect("Failed to decrypt secret")
+        let decrypt_method = if config.api_key_secret_arn.is_empty() {
+            decrypt_aws_kms
         } else {
-            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config)
-                .expect("Failed to decrypt secret")
+            decrypt_aws_sm
         };
 
+        let resolved_key = decrypt_method(client, config.api_key_secret_arn.clone(), aws_config)
+            .expect("Failed to decrypt secret");
         debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
 
         Ok(Config {
-            api_key: decrypted_key,
+            api_key: resolved_key,
             ..config.clone()
         })
     } else {
@@ -55,6 +55,7 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
         ))
     }
 }
+
 
 struct RequestArgs<'a> {
     service: String,
@@ -72,15 +73,17 @@ struct AwsConfig {
 }
 
 fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Result<String> {
-    let json_body = &serde_json::json!({
-        "CiphertextBlob": kms_key,
-        "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
-    );
+    let decoded_key = BASE64_STANDARD
+        .decode(kms_key)
+        .expect("Failed to decode base64 string");
+    let decoded_key_str = String::from_utf8(decoded_key).expect("Failed to convert to String");
+
+    let json_body = &serde_json::json!({ "CiphertextBlob": decoded_key_str });
 
     let headers = build_get_secret_signed_headers(
         &aws_config,
         RequestArgs {
-            service: "kms".to_string(),
+            service: format!("kms.{}.amazonaws.com", aws_config.region),
             body: json_body,
             time: Utc::now(),
             x_amz_target: "TrentService.Decrypt".to_string(),
@@ -89,14 +92,9 @@ fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Re
 
     let v = request(json_body, headers, client);
 
-    return if let Some(secret_string_b64) = v["Plaintext"].as_str() {
-        let secret_string = String::from_utf8(
-            BASE64_STANDARD
-                .decode(secret_string_b64)
-                .expect("Failed to decode base64"),
-        )
-        .expect("Failed to convert to string");
-        Ok(secret_string)
+    return if let Some(secret_string) = v["CiphertextBlob"].as_str() {
+        debug!("{}", secret_string.to_string());
+        Ok(secret_string.to_string())
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
     };
@@ -254,7 +252,7 @@ mod tests {
                 function_name: "arn:some-function".to_string(),
             },
             RequestArgs {
-                service: "secretsmanager".to_string(),
+                service: "secretsmanager.us-east-1.amazonaws.com".to_string(),
                 body: &serde_json::json!({ "SecretId": "arn:aws:secretsmanager:region:account-id:secret:secret-name"}),
                 time,
                 x_amz_target: "secretsmanager.GetSecretValue".to_string(),
