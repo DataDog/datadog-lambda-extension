@@ -9,11 +9,11 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use decrypt::resolve_secrets;
 use lifecycle::{
     flush_control::FlushControl,
     invocation_context::{InvocationContext, InvocationContextBuffer},
 };
-use decrypt::resolve_secrets;
 use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
