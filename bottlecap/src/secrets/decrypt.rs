@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::config::Config;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
@@ -12,7 +13,34 @@ use std::time::Instant;
 use tracing::debug;
 
 pub fn resolve_all_secrets(config: Config) -> Result<Config> {
+    let client = &Client::builder()
+        .use_rustls_tls()
+        .build()
+        .expect("Failed to create reqwest client for aws decrypt");
+    let aws_config = &AwsConfig {
+        region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
+        aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
+        aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
+            .expect("AWS_SECRET_ACCESS_KEY not set"),
+        aws_session_token: env::var("AWS_SESSION_TOKEN")
+            .expect("AWS_SESSION_TOKEN is not set!"),
+        function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
+            .expect("AWS_LAMBDA_FUNCTION_NAME is not set!"),
+    };
+    let decrypted_arn = config.secret_arn_env_map.iter().map(|(k, v)| {
+        let decrypted = decrypt_aws_sm(client, v.1.to_string(), aws_config).unwrap();
+        (k.to_string(), (v.1.clone(), decrypted))
+    }).collect::<HashMap<String, (String, String)>>();
+    let decrypted_kms = config.kms_env_map.iter().map(|(k, v)| {
+        let decrypted = decrypt_aws_kms(client, v.1.to_string(), aws_config).unwrap();
+        (k.to_string(), (v.1.clone(), decrypted))
+    }).collect::<HashMap<String, (String, String)>>();
 
+    return Ok(Config {
+        secret_arn_env_map: decrypted_arn,
+        kms_env_map: decrypted_kms,
+        ..config
+    });
 }
 
 pub fn resolve_api_secret(config: Config) -> Result<Config> {
@@ -21,12 +49,12 @@ pub fn resolve_api_secret(config: Config) -> Result<Config> {
         Ok(config)
     } else {
         let api_key_secret_arn = match config.secret_arn_env_map.get("API_KEY_SECRET_ARN") {
-            Some(secret_arn) => Some(secret_arn.to_string()),
+            Some(secret_arn) => Some(secret_arn.1.to_string()),
             None => None,
         };
         let kms_api_key = if config.kms_api_key.is_some() { config.kms_api_key.clone() } else {
             match config.kms_env_map.get("API_KEY_KMS_ENCRYPTED") {
-                Some(kms_key) => Some(kms_key.to_string()),
+                Some(kms_key) => Some(kms_key.1.to_string()),
                 None => None
             }
         };
@@ -34,12 +62,12 @@ pub fn resolve_api_secret(config: Config) -> Result<Config> {
         if api_key_secret_arn.is_some() || kms_api_key.is_some() {
             let before_decrypt = Instant::now();
 
-            let client = Client::builder()
+            let client = &Client::builder()
                 .use_rustls_tls()
                 .build()
                 .expect("Failed to create reqwest client for aws decrypt");
 
-            let aws_config = AwsConfig {
+            let aws_config = &AwsConfig {
                 region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
                 aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
                 aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
@@ -88,7 +116,7 @@ struct AwsConfig {
     function_name: String,
 }
 
-fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Result<String> {
+fn decrypt_aws_kms(client: &Client, kms_key: String, aws_config: &AwsConfig) -> Result<String> {
     let json_body = &serde_json::json!({
         "CiphertextBlob": kms_key,
         "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
@@ -119,7 +147,7 @@ fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Re
     };
 }
 
-fn decrypt_aws_sm(client: Client, secret_arn: String, aws_config: AwsConfig) -> Result<String> {
+fn decrypt_aws_sm(client: &Client, secret_arn: String, aws_config: &AwsConfig) -> Result<String> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
     let headers = build_get_secret_signed_headers(
@@ -141,7 +169,7 @@ fn decrypt_aws_sm(client: Client, secret_arn: String, aws_config: AwsConfig) -> 
     };
 }
 
-fn request(json_body: &Value, headers: HeaderMap, client: Client) -> Value {
+fn request(json_body: &Value, headers: HeaderMap, client: &Client) -> Value {
     let req = client
         .post(format!(
             "https://{}",

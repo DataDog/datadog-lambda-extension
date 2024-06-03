@@ -22,8 +22,8 @@ pub struct Config {
     pub api_key: String,
     // DD_KMS_API_KEY is the only KMS var that does not follow the suffix pattern
     pub kms_api_key: Option<String>,
-    pub kms_env_map: HashMap<String, String>,
-    pub secret_arn_env_map: HashMap<String, String>,
+    pub kms_env_map: HashMap<String, (String, String)>,
+    pub secret_arn_env_map: HashMap<String, (String, String)>,
     pub env: Option<String>,
     pub service: Option<String>,
     pub version: Option<String>,
@@ -94,7 +94,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     })
 }
 
-fn map_stripped_env_by_suffix(suffix: &str) -> HashMap<String, String> {
+fn map_stripped_env_by_suffix(suffix: &str) -> HashMap<String, (String, String)> {
     std::env::vars()
         .filter(|(k, _)| k.ends_with(suffix))
         .map(|(k, v)| {
@@ -105,9 +105,9 @@ fn map_stripped_env_by_suffix(suffix: &str) -> HashMap<String, String> {
             } else {
                 k
             };
-            (key, v)
+            (key, (v, "".to_string()))
         })
-        .collect::<HashMap<String, String>>()
+        .collect::<HashMap<String, (String, String)>>()
 }
 
 #[cfg(test)]
@@ -379,13 +379,13 @@ pub mod tests {
             let config = get_config(Path::new("")).expect("should parse config");
 
             let mut expected_kms_env_map = HashMap::new();
-            expected_kms_env_map.insert("SOMEKEY1_KMS_ENCRYPTED".to_string(), "secret1".to_string());
-            expected_kms_env_map.insert("SOMEKEY2_KMS_ENCRYPTED".to_string(), "secret2".to_string());
-            expected_kms_env_map.insert("SOMEKEY3_KMS_ENCRYPTED".to_string(), "secret3".to_string());
+            expected_kms_env_map.insert("SOMEKEY1_KMS_ENCRYPTED".to_string(), ("secret1".to_string(), "".to_string()));
+            expected_kms_env_map.insert("SOMEKEY2_KMS_ENCRYPTED".to_string(), ("secret2".to_string(), "".to_string()));
+            expected_kms_env_map.insert("SOMEKEY3_KMS_ENCRYPTED".to_string(), ("secret3".to_string(), "".to_string()));
 
             let mut expected_secret_arn_env_map = HashMap::new();
-            expected_secret_arn_env_map.insert("SOMEKEY4_SECRET_ARN".to_string(), "secret4".to_string());
-            expected_secret_arn_env_map.insert("SOMEKEY5_SECRET_ARN".to_string(), "secret5".to_string());
+            expected_secret_arn_env_map.insert("SOMEKEY4_SECRET_ARN".to_string(), ("secret4".to_string(), "".to_string()));
+            expected_secret_arn_env_map.insert("SOMEKEY5_SECRET_ARN".to_string(), ("secret5".to_string(), "".to_string()));
 
             let mut expected_config = Config::default();
             expected_config.kms_env_map = expected_kms_env_map;
