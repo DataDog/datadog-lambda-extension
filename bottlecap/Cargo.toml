@@ -32,7 +32,7 @@ tikv-jemallocator = "0.5"
 
 [dev-dependencies]
 figment = { version = "0.10.15", default-features = false, features = ["yaml", "env", "test"] }
-proptest = { version = "1.4.0", default-features = false}
+proptest = "1.4.0"
 
 [[bin]]
 name = "bottlecap"
