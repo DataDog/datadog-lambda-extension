@@ -13,6 +13,7 @@ use lifecycle::{
     flush_control::FlushControl,
     invocation_context::{InvocationContext, InvocationContextBuffer},
 };
+use decrypt::resolve_secrets;
 use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
@@ -49,6 +50,7 @@ use std::io::Result;
 use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
+use bottlecap::secrets::decrypt;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -133,12 +135,9 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<()> {
     // First load the configuration
-    let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
-        Ok(val) => val,
-        Err(_) => "/var/task".to_string(),
-    };
-    let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => Arc::new(config),
+    let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let env_config = match config::get_config(Path::new(&lambda_directory)) {
+        Ok(config) => config,
         Err(e) => {
             // NOTE we must print here as the logging subsystem is not enabled yet.
             println!("Error loading configuration: {e:?}");
@@ -150,13 +149,13 @@ fn main() -> Result<()> {
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
-        .with_max_level(config.log_level.as_level_filter())
+        .with_max_level(env_config.log_level.as_level_filter())
         .init()
         .expect("failed to set up log bridge");
 
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_new(config.log_level)
+            EnvFilter::try_new(env_config.log_level)
                 .expect("could not parse log level in configuration"),
         )
         .with_level(true)
@@ -171,6 +170,13 @@ fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     info!("logging subsystem enabled");
+
+    let config = match resolve_secrets(env_config) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            panic!("Error resolving key: {e}");
+        }
+    };
 
     let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
