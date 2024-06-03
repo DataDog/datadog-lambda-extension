@@ -45,7 +45,8 @@ impl Lambda {
         let metric = metric::Metric::new(
             constants::RUNTIME_DURATION_METRIC.into(),
             metric::Type::Distribution,
-            (duration_ms * constants::MS_TO_SEC).to_string().into(),
+            // Datadog expects this value as milliseconds, not seconds
+            duration_ms.to_string().into(),
             None,
         );
         if let Err(e) = self
@@ -62,7 +63,8 @@ impl Lambda {
         let metric = metric::Metric::new(
             constants::POST_RUNTIME_DURATION_METRIC.into(),
             metric::Type::Distribution,
-            (duration_ms * constants::MS_TO_SEC).to_string().into(),
+            // Datadog expects this value as milliseconds, not seconds
+            duration_ms.to_string().into(),
             None,
         );
         if let Err(e) = self
@@ -76,12 +78,12 @@ impl Lambda {
     }
 
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
-        let gb_seconds = billed_duration_ms as f64 * constants::MS_TO_SEC * memory_size_mb as f64
-            / constants::MB_TO_GB;
+        let gb_seconds = (billed_duration_ms as f64 * constants::MS_TO_SEC)
+            * (memory_size_mb as f64 / constants::MB_TO_GB);
 
         let price_per_gb = match ARCH {
             "x86_64" => constants::X86_LAMBDA_PRICE_PER_GB_SECOND,
-            "aarch_64" => constants::ARM_LAMBDA_PRICE_PER_GB_SECOND,
+            "aarch64" => constants::ARM_LAMBDA_PRICE_PER_GB_SECOND,
             _ => {
                 error!("unsupported architecture: {}", ARCH);
                 return 0.0;
@@ -91,27 +93,9 @@ impl Lambda {
         ((BASE_LAMBDA_INVOCATION_PRICE + (gb_seconds * price_per_gb)) * 1e12).round() / 1e12
     }
 
-    pub fn set_estimated_cost_metric(&self, billed_duration_ms: u64, memory_size_mb: u64) {
-        let cost_usd = Self::calculate_estimated_cost_usd(billed_duration_ms, memory_size_mb);
-
-        let metric = metric::Metric::new(
-            constants::ESTIMATED_COST_METRIC.into(),
-            metric::Type::Distribution,
-            cost_usd.to_string().into(),
-            None,
-        );
-        if let Err(e) = self
-            .aggregator
-            .lock()
-            .expect("lock poisoned")
-            .insert(&metric)
-        {
-            error!("failed to insert estimated cost metric: {}", e);
-        }
-    }
-
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
-        let mut aggr = self.aggregator.lock().expect("lock poisoned");
+        let mut aggr: std::sync::MutexGuard<Aggregator<1024>> =
+            self.aggregator.lock().expect("lock poisoned");
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
             metric::Type::Distribution,
@@ -163,7 +147,18 @@ impl Lambda {
                 error!("failed to insert memory size metric: {}", e);
             }
         }
-        // TODO(astuyve): estimated cost metric, post runtime duration metric.
+
+        let cost_usd =
+            Self::calculate_estimated_cost_usd(metrics.billed_duration_ms, metrics.memory_size_mb);
+        let metric = metric::Metric::new(
+            constants::ESTIMATED_COST_METRIC.into(),
+            metric::Type::Distribution,
+            cost_usd.to_string().into(),
+            None,
+        );
+        if let Err(e) = aggr.insert(&metric) {
+            error!("failed to insert estimated cost metric: {}", e);
+        }
     }
 }
 

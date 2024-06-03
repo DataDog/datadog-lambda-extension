@@ -329,10 +329,6 @@ fn main() -> Result<()> {
                                     request_id, status
                                 );
                                 lambda_enhanced_metrics.set_report_log_metrics(&metrics);
-                                lambda_enhanced_metrics.set_estimated_cost_metric(
-                                    metrics.billed_duration_ms,
-                                    metrics.memory_size_mb,
-                                );
                                 if let Some(invocation_context) =
                                     invocation_context_buffer.remove(&request_id)
                                 {
