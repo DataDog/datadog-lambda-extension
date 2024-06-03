@@ -2,6 +2,7 @@ pub mod flush_strategy;
 pub mod log_level;
 pub mod processing_rule;
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use figment::{
@@ -15,13 +16,14 @@ use crate::config::log_level::LogLevel;
 use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 
 #[derive(Debug, PartialEq, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 #[serde(default)]
 pub struct Config {
     pub site: String,
     pub api_key: String,
-    pub api_key_secret_arn: String,
-    pub kms_api_key: String,
+    // DD_KMS_API_KEY is the only KMS var that does not follow the suffix pattern
+    pub kms_api_key: Option<String>,
+    pub kms_env_map: HashMap<String, String>,
+    pub secret_arn_env_map: HashMap<String, String>,
     pub env: Option<String>,
     pub service: Option<String>,
     pub version: Option<String>,
@@ -41,8 +43,9 @@ impl Default for Config {
             // General
             site: "datadoghq.com".to_string(),
             api_key: String::default(),
-            api_key_secret_arn: String::default(),
-            kms_api_key: String::default(),
+            kms_api_key: None,
+            kms_env_map: HashMap::default(),
+            secret_arn_env_map: HashMap::default(),
             serverless_flush_strategy: FlushStrategy::Default,
             // Unified Tagging
             env: None,
@@ -76,12 +79,35 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         .merge(Env::prefixed("DATADOG_"))
         .merge(Env::prefixed("DD_"));
 
+    let kms_env_vars = map_stripped_env_by_suffix("_KMS_ENCRYPTED");
+    let secret_arn_env_vars = map_stripped_env_by_suffix("_SECRET_ARN");
+
     let config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => ConfigError::UnsupportedField(field),
         _ => ConfigError::ParseError(err.to_string()),
     })?;
 
-    Ok(config)
+    Ok(Config {
+        kms_env_map: kms_env_vars,
+        secret_arn_env_map: secret_arn_env_vars,
+        ..config
+    })
+}
+
+fn map_stripped_env_by_suffix(suffix: &str) -> HashMap<String, String> {
+    std::env::vars()
+        .filter(|(k, _)| k.ends_with(suffix))
+        .map(|(k, v)| {
+            let key = if k.starts_with("DD_") {
+                k.strip_prefix("DD_").unwrap().to_string()
+            } else if k.starts_with("DATADOG_") {
+                k.strip_prefix("DATADOG_").unwrap().to_string()
+            } else {
+                k
+            };
+            (key, v)
+        })
+        .collect::<HashMap<String, String>>()
 }
 
 #[cfg(test)]
@@ -90,39 +116,6 @@ pub mod tests {
 
     use crate::config::flush_strategy::PeriodicStrategy;
     use crate::config::processing_rule;
-
-    #[test]
-    fn test_reject_unknown_fields_yaml() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                unknown_field: true
-            ",
-            )?;
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("unknown_field".to_string())
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_reject_unknown_fields_env() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.set_env("DD_UNKNOWN_FIELD", "true");
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("unknown_field".to_string())
-            );
-            Ok(())
-        });
-    }
 
     #[test]
     fn test_precedence() {
@@ -298,7 +291,7 @@ pub mod tests {
                         kind: processing_rule::Kind::ExcludeAtMatch,
                         name: "exclude".to_string(),
                         pattern: "exclude".to_string(),
-                        replace_placeholder: None
+                        replace_placeholder: None,
                     }]),
                     ..Config::default()
                 }
@@ -337,24 +330,68 @@ pub mod tests {
                             kind: processing_rule::Kind::ExcludeAtMatch,
                             name: "exclude".to_string(),
                             pattern: "exclude".to_string(),
-                            replace_placeholder: None
+                            replace_placeholder: None,
                         },
                         ProcessingRule {
                             kind: processing_rule::Kind::IncludeAtMatch,
                             name: "include".to_string(),
                             pattern: "include".to_string(),
-                            replace_placeholder: None
+                            replace_placeholder: None,
                         },
                         ProcessingRule {
                             kind: processing_rule::Kind::MaskSequences,
                             name: "mask".to_string(),
                             pattern: "mask".to_string(),
-                            replace_placeholder: Some("REPLACED".to_string())
-                        }
+                            replace_placeholder: Some("REPLACED".to_string()),
+                        },
                     ]),
                     ..Config::default()
                 }
             );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_kms_env_var() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_SOMEKEY1_KMS_ENCRYPTED",
+                "secret1",
+            );
+            jail.set_env(
+                "DD_SOMEKEY2_KMS_ENCRYPTED",
+                "secret2",
+            );
+            jail.set_env(
+                "DD_SOMEKEY3_KMS_ENCRYPTED",
+                "secret3",
+            );
+            jail.set_env(
+                "DD_SOMEKEY4_SECRET_ARN",
+                "secret4",
+            );
+            jail.set_env(
+                "DD_SOMEKEY5_SECRET_ARN",
+                "secret5",
+            );
+            let config = get_config(Path::new("")).expect("should parse config");
+
+            let mut expected_kms_env_map = HashMap::new();
+            expected_kms_env_map.insert("SOMEKEY1_KMS_ENCRYPTED".to_string(), "secret1".to_string());
+            expected_kms_env_map.insert("SOMEKEY2_KMS_ENCRYPTED".to_string(), "secret2".to_string());
+            expected_kms_env_map.insert("SOMEKEY3_KMS_ENCRYPTED".to_string(), "secret3".to_string());
+
+            let mut expected_secret_arn_env_map = HashMap::new();
+            expected_secret_arn_env_map.insert("SOMEKEY4_SECRET_ARN".to_string(), "secret4".to_string());
+            expected_secret_arn_env_map.insert("SOMEKEY5_SECRET_ARN".to_string(), "secret5".to_string());
+
+            let mut expected_config = Config::default();
+            expected_config.kms_env_map = expected_kms_env_map;
+            expected_config.secret_arn_env_map = expected_secret_arn_env_map;
+
+            assert_eq!(config, expected_config);
             Ok(())
         });
     }

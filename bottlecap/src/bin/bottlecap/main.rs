@@ -9,7 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use decrypt::resolve_secrets;
+use decrypt::resolve_api_secret;
 use lifecycle::flush_control::FlushControl;
 use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
@@ -48,6 +48,7 @@ use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use bottlecap::secrets::decrypt;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
+use bottlecap::secrets::decrypt::resolve_all_secrets;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -166,10 +167,17 @@ fn main() -> Result<()> {
 
     info!("logging subsystem enabled");
 
-    let config = match resolve_secrets(env_config) {
+    let config_with_secret = match resolve_api_secret(env_config) {
+        Ok(c) => c,
+        Err(e) => {
+            panic!("Error resolving dd api key: {e}");
+        }
+    };
+
+    let config = match resolve_all_secrets(config_with_secret) {
         Ok(c) => Arc::new(c),
         Err(e) => {
-            panic!("Error resolving key: {e}");
+            panic!("Error resolving secret: {e}");
         }
     };
 
@@ -228,10 +236,10 @@ fn main() -> Result<()> {
         let evt = next_event(&r.extension_id);
         match evt {
             Ok(NextEventResponse::Invoke {
-                request_id,
-                deadline_ms,
-                invoked_function_arn,
-            }) => {
+                   request_id,
+                   deadline_ms,
+                   invoked_function_arn,
+               }) => {
                 info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
@@ -241,9 +249,9 @@ fn main() -> Result<()> {
                 }
             }
             Ok(NextEventResponse::Shutdown {
-                shutdown_reason,
-                deadline_ms,
-            }) => {
+                   shutdown_reason,
+                   deadline_ms,
+               }) => {
                 println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
                 shutdown = true;
             }

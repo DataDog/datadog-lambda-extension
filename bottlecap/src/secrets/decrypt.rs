@@ -11,51 +11,67 @@ use std::io::{Error, Result};
 use std::time::Instant;
 use tracing::debug;
 
-pub fn resolve_secrets(config: Config) -> Result<Config> {
+pub fn resolve_all_secrets(config: Config) -> Result<Config> {
+
+}
+
+pub fn resolve_api_secret(config: Config) -> Result<Config> {
     if !config.api_key.is_empty() {
         debug!("DD_API_KEY found, not trying to resolve secrets");
         Ok(config)
-    } else if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
-        let before_decrypt = Instant::now();
-
-        let client = Client::builder()
-            .use_rustls_tls()
-            .build()
-            .expect("Failed to create reqwest client for aws decrypt");
-
-        let aws_config = AwsConfig {
-            region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
-            aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
-            aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
-                .expect("AWS_SECRET_ACCESS_KEY not set"),
-            aws_session_token: env::var("AWS_SESSION_TOKEN")
-                .expect("AWS_SESSION_TOKEN is not set!"),
-            function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
-                .expect("AWS_LAMBDA_FUNCTION_NAME is not set!"),
-        };
-
-        let decrypt_method = if config.api_key_secret_arn.is_empty() {
-            decrypt_aws_kms
-        } else {
-            decrypt_aws_sm
-        };
-
-        let resolved_key = decrypt_method(client, config.api_key_secret_arn.clone(), aws_config)
-            .expect("Failed to decrypt secret");
-        debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
-
-        Ok(Config {
-            api_key: resolved_key,
-            ..config.clone()
-        })
     } else {
-        Err(Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "No API key or secret ARN found".to_string(),
-        ))
+        let api_key_secret_arn = match config.secret_arn_env_map.get("API_KEY_SECRET_ARN") {
+            Some(secret_arn) => Some(secret_arn.to_string()),
+            None => None,
+        };
+        let kms_api_key = if config.kms_api_key.is_some() { config.kms_api_key.clone() } else {
+            match config.kms_env_map.get("API_KEY_KMS_ENCRYPTED") {
+                Some(kms_key) => Some(kms_key.to_string()),
+                None => None
+            }
+        };
+
+        if api_key_secret_arn.is_some() || kms_api_key.is_some() {
+            let before_decrypt = Instant::now();
+
+            let client = Client::builder()
+                .use_rustls_tls()
+                .build()
+                .expect("Failed to create reqwest client for aws decrypt");
+
+            let aws_config = AwsConfig {
+                region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
+                aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
+                aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
+                    .expect("AWS_SECRET_ACCESS_KEY not set"),
+                aws_session_token: env::var("AWS_SESSION_TOKEN")
+                    .expect("AWS_SESSION_TOKEN is not set!"),
+                function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
+                    .expect("AWS_LAMBDA_FUNCTION_NAME is not set!"),
+            };
+
+            let decrypted_key: String = if kms_api_key.is_some() {
+                decrypt_aws_kms(client, kms_api_key.unwrap(), aws_config)
+                    .expect("Failed to decrypt secret")
+            } else {
+                decrypt_aws_sm(client, api_key_secret_arn.unwrap(), aws_config)
+                    .expect("Failed to decrypt secret")
+            };
+
+            debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
+
+            Ok(Config {
+                api_key: decrypted_key,
+                ..config.clone()
+            })
+        } else {
+            Err(Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "No API key or secret ARN found".to_string(),
+            ))
+        }
     }
 }
-
 
 struct RequestArgs<'a> {
     service: String,
@@ -73,17 +89,15 @@ struct AwsConfig {
 }
 
 fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Result<String> {
-    let decoded_key = BASE64_STANDARD
-        .decode(kms_key)
-        .expect("Failed to decode base64 string");
-    let decoded_key_str = String::from_utf8(decoded_key).expect("Failed to convert to String");
-
-    let json_body = &serde_json::json!({ "CiphertextBlob": decoded_key_str });
+    let json_body = &serde_json::json!({
+        "CiphertextBlob": kms_key,
+        "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
+    );
 
     let headers = build_get_secret_signed_headers(
         &aws_config,
         RequestArgs {
-            service: format!("kms.{}.amazonaws.com", aws_config.region),
+            service: "kms".to_string(),
             body: json_body,
             time: Utc::now(),
             x_amz_target: "TrentService.Decrypt".to_string(),
@@ -92,9 +106,14 @@ fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Re
 
     let v = request(json_body, headers, client);
 
-    return if let Some(secret_string) = v["CiphertextBlob"].as_str() {
-        debug!("{}", secret_string.to_string());
-        Ok(secret_string.to_string())
+    return if let Some(secret_string_b64) = v["Plaintext"].as_str() {
+        let secret_string = String::from_utf8(
+            BASE64_STANDARD
+                .decode(secret_string_b64)
+                .expect("Failed to decode base64"),
+        )
+            .expect("Failed to convert to string");
+        Ok(secret_string)
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
     };
@@ -252,7 +271,7 @@ mod tests {
                 function_name: "arn:some-function".to_string(),
             },
             RequestArgs {
-                service: "secretsmanager.us-east-1.amazonaws.com".to_string(),
+                service: "secretsmanager".to_string(),
                 body: &serde_json::json!({ "SecretId": "arn:aws:secretsmanager:region:account-id:secret:secret-name"}),
                 time,
                 x_amz_target: "secretsmanager.GetSecretValue".to_string(),
