@@ -1,8 +1,10 @@
+use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
 
 use tracing::debug;
 
 use crate::config::processing_rule;
+use crate::events::Event;
 use crate::tags;
 use crate::telemetry::events::TelemetryEvent;
 use crate::{config, LAMBDA_RUNTIME_SLUG};
@@ -15,20 +17,21 @@ impl LogsProcessor {
     pub fn new(
         config: Arc<config::Config>,
         tags_provider: Arc<tags::provider::Provider>,
+        event_bus: SyncSender<Event>,
         runtime: String,
     ) -> Self {
         match runtime.as_str() {
             LAMBDA_RUNTIME_SLUG => {
-                let lambda_processor = LambdaProcessor::new(tags_provider, config);
+                let lambda_processor = LambdaProcessor::new(tags_provider, config, event_bus);
                 LogsProcessor::Lambda(lambda_processor)
             }
             _ => panic!("Unsupported runtime: {runtime}"),
         }
     }
 
-    pub fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
         match self {
-            LogsProcessor::Lambda(lambda_processor) => lambda_processor.process(event, aggregator),
+            LogsProcessor::Lambda(lambda_processor) => lambda_processor.process(events, aggregator),
         }
     }
 }
