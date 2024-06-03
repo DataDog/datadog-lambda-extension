@@ -10,10 +10,6 @@
 #![deny(missing_debug_implementations)]
 
 use decrypt::resolve_secrets;
-use lifecycle::{
-    flush_control::FlushControl,
-    invocation_context::{InvocationContext, InvocationContextBuffer},
-};
 use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
@@ -23,7 +19,11 @@ use bottlecap::{
     base_url, config,
     event_bus::bus::EventBus,
     events::Event,
-    lifecycle, logger,
+    lifecycle::{
+        flush_control::FlushControl,
+        invocation_context::{InvocationContext, InvocationContextBuffer},
+    },
+    logger,
     logs::agent::LogsAgent,
     metrics::{
         aggregator as metrics_aggregator, constants,
@@ -193,8 +193,13 @@ fn main() -> Result<()> {
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
-    let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
+
     let event_bus = EventBus::run();
+    let logs_agent = LogsAgent::run(
+        Arc::clone(&tags_provider),
+        Arc::clone(&config),
+        event_bus.get_sender_copy(),
+    );
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -214,7 +219,7 @@ fn main() -> Result<()> {
         port: TELEMETRY_PORT,
     };
     let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, event_bus.get_sender_copy())
+        TelemetryListener::run(&telemetry_listener_config, logs_agent.get_sender_copy())
             .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
@@ -264,96 +269,92 @@ fn main() -> Result<()> {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
                         }
-                        Event::Telemetry(event) => {
-                            logs_agent.send_event(event.clone());
-                            match event.record {
-                                TelemetryRecord::PlatformStart { request_id, .. } => {
-                                    invocation_context_buffer.insert(InvocationContext {
-                                        request_id,
-                                        runtime_duration_ms: 0.0,
-                                    });
-                                }
-                                TelemetryRecord::PlatformInitReport {
-                                    initialization_type,
-                                    phase,
-                                    metrics,
-                                } => {
-                                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                }
-                                TelemetryRecord::PlatformRuntimeDone {
+                        Event::Telemetry(event) => match event.record {
+                            TelemetryRecord::PlatformStart { request_id, .. } => {
+                                invocation_context_buffer.insert(InvocationContext {
                                     request_id,
-                                    status,
-                                    metrics,
-                                    ..
-                                } => {
-                                    if let Some(metrics) = metrics {
-                                        invocation_context_buffer
-                                            .add_runtime_duration(&request_id, metrics.duration_ms);
-                                        lambda_enhanced_metrics
-                                            .set_runtime_duration_metric(metrics.duration_ms);
-                                    }
+                                    runtime_duration_ms: 0.0,
+                                });
+                            }
+                            TelemetryRecord::PlatformInitReport {
+                                initialization_type,
+                                phase,
+                                metrics,
+                            } => {
+                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                            }
+                            TelemetryRecord::PlatformRuntimeDone {
+                                request_id,
+                                status,
+                                metrics,
+                                ..
+                            } => {
+                                if let Some(metrics) = metrics {
+                                    invocation_context_buffer
+                                        .add_runtime_duration(&request_id, metrics.duration_ms);
+                                    lambda_enhanced_metrics
+                                        .set_runtime_duration_metric(metrics.duration_ms);
+                                }
 
-                                    if status != Status::Success {
+                                if status != Status::Success {
+                                    if let Err(e) =
+                                        lambda_enhanced_metrics.increment_errors_metric()
+                                    {
+                                        error!("Failed to increment error metric: {e:?}");
+                                    }
+                                    if status == Status::Timeout {
                                         if let Err(e) =
-                                            lambda_enhanced_metrics.increment_errors_metric()
+                                            lambda_enhanced_metrics.increment_timeout_metric()
                                         {
-                                            error!("Failed to increment error metric: {e:?}");
-                                        }
-                                        if status == Status::Timeout {
-                                            if let Err(e) =
-                                                lambda_enhanced_metrics.increment_timeout_metric()
-                                            {
-                                                error!("Failed to increment timeout metric: {e:?}");
-                                            }
+                                            error!("Failed to increment timeout metric: {e:?}");
                                         }
                                     }
-                                    debug!(
-                                        "Runtime done for request_id: {:?} with status: {:?}",
-                                        request_id, status
-                                    );
-                                    logs_agent.flush();
-                                    dogstats_client.flush();
+                                }
+                                debug!(
+                                    "Runtime done for request_id: {:?} with status: {:?}",
+                                    request_id, status
+                                );
+                                logs_agent.flush();
+                                dogstats_client.flush();
+                                break;
+                            }
+                            TelemetryRecord::PlatformReport {
+                                request_id,
+                                status,
+                                metrics,
+                                ..
+                            } => {
+                                debug!(
+                                    "Platform report for request_id: {:?} with status: {:?}",
+                                    request_id, status
+                                );
+                                lambda_enhanced_metrics.set_report_log_metrics(&metrics);
+                                lambda_enhanced_metrics.set_estimated_cost_metric(
+                                    metrics.billed_duration_ms,
+                                    metrics.memory_size_mb,
+                                );
+                                if let Some(invocation_context) =
+                                    invocation_context_buffer.remove(&request_id)
+                                {
+                                    if invocation_context.runtime_duration_ms > 0.0 {
+                                        let post_runtime_duration_ms = metrics.duration_ms
+                                            - invocation_context.runtime_duration_ms;
+                                        lambda_enhanced_metrics.set_post_runtime_duration_metric(
+                                            post_runtime_duration_ms,
+                                        );
+                                    } else {
+                                        debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
+                                    }
+                                }
+
+                                if shutdown {
                                     break;
                                 }
-                                TelemetryRecord::PlatformReport {
-                                    request_id,
-                                    status,
-                                    metrics,
-                                    ..
-                                } => {
-                                    debug!(
-                                        "Platform report for request_id: {:?} with status: {:?}",
-                                        request_id, status
-                                    );
-                                    lambda_enhanced_metrics.set_report_log_metrics(&metrics);
-                                    lambda_enhanced_metrics.set_estimated_cost_metric(
-                                        metrics.billed_duration_ms,
-                                        metrics.memory_size_mb,
-                                    );
-                                    if let Some(invocation_context) =
-                                        invocation_context_buffer.remove(&request_id)
-                                    {
-                                        if invocation_context.runtime_duration_ms > 0.0 {
-                                            let post_runtime_duration_ms = metrics.duration_ms
-                                                - invocation_context.runtime_duration_ms;
-                                            lambda_enhanced_metrics
-                                                .set_post_runtime_duration_metric(
-                                                    post_runtime_duration_ms,
-                                                );
-                                        } else {
-                                            debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
-                                        }
-                                    }
-
-                                    if shutdown {
-                                        break;
-                                    }
-                                }
-                                _ => {
-                                    debug!("Unforwarded Telemetry event: {:?}", event);
-                                }
                             }
-                        }
+                            _ => {
+                                debug!("Unforwarded Telemetry event: {:?}", event);
+                            }
+                        },
                     }
                 } else {
                     error!("could not get the event");
