@@ -183,7 +183,7 @@ async fn main() -> Result<()> {
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    let config = match resolve_secrets(env_config) {
+    let config = match resolve_secrets(env_config).await {
         Ok(c) => Arc::new(c),
         Err(e) => {
             panic!("Error resolving key: {e}");
@@ -205,11 +205,15 @@ async fn main() -> Result<()> {
     ));
 
     let mut event_bus = EventBus::run();
-    let logs_agent = LogsAgent::run(
+    let logs_agent = LogsAgent::new(
         Arc::clone(&tags_provider),
         Arc::clone(&config),
         event_bus.get_sender_copy(),
     );
+    let logs_agent_channel = logs_agent.get_sender_copy();
+    tokio::spawn(async move {
+        logs_agent.spin().await;
+    });
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -239,7 +243,7 @@ async fn main() -> Result<()> {
     let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
     let telemetry_listener = TelemetryListener::new(
         &telemetry_listener_config,
-        event_bus.get_sender_copy(),
+        logs_agent_channel,
         telemetry_listener_cancel_token.clone(),
     )
     .await
@@ -327,7 +331,7 @@ async fn main() -> Result<()> {
                                     request_id, status
                                 );
                                 logs_agent.flush();
-                                dogstats_client.flush();
+                                dogstats_client.flush().await;
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -357,7 +361,6 @@ async fn main() -> Result<()> {
         }
 
         if shutdown {
-            tokio::join!(logs_agent.shutdown());
             dogstats_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             return Ok(());

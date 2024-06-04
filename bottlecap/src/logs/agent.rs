@@ -15,45 +15,40 @@ pub struct LogsAgent {
     dd_api: datadog::Api,
     aggregator: Arc<Mutex<Aggregator>>,
     tx: Sender<Vec<TelemetryEvent>>,
-    join_handle: std::thread::JoinHandle<()>,
+    rx: mpsc::Receiver<Vec<TelemetryEvent>>,
+    processor: LogsProcessor,
 }
 
 impl LogsAgent {
     #[must_use]
-    pub fn run(
+    pub fn new(
         tags_provider: Arc<tags::provider::Provider>,
         datadog_config: Arc<config::Config>,
         event_bus: Sender<Event>,
     ) -> LogsAgent {
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
-        let mut processor = LogsProcessor::new(
+        let processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
             tags_provider,
             event_bus,
             LAMBDA_RUNTIME_SLUG.to_string(),
         );
 
-        let cloned_aggregator = aggregator.clone();
-
-        let (tx, rx) = mpsc::channel::<Vec<TelemetryEvent>>();
-        let join_handle = thread::spawn(move || loop {
-            let received = rx.recv().await;
-            // TODO(duncanista): we might need to create a Event::Shutdown
-            // to signal shutdown and make it easier to handle any floating events
-            let Ok(events) = received else {
-                debug!("Failed to received event in Logs Agent");
-                break;
-            };
-
-            processor.process(events, &cloned_aggregator);
-        });
+        let (tx, rx) = mpsc::channel::<Vec<TelemetryEvent>>(1000);
 
         let dd_api = datadog::Api::new(datadog_config.api_key.clone(), datadog_config.site.clone());
         LogsAgent {
             dd_api,
             aggregator,
             tx,
-            join_handle,
+            rx,
+            processor,
+        }
+    }
+
+    pub async fn spin(&mut self) {
+        while let Some(events) = self.rx.recv().await {
+            self.processor.process(events, &self.aggregator).await;
         }
     }
 
@@ -66,11 +61,11 @@ impl LogsAgent {
         LogsAgent::flush_internal(&self.aggregator, &self.dd_api).await;
     }
 
-    fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
+    async fn flush_internal(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
         let mut guard = aggregator.lock().expect("lock poisoned");
         let logs = guard.get_batch();
         drop(guard);
-        dd_api.send(&logs).expect("Failed to send logs to Datadog");
+        dd_api.send(logs).await.expect("Failed to send logs to Datadog");
     }
 
     async fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
@@ -90,17 +85,6 @@ impl LogsAgent {
         debug!("Shutting down LogsAgent");
         // Dropping this sender to help close the thread
         drop(self.tx);
-        match self.join_handle.join() {
-            Ok(()) => {
-                debug!("LogsAgent Message Receiver thread has been shutdown");
-            }
-            Err(e) => {
-                debug!(
-                    "Error shutting down the LogsAgent Message Receiver thread: {:?}",
-                    e
-                );
-            }
-        }
         LogsAgent::flush_shutdown(&self.aggregator, &self.dd_api).await;
     }
 }
