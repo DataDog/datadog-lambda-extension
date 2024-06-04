@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:experimental
 
 FROM public.ecr.aws/lambda/provided:al2 as bottlecap-builder
-RUN yum install -y curl gcc gcc-c++ make unzip
+RUN yum install -y curl gcc gcc-c++ make unzip openssl openssl-devel
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
 RUN chmod +x /install-protoc.sh && /install-protoc.sh
@@ -15,15 +15,13 @@ RUN cp /tmp/dd/bottlecap/target/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
 # zip the extension
 FROM ubuntu:latest as compresser
-ARG CMD_PATH
 ARG EXTENSION_NAME_AND_ARCH
 ARG DATADOG_WRAPPER=datadog_wrapper
 
 RUN apt-get update
 RUN apt-get install -y zip binutils
 RUN echo $EXTENSION_NAME_AND_ARCH
-COPY ./.layers/$EXTENSION_NAME_AND_ARCH/extensions/datadog-agent /datadog-agent-go
-RUN strip /datadog-agent-go # just in case
+COPY --from=public.ecr.aws/datadog/lambda-extension:57 /opt/extensions/datadog-agent  /datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 

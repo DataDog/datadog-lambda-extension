@@ -1,4 +1,3 @@
-use crate::events;
 use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
@@ -16,21 +15,61 @@ pub struct HttpRequestParser {
 
 const CR: u8 = b'\r';
 const LR: u8 = b'\n';
+/// It is guaranteed that the headers will be less than 256 bytes.
+const HEADERS_BUFFER_SIZE: usize = 256;
 
 impl HttpRequestParser {
-    /// Create a `HttpRequestParser` from passed `buf`
+    /// Create a `HttpRequestParser` from passed `TcpStream`
     ///
     /// # Errors
     ///
-    /// Function will fail if parsing of headers or body in `buf` fail.
-    pub fn from_buf(buf: &[u8]) -> Result<HttpRequestParser, String> {
+    /// Function will error if the stream cannot be read from.
+    ///
+    /// It will also error if the headers cannot be parsed.
+    ///
+    /// Or if the body cannot be parsed.
+    pub async fn from_stream(stream: &mut TcpStream) -> Result<HttpRequestParser, String> {
         let mut parser = HttpRequestParser {
             headers: HashMap::new(),
             body: String::new(),
         };
 
-        let body_start_index = parser.parse_headers(buf)?;
-        parser.parse_body(buf, body_start_index)?;
+        let mut headers_buf = [0u8; HEADERS_BUFFER_SIZE];
+        loop {
+            match stream.read(&mut headers_buf).await {
+                Ok(_) => {}
+                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    continue;
+                }
+                Err(e) => {
+                    error!("Error reading from stream: {}", e);
+                }
+            }
+
+            let _ = parser.parse_headers(&headers_buf);
+            if parser.headers.contains_key("content-length") {
+                break;
+            }
+        }
+
+        let body_start_index = parser.parse_headers(&headers_buf)?;
+        let content_length = parser
+            .headers
+            .get("content-length")
+            .expect("infallible")
+            .parse::<usize>().map_err(|e| e.to_string())?;
+        let body_bytes_read = headers_buf.len() - body_start_index;
+        let missing_body_length = content_length - body_bytes_read;
+        let mut body_buf = vec![0u8; missing_body_length];
+
+        stream.read_exact(&mut body_buf).await.map_err(|e| e.to_string())?;
+
+        let total_bytes_read = headers_buf.len() + missing_body_length;
+        let mut buf = vec![0u8; total_bytes_read];
+        buf[..headers_buf.len()].copy_from_slice(&headers_buf);
+        buf[headers_buf.len()..].copy_from_slice(&body_buf);
+
+        parser.parse_body(&buf, body_start_index)?;
 
         Ok(parser)
     }
@@ -111,7 +150,7 @@ impl HttpRequestParser {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct TelemetryListener {
-    event_bus: Sender<events::Event>,
+    event_bus: Sender<Vec<TelemetryEvent>>,
     cancel_token: tokio_util::sync::CancellationToken,
     listener: TcpListener,
 }
@@ -129,7 +168,7 @@ impl TelemetryListener {
     /// Function will error if the passed address cannot be bound.
     pub async fn new(
         config: &TelemetryListenerConfig,
-        event_bus: Sender<events::Event>,
+        event_bus: Sender<Vec<TelemetryEvent>>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> Result<TelemetryListener, String> {
         let addr = format!("{}:{}", &config.host, &config.port);
@@ -147,14 +186,11 @@ impl TelemetryListener {
             match self.listener.accept().await {
                 Ok((mut stream, _)) => {
                     debug!("Received a Telemetry API connection");
-
                     let cloned_event_bus = self.event_bus.clone();
                     let cancel_token_clone = self.cancel_token.clone();
                     tokio::spawn(async move {
-                        let buf = vec![0; 256 * 1024];
                         let r = Self::handle_stream(
                             &mut stream,
-                            buf,
                             cloned_event_bus,
                             cancel_token_clone,
                         )
@@ -175,8 +211,7 @@ impl TelemetryListener {
 
     async fn handle_stream(
         stream: &mut TcpStream,
-        mut buf: Vec<u8>,
-        event_bus: Sender<events::Event>,
+        event_bus: Sender<Vec<TelemetryEvent>>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> Result<(), String> {
         // Read into buffer
@@ -185,15 +220,10 @@ impl TelemetryListener {
                 _ = cancel_token.cancelled() => {
                     return Ok(());
                 }
-                _ = stream.read(&mut buf) => {
-                    let p = HttpRequestParser::from_buf(&buf)?;
+                _ = stream.readable() => {
+                    let p = HttpRequestParser::from_stream(stream).await.map_err(|e| e.to_string())?;
                     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| e.to_string())?;
-                    for event in telemetry_events {
-                        error!("ASTUYVE sending telemetry event to main thread: {:?}", event);
-                        if let Err(e) = event_bus.send(events::Event::Telemetry(event)).await {
-                            error!("Error sending Telemetry event to the event bus: {}", e);
-                        }
-                    }
+                    event_bus.send(telemetry_events).await.map_err(|e| e.to_string())?;
                 }
             }
         }
@@ -218,6 +248,8 @@ impl TelemetryListener {
 
 #[cfg(test)]
 mod tests {
+    use std::thread;
+
     use chrono::DateTime;
 
     use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
@@ -295,32 +327,31 @@ mod tests {
         assert_eq!(parser.body, "Hello, World!".to_string());
     }
 
-    struct MockTcpStream {
-        data: Vec<u8>,
-    }
+    fn get_stream(data: Vec<u8>) -> TcpStream {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
 
-    impl Read for MockTcpStream {
-        fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
-            let len = std::cmp::min(buf.len(), self.data.len());
-            buf.write_all(&self.data[..len])?;
-            self.data = self.data.split_off(len);
-            Ok(len)
-        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.write_all(&data).unwrap();
+            tx.send(()).unwrap(); // Signal that the request has been sent
+        });
+
+        let stream = TcpStream::connect(addr).unwrap();
+        rx.recv().unwrap(); // Wait for the signal from the spawned thread
+
+        stream
     }
 
     #[tokio::test]
     async fn test_handle_stream() {
-        let mut stream = MockTcpStream {
-            data: "POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string().into_bytes(),
-        };
+        let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
+
         let (tx, mut rx) = tokio::sync::mpsc::channel(3);
-        let buf = vec![0; 262_144];
-        let result = TelemetryListener::handle_stream(&mut stream, buf, tx).await;
-        let event = rx.recv().await.expect("No events received");
-        let telemetry_event = match event {
-            events::Event::Telemetry(te) => te,
-            _ => panic!("Expected Telemetry Event"),
-        };
+        let result = TelemetryListener::handle_stream(&stream, tx);
+        let events = rx.recv().expect("No events received");
+        let telemetry_event = events.get(0).expect("failed to get event");
 
         let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
         assert_eq!(telemetry_event.time, expected_time);
@@ -339,9 +370,7 @@ mod tests {
                 #[tokio::test]
                 #[should_panic]
                 async fn $name() {
-                    let mut stream = MockTcpStream {
-                        data: $value.to_string().into_bytes(),
-                    };
+                    let stream = get_stream($value.to_vec());
                     let (tx, _) = tokio::sync::mpsc::channel(4);
                     let buf = vec![0; 256 * 1024];
                     TelemetryListener::handle_stream(&mut stream, buf, tx).await.unwrap()
@@ -351,25 +380,27 @@ mod tests {
     }
 
     test_handle_stream_invalid_body! {
-        invalid_json: "POST /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!",
-        empty_json: "POST /path HTTP/1.1\r\nContent-Length: 2\r\nHeader1: Value1\r\n\r\n{}",
-        json_array_with_empty_json: "POST /path HTTP/1.1\r\nContent-Length: 4\r\nHeader1: Value1\r\n\r\n[{}]",
+        invalid_json: b"POST /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!",
+        empty_json: b"POST /path HTTP/1.1\r\nContent-Length: 2\r\nHeader1: Value1\r\n\r\n{}",
+        json_array_with_empty_json: b"POST /path HTTP/1.1\r\nContent-Length: 4\r\nHeader1: Value1\r\n\r\n[{}]",
 
     }
 
     #[test]
-    fn test_from_buf() {
-        let buf =
-            b"GET /path HTTP/1.1\r\nContent-Length: 13\r\nHeader1: Value1\r\n\r\nHello, World!";
-        let result = HttpRequestParser::from_buf(buf);
+    fn test_from_stream() {
+        let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
+
+        let result = HttpRequestParser::from_stream(&stream);
+
         assert!(result.is_ok());
         let parser = result.unwrap();
         assert_eq!(parser.headers.len(), 2);
         assert_eq!(
             parser.headers.get("content-length"),
-            Some(&"13".to_string())
+            Some(&"335".to_string())
         );
         assert_eq!(parser.headers.get("header1"), Some(&"Value1".to_string()));
-        assert_eq!(parser.body, "Hello, World!".to_string());
+
+        assert_eq!(parser.body, "[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_string());
     }
 }

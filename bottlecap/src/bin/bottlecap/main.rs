@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use decrypt::resolve_secrets;
 use lifecycle::flush_control::FlushControl;
 use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
@@ -44,6 +45,7 @@ use std::io::Result;
 use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
+use bottlecap::secrets::decrypt;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -141,12 +143,9 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 #[tokio::main]
 async fn main() -> Result<()> {
     // First load the configuration
-    let lambda_directory = match env::var("LAMBDA_TASK_ROOT") {
-        Ok(val) => val,
-        Err(_) => "/var/task".to_string(),
-    };
-    let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => Arc::new(config),
+    let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let env_config = match config::get_config(Path::new(&lambda_directory)) {
+        Ok(config) => config,
         Err(e) => {
             // NOTE we must print here as the logging subsystem is not enabled yet.
             println!("Error loading configuration: {e:?}");
@@ -158,13 +157,13 @@ async fn main() -> Result<()> {
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
-        .with_max_level(config.log_level.as_level_filter())
+        .with_max_level(env_config.log_level.as_level_filter())
         .init()
         .expect("failed to set up log bridge");
 
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_new(config.log_level)
+            EnvFilter::try_new(env_config.log_level)
                 .expect("could not parse log level in configuration"),
         )
         .with_level(true)
@@ -184,6 +183,12 @@ async fn main() -> Result<()> {
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let config = match resolve_secrets(env_config) {
+        Ok(c) => Arc::new(c),
+        Err(e) => {
+            panic!("Error resolving key: {e}");
+        }
+    };
 
     let region = env::var("AWS_REGION").expect("could not read AWS_REGION");
     let function_name =
@@ -198,8 +203,13 @@ async fn main() -> Result<()> {
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
-    let logs_agent = LogsAgent::run(Arc::clone(&tags_provider), Arc::clone(&config));
+
     let mut event_bus = EventBus::run();
+    let logs_agent = LogsAgent::run(
+        Arc::clone(&tags_provider),
+        Arc::clone(&config),
+        event_bus.get_sender_copy(),
+    );
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -213,7 +223,12 @@ async fn main() -> Result<()> {
     };
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
     let dogstats_cancel_token = tokio_util::sync::CancellationToken::new();
-    let mut dogstats_client = DogStatsD::new(&dogstatsd_config, event_bus.get_sender_copy(), dogstats_cancel_token.clone()).await;
+    let mut dogstats_client = DogStatsD::new(
+        &dogstatsd_config,
+        event_bus.get_sender_copy(),
+        dogstats_cancel_token.clone(),
+    )
+    .await;
     tokio::spawn(async move {
         dogstats_client.spin().await;
     });
@@ -232,6 +247,7 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         telemetry_listener.spin().await;
     });
+
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
         .subscribe()
@@ -281,61 +297,58 @@ async fn main() -> Result<()> {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
                         }
-                        Event::Telemetry(event) => {
-                            logs_agent.send_event(event.clone());
-                            match event.record {
-                                TelemetryRecord::PlatformInitReport {
-                                    initialization_type,
-                                    phase,
-                                    metrics,
-                                } => {
-                                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                }
-                                TelemetryRecord::PlatformRuntimeDone {
-                                    request_id, status, ..
-                                } => {
-                                    if status != Status::Success {
+                        Event::Telemetry(event) => match event.record {
+                            TelemetryRecord::PlatformInitReport {
+                                initialization_type,
+                                phase,
+                                metrics,
+                            } => {
+                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                            }
+                            TelemetryRecord::PlatformRuntimeDone {
+                                request_id, status, ..
+                            } => {
+                                if status != Status::Success {
+                                    if let Err(e) =
+                                        lambda_enhanced_metrics.increment_errors_metric()
+                                    {
+                                        error!("Failed to increment error metric: {e:?}");
+                                    }
+                                    if status == Status::Timeout {
                                         if let Err(e) =
-                                            lambda_enhanced_metrics.increment_errors_metric()
+                                            lambda_enhanced_metrics.increment_timeout_metric()
                                         {
-                                            error!("Failed to increment error metric: {e:?}");
-                                        }
-                                        if status == Status::Timeout {
-                                            if let Err(e) =
-                                                lambda_enhanced_metrics.increment_timeout_metric()
-                                            {
-                                                error!("Failed to increment timeout metric: {e:?}");
-                                            }
+                                            error!("Failed to increment timeout metric: {e:?}");
                                         }
                                     }
-                                    debug!(
-                                        "Runtime done for request_id: {:?} with status: {:?}",
-                                        request_id, status
-                                    );
-                                    logs_agent.flush().await;
-                                    dogstats_client.flush().await;
+                                }
+                                debug!(
+                                    "Runtime done for request_id: {:?} with status: {:?}",
+                                    request_id, status
+                                );
+                                logs_agent.flush();
+                                dogstats_client.flush();
+                                break;
+                            }
+                            TelemetryRecord::PlatformReport {
+                                request_id,
+                                status,
+                                metrics,
+                                ..
+                            } => {
+                                debug!(
+                                    "Platform report for request_id: {:?} with status: {:?}",
+                                    request_id, status
+                                );
+                                lambda_enhanced_metrics.set_report_log_metrics(&metrics);
+                                if shutdown {
                                     break;
                                 }
-                                TelemetryRecord::PlatformReport {
-                                    request_id,
-                                    status,
-                                    metrics,
-                                    ..
-                                } => {
-                                    debug!(
-                                        "Platform report for request_id: {:?} with status: {:?}",
-                                        request_id, status
-                                    );
-                                    lambda_enhanced_metrics.set_report_log_metrics(&metrics);
-                                    if shutdown {
-                                        break;
-                                    }
-                                }
-                                _ => {
-                                    debug!("Unforwarded Telemetry event: {:?}", event);
-                                }
                             }
-                        }
+                            _ => {
+                                debug!("Unforwarded Telemetry event: {:?}", event);
+                            }
+                        },
                     }
                 } else {
                     error!("could not get the event");

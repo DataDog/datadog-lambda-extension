@@ -5,32 +5,34 @@ edition = "2021"
 publish = false
 
 [dependencies]
-chrono = { version = "0.4.38", features = ["serde"] }
-datadog-protos = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
-ddsketch-agent = { git = "https://github.com/DataDog/saluki/", version = "0.1.0", default-features = false }
-figment = { version = "0.10.15", features = ["yaml", "env"] }
+chrono = { version = "0.4.38", features = ["serde", "std", "now"], default-features = false}
+datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
+ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
+figment = { version = "0.10.15", default-features = false, features = ["yaml", "env"] }
 fnv = { version = "1.0.7", default-features = false }
 hashbrown = { version = "0.14.3", default-features = false, features = ["inline-more"] }
-log = { version = "0.4.21", default-features = false, features = [] }
+log = { version = "0.4.21", default-features = false }
 protobuf = { version = "3.4.0", default-features = false }
 regex = { version = "1.10.4", default-features = false }
 reqwest = { version = "0.12.4", features = ["json", "http2", "rustls-tls"], default-features = false }
-serde = { version = "1.0.197", features = ["derive"], default-features = false }
-serde_json = { version = "1.0.116", features = ["alloc"], default-features = false }
+serde = { version = "1.0.197", default-features = false, features = ["derive"] }
+serde_json = { version = "1.0.116", default-features = false, features = ["alloc"] }
 thiserror = { version = "1.0.58", default-features = false }
 tokio = { version = "1.37.0", features = ["full"] }
 tokio-util = "0.7.11"
-tracing = {version = "0.1.40", default-features = false }
+tracing = { version = "0.1.40", default-features = false }
 tracing-core = { version = "0.1.32", default-features = false }
 tracing-log = { version = "0.2.0", default-features = false, features = ["std", "log-tracer"] }
 tracing-subscriber = { version = "0.3.18", default-features = false, features = ["fmt", "env-filter"] }
 ustr = { version = "1.0.0", default-features = false }
-
+hmac = { version = "0.12.1", default-features = false }
+sha2 = { version = "0.10.8", default-features = false }
+hex = { version = "0.4.3", default-features = false, features = ["std"] }
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.5"
 
 [dev-dependencies]
-figment = { version = "0.10.15", features = ["yaml", "env", "test"] }
+figment = { version = "0.10.15", default-features = false, features = ["yaml", "env", "test"] }
 proptest = "1.4.0"
 
 [[bin]]
