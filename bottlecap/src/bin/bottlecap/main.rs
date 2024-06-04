@@ -46,9 +46,9 @@ use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
 
 use bottlecap::secrets::decrypt;
+use bottlecap::secrets::decrypt::resolve_all_secrets;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
-use bottlecap::secrets::decrypt::resolve_all_secrets;
 
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
@@ -236,10 +236,10 @@ fn main() -> Result<()> {
         let evt = next_event(&r.extension_id);
         match evt {
             Ok(NextEventResponse::Invoke {
-                   request_id,
-                   deadline_ms,
-                   invoked_function_arn,
-               }) => {
+                request_id,
+                deadline_ms,
+                invoked_function_arn,
+            }) => {
                 info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
@@ -249,9 +249,9 @@ fn main() -> Result<()> {
                 }
             }
             Ok(NextEventResponse::Shutdown {
-                   shutdown_reason,
-                   deadline_ms,
-               }) => {
+                shutdown_reason,
+                deadline_ms,
+            }) => {
                 println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
                 shutdown = true;
             }

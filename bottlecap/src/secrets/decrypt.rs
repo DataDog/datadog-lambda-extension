@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use crate::config::Config;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
@@ -7,6 +6,7 @@ use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::env;
 use std::io::{Error, Result};
 use std::time::Instant;
@@ -22,25 +22,32 @@ pub fn resolve_all_secrets(config: Config) -> Result<Config> {
         aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
         aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
             .expect("AWS_SECRET_ACCESS_KEY not set"),
-        aws_session_token: env::var("AWS_SESSION_TOKEN")
-            .expect("AWS_SESSION_TOKEN is not set!"),
+        aws_session_token: env::var("AWS_SESSION_TOKEN").expect("AWS_SESSION_TOKEN is not set!"),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
             .expect("AWS_LAMBDA_FUNCTION_NAME is not set!"),
     };
-    let decrypted_arn = config.secret_arn_env_map.iter().map(|(k, v)| {
-        let decrypted = decrypt_aws_sm(client, v.1.to_string(), aws_config).unwrap();
-        (k.to_string(), (v.1.clone(), decrypted))
-    }).collect::<HashMap<String, (String, String)>>();
-    let decrypted_kms = config.kms_env_map.iter().map(|(k, v)| {
-        let decrypted = decrypt_aws_kms(client, v.1.to_string(), aws_config).unwrap();
-        (k.to_string(), (v.1.clone(), decrypted))
-    }).collect::<HashMap<String, (String, String)>>();
+    let decrypted_arn = config
+        .secret_arn_env_map
+        .iter()
+        .map(|(k, v)| {
+            let decrypted = decrypt_aws_sm(client, v.1.to_string(), aws_config).unwrap();
+            (k.to_string(), (v.1.clone(), decrypted))
+        })
+        .collect::<HashMap<String, (String, String)>>();
+    let decrypted_kms = config
+        .kms_env_map
+        .iter()
+        .map(|(k, v)| {
+            let decrypted = decrypt_aws_kms(client, v.1.to_string(), aws_config).unwrap();
+            (k.to_string(), (v.1.clone(), decrypted))
+        })
+        .collect::<HashMap<String, (String, String)>>();
 
-    return Ok(Config {
+    Ok(Config {
         secret_arn_env_map: decrypted_arn,
         kms_env_map: decrypted_kms,
         ..config
-    });
+    })
 }
 
 pub fn resolve_api_secret(config: Config) -> Result<Config> {
@@ -48,15 +55,17 @@ pub fn resolve_api_secret(config: Config) -> Result<Config> {
         debug!("DD_API_KEY found, not trying to resolve secrets");
         Ok(config)
     } else {
-        let api_key_secret_arn = match config.secret_arn_env_map.get("API_KEY_SECRET_ARN") {
-            Some(secret_arn) => Some(secret_arn.1.to_string()),
-            None => None,
-        };
-        let kms_api_key = if config.kms_api_key.is_some() { config.kms_api_key.clone() } else {
-            match config.kms_env_map.get("API_KEY_KMS_ENCRYPTED") {
-                Some(kms_key) => Some(kms_key.1.to_string()),
-                None => None
-            }
+        let api_key_secret_arn = config
+            .secret_arn_env_map
+            .get("API_KEY_SECRET_ARN")
+            .map(|secret_arn| secret_arn.1.to_string());
+        let kms_api_key = if config.kms_api_key.is_some() {
+            config.kms_api_key.clone()
+        } else {
+            config
+                .kms_env_map
+                .get("API_KEY_KMS_ENCRYPTED")
+                .map(|kms_key| kms_key.1.to_string())
         };
 
         if api_key_secret_arn.is_some() || kms_api_key.is_some() {
@@ -69,7 +78,8 @@ pub fn resolve_api_secret(config: Config) -> Result<Config> {
 
             let aws_config = &AwsConfig {
                 region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
-                aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
+                aws_access_key_id: env::var("AWS_ACCESS_KEY_ID")
+                    .expect("AWS_ACCESS_KEY_ID not set"),
                 aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
                     .expect("AWS_SECRET_ACCESS_KEY not set"),
                 aws_session_token: env::var("AWS_SESSION_TOKEN")
@@ -123,7 +133,7 @@ fn decrypt_aws_kms(client: &Client, kms_key: String, aws_config: &AwsConfig) -> 
     );
 
     let headers = build_get_secret_signed_headers(
-        &aws_config,
+        aws_config,
         RequestArgs {
             service: "kms".to_string(),
             body: json_body,
@@ -140,7 +150,7 @@ fn decrypt_aws_kms(client: &Client, kms_key: String, aws_config: &AwsConfig) -> 
                 .decode(secret_string_b64)
                 .expect("Failed to decode base64"),
         )
-            .expect("Failed to convert to string");
+        .expect("Failed to convert to string");
         Ok(secret_string)
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
@@ -151,7 +161,7 @@ fn decrypt_aws_sm(client: &Client, secret_arn: String, aws_config: &AwsConfig) -
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
     let headers = build_get_secret_signed_headers(
-        &aws_config,
+        aws_config,
         RequestArgs {
             service: "secretsmanager".to_string(),
             body: json_body,
