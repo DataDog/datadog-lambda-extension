@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::sync::mpsc::SyncSender;
+use tokio::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
 use tracing::error;
@@ -25,7 +25,7 @@ pub struct LambdaProcessor {
     // Current Invocation Context
     execution_context: ExecutionContext,
     // Main event bus
-    event_bus: SyncSender<Event>,
+    event_bus: Sender<Event>,
 }
 
 #[derive(Clone, Debug)]
@@ -43,7 +43,7 @@ impl LambdaProcessor {
     pub fn new(
         tags_provider: Arc<provider::Provider>,
         datadog_config: Arc<config::Config>,
-        event_bus: SyncSender<Event>,
+        event_bus: Sender<Event>,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
@@ -65,7 +65,7 @@ impl LambdaProcessor {
         }
     }
 
-    fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
+    async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
@@ -92,7 +92,7 @@ impl LambdaProcessor {
             },
             // TODO: check if we could do anything with the fields from `PlatformInitReport`
             TelemetryRecord::PlatformInitReport { .. } => {
-                if let Err(e) = self.event_bus.send(Event::Telemetry(event)) {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
                     error!("Failed to send PlatformInitReport to the main event bus: {}", e);
                 }
                 // We don't need to process any log for this event
@@ -116,7 +116,7 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
@@ -132,7 +132,7 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformReport to the main event bus: {}", e);
                 }
 
@@ -201,19 +201,19 @@ impl LambdaProcessor {
         }
     }
 
-    fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
-        match self.get_message(event) {
+    async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
+        match self.get_message(event).await {
             Ok(lambda_message) => self.get_intake_log(lambda_message),
             // TODO: Check what to do when we can't process the event
             Err(e) => Err(e),
         }
     }
 
-    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub async fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
         let mut to_send = Vec::<String>::new();
 
         for event in events {
-            if let Ok(mut log) = self.make_log(event) {
+            if let Ok(mut log) = self.make_log(event).await {
                 let should_send_log =
                     LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
@@ -262,8 +262,8 @@ mod tests {
     macro_rules! get_message_tests {
         ($($name:ident: $value:expr,)*) => {
             $(
-                #[test]
-                fn $name() {
+                #[tokio::test]
+                async fn $name() {
                     let (input, expected): (&TelemetryEvent, Message) = $value;
 
                     let config = Arc::new(config::Config {
@@ -277,7 +277,7 @@ mod tests {
                         LAMBDA_RUNTIME_SLUG.to_string(),
                         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
 
-                    let (tx, _) = std::sync::mpsc::sync_channel(2);
+                    let (tx, _) = tokio::sync::mpsc::channel(2);
 
                     let mut processor = LambdaProcessor::new(
                         tags_provider,
@@ -288,7 +288,7 @@ mod tests {
                         tx.clone(),
                     );
 
-                    let result = processor.get_message(input.clone()).unwrap();
+                    let result = processor.get_message(input.clone()).await.unwrap();
 
                     assert_eq!(result, expected);
                 }

@@ -1,5 +1,5 @@
-use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::{Sender, self};
 use std::thread;
 
 use tracing::debug;
@@ -23,7 +23,7 @@ impl LogsAgent {
     pub fn run(
         tags_provider: Arc<tags::provider::Provider>,
         datadog_config: Arc<config::Config>,
-        event_bus: SyncSender<Event>,
+        event_bus: Sender<Event>,
     ) -> LogsAgent {
         let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
         let mut processor = LogsProcessor::new(
@@ -37,7 +37,7 @@ impl LogsAgent {
 
         let (tx, rx) = mpsc::channel::<Vec<TelemetryEvent>>();
         let join_handle = thread::spawn(move || loop {
-            let received = rx.recv();
+            let received = rx.recv().await;
             // TODO(duncanista): we might need to create a Event::Shutdown
             // to signal shutdown and make it easier to handle any floating events
             let Ok(events) = received else {
