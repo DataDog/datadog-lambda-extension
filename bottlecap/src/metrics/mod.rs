@@ -5,3 +5,4 @@ pub mod dogstatsd;
 pub mod enhanced;
 pub mod errors;
 pub mod metric;
+pub mod flusher;

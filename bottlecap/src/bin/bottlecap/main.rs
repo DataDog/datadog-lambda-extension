@@ -22,10 +22,12 @@ use bottlecap::{
     events::Event,
     lifecycle, logger,
     logs::agent::LogsAgent,
+    logs::flusher::Flusher as LogsFlusher,
     metrics::{
         aggregator as metrics_aggregator, constants,
         dogstatsd::{DogStatsD, DogStatsDConfig},
         enhanced::lambda::Lambda as enhanced_metrics,
+        flusher::Flusher as MetricsFlusher,
     },
     tags::{lambda, provider},
     telemetry::{
@@ -205,12 +207,13 @@ async fn main() -> Result<()> {
     ));
 
     let mut event_bus = EventBus::run();
-    let logs_agent = LogsAgent::new(
+    let mut logs_agent = LogsAgent::new(
         Arc::clone(&tags_provider),
         Arc::clone(&config),
         event_bus.get_sender_copy(),
     );
     let logs_agent_channel = logs_agent.get_sender_copy();
+    let logs_flusher = LogsFlusher::new(Arc::clone(&config), Arc::clone(&logs_agent.aggregator));
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
@@ -227,12 +230,15 @@ async fn main() -> Result<()> {
     };
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
     let dogstats_cancel_token = tokio_util::sync::CancellationToken::new();
-    let mut dogstats_client = DogStatsD::new(
+    let dogstats_client = DogStatsD::new(
         &dogstatsd_config,
         event_bus.get_sender_copy(),
         dogstats_cancel_token.clone(),
     )
     .await;
+
+    let mut statsd_flusher = MetricsFlusher::new(Arc::clone(&config), Arc::clone(&dogstats_client.aggregator));
+
     tokio::spawn(async move {
         dogstats_client.spin().await;
     });
@@ -330,8 +336,8 @@ async fn main() -> Result<()> {
                                     "Runtime done for request_id: {:?} with status: {:?}",
                                     request_id, status
                                 );
-                                logs_agent.flush();
-                                dogstats_client.flush().await;
+                                logs_flusher.flush().await;
+                                statsd_flusher.flush().await;
                                 break;
                             }
                             TelemetryRecord::PlatformReport {

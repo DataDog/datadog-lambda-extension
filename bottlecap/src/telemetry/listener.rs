@@ -189,17 +189,13 @@ impl TelemetryListener {
                     let cloned_event_bus = self.event_bus.clone();
                     let cancel_token_clone = self.cancel_token.clone();
                     tokio::spawn(async move {
-                        let r = Self::handle_stream(
+                        let _ = Self::handle_stream(
                             &mut stream,
                             cloned_event_bus,
                             cancel_token_clone,
                         )
                         .await;
-                        if let Err(e) = Self::acknowledge_request(stream, r).await {
-                            error!("Error acknowledging Telemetry request: {:?}", e);
-                        } else {
-                            debug!("ASTUYVE Telemetry request acknowledged");
-                        }
+                        
                     });
                 }
                 Err(e) => {
@@ -224,14 +220,18 @@ impl TelemetryListener {
                     let p = HttpRequestParser::from_stream(stream).await.map_err(|e| e.to_string())?;
                     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| e.to_string())?;
                     event_bus.send(telemetry_events).await.map_err(|e| e.to_string())?;
+                    if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
+                        error!("Error acknowledging Telemetry request: {:?}", e);
+                    } else {
+                        debug!("ASTUYVE Telemetry request acknowledged");
+                    }
                 }
             }
         }
     }
 
-    #[allow(clippy::unused_io_amount)]
     async fn acknowledge_request(
-        mut stream: TcpStream,
+        stream: &mut TcpStream,
         request: Result<(), String>,
     ) -> Result<(), String> {
         match request {
