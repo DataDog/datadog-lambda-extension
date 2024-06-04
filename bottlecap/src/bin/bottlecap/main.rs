@@ -212,8 +212,11 @@ async fn main() -> Result<()> {
         tags_provider: Arc::clone(&tags_provider),
     };
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
-    let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy()).await;
-
+    let dogstats_cancel_token = tokio_util::sync::CancellationToken::new();
+    let mut dogstats_client = DogStatsD::new(&dogstatsd_config, event_bus.get_sender_copy(), dogstats_cancel_token.clone()).await;
+    tokio::spawn(async move {
+        dogstats_client.spin().await;
+    });
     let telemetry_listener_config = TelemetryListenerConfig {
         host: EXTENSION_HOST.to_string(),
         port: TELEMETRY_PORT,
@@ -341,7 +344,8 @@ async fn main() -> Result<()> {
         }
 
         if shutdown {
-            tokio::join!(logs_agent.shutdown(), dogstats_client.shutdown());
+            tokio::join!(logs_agent.shutdown());
+            dogstats_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             return Ok(());
         }

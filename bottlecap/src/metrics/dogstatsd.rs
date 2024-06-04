@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
     cancel_token: tokio_util::sync::CancellationToken,
-    serve_handle: tokio::task::JoinHandle<()>,
     aggregator: Arc<Mutex<Aggregator<1024>>>,
+    socket: tokio::net::UdpSocket,
+    event_bus: Sender<events::Event>,
     dd_api: datadog::DdApi,
 }
 
@@ -28,43 +29,29 @@ pub struct DogStatsDConfig {
 
 impl DogStatsD {
     #[must_use]
-    pub async fn run(config: &DogStatsDConfig, event_bus: Sender<events::Event>) -> DogStatsD {
-        let serializer_aggr = Arc::clone(&config.aggregator);
-        let cancel_token = tokio_util::sync::CancellationToken::new();
-        let serve_handle = DogStatsD::run_server(
-            &config.host,
-            config.port,
-            event_bus,
-            serializer_aggr,
-            cancel_token.clone(),
-        )
-        .await;
+    pub async fn new(config: &DogStatsDConfig, event_bus: Sender<events::Event>, cancel_token: tokio_util::sync::CancellationToken) -> DogStatsD {
         let dd_api = datadog::DdApi::new(
             config.datadog_config.api_key.clone(),
             config.datadog_config.site.clone(),
         );
+        let addr = format!("{}:{}", config.host, config.port);
+        // TODO (UDS socket)
+        let socket = tokio::net::UdpSocket::bind(addr).await.expect("couldn't bind to address");
         DogStatsD {
-            serve_handle,
+            socket,
             cancel_token,
+            event_bus: event_bus.clone(),
             aggregator: config.aggregator.clone(),
             dd_api,
         }
     }
 
-    async fn run_server(
-        host: &str,
-        port: u16,
-        event_bus: Sender<events::Event>,
-        aggregator: Arc<Mutex<Aggregator<{ constants::CONTEXTS }>>>,
-        cancel_token: tokio_util::sync::CancellationToken,
-    ) -> tokio::task::JoinHandle<()> {
-        let addr = format!("{host}:{port}");
+    pub async fn spin(self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let socket = std::net::UdpSocket::bind(addr).expect("couldn't bind to address");
             loop {
                 // TODO(astuyve) this should be dynamic
                 let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
-                let (amt, src) = socket.recv_from(&mut buf).expect("didn't receive data");
+                let (amt, src) = self.socket.recv_from(&mut buf).await.expect("didn't receive data");
                 let buf = &mut buf[..amt];
                 let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
                 info!(
@@ -93,13 +80,13 @@ impl DogStatsD {
                     first_value,
                     parsed_metric.tags(),
                 );
-                let _ = aggregator
+                let _ = self.aggregator
                     .lock()
                     .expect("lock poisoned")
                     .insert(&parsed_metric);
                 // Don't publish until after validation and adding metric_event to buff
-                let _ = event_bus.send(Event::Metric(metric_event)); // todo check the result
-                if cancel_token.is_cancelled() {
+                let _ = self.event_bus.send(Event::Metric(metric_event)); // todo check the result
+                if self.cancel_token.is_cancelled() {
                     error!("ASTUYVE shutting down DogStatsD server");
                     break;
                 }
@@ -128,18 +115,5 @@ impl DogStatsD {
                 .expect("failed to ship metrics to datadog");
         }
         locked_aggr.clear();
-    }
-
-    pub async fn shutdown(mut self) {
-        self.cancel_token.cancel();
-        self.flush().await;
-        match self.serve_handle.await {
-            Ok(()) => {
-                info!("DogStatsD thread has been shutdown");
-            }
-            Err(e) => {
-                error!("Error shutting down the DogStatsD thread: {:?}", e);
-            }
-        }
     }
 }
