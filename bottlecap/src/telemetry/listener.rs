@@ -208,25 +208,18 @@ impl TelemetryListener {
     async fn handle_stream(
         stream: &mut TcpStream,
         event_bus: Sender<Vec<TelemetryEvent>>,
-        cancel_token: tokio_util::sync::CancellationToken,
+        _cancel_token: tokio_util::sync::CancellationToken,
     ) -> Result<(), String> {
         // Read into buffer
-        loop {
-            tokio::select! {
-                _ = cancel_token.cancelled() => {
-                    return Ok(());
-                }
-                _ = stream.readable() => {
-                    let p = HttpRequestParser::from_stream(stream).await.map_err(|e| e.to_string())?;
-                    let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| e.to_string())?;
-                    event_bus.send(telemetry_events).await.map_err(|e| e.to_string())?;
-                    if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
-                        error!("Error acknowledging Telemetry request: {:?}", e);
-                    } else {
-                        debug!("ASTUYVE Telemetry request acknowledged");
-                    }
-                }
-            }
+        let p = HttpRequestParser::from_stream(stream).await.map_err(|e| e.to_string())?;
+        let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| e.to_string())?;
+        event_bus.send(telemetry_events).await.map_err(|e| e.to_string())?;
+        if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
+            error!("Error acknowledging Telemetry request: {:?}", e);
+            Err(e)
+        } else {
+            debug!("ASTUYVE Telemetry request acknowledged");
+            Ok(())
         }
     }
 
