@@ -59,6 +59,7 @@ impl DdApi {
         match resp {
             Ok(resp) => match resp.status() {
                 reqwest::StatusCode::OK => Ok(()),
+                reqwest::StatusCode::ACCEPTED => Ok(()),
                 _ => Err(ShipError::Failure {
                     status: resp.status().as_u16(),
                     body: resp.text().await.unwrap_or_default(),
@@ -98,6 +99,7 @@ impl DdApi {
         match resp {
             Ok(resp) => match resp.status() {
                 reqwest::StatusCode::OK => Ok(()),
+                reqwest::StatusCode::ACCEPTED => Ok(()),
                 _ => Err(ShipError::Failure {
                     status: resp.status().as_u16(),
                     body: resp.text().await.unwrap_or_default(),
