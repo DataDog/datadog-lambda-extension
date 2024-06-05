@@ -1,7 +1,6 @@
 use crate::telemetry::events::TelemetryEvent;
 
 use std::collections::HashMap;
-use std::error::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
@@ -11,6 +10,25 @@ use tracing::{debug, error};
 pub struct HttpRequestParser {
     headers: HashMap<String, String>,
     body: String,
+}
+
+#[derive(Debug)]
+pub enum TcpError {
+    Close(String),
+    Read(String),
+    Write(String),
+    Parse(String),
+}
+
+impl ToString for TcpError {
+    fn to_string(&self) -> String {
+        match self {
+            TcpError::Close(close) => close.clone(),
+            TcpError::Read(read) => read.clone(),
+            TcpError::Parse(parse) => parse.clone(),
+            TcpError::Write(write) => write.clone(),
+        }
+    }
 }
 
 const CR: u8 = b'\r';
@@ -28,7 +46,7 @@ impl HttpRequestParser {
     /// It will also error if the headers cannot be parsed.
     ///
     /// Or if the body cannot be parsed.
-    pub async fn from_stream(stream: &mut TcpStream) -> Result<HttpRequestParser, String> {
+    pub async fn from_stream(stream: &mut TcpStream) -> Result<HttpRequestParser, TcpError> {
         let mut parser = HttpRequestParser {
             headers: HashMap::new(),
             body: String::new(),
@@ -36,13 +54,19 @@ impl HttpRequestParser {
 
         let mut headers_buf = [0u8; HEADERS_BUFFER_SIZE];
         loop {
+            // select here
             match stream.read(&mut headers_buf).await {
+                Ok(0) => {
+                    error!("astuyve Connection closed by client");
+                    return Err(TcpError::Close("Connection closed by client".to_string()))
+                }
                 Ok(_) => {}
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                     continue;
                 }
                 Err(e) => {
                     error!("Error reading from stream: {}", e);
+                    return Err(TcpError::Read(e.to_string()))
                 }
             }
 
@@ -57,12 +81,12 @@ impl HttpRequestParser {
             .headers
             .get("content-length")
             .expect("infallible")
-            .parse::<usize>().map_err(|e| e.to_string())?;
+            .parse::<usize>().map_err(|e| TcpError::Parse(e.to_string()))?;
         let body_bytes_read = headers_buf.len() - body_start_index;
         let missing_body_length = content_length - body_bytes_read;
         let mut body_buf = vec![0u8; missing_body_length];
 
-        stream.read_exact(&mut body_buf).await.map_err(|e| e.to_string())?;
+        stream.read_exact(&mut body_buf).await.map_err(|e| TcpError::Read(e.to_string()))?;
 
         let total_bytes_read = headers_buf.len() + missing_body_length;
         let mut buf = vec![0u8; total_bytes_read];
@@ -74,7 +98,7 @@ impl HttpRequestParser {
         Ok(parser)
     }
 
-    fn parse_headers(&mut self, buf: &[u8]) -> Result<usize, String> {
+    fn parse_headers(&mut self, buf: &[u8]) -> Result<usize, TcpError> {
         let mut last_start = 0;
         let mut i = 0;
 
@@ -98,7 +122,7 @@ impl HttpRequestParser {
             if buf[i] == CR && buf[i + 1] == LR {
                 // Slice the header from the buffer, not using i+1
                 // because we don't want to include '\r\n' in the value
-                let header = std::str::from_utf8(&buf[last_start..i]).map_err(|e| e.to_string())?;
+                let header = std::str::from_utf8(&buf[last_start..i]).map_err(|e| TcpError::Parse(e.to_string()))?;
                 let mut header_parts = header.split(": ");
 
                 if let (Some(key), Some(value)) = (header_parts.next(), header_parts.next()) {
@@ -128,20 +152,20 @@ impl HttpRequestParser {
         Ok(last_start)
     }
 
-    fn parse_body(&mut self, buf: &[u8], start_index: usize) -> Result<(), String> {
+    fn parse_body(&mut self, buf: &[u8], start_index: usize) -> Result<(), TcpError> {
         let content_length = match self.headers.get("content-length") {
-            Some(length) => length.parse::<usize>().map_err(|e| e.to_string())?,
-            None => return Err("content-length header not found".to_string()),
+            Some(length) => length.parse::<usize>().map_err(|e| TcpError::Parse(e.to_string()))?,
+            None => return Err(TcpError::Parse("content-length header not found".to_string())),
         };
 
         let end_index = start_index + content_length;
 
         if end_index > buf.len() {
-            return Err("content-length header is greater than the buffer length".to_string());
+            return Err(TcpError::Parse("content-length header is greater than the buffer length".to_string()));
         }
 
         self.body = std::str::from_utf8(&buf[start_index..end_index])
-            .map_err(|e| e.to_string())?
+            .map_err(|e| TcpError::Parse(e.to_string()))?
             .to_string();
 
         Ok(())
@@ -195,7 +219,6 @@ impl TelemetryListener {
                             cancel_token_clone,
                         )
                         .await;
-                        
                     });
                 }
                 Err(e) => {
@@ -209,17 +232,17 @@ impl TelemetryListener {
         stream: &mut TcpStream,
         event_bus: Sender<Vec<TelemetryEvent>>,
         _cancel_token: tokio_util::sync::CancellationToken,
-    ) -> Result<(), String> {
-        // Read into buffer
-        let p = HttpRequestParser::from_stream(stream).await.map_err(|e| e.to_string())?;
-        let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| e.to_string())?;
-        event_bus.send(telemetry_events).await.map_err(|e| e.to_string())?;
-        if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
-            error!("Error acknowledging Telemetry request: {:?}", e);
-            Err(e)
-        } else {
-            debug!("ASTUYVE Telemetry request acknowledged");
-            Ok(())
+    ) -> Result<(), TcpError> {
+        loop {
+            // block here
+            let p = HttpRequestParser::from_stream(stream).await?;
+            let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| TcpError::Parse(e.to_string()))?;
+            event_bus.send(telemetry_events).await.map_err(|e| TcpError::Write(e.to_string()))?; //todo
+            //AJ this is cheeky but we should have include the SendError in the enum
+            if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
+                error!("Error acknowledging Telemetry request: {:?}", e);
+                return Err(TcpError::Write(e));
+            }
         }
     }
 
