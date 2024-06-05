@@ -37,6 +37,7 @@ use bottlecap::{
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    secrets::decrypt,
 };
 
 use serde::Deserialize;
@@ -46,14 +47,6 @@ use std::io::Error;
 use std::io::Result;
 use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
-
-use bottlecap::secrets::decrypt;
-#[cfg(not(target_env = "msvc"))]
-use tikv_jemallocator::Jemalloc;
-
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -305,7 +298,7 @@ async fn main() -> Result<()> {
                 if let Some(event) = received {
                     match event {
                         Event::Metric(event) => {
-                            debug!("Metric event: {:?}", event);
+                            error!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => match event.record {
                             TelemetryRecord::PlatformInitReport {
@@ -313,7 +306,8 @@ async fn main() -> Result<()> {
                                 phase,
                                 metrics,
                             } => {
-                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                                error!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                                let _ = lambda_enhanced_metrics.set_init_duration_metric(metrics.duration_ms);
                             }
                             TelemetryRecord::PlatformRuntimeDone {
                                 request_id, status, ..
