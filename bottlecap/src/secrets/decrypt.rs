@@ -7,11 +7,11 @@ use sha2::{Digest, Sha256};
 use std::env;
 use std::io::{Error, Result};
 use std::time::Instant;
-use tracing::debug;
+use tracing::{debug,error};
 
 pub async fn resolve_secrets(config: Config) -> Result<Config> {
     if !config.api_key.is_empty() {
-        debug!("DD_API_KEY found, not trying to resolve secrets");
+        error!("DD_API_KEY found, not trying to resolve secrets");
         Ok(config)
     } else if !config.api_key_secret_arn.is_empty() {
         let before_manual = Instant::now();

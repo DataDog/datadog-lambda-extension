@@ -139,6 +139,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 async fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let env_start = std::time::Instant::now();
     let env_config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => config,
         Err(e) => {
@@ -148,6 +149,8 @@ async fn main() -> Result<()> {
             panic!("Error starting the extension: {err:?}");
         }
     };
+
+    error!("astuyve config elapsed: {:?}", env_start.elapsed());
 
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
@@ -175,9 +178,11 @@ async fn main() -> Result<()> {
     info!("logging subsystem enabled");
     let client = reqwest::Client::new();
 
+    let register_duration = std::time::Instant::now();
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    error!("astuyve register elapsed: {:?}", register_duration.elapsed());
     let config = match resolve_secrets(env_config).await {
         Ok(c) => Arc::new(c),
         Err(e) => {
@@ -200,6 +205,7 @@ async fn main() -> Result<()> {
     ));
 
     let mut event_bus = EventBus::run();
+    let logs_duration = std::time::Instant::now();
     let mut logs_agent = LogsAgent::new(
         Arc::clone(&tags_provider),
         Arc::clone(&config),
@@ -210,6 +216,8 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
+    error!("astuyve logs elapsed: {:?}", logs_duration.elapsed());
+    let metrics_duration = std::time::Instant::now();
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -235,6 +243,8 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         dogstats_client.spin().await;
     });
+    error!("astuyve metrics elapsed: {:?}", metrics_duration.elapsed());
+    let telemetry_duration = std::time::Instant::now();
     let telemetry_listener_config = TelemetryListenerConfig {
         host: EXTENSION_HOST.to_string(),
         port: TELEMETRY_PORT,
@@ -250,18 +260,24 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         telemetry_listener.spin().await;
     });
+    error!("astuyve telemetry listener elapsed: {:?}", telemetry_duration.elapsed());
 
+    let telemetry_subscribe_duration = std::time::Instant::now();
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
         .subscribe()
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    error!("astuyve telemetry subscribe elapsed: {:?}", telemetry_subscribe_duration.elapsed());
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut shutdown = false;
 
     loop {
+        error!("astyve calling next");
+        let next_duration = std::time::Instant::now();
         let evt = next_event(&client, &r.extension_id).await;
+        error!("astuyve next elapsed: {:?}", next_duration.elapsed());
         match evt {
             Ok(NextEventResponse::Invoke {
                 request_id,
