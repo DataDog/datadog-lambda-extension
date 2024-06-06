@@ -309,8 +309,11 @@ async fn main() -> Result<()> {
                                 metrics,
                             } => {
                                 debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                let _ = lambda_enhanced_metrics
-                                    .set_init_duration_metric(metrics.duration_ms);
+                                if let Err(e) = lambda_enhanced_metrics
+                                    .set_init_duration_metric(metrics.duration_ms)
+                                {
+                                    error!("Failed to set init duration metric: {e:?}");
+                                }
                             }
                             TelemetryRecord::PlatformRuntimeDone {
                                 request_id, status, ..
