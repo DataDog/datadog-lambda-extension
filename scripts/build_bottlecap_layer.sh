@@ -48,11 +48,16 @@ prepare_folders() {
 
 docker_build_bottlecap_zip() {
     local arch=$1
+    if [ "$arch" == "amd64" ]; then
+        PLATFORM="x86_64"
+    else
+        PLATFORM="aarch64"
+    fi
 
     docker build --platform linux/${arch} \
         -t datadog/build-bottlecap-${arch}:$VERSION \
         -f ./scripts/Dockerfile.bottlecap.build \
-        --build-arg EXTENSION_NAME_AND_ARCH="datadog_extension-${arch}" \
+        --build-arg PLATFORM=$PLATFORM \
         . --load
     local dockerId=$(docker create datadog/build-bottlecap-${arch}:$VERSION)
     docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_bottlecap-${arch}.zip

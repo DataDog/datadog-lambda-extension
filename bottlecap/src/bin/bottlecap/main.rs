@@ -22,11 +22,14 @@ use bottlecap::{
     events::Event,
     lifecycle, logger,
     logs::agent::LogsAgent,
+    logs::flusher::Flusher as LogsFlusher,
     metrics::{
         aggregator as metrics_aggregator, constants,
         dogstatsd::{DogStatsD, DogStatsDConfig},
         enhanced::lambda::Lambda as enhanced_metrics,
+        flusher::Flusher as MetricsFlusher,
     },
+    secrets::decrypt,
     tags::{lambda, provider},
     telemetry::{
         self, client::TelemetryApiClient, events::Status, events::TelemetryRecord,
@@ -44,14 +47,6 @@ use std::io::Error;
 use std::io::Result;
 use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
-
-use bottlecap::secrets::decrypt;
-#[cfg(not(target_env = "msvc"))]
-use tikv_jemallocator::Jemalloc;
-
-#[cfg(not(target_env = "msvc"))]
-#[global_allocator]
-static GLOBAL: Jemalloc = Jemalloc;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,38 +79,51 @@ enum NextEventResponse {
     },
 }
 
-fn next_event(ext_id: &str) -> Result<NextEventResponse> {
+async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
-    ureq::get(&url)
-        .set(EXTENSION_ID_HEADER, ext_id)
-        .call()
+    client
+        .get(&url)
+        .header(EXTENSION_ID_HEADER, ext_id)
+        .send()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?
-        .into_json()
+        .json()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
 }
 
-fn register() -> Result<RegisterResponse> {
+#[allow(clippy::unwrap_used)]
+async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
     let mut map = HashMap::new();
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     map.insert("events", vec!["INVOKE", "SHUTDOWN"]);
     let url = format!("{base_url}/register");
 
-    let resp = ureq::post(&url)
-        .set(EXTENSION_NAME_HEADER, EXTENSION_NAME)
-        .set(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
-        .send_json(ureq::json!(map))
+    let resp = client
+        .post(&url)
+        .header(EXTENSION_NAME_HEADER, EXTENSION_NAME)
+        .header(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
+        .json(&map)
+        .send()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     assert!(resp.status() == 200, "Unable to register extension");
 
     let extension_id = resp
-        .header(EXTENSION_ID_HEADER)
-        .unwrap_or_default()
+        .headers()
+        .get(EXTENSION_ID_HEADER)
+        .unwrap()
+        .to_str()
+        .expect("Can't convert header to string")
         .to_string();
-    let mut register_response = resp.into_json::<RegisterResponse>()?;
+    let mut register_response: RegisterResponse = resp
+        .json::<RegisterResponse>()
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     // Set manually since it's not part of the response body
     register_response.extension_id = extension_id;
@@ -128,7 +136,8 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 }
 
 #[allow(clippy::too_many_lines)]
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let env_config = match config::get_config(Path::new(&lambda_directory)) {
@@ -165,15 +174,18 @@ fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     info!("logging subsystem enabled");
+    let client = reqwest::Client::new();
 
-    let config = match resolve_secrets(env_config) {
+    let r = register(&client)
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
+    let config = match resolve_secrets(env_config).await {
         Ok(c) => Arc::new(c),
         Err(e) => {
             panic!("Error resolving key: {e}");
         }
     };
-
-    let r = register().map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let region = env::var("AWS_REGION").expect("could not read AWS_REGION");
     let function_name =
@@ -189,12 +201,17 @@ fn main() -> Result<()> {
         &metadata_hash,
     ));
 
-    let event_bus = EventBus::run();
-    let logs_agent = LogsAgent::run(
+    let mut event_bus = EventBus::run();
+    let mut logs_agent = LogsAgent::new(
         Arc::clone(&tags_provider),
         Arc::clone(&config),
         event_bus.get_sender_copy(),
     );
+    let logs_agent_channel = logs_agent.get_sender_copy();
+    let logs_flusher = LogsFlusher::new(Arc::clone(&config), Arc::clone(&logs_agent.aggregator));
+    tokio::spawn(async move {
+        logs_agent.spin().await;
+    });
     let metrics_aggr = Arc::new(Mutex::new(
         metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
@@ -207,25 +224,47 @@ fn main() -> Result<()> {
         tags_provider: Arc::clone(&tags_provider),
     };
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
-    let mut dogstats_client = DogStatsD::run(&dogstatsd_config, event_bus.get_sender_copy());
+    let dogstats_cancel_token = tokio_util::sync::CancellationToken::new();
+    let dogstats_client = DogStatsD::new(
+        &dogstatsd_config,
+        event_bus.get_sender_copy(),
+        dogstats_cancel_token.clone(),
+    )
+    .await;
 
+    let mut statsd_flusher =
+        MetricsFlusher::new(Arc::clone(&config), Arc::clone(&dogstats_client.aggregator));
+
+    tokio::spawn(async move {
+        dogstats_client.spin().await;
+    });
     let telemetry_listener_config = TelemetryListenerConfig {
         host: EXTENSION_HOST.to_string(),
         port: TELEMETRY_PORT,
     };
-    let telemetry_listener =
-        TelemetryListener::run(&telemetry_listener_config, logs_agent.get_sender_copy())
-            .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
+    let telemetry_listener = TelemetryListener::new(
+        &telemetry_listener_config,
+        logs_agent_channel,
+        telemetry_listener_cancel_token.clone(),
+    )
+    .await
+    .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    tokio::spawn(async move {
+        telemetry_listener.spin().await;
+    });
+
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
         .subscribe()
+        .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut shutdown = false;
 
     loop {
-        let evt = next_event(&r.extension_id);
+        let evt = next_event(&client, &r.extension_id).await;
         match evt {
             Ok(NextEventResponse::Invoke {
                 request_id,
@@ -257,8 +296,8 @@ fn main() -> Result<()> {
         // Check if flush logic says we should block and flush or not
         if flush_control.should_flush() || shutdown {
             loop {
-                let received = event_bus.rx.recv();
-                if let Ok(event) = received {
+                let received = event_bus.rx.recv().await;
+                if let Some(event) = received {
                     match event {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
@@ -270,6 +309,11 @@ fn main() -> Result<()> {
                                 metrics,
                             } => {
                                 debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                                if let Err(e) = lambda_enhanced_metrics
+                                    .set_init_duration_metric(metrics.duration_ms)
+                                {
+                                    error!("Failed to set init duration metric: {e:?}");
+                                }
                             }
                             TelemetryRecord::PlatformRuntimeDone {
                                 request_id, status, ..
@@ -292,8 +336,7 @@ fn main() -> Result<()> {
                                     "Runtime done for request_id: {:?} with status: {:?}",
                                     request_id, status
                                 );
-                                logs_agent.flush();
-                                dogstats_client.flush();
+                                tokio::join!(logs_flusher.flush(), statsd_flusher.flush());
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -323,9 +366,9 @@ fn main() -> Result<()> {
         }
 
         if shutdown {
-            logs_agent.shutdown();
-            dogstats_client.shutdown();
-            telemetry_listener.shutdown();
+            dogstats_cancel_token.cancel();
+            telemetry_listener_cancel_token.cancel();
+            tokio::join!(logs_flusher.flush(), statsd_flusher.flush());
             return Ok(());
         }
     }
