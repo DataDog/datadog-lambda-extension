@@ -333,8 +333,7 @@ async fn main() -> Result<()> {
                                     "Runtime done for request_id: {:?} with status: {:?}",
                                     request_id, status
                                 );
-                                logs_flusher.flush().await;
-                                statsd_flusher.flush().await;
+                                tokio::join!(logs_flusher.flush(), statsd_flusher.flush());
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -366,8 +365,7 @@ async fn main() -> Result<()> {
         if shutdown {
             dogstats_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            logs_flusher.flush().await;
-            statsd_flusher.flush().await;
+            tokio::join!(logs_flusher.flush(), statsd_flusher.flush());
             return Ok(());
         }
     }
