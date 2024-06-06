@@ -300,7 +300,7 @@ async fn main() -> Result<()> {
                 if let Some(event) = received {
                     match event {
                         Event::Metric(event) => {
-                            error!("Metric event: {:?}", event);
+                            debug!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => match event.record {
                             TelemetryRecord::PlatformInitReport {
@@ -308,7 +308,7 @@ async fn main() -> Result<()> {
                                 phase,
                                 metrics,
                             } => {
-                                error!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
                                 let _ = lambda_enhanced_metrics
                                     .set_init_duration_metric(metrics.duration_ms);
                             }

@@ -248,18 +248,24 @@ impl TelemetryListener {
         event_bus: Sender<Vec<TelemetryEvent>>,
     ) -> Result<(), TcpError> {
         loop {
-            // block here
-            let p = HttpRequestParser::from_stream(stream).await?;
-            let telemetry_events: Vec<TelemetryEvent> =
-                serde_json::from_str(&p.body).map_err(|e| TcpError::Parse(e.to_string()))?;
-            event_bus
-                .send(telemetry_events)
-                .await
-                .map_err(|e| TcpError::Write(e.to_string()))?; //todo
-                                                               //AJ this is cheeky but we should have include the SendError in the enum
-            if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
-                error!("Error acknowledging Telemetry request: {:?}", e);
-                return Err(TcpError::Write(e));
+            match HttpRequestParser::from_stream(stream).await {
+                Ok(p) => {
+                    let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)
+                        .map_err(|e| TcpError::Parse(e.to_string()))?;
+                    event_bus
+                        .send(telemetry_events)
+                        .await
+                        .map_err(|e| TcpError::Write(e.to_string()))?; //todo
+                                                                       //AJ this is cheeky but we should have include the SendError in the enum
+                    if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
+                        error!("Error acknowledging Telemetry request: {:?}", e);
+                        return Err(TcpError::Write(e));
+                    }
+                }
+                Err(e) => match e {
+                    TcpError::Close(_) => return Ok(()),
+                    _ => return Err(e),
+                },
             }
         }
     }
@@ -393,10 +399,7 @@ mod tests {
             runtime_version: Some("nodejs:20.v22".to_string()),
             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
-        assert_eq!(
-            result.unwrap_err(),
-            TcpError::Close("Connection closed by client".to_string())
-        );
+        assert!(result.is_ok());
     }
 
     macro_rules! test_handle_stream_invalid_body {
