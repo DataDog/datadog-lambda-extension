@@ -95,8 +95,6 @@ impl Lambda {
         if let Err(e) = aggr.insert(&metric) {
             error!("failed to insert memory size metric: {}", e);
         }
-        if let Some(init_duration_ms) = metrics.init_duration_ms {}
-        // TODO(astuyve): estimated cost metric, post runtime duration metric.
     }
 }
 
