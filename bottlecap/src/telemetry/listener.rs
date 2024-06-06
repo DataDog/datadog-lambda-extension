@@ -220,16 +220,24 @@ impl TelemetryListener {
 
     pub async fn spin(self) {
         loop {
-            match self.listener.accept().await {
-                Ok((mut stream, _)) => {
-                    debug!("Received a Telemetry API connection");
-                    let cloned_event_bus = self.event_bus.clone();
-                    tokio::spawn(async move {
-                        let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
-                    });
+            tokio::select! {
+                biased;
+                stream = self.listener.accept() => {
+                    match stream {
+                        Ok((mut stream, _)) => {
+                            debug!("Received a Telemetry API connection");
+                            let cloned_event_bus = self.event_bus.clone();
+                            tokio::spawn(async move {
+                                let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
+                            });
+                        }
+                        Err(e) => {
+                            error!("Error accepting connection: {:?}", e);
+                        }
+                    }
                 }
-                Err(e) => {
-                    error!("Error accepting connection: {:?}", e);
+                _ = self.cancel_token.cancelled() => {
+                    break;
                 }
             }
         }
