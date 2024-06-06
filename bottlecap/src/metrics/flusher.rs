@@ -8,6 +8,7 @@ pub struct Flusher {
     aggregator: Arc<Mutex<Aggregator<1024>>>,
 }
 
+#[allow(clippy::await_holding_lock)]
 impl Flusher {
     pub fn new(config: Arc<config::Config>, aggregator: Arc<Mutex<Aggregator<1024>>>) -> Self {
         let dd_api = datadog::DdApi::new(config.api_key.clone(), config.site.clone());
