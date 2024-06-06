@@ -1,5 +1,5 @@
-use crate::logs::{aggregator::Aggregator, datadog};
 use crate::config;
+use crate::logs::{aggregator::Aggregator, datadog};
 use std::sync::{Arc, Mutex};
 
 pub struct Flusher {
@@ -16,7 +16,10 @@ impl Flusher {
         let mut guard = self.aggregator.lock().expect("lock poisoned");
         let logs = guard.get_batch();
         drop(guard);
-        self.dd_api.send(logs).await.expect("Failed to send logs to Datadog");
+        self.dd_api
+            .send(logs)
+            .await
+            .expect("Failed to send logs to Datadog");
     }
 
     pub async fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {

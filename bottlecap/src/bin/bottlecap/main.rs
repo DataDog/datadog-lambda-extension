@@ -29,6 +29,7 @@ use bottlecap::{
         enhanced::lambda::Lambda as enhanced_metrics,
         flusher::Flusher as MetricsFlusher,
     },
+    secrets::decrypt,
     tags::{lambda, provider},
     telemetry::{
         self, client::TelemetryApiClient, events::Status, events::TelemetryRecord,
@@ -37,7 +38,6 @@ use bottlecap::{
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
-    secrets::decrypt,
 };
 
 use serde::Deserialize;
@@ -182,7 +182,10 @@ async fn main() -> Result<()> {
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    error!("astuyve register elapsed: {:?}", register_duration.elapsed());
+    error!(
+        "astuyve register elapsed: {:?}",
+        register_duration.elapsed()
+    );
     let config = match resolve_secrets(env_config).await {
         Ok(c) => Arc::new(c),
         Err(e) => {
@@ -238,7 +241,8 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    let mut statsd_flusher = MetricsFlusher::new(Arc::clone(&config), Arc::clone(&dogstats_client.aggregator));
+    let mut statsd_flusher =
+        MetricsFlusher::new(Arc::clone(&config), Arc::clone(&dogstats_client.aggregator));
 
     tokio::spawn(async move {
         dogstats_client.spin().await;
@@ -260,7 +264,10 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         telemetry_listener.spin().await;
     });
-    error!("astuyve telemetry listener elapsed: {:?}", telemetry_duration.elapsed());
+    error!(
+        "astuyve telemetry listener elapsed: {:?}",
+        telemetry_duration.elapsed()
+    );
 
     let telemetry_subscribe_duration = std::time::Instant::now();
     let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
@@ -268,7 +275,10 @@ async fn main() -> Result<()> {
         .subscribe()
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    error!("astuyve telemetry subscribe elapsed: {:?}", telemetry_subscribe_duration.elapsed());
+    error!(
+        "astuyve telemetry subscribe elapsed: {:?}",
+        telemetry_subscribe_duration.elapsed()
+    );
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut shutdown = false;
@@ -323,7 +333,8 @@ async fn main() -> Result<()> {
                                 metrics,
                             } => {
                                 error!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                let _ = lambda_enhanced_metrics.set_init_duration_metric(metrics.duration_ms);
+                                let _ = lambda_enhanced_metrics
+                                    .set_init_duration_metric(metrics.duration_ms);
                             }
                             TelemetryRecord::PlatformRuntimeDone {
                                 request_id, status, ..

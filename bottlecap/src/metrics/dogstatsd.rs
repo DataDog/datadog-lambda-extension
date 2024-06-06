@@ -26,10 +26,16 @@ pub struct DogStatsDConfig {
 
 impl DogStatsD {
     #[must_use]
-    pub async fn new(config: &DogStatsDConfig, event_bus: Sender<events::Event>, cancel_token: tokio_util::sync::CancellationToken) -> DogStatsD {
+    pub async fn new(
+        config: &DogStatsDConfig,
+        event_bus: Sender<events::Event>,
+        cancel_token: tokio_util::sync::CancellationToken,
+    ) -> DogStatsD {
         let addr = format!("{}:{}", config.host, config.port);
         // TODO (UDS socket)
-        let socket = tokio::net::UdpSocket::bind(addr).await.expect("couldn't bind to address");
+        let socket = tokio::net::UdpSocket::bind(addr)
+            .await
+            .expect("couldn't bind to address");
         DogStatsD {
             socket,
             cancel_token,
@@ -42,7 +48,11 @@ impl DogStatsD {
         loop {
             // TODO(astuyve) this should be dynamic
             let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
-            let (amt, src) = self.socket.recv_from(&mut buf).await.expect("didn't receive data");
+            let (amt, src) = self
+                .socket
+                .recv_from(&mut buf)
+                .await
+                .expect("didn't receive data");
             let buf = &mut buf[..amt];
             let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
             info!(
@@ -71,7 +81,8 @@ impl DogStatsD {
                 first_value,
                 parsed_metric.tags(),
             );
-            let _ = self.aggregator
+            let _ = self
+                .aggregator
                 .lock()
                 .expect("lock poisoned")
                 .insert(&parsed_metric);
@@ -83,6 +94,4 @@ impl DogStatsD {
             }
         }
     }
-
-
 }

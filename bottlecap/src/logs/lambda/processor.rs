@@ -1,6 +1,6 @@
 use std::error::Error;
-use tokio::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::Sender;
 
 use tracing::error;
 
@@ -209,7 +209,11 @@ impl LambdaProcessor {
         }
     }
 
-    pub async fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub async fn process(
+        &mut self,
+        events: Vec<TelemetryEvent>,
+        aggregator: &Arc<Mutex<Aggregator>>,
+    ) {
         let mut to_send = Vec::<String>::new();
 
         for event in events {
@@ -663,7 +667,9 @@ mod tests {
             },
         };
 
-        processor.process(vec![start_event.clone()], &aggregator).await;
+        processor
+            .process(vec![start_event.clone()], &aggregator)
+            .await;
         assert_eq!(
             processor.execution_context.request_id,
             Some("test-request-id".to_string())

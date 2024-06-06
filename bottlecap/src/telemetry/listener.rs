@@ -58,7 +58,7 @@ impl HttpRequestParser {
             match stream.read(&mut headers_buf).await {
                 Ok(0) => {
                     error!("astuyve Connection closed by client");
-                    return Err(TcpError::Close("Connection closed by client".to_string()))
+                    return Err(TcpError::Close("Connection closed by client".to_string()));
                 }
                 Ok(_) => {}
                 Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -66,7 +66,7 @@ impl HttpRequestParser {
                 }
                 Err(e) => {
                     error!("Error reading from stream: {}", e);
-                    return Err(TcpError::Read(e.to_string()))
+                    return Err(TcpError::Read(e.to_string()));
                 }
             }
 
@@ -81,12 +81,16 @@ impl HttpRequestParser {
             .headers
             .get("content-length")
             .expect("infallible")
-            .parse::<usize>().map_err(|e| TcpError::Parse(e.to_string()))?;
+            .parse::<usize>()
+            .map_err(|e| TcpError::Parse(e.to_string()))?;
         let body_bytes_read = headers_buf.len() - body_start_index;
         let missing_body_length = content_length - body_bytes_read;
         let mut body_buf = vec![0u8; missing_body_length];
 
-        stream.read_exact(&mut body_buf).await.map_err(|e| TcpError::Read(e.to_string()))?;
+        stream
+            .read_exact(&mut body_buf)
+            .await
+            .map_err(|e| TcpError::Read(e.to_string()))?;
 
         let total_bytes_read = headers_buf.len() + missing_body_length;
         let mut buf = vec![0u8; total_bytes_read];
@@ -122,7 +126,8 @@ impl HttpRequestParser {
             if buf[i] == CR && buf[i + 1] == LR {
                 // Slice the header from the buffer, not using i+1
                 // because we don't want to include '\r\n' in the value
-                let header = std::str::from_utf8(&buf[last_start..i]).map_err(|e| TcpError::Parse(e.to_string()))?;
+                let header = std::str::from_utf8(&buf[last_start..i])
+                    .map_err(|e| TcpError::Parse(e.to_string()))?;
                 let mut header_parts = header.split(": ");
 
                 if let (Some(key), Some(value)) = (header_parts.next(), header_parts.next()) {
@@ -154,14 +159,22 @@ impl HttpRequestParser {
 
     fn parse_body(&mut self, buf: &[u8], start_index: usize) -> Result<(), TcpError> {
         let content_length = match self.headers.get("content-length") {
-            Some(length) => length.parse::<usize>().map_err(|e| TcpError::Parse(e.to_string()))?,
-            None => return Err(TcpError::Parse("content-length header not found".to_string())),
+            Some(length) => length
+                .parse::<usize>()
+                .map_err(|e| TcpError::Parse(e.to_string()))?,
+            None => {
+                return Err(TcpError::Parse(
+                    "content-length header not found".to_string(),
+                ))
+            }
         };
 
         let end_index = start_index + content_length;
 
         if end_index > buf.len() {
-            return Err(TcpError::Parse("content-length header is greater than the buffer length".to_string()));
+            return Err(TcpError::Parse(
+                "content-length header is greater than the buffer length".to_string(),
+            ));
         }
 
         self.body = std::str::from_utf8(&buf[start_index..end_index])
@@ -200,8 +213,8 @@ impl TelemetryListener {
 
         Ok(TelemetryListener {
             event_bus,
-            listener,
             cancel_token,
+            listener,
         })
     }
 
@@ -212,11 +225,7 @@ impl TelemetryListener {
                     debug!("Received a Telemetry API connection");
                     let cloned_event_bus = self.event_bus.clone();
                     tokio::spawn(async move {
-                        let _ = Self::handle_stream(
-                            &mut stream,
-                            cloned_event_bus,
-                        )
-                        .await;
+                        let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
                     });
                 }
                 Err(e) => {
@@ -233,9 +242,13 @@ impl TelemetryListener {
         loop {
             // block here
             let p = HttpRequestParser::from_stream(stream).await?;
-            let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body).map_err(|e| TcpError::Parse(e.to_string()))?;
-            event_bus.send(telemetry_events).await.map_err(|e| TcpError::Write(e.to_string()))?; //todo
-            //AJ this is cheeky but we should have include the SendError in the enum
+            let telemetry_events: Vec<TelemetryEvent> =
+                serde_json::from_str(&p.body).map_err(|e| TcpError::Parse(e.to_string()))?;
+            event_bus
+                .send(telemetry_events)
+                .await
+                .map_err(|e| TcpError::Write(e.to_string()))?; //todo
+                                                               //AJ this is cheeky but we should have include the SendError in the enum
             if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
                 error!("Error acknowledging Telemetry request: {:?}", e);
                 return Err(TcpError::Write(e));
@@ -362,7 +375,7 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel(3);
         let result = TelemetryListener::handle_stream(&mut stream, tx).await;
         let events = rx.recv().await.expect("No events received");
-        let telemetry_event = events.get(0).expect("failed to get event");
+        let telemetry_event = events.first().expect("failed to get event");
 
         let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
         assert_eq!(telemetry_event.time, expected_time);
@@ -372,7 +385,10 @@ mod tests {
             runtime_version: Some("nodejs:20.v22".to_string()),
             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
-        assert_eq!(result.unwrap_err(), TcpError::Close("Connection closed by client".to_string()));
+        assert_eq!(
+            result.unwrap_err(),
+            TcpError::Close("Connection closed by client".to_string())
+        );
     }
 
     macro_rules! test_handle_stream_invalid_body {

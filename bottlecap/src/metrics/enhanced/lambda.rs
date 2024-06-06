@@ -34,7 +34,10 @@ impl Lambda {
             (init_duration_ms * constants::MS_TO_SEC).to_string().into(),
             None,
         );
-        self.aggregator.lock().expect("lock poisoned").insert(&metric)
+        self.aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(&metric)
     }
 
     fn increment_metric(&self, metric_name: &str) -> Result<(), errors::Insert> {
@@ -92,9 +95,7 @@ impl Lambda {
         if let Err(e) = aggr.insert(&metric) {
             error!("failed to insert memory size metric: {}", e);
         }
-        if let Some(init_duration_ms) = metrics.init_duration_ms {
-
-        }
+        if let Some(init_duration_ms) = metrics.init_duration_ms {}
         // TODO(astuyve): estimated cost metric, post runtime duration metric.
     }
 }
