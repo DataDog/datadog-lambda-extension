@@ -87,9 +87,8 @@ impl DogStatsD {
                 .expect("lock poisoned")
                 .insert(&parsed_metric);
             // Don't publish until after validation and adding metric_event to buff
-            let _ = self.event_bus.send(Event::Metric(metric_event)); // todo check the result
+            let _ = self.event_bus.send(Event::Metric(metric_event)).await; // todo check the result
             if self.cancel_token.is_cancelled() {
-                error!("ASTUYVE shutting down DogStatsD server");
                 break;
             }
         }

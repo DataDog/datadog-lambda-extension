@@ -36,7 +36,7 @@ impl LogsProcessor {
     ) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => {
-                lambda_processor.process(events, aggregator).await
+                lambda_processor.process(events, aggregator).await;
             }
         }
     }

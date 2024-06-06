@@ -1,4 +1,5 @@
 use crate::telemetry::events::TelemetryEvent;
+use core::fmt::Display;
 
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -20,13 +21,13 @@ pub enum TcpError {
     Parse(String),
 }
 
-impl ToString for TcpError {
-    fn to_string(&self) -> String {
+impl Display for TcpError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TcpError::Close(close) => close.clone(),
-            TcpError::Read(read) => read.clone(),
-            TcpError::Parse(parse) => parse.clone(),
-            TcpError::Write(write) => write.clone(),
+            TcpError::Close(close) => write!(f, "{}", close.clone()),
+            TcpError::Read(read) => write!(f, "{}", read.clone()),
+            TcpError::Parse(parse) => write!(f, "{}", parse.clone()),
+            TcpError::Write(write) => write!(f, "{}", write.clone()),
         }
     }
 }
@@ -57,7 +58,6 @@ impl HttpRequestParser {
             // select here
             match stream.read(&mut headers_buf).await {
                 Ok(0) => {
-                    error!("astuyve Connection closed by client");
                     return Err(TcpError::Close("Connection closed by client".to_string()));
                 }
                 Ok(_) => {}
@@ -236,7 +236,7 @@ impl TelemetryListener {
                         }
                     }
                 }
-                _ = self.cancel_token.cancelled() => {
+                () = self.cancel_token.cancelled() => {
                     break;
                 }
             }
