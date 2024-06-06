@@ -10,7 +10,7 @@
 # or
 # VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
 
-set -e
+set -ex
 
 prepare_folders() {
   # Move into the root directory, so this script can be called from any directory
@@ -29,7 +29,7 @@ prepare_folders() {
 }
 
 
-docker_build_bottlecap_zip() {
+_docker_build_bottlecap_zip() {
     local arch=$1
     if [ "$arch" == "amd64" ]; then
         PLATFORM="x86_64"
@@ -51,14 +51,14 @@ docker_build_bottlecap_zip() {
 build_for_arch() {
   if [ "$ARCHITECTURE" == "amd64" ]; then
       echo "Building for amd64 only"
-      docker_build_bottlecap_zip amd64
+      _docker_build_bottlecap_zip amd64
   elif [ "$ARCHITECTURE" == "arm64" ]; then
       echo "Building for arm64 only"
-      docker_build_bottlecap_zip arm64
+      _docker_build_bottlecap_zip arm64
   else
       echo "Building for both amd64 and arm64"
-      docker_build_bottlecap_zip amd64
-      docker_build_bottlecap_zip arm64
+      _docker_build_bottlecap_zip amd64
+      _docker_build_bottlecap_zip arm64
   fi
 }
 

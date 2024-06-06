@@ -41,6 +41,12 @@ build_local() {
   du -hs $_LAYER_DIR/../datadog_bottlecap-$ARCH.zip
 }
 
+build_dockerized(){
+  _require_argument ARCH
+  cd ../scripts
+  ARCHITECTURE=$ARCH ./build_bottlecap_layer.sh
+}
+
 publish() {
   _require_argument ARCH
   _require_argument LAYER_NAME
@@ -81,7 +87,8 @@ invoke(){
 }
 
 all(){
-  time build_local
+#  time build_local
+  time build_dockerized
   version_nbr=$(publish)
   update "$version_nbr"
   invoke
@@ -94,4 +101,4 @@ format () {
   cargo clippy --fix
 }
 
-"$@"
+time "$@"
