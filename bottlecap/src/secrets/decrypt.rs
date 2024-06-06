@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::env;
 use std::io::{Error, Result};
 use std::time::Instant;
-use tracing::{debug, error};
+use tracing::debug;
 
 pub async fn resolve_secrets(config: Config) -> Result<Config> {
     if !config.api_key.is_empty() {
