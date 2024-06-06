@@ -366,6 +366,8 @@ async fn main() -> Result<()> {
         if shutdown {
             dogstats_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
+            logs_flusher.flush().await;
+            statsd_flusher.flush().await;
             return Ok(());
         }
     }
