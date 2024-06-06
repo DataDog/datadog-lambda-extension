@@ -10,7 +10,7 @@
 # or
 # VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
 
-set -ex
+set -e
 
 prepare_folders() {
   # Move into the root directory, so this script can be called from any directory
