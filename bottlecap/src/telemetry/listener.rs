@@ -12,7 +12,7 @@ pub struct HttpRequestParser {
     body: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum TcpError {
     Close(String),
     Read(String),
@@ -211,12 +211,10 @@ impl TelemetryListener {
                 Ok((mut stream, _)) => {
                     debug!("Received a Telemetry API connection");
                     let cloned_event_bus = self.event_bus.clone();
-                    let cancel_token_clone = self.cancel_token.clone();
                     tokio::spawn(async move {
                         let _ = Self::handle_stream(
                             &mut stream,
                             cloned_event_bus,
-                            cancel_token_clone,
                         )
                         .await;
                     });
@@ -231,7 +229,6 @@ impl TelemetryListener {
     async fn handle_stream(
         stream: &mut TcpStream,
         event_bus: Sender<Vec<TelemetryEvent>>,
-        _cancel_token: tokio_util::sync::CancellationToken,
     ) -> Result<(), TcpError> {
         loop {
             // block here
@@ -264,8 +261,6 @@ impl TelemetryListener {
 
 #[cfg(test)]
 mod tests {
-    use std::thread;
-
     use chrono::DateTime;
 
     use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
@@ -316,7 +311,7 @@ mod tests {
 
     #[test]
     #[should_panic(
-        expected = "called `Result::unwrap()` on an `Err` value: ParseIntError { kind: InvalidDigit }"
+        expected = "called `Result::unwrap()` on an `Err` value: Parse(\"invalid digit found in string\")"
     )]
     fn test_parse_headers_invalid_content_length() {
         let mut parser = HttpRequestParser {
@@ -343,30 +338,30 @@ mod tests {
         assert_eq!(parser.body, "Hello, World!".to_string());
     }
 
-    fn get_stream(data: Vec<u8>) -> TcpStream {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    async fn get_stream(data: Vec<u8>) -> TcpStream {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
 
-        let (tx, rx) = std::sync::mpsc::channel();
-        thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream.write_all(&data).unwrap();
-            tx.send(()).unwrap(); // Signal that the request has been sent
+        let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            stream.write_all(&data).await.unwrap();
+            tx.send(()).await.unwrap(); // Signal that the request has been sent
         });
 
-        let stream = TcpStream::connect(addr).unwrap();
-        rx.recv().unwrap(); // Wait for the signal from the spawned thread
+        let stream = TcpStream::connect(addr).await.unwrap();
+        rx.recv().await.unwrap(); // Wait for the signal from the spawned thread
 
         stream
     }
 
     #[tokio::test]
     async fn test_handle_stream() {
-        let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
+        let mut stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec()).await;
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(3);
-        let result = TelemetryListener::handle_stream(&stream, tx);
-        let events = rx.recv().expect("No events received");
+        let result = TelemetryListener::handle_stream(&mut stream, tx).await;
+        let events = rx.recv().await.expect("No events received");
         let telemetry_event = events.get(0).expect("failed to get event");
 
         let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
@@ -377,7 +372,7 @@ mod tests {
             runtime_version: Some("nodejs:20.v22".to_string()),
             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
-        assert!(result.is_ok());
+        assert_eq!(result.unwrap_err(), TcpError::Close("Connection closed by client".to_string()));
     }
 
     macro_rules! test_handle_stream_invalid_body {
@@ -386,10 +381,9 @@ mod tests {
                 #[tokio::test]
                 #[should_panic]
                 async fn $name() {
-                    let stream = get_stream($value.to_vec());
+                    let mut stream = get_stream($value.to_vec()).await;
                     let (tx, _) = tokio::sync::mpsc::channel(4);
-                    let buf = vec![0; 256 * 1024];
-                    TelemetryListener::handle_stream(&mut stream, buf, tx).await.unwrap()
+                    TelemetryListener::handle_stream(&mut stream, tx).await.unwrap()
                 }
             )*
         }
@@ -402,11 +396,11 @@ mod tests {
 
     }
 
-    #[test]
-    fn test_from_stream() {
-        let stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec());
+    #[tokio::test]
+    async fn test_from_stream() {
+        let mut stream = get_stream(b"POST /path HTTP/1.1\r\nContent-Length: 335\r\nHeader1: Value1\r\n\r\n[{\"time\":\"2024-04-25T17:35:59.944Z\",\"type\":\"platform.initStart\",\"record\":{\"initializationType\":\"on-demand\",\"phase\":\"init\",\"runtimeVersion\":\"nodejs:20.v22\",\"runtimeVersionArn\":\"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72\",\"functionName\":\"hello-world\",\"functionVersion\":\"$LATEST\"}}]".to_vec()).await;
 
-        let result = HttpRequestParser::from_stream(&stream);
+        let result = HttpRequestParser::from_stream(&mut stream).await;
 
         assert!(result.is_ok());
         let parser = result.unwrap();

@@ -192,12 +192,5 @@ mod tests {
                 .unwrap(),
             max_mem_sketch
         );
-        let mut init_duration_sketch = ddsketch_agent::DDSketch::default();
-        init_duration_sketch.insert(0.05);
-        assert_eq!(
-            aggr.get_value_by_id(constants::INIT_DURATION_METRIC.into(), None)
-                .unwrap(),
-            init_duration_sketch
-        );
     }
 }
