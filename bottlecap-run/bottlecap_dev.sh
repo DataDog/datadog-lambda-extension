@@ -1,4 +1,6 @@
 #!/bin/bash
+# example usage
+# LAMBDA_NAME=svls4825m-bottlecap-busy-node20-lambda LAYER_NAME=Datadog-Bottlecap-Beta-ag  ARCH=amd64 ./bottlecap_dev.sh all
 set -e
 
 _REGION="us-east-1"
