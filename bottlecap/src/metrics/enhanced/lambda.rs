@@ -28,6 +28,19 @@ impl Lambda {
         self.increment_metric(constants::TIMEOUTS_METRIC)
     }
 
+    pub fn set_init_duration_metric(&self, init_duration_ms: f64) -> Result<(), errors::Insert> {
+        let metric = metric::Metric::new(
+            constants::INIT_DURATION_METRIC.into(),
+            metric::Type::Distribution,
+            (init_duration_ms * constants::MS_TO_SEC).to_string().into(),
+            None,
+        );
+        self.aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(&metric)
+    }
+
     fn increment_metric(&self, metric_name: &str) -> Result<(), errors::Insert> {
         let metric = metric::Metric::new(
             metric_name.into(),
@@ -136,29 +149,6 @@ impl Lambda {
         if let Err(e) = aggr.insert(&metric) {
             error!("failed to insert memory size metric: {}", e);
         }
-        if let Some(init_duration_ms) = metrics.init_duration_ms {
-            let metric = metric::Metric::new(
-                constants::INIT_DURATION_METRIC.into(),
-                metric::Type::Distribution,
-                (init_duration_ms * constants::MS_TO_SEC).to_string().into(),
-                None,
-            );
-            if let Err(e) = aggr.insert(&metric) {
-                error!("failed to insert memory size metric: {}", e);
-            }
-        }
-
-        let cost_usd =
-            Self::calculate_estimated_cost_usd(metrics.billed_duration_ms, metrics.memory_size_mb);
-        let metric = metric::Metric::new(
-            constants::ESTIMATED_COST_METRIC.into(),
-            metric::Type::Distribution,
-            cost_usd.to_string().into(),
-            None,
-        );
-        if let Err(e) = aggr.insert(&metric) {
-            error!("failed to insert estimated cost metric: {}", e);
-        }
     }
 }
 
@@ -254,13 +244,6 @@ mod tests {
             aggr.get_value_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
                 .unwrap(),
             max_mem_sketch
-        );
-        let mut init_duration_sketch = ddsketch_agent::DDSketch::default();
-        init_duration_sketch.insert(0.05);
-        assert_eq!(
-            aggr.get_value_by_id(constants::INIT_DURATION_METRIC.into(), None)
-                .unwrap(),
-            init_duration_sketch
         );
     }
 }

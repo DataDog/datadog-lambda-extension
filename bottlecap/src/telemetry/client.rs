@@ -1,3 +1,5 @@
+use reqwest::Response;
+use serde_json;
 use std::error::Error;
 use tracing::debug;
 
@@ -15,26 +17,26 @@ impl TelemetryApiClient {
         TelemetryApiClient { extension_id, port }
     }
 
-    pub fn subscribe(&self) -> Result<ureq::Response, Box<dyn Error>> {
+    pub async fn subscribe(&self) -> Result<Response, Box<dyn Error>> {
         let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE)?;
-        let data = ureq::json!({
-            "schemaVersion": "2022-12-13",
-            "destination": {
-                "protocol": "HTTP",
-                "URI": format!("http://sandbox:{}/", &self.port),
-            },
-            "types": ["function", "platform"],
-            "buffering": { // TODO: re evaluate using default values
-                "maxItems": 1000,
-                "maxBytes": 256 * 1024,
-                "timeoutMs": 25
-            }
-        });
-
-        let resp = ureq::put(&url)
-            .set("Content-Type", "application/json")
-            .set(EXTENSION_ID_HEADER, &self.extension_id)
-            .send_json(data);
+        let resp = reqwest::Client::new()
+            .put(&url)
+            .header(EXTENSION_ID_HEADER, &self.extension_id)
+            .json(&serde_json::json!({
+                "schemaVersion": "2022-12-13",
+                "destination": {
+                    "protocol": "HTTP",
+                    "URI": format!("http://sandbox:{}/", &self.port),
+                },
+                "types": ["function", "platform"],
+                "buffering": { // TODO: re evaluate using default values
+                    "maxItems": 1000,
+                    "maxBytes": 256 * 1024,
+                    "timeoutMs": 25
+                }
+            }))
+            .send()
+            .await;
 
         debug!("subscribed to telemetry: {:?}", resp);
         Ok(resp?)

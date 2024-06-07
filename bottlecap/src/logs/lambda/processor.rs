@@ -1,6 +1,6 @@
 use std::error::Error;
-use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::Sender;
 
 use tracing::error;
 
@@ -25,7 +25,7 @@ pub struct LambdaProcessor {
     // Current Invocation Context
     execution_context: ExecutionContext,
     // Main event bus
-    event_bus: SyncSender<Event>,
+    event_bus: Sender<Event>,
 }
 
 #[derive(Clone, Debug)]
@@ -43,7 +43,7 @@ impl LambdaProcessor {
     pub fn new(
         tags_provider: Arc<provider::Provider>,
         datadog_config: Arc<config::Config>,
-        event_bus: SyncSender<Event>,
+        event_bus: Sender<Event>,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
@@ -65,7 +65,7 @@ impl LambdaProcessor {
         }
     }
 
-    fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
+    async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
@@ -92,7 +92,7 @@ impl LambdaProcessor {
             },
             // TODO: check if we could do anything with the fields from `PlatformInitReport`
             TelemetryRecord::PlatformInitReport { .. } => {
-                if let Err(e) = self.event_bus.send(Event::Telemetry(event)) {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
                     error!("Failed to send PlatformInitReport to the main event bus: {}", e);
                 }
                 // We don't need to process any log for this event
@@ -119,7 +119,7 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
@@ -135,7 +135,7 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformReport to the main event bus: {}", e);
                 }
 
@@ -204,19 +204,23 @@ impl LambdaProcessor {
         }
     }
 
-    fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
-        match self.get_message(event) {
+    async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
+        match self.get_message(event).await {
             Ok(lambda_message) => self.get_intake_log(lambda_message),
             // TODO: Check what to do when we can't process the event
             Err(e) => Err(e),
         }
     }
 
-    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub async fn process(
+        &mut self,
+        events: Vec<TelemetryEvent>,
+        aggregator: &Arc<Mutex<Aggregator>>,
+    ) {
         let mut to_send = Vec::<String>::new();
 
         for event in events {
-            if let Ok(mut log) = self.make_log(event) {
+            if let Ok(mut log) = self.make_log(event).await {
                 let should_send_log =
                     LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
@@ -265,8 +269,8 @@ mod tests {
     macro_rules! get_message_tests {
         ($($name:ident: $value:expr,)*) => {
             $(
-                #[test]
-                fn $name() {
+                #[tokio::test]
+                async fn $name() {
                     let (input, expected): (&TelemetryEvent, Message) = $value;
 
                     let config = Arc::new(config::Config {
@@ -280,7 +284,7 @@ mod tests {
                         LAMBDA_RUNTIME_SLUG.to_string(),
                         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
 
-                    let (tx, _) = std::sync::mpsc::sync_channel(2);
+                    let (tx, _) = tokio::sync::mpsc::channel(2);
 
                     let mut processor = LambdaProcessor::new(
                         tags_provider,
@@ -291,7 +295,7 @@ mod tests {
                         tx.clone(),
                     );
 
-                    let result = processor.get_message(input.clone()).unwrap();
+                    let result = processor.get_message(input.clone()).await.unwrap();
 
                     assert_eq!(result, expected);
                 }
@@ -433,8 +437,8 @@ mod tests {
     }
 
     // get_intake_log
-    #[test]
-    fn test_get_intake_log() {
+    #[tokio::test]
+    async fn test_get_intake_log() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tags".to_string()),
@@ -447,7 +451,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
         let event = TelemetryEvent {
@@ -458,7 +462,7 @@ mod tests {
             },
         };
 
-        let lambda_message = processor.get_message(event.clone()).unwrap();
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
         let intake_log = processor.get_intake_log(lambda_message).unwrap();
 
         assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
@@ -479,8 +483,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_get_intake_log_errors_with_orphan() {
+    #[tokio::test]
+    async fn test_get_intake_log_errors_with_orphan() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tags".to_string()),
@@ -493,7 +497,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
         let event = TelemetryEvent {
@@ -501,7 +505,7 @@ mod tests {
             record: TelemetryRecord::Function("test-function".to_string()),
         };
 
-        let lambda_message = processor.get_message(event.clone()).unwrap();
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
         assert_eq!(lambda_message.lambda.request_id, None);
 
         let intake_log = processor.get_intake_log(lambda_message).unwrap_err();
@@ -512,8 +516,8 @@ mod tests {
         assert_eq!(processor.execution_context.orphan_logs.len(), 1);
     }
 
-    #[test]
-    fn test_get_intake_log_no_orphan_after_seeing_request_id() {
+    #[tokio::test]
+    async fn test_get_intake_log_no_orphan_after_seeing_request_id() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tags".to_string()),
@@ -526,7 +530,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
         let start_event = TelemetryEvent {
@@ -537,7 +541,7 @@ mod tests {
             },
         };
 
-        let start_lambda_message = processor.get_message(start_event.clone()).unwrap();
+        let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
         processor.get_intake_log(start_lambda_message).unwrap();
 
         // This could be any event that doesn't have a `request_id`
@@ -546,7 +550,7 @@ mod tests {
             record: TelemetryRecord::Function("test-function".to_string()),
         };
 
-        let lambda_message = processor.get_message(event.clone()).unwrap();
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
         let intake_log = processor.get_intake_log(lambda_message).unwrap();
         assert_eq!(
             intake_log.message.lambda.request_id,
@@ -555,8 +559,8 @@ mod tests {
     }
 
     // process
-    #[test]
-    fn test_process() {
+    #[tokio::test]
+    async fn test_process() {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
@@ -570,7 +574,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
         let mut processor =
             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
@@ -583,7 +587,7 @@ mod tests {
             },
         };
 
-        processor.process(vec![event.clone()], &aggregator);
+        processor.process(vec![event.clone()], &aggregator).await;
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
@@ -606,8 +610,8 @@ mod tests {
         assert_eq!(batch, serialized_log.as_bytes());
     }
 
-    #[test]
-    fn test_process_log_with_no_request_id() {
+    #[tokio::test]
+    async fn test_process_log_with_no_request_id() {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
@@ -621,7 +625,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
@@ -630,7 +634,7 @@ mod tests {
             record: TelemetryRecord::Function("test-function".to_string()),
         };
 
-        processor.process(vec![event.clone()], &aggregator);
+        processor.process(vec![event.clone()], &aggregator).await;
         assert_eq!(processor.execution_context.orphan_logs.len(), 1);
 
         let mut aggregator_lock = aggregator.lock().unwrap();
@@ -638,8 +642,8 @@ mod tests {
         assert_eq!(batch, "[]".as_bytes());
     }
 
-    #[test]
-    fn test_process_logs_after_seeing_request_id() {
+    #[tokio::test]
+    async fn test_process_logs_after_seeing_request_id() {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
@@ -653,7 +657,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let (tx, _rx) = std::sync::mpsc::sync_channel(2);
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
         let mut processor =
             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
@@ -666,7 +670,9 @@ mod tests {
             },
         };
 
-        processor.process(vec![start_event.clone()], &aggregator);
+        processor
+            .process(vec![start_event.clone()], &aggregator)
+            .await;
         assert_eq!(
             processor.execution_context.request_id,
             Some("test-request-id".to_string())
@@ -678,7 +684,7 @@ mod tests {
             record: TelemetryRecord::Function("test-function".to_string()),
         };
 
-        processor.process(vec![event.clone()], &aggregator);
+        processor.process(vec![event.clone()], &aggregator).await;
 
         // Verify aggregator logs
         let mut aggregator_lock = aggregator.lock().unwrap();

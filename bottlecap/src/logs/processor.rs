@@ -1,5 +1,5 @@
-use std::sync::mpsc::SyncSender;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::Sender;
 
 use tracing::debug;
 
@@ -17,7 +17,7 @@ impl LogsProcessor {
     pub fn new(
         config: Arc<config::Config>,
         tags_provider: Arc<tags::provider::Provider>,
-        event_bus: SyncSender<Event>,
+        event_bus: Sender<Event>,
         runtime: String,
     ) -> Self {
         match runtime.as_str() {
@@ -29,9 +29,15 @@ impl LogsProcessor {
         }
     }
 
-    pub fn process(&mut self, events: Vec<TelemetryEvent>, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub async fn process(
+        &mut self,
+        events: Vec<TelemetryEvent>,
+        aggregator: &Arc<Mutex<Aggregator>>,
+    ) {
         match self {
-            LogsProcessor::Lambda(lambda_processor) => lambda_processor.process(events, aggregator),
+            LogsProcessor::Lambda(lambda_processor) => {
+                lambda_processor.process(events, aggregator).await;
+            }
         }
     }
 }

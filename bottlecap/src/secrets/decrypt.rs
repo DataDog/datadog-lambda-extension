@@ -9,7 +9,7 @@ use std::io::{Error, Result};
 use std::time::Instant;
 use tracing::debug;
 
-pub fn resolve_secrets(config: Config) -> Result<Config> {
+pub async fn resolve_secrets(config: Config) -> Result<Config> {
     if !config.api_key.is_empty() {
         debug!("DD_API_KEY found, not trying to resolve secrets");
         Ok(config)
@@ -28,6 +28,7 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
                     .expect("AWS_SESSION_TOKEN is not set!"),
             },
         )
+        .await
         .expect("Failed to decrypt secret");
         debug!("AWS decrypt took {}ms", before_manual.elapsed().as_millis());
 
@@ -50,12 +51,12 @@ struct AwsConfig {
     aws_session_token: String,
 }
 
-fn manual_decrypt(secret_arn: String, aws_config: AwsConfig) -> Result<String> {
+async fn manual_decrypt(secret_arn: String, aws_config: AwsConfig) -> Result<String> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
     let headers = build_get_secret_signed_headers(&aws_config, json_body, Utc::now());
 
-    let client = reqwest::blocking::Client::builder()
+    let client = reqwest::Client::builder()
         .use_rustls_tls()
         .build()
         .expect("Failed to create reqwest client for aws decrypt");
@@ -68,10 +69,11 @@ fn manual_decrypt(secret_arn: String, aws_config: AwsConfig) -> Result<String> {
         .json(json_body)
         .headers(headers);
 
-    let resp = req.send();
+    let resp = req.send().await;
     let body = resp
         .expect("Failed to get response body")
         .text()
+        .await
         .expect("Cannot deserialize body");
     let v: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
 
