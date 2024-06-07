@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 
 use tracing::debug;
 
+#[derive(Debug, Clone)]
 pub struct InvocationContext {
     pub request_id: String,
     pub runtime_duration_ms: f64,
