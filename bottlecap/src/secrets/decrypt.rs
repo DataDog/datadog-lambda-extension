@@ -86,12 +86,12 @@ async fn decrypt_aws_kms(
 
     let v = request(json_body, headers?, client).await?;
 
-    return if let Some(secret_string_b64) = v["Plaintext"].as_str() {
+    if let Some(secret_string_b64) = v["Plaintext"].as_str() {
         let secret_string = String::from_utf8(BASE64_STANDARD.decode(secret_string_b64)?)?;
         Ok(secret_string)
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
-    };
+    }
 }
 
 async fn decrypt_aws_sm(
@@ -115,11 +115,11 @@ async fn decrypt_aws_sm(
         .await
         .map_err(|err| Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
 
-    return if let Some(secret_string) = v["SecretString"].as_str() {
+    if let Some(secret_string) = v["SecretString"].as_str() {
         Ok(secret_string.to_string())
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
-    };
+    }
 }
 
 async fn request(
