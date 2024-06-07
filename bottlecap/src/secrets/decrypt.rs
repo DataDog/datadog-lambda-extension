@@ -2,23 +2,23 @@ use crate::config::Config;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
-use reqwest::blocking::Client;
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::io::{Error, Result};
 use std::time::Instant;
+use reqwest::Client;
 use tracing::debug;
 
-pub fn resolve_secrets(config: Config) -> Result<Config> {
+pub async fn resolve_secrets(config: Config) -> Result<Config> {
     if !config.api_key.is_empty() {
         debug!("DD_API_KEY found, not trying to resolve secrets");
         Ok(config)
     } else if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
         let before_decrypt = Instant::now();
 
-        let client = Client::builder()
+        let client = &Client::builder()
             .use_rustls_tls()
             .build()
             .expect("Failed to create reqwest client for aws decrypt");
@@ -35,10 +35,10 @@ pub fn resolve_secrets(config: Config) -> Result<Config> {
         };
 
         let decrypted_key: String = if config.api_key_secret_arn.is_empty() {
-            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config)
+            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config).await
                 .expect("Failed to decrypt secret")
         } else {
-            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config)
+            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config).await
                 .expect("Failed to decrypt secret")
         };
 
@@ -71,7 +71,7 @@ struct AwsConfig {
     function_name: String,
 }
 
-fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Result<String> {
+async fn decrypt_aws_kms(client: &Client, kms_key: String, aws_config: AwsConfig) -> Result<String> {
     let json_body = &serde_json::json!({
         "CiphertextBlob": kms_key,
         "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
@@ -87,7 +87,7 @@ fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Re
         },
     );
 
-    let v = request(json_body, headers, client);
+    let v = request(json_body, headers, client).await;
 
     return if let Some(secret_string_b64) = v["Plaintext"].as_str() {
         let secret_string = String::from_utf8(
@@ -95,14 +95,14 @@ fn decrypt_aws_kms(client: Client, kms_key: String, aws_config: AwsConfig) -> Re
                 .decode(secret_string_b64)
                 .expect("Failed to decode base64"),
         )
-        .expect("Failed to convert to string");
+            .expect("Failed to convert to string");
         Ok(secret_string)
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
     };
 }
 
-fn decrypt_aws_sm(client: Client, secret_arn: String, aws_config: AwsConfig) -> Result<String> {
+async fn decrypt_aws_sm(client: &Client, secret_arn: String, aws_config: AwsConfig) -> Result<String> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
     let headers = build_get_secret_signed_headers(
@@ -115,7 +115,7 @@ fn decrypt_aws_sm(client: Client, secret_arn: String, aws_config: AwsConfig) -> 
         },
     );
 
-    let v = request(json_body, headers, client);
+    let v = request(json_body, headers, client).await;
 
     return if let Some(secret_string) = v["SecretString"].as_str() {
         Ok(secret_string.to_string())
@@ -124,7 +124,7 @@ fn decrypt_aws_sm(client: Client, secret_arn: String, aws_config: AwsConfig) -> 
     };
 }
 
-fn request(json_body: &Value, headers: HeaderMap, client: Client) -> Value {
+async fn request(json_body: &Value, headers: HeaderMap, client: &Client) -> Value {
     let req = client
         .post(format!(
             "https://{}",
@@ -134,9 +134,9 @@ fn request(json_body: &Value, headers: HeaderMap, client: Client) -> Value {
         .headers(headers);
 
     let resp = req.send();
-    let body = resp
+    let body = resp.await
         .expect("Failed to get response body")
-        .text()
+        .text().await
         .expect("Cannot deserialize body");
     let v: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
     v
