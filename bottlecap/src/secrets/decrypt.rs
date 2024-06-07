@@ -93,7 +93,7 @@ async fn decrypt_aws_kms(
         },
     );
 
-    let v = request(json_body, headers, client).await;
+    let v = request(json_body, headers, client).await?;
 
     return if let Some(secret_string_b64) = v["Plaintext"].as_str() {
         let secret_string = String::from_utf8(
@@ -101,7 +101,7 @@ async fn decrypt_aws_kms(
                 .decode(secret_string_b64)
                 .expect("Failed to decode base64"),
         )
-        .expect("Failed to convert to string");
+            .expect("Failed to convert to string");
         Ok(secret_string)
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
@@ -125,7 +125,9 @@ async fn decrypt_aws_sm(
         },
     );
 
-    let v = request(json_body, headers, client).await;
+    let v = request(json_body, headers, client).await.map_err(|err| {
+        Error::new(std::io::ErrorKind::InvalidData, err.to_string())
+    })?;
 
     return if let Some(secret_string) = v["SecretString"].as_str() {
         Ok(secret_string.to_string())
@@ -134,24 +136,23 @@ async fn decrypt_aws_sm(
     };
 }
 
-async fn request(json_body: &Value, headers: HeaderMap, client: &Client) -> Value {
+async fn request(json_body: &Value, headers: HeaderMap, client: &Client) -> Result<Value> {
+    let host_header = &headers["host"].to_str()
+        .map_err(|err| {
+            Error::new(std::io::ErrorKind::InvalidInput, err.to_string())
+        })?;
     let req = client
-        .post(format!(
-            "https://{}",
-            &headers["host"].to_str().expect("invalid host")
-        ))
+        .post(format!("https://{}", host_header))
         .json(json_body)
         .headers(headers);
 
-    let resp = req.send();
-    let body = resp
-        .await
-        .expect("Failed to get response body")
-        .text()
-        .await
-        .expect("Cannot deserialize body");
+    let body = req.send().await.map_err(|err| {
+        Error::new(std::io::ErrorKind::InvalidData, err.to_string())
+    })?.text().await.map_err(|err| {
+        Error::new(std::io::ErrorKind::InvalidData, err.to_string())
+    })?;
     let v: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
-    v
+    Ok(v)
 }
 
 fn build_get_secret_signed_headers(
