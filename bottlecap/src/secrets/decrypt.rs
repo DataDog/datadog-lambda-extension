@@ -3,12 +3,12 @@ use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
 use reqwest::header::{HeaderMap, HeaderValue};
+use reqwest::Client;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::io::{Error, Result};
 use std::time::Instant;
-use reqwest::Client;
 use tracing::debug;
 
 pub async fn resolve_secrets(config: Config) -> Result<Config> {
@@ -35,10 +35,12 @@ pub async fn resolve_secrets(config: Config) -> Result<Config> {
         };
 
         let decrypted_key: String = if config.api_key_secret_arn.is_empty() {
-            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config).await
+            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config)
+                .await
                 .expect("Failed to decrypt secret")
         } else {
-            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config).await
+            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config)
+                .await
                 .expect("Failed to decrypt secret")
         };
 
@@ -71,7 +73,11 @@ struct AwsConfig {
     function_name: String,
 }
 
-async fn decrypt_aws_kms(client: &Client, kms_key: String, aws_config: AwsConfig) -> Result<String> {
+async fn decrypt_aws_kms(
+    client: &Client,
+    kms_key: String,
+    aws_config: AwsConfig,
+) -> Result<String> {
     let json_body = &serde_json::json!({
         "CiphertextBlob": kms_key,
         "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
@@ -95,14 +101,18 @@ async fn decrypt_aws_kms(client: &Client, kms_key: String, aws_config: AwsConfig
                 .decode(secret_string_b64)
                 .expect("Failed to decode base64"),
         )
-            .expect("Failed to convert to string");
+        .expect("Failed to convert to string");
         Ok(secret_string)
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()))
     };
 }
 
-async fn decrypt_aws_sm(client: &Client, secret_arn: String, aws_config: AwsConfig) -> Result<String> {
+async fn decrypt_aws_sm(
+    client: &Client,
+    secret_arn: String,
+    aws_config: AwsConfig,
+) -> Result<String> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
     let headers = build_get_secret_signed_headers(
@@ -134,9 +144,11 @@ async fn request(json_body: &Value, headers: HeaderMap, client: &Client) -> Valu
         .headers(headers);
 
     let resp = req.send();
-    let body = resp.await
+    let body = resp
+        .await
         .expect("Failed to get response body")
-        .text().await
+        .text()
+        .await
         .expect("Cannot deserialize body");
     let v: Value = serde_json::from_str(&body).expect("Failed to parse JSON");
     v
