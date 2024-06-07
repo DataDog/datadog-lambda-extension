@@ -149,6 +149,18 @@ impl Lambda {
         if let Err(e) = aggr.insert(&metric) {
             error!("failed to insert memory size metric: {}", e);
         }
+
+        let cost_usd =
+            Self::calculate_estimated_cost_usd(metrics.billed_duration_ms, metrics.memory_size_mb);
+        let metric = metric::Metric::new(
+            constants::ESTIMATED_COST_METRIC.into(),
+            metric::Type::Distribution,
+            cost_usd.to_string().into(),
+            None,
+        );
+        if let Err(e) = aggr.insert(&metric) {
+            error!("failed to insert estimated cost metric: {}", e);
+        }
     }
 }
 

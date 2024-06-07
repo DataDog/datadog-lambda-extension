@@ -104,7 +104,7 @@ impl LambdaProcessor {
                 request_id,
                 version,
             } => {
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)) {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformStart to the main event bus: {}", e);
                 }
                 // Set request_id for unprocessed and future logs
