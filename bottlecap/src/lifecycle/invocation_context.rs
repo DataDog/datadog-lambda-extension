@@ -23,10 +23,8 @@ impl Default for InvocationContextBuffer {
 impl InvocationContextBuffer {
     pub fn insert(&mut self, invocation_context: InvocationContext) {
         if self.buffer.len() == self.buffer.capacity() {
-            debug!(
-                "Buffer is full, dropping context for request_id: {:?}",
-                invocation_context.request_id
-            );
+            self.buffer.pop_front();
+            self.buffer.push_back(invocation_context);
         } else {
             if self.get(&invocation_context.request_id).is_some() {
                 self.remove(&invocation_context.request_id);
