@@ -1,4 +1,3 @@
-use log::warn;
 use reqwest;
 use std::error::Error;
 use tracing::{debug, error};
