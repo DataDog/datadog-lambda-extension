@@ -195,7 +195,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let decrypted_key = resolve_secrets(Arc::clone(&config), &aws_config).await;
+    let resolved_api_key = resolve_secrets(Arc::clone(&config), &aws_config).await;
 
     let function_arn =
         build_function_arn(&r.account_id, &aws_config.region, &aws_config.function_name);
@@ -217,7 +217,7 @@ async fn main() -> Result<()> {
     );
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
-        decrypted_key.clone(),
+        resolved_api_key.clone(),
         Arc::clone(&logs_agent.aggregator),
         config.site.clone(),
     );
@@ -245,7 +245,7 @@ async fn main() -> Result<()> {
     .await;
 
     let mut statsd_flusher = MetricsFlusher::new(
-        decrypted_key,
+        resolved_api_key,
         Arc::clone(&dogstats_client.aggregator),
         config.site.clone(),
     );
