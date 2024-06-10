@@ -1,75 +1,37 @@
-use crate::config;
-use crate::logs::aggregator::Aggregator;
+use crate::logs::{aggregator::Aggregator, datadog};
 use std::sync::{Arc, Mutex};
-use tokio::task::JoinSet;
-use tracing::{debug, error};
 
 pub struct Flusher {
-    api_key: String,
-    site: String,
+    dd_api: datadog::Api,
     aggregator: Arc<Mutex<Aggregator>>,
 }
+
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(config: Arc<config::Config>, aggregator: Arc<Mutex<Aggregator>>) -> Self {
-        Flusher {
-            site: config.site.clone(),
-            api_key: config.api_key.clone(),
-            aggregator,
-        }
+    pub fn new(api_key: Option<String>, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
+        let dd_api = datadog::Api::new(api_key, site);
+        Flusher { dd_api, aggregator }
     }
     pub async fn flush(&self) {
         let mut guard = self.aggregator.lock().expect("lock poisoned");
-        let mut set = JoinSet::new();
-        // It could be an empty JSON array: []
-        let mut logs = guard.get_batch();
-        let client = reqwest::Client::new();
-        while logs.len() > 2 {
-            let api_key = self.api_key.clone();
-            let site = self.site.clone();
-            let cloned_client = client.clone();
-            set.spawn(async move { Self::send(cloned_client, api_key, site, logs).await });
-            logs = guard.get_batch();
-        }
+        let logs = guard.get_batch();
         drop(guard);
-        while let Some(res) = set.join_next().await {
-            if let Err(e) = res {
-                debug!("Failed to send logs to datadog: {}", e);
-            }
-        }
+        self.dd_api
+            .send(logs)
+            .await
+            .expect("Failed to send logs to Datadog");
     }
 
-    async fn send(
-        client: reqwest::Client,
-        api_key: String,
-        site: String,
-        data: Vec<u8>,
-    ) -> Result<(), String> {
-        let url = format!("https://http-intake.logs.{site}/api/v2/logs");
-
+    pub async fn flush_shutdown(aggregator: &Arc<Mutex<Aggregator>>, dd_api: &datadog::Api) {
+        let mut aggregator = aggregator.lock().expect("lock poisoned");
+        let mut logs = aggregator.get_batch();
         // It could be an empty JSON array: []
-        if data.len() > 2 {
-            let resp: Result<reqwest::Response, reqwest::Error> = client
-                .post(&url)
-                .header("DD-API-KEY", api_key)
-                .header("DD-PROTOCOL", "agent-json")
-                .header("Content-Type", "application/json")
-                .body(data)
-                .send()
-                .await;
-
-            match resp {
-                Ok(resp) => {
-                    if resp.status() != 202 {
-                        debug!("Failed to send logs to datadog: {}", resp.status());
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to send logs to datadog: {}", e);
-                }
-            }
+        while logs.len() > 2 {
+            dd_api
+                .send(logs)
+                .await
+                .expect("Failed to send logs to Datadog");
+            logs = aggregator.get_batch();
         }
-
-        Ok(())
     }
 }

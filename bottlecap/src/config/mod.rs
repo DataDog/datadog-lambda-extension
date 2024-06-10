@@ -84,6 +84,15 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     Ok(config)
 }
 
+#[allow(clippy::module_name_repetitions)]
+pub struct AwsConfig {
+    pub region: String,
+    pub aws_access_key_id: String,
+    pub aws_secret_access_key: String,
+    pub aws_session_token: String,
+    pub function_name: String,
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -298,7 +307,7 @@ pub mod tests {
                         kind: processing_rule::Kind::ExcludeAtMatch,
                         name: "exclude".to_string(),
                         pattern: "exclude".to_string(),
-                        replace_placeholder: None
+                        replace_placeholder: None,
                     }]),
                     ..Config::default()
                 }
@@ -337,20 +346,20 @@ pub mod tests {
                             kind: processing_rule::Kind::ExcludeAtMatch,
                             name: "exclude".to_string(),
                             pattern: "exclude".to_string(),
-                            replace_placeholder: None
+                            replace_placeholder: None,
                         },
                         ProcessingRule {
                             kind: processing_rule::Kind::IncludeAtMatch,
                             name: "include".to_string(),
                             pattern: "include".to_string(),
-                            replace_placeholder: None
+                            replace_placeholder: None,
                         },
                         ProcessingRule {
                             kind: processing_rule::Kind::MaskSequences,
                             name: "mask".to_string(),
                             pattern: "mask".to_string(),
-                            replace_placeholder: Some("REPLACED".to_string())
-                        }
+                            replace_placeholder: Some("REPLACED".to_string()),
+                        },
                     ]),
                     ..Config::default()
                 }

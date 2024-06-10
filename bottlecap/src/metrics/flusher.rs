@@ -1,5 +1,5 @@
+use crate::metrics::aggregator::Aggregator;
 use crate::metrics::datadog;
-use crate::{config, metrics::aggregator::Aggregator};
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 
@@ -10,8 +10,12 @@ pub struct Flusher {
 
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(config: Arc<config::Config>, aggregator: Arc<Mutex<Aggregator<1024>>>) -> Self {
-        let dd_api = datadog::DdApi::new(config.api_key.clone(), config.site.clone());
+    pub fn new(
+        api_key: Option<String>,
+        aggregator: Arc<Mutex<Aggregator<1024>>>,
+        site: String,
+    ) -> Self {
+        let dd_api = datadog::DdApi::new(api_key, site);
         Flusher { dd_api, aggregator }
     }
 

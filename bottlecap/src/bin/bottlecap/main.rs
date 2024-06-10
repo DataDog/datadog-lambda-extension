@@ -45,6 +45,7 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 
+use bottlecap::config::AwsConfig;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -145,8 +146,17 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 async fn main() -> Result<()> {
     // First load the configuration
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let env_config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => config,
+    let aws_config = AwsConfig {
+        region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
+        aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
+        aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
+            .expect("AWS_SECRET_ACCESS_KEY not set"),
+        aws_session_token: env::var("AWS_SESSION_TOKEN").expect("AWS_SESSION_TOKEN not set"),
+        function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
+            .expect("AWS_LAMBDA_FUNCTION_NAME not set"),
+    };
+    let config = match config::get_config(Path::new(&lambda_directory)) {
+        Ok(config) => Arc::new(config),
         Err(e) => {
             // NOTE we must print here as the logging subsystem is not enabled yet.
             println!("Error loading configuration: {e:?}");
@@ -158,13 +168,13 @@ async fn main() -> Result<()> {
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
-        .with_max_level(env_config.log_level.as_level_filter())
+        .with_max_level(config.log_level.as_level_filter())
         .init()
         .expect("failed to set up log bridge");
 
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_new(env_config.log_level)
+            EnvFilter::try_new(config.log_level)
                 .expect("could not parse log level in configuration"),
         )
         .with_level(true)
@@ -185,17 +195,10 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let config = match resolve_secrets(env_config).await {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            panic!("Error resolving key: {e}");
-        }
-    };
+    let decrypted_key = resolve_secrets(Arc::clone(&config), &aws_config).await;
 
-    let region = env::var("AWS_REGION").expect("could not read AWS_REGION");
-    let function_name =
-        env::var("AWS_LAMBDA_FUNCTION_NAME").expect("could not read AWS_LAMBDA_FUNCTION_NAME");
-    let function_arn = build_function_arn(&r.account_id, &region, &function_name);
+    let function_arn =
+        build_function_arn(&r.account_id, &aws_config.region, &aws_config.function_name);
     let metadata_hash = hash_map::HashMap::from([(
         lambda::tags::FUNCTION_ARN_KEY.to_string(),
         function_arn.clone(),
@@ -213,7 +216,11 @@ async fn main() -> Result<()> {
         event_bus.get_sender_copy(),
     );
     let logs_agent_channel = logs_agent.get_sender_copy();
-    let logs_flusher = LogsFlusher::new(Arc::clone(&config), Arc::clone(&logs_agent.aggregator));
+    let logs_flusher = LogsFlusher::new(
+        decrypted_key.clone(),
+        Arc::clone(&logs_agent.aggregator),
+        config.site.clone(),
+    );
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
@@ -237,8 +244,11 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    let mut statsd_flusher =
-        MetricsFlusher::new(Arc::clone(&config), Arc::clone(&dogstats_client.aggregator));
+    let mut statsd_flusher = MetricsFlusher::new(
+        decrypted_key,
+        Arc::clone(&dogstats_client.aggregator),
+        config.site.clone(),
+    );
 
     tokio::spawn(async move {
         dogstats_client.spin().await;

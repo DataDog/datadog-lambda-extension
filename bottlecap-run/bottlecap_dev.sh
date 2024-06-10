@@ -99,10 +99,11 @@ all(){
 }
 
 format () {
-  cd ../../bottlecap
+  cd ../bottlecap
   cargo fmt
   cargo clippy --workspace --all-features
   cargo clippy --fix
+  cd -
 }
 
 time "$@"
