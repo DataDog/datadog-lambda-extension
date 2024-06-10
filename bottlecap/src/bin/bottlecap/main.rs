@@ -10,7 +10,6 @@
 #![deny(missing_debug_implementations)]
 
 use decrypt::resolve_secrets;
-use lifecycle::flush_control::FlushControl;
 use std::collections::hash_map;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
@@ -20,7 +19,11 @@ use bottlecap::{
     base_url, config,
     event_bus::bus::EventBus,
     events::Event,
-    lifecycle, logger,
+    lifecycle::{
+        flush_control::FlushControl,
+        invocation_context::{InvocationContext, InvocationContextBuffer},
+    },
+    logger,
     logs::agent::LogsAgent,
     logs::flusher::Flusher as LogsFlusher,
     metrics::{
@@ -32,7 +35,9 @@ use bottlecap::{
     secrets::decrypt,
     tags::{lambda, provider},
     telemetry::{
-        self, client::TelemetryApiClient, events::Status, events::TelemetryRecord,
+        self,
+        client::TelemetryApiClient,
+        events::{Status, TelemetryRecord},
         listener::TelemetryListener,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -261,6 +266,7 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
+    let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
 
     loop {
@@ -303,6 +309,12 @@ async fn main() -> Result<()> {
                             debug!("Metric event: {:?}", event);
                         }
                         Event::Telemetry(event) => match event.record {
+                            TelemetryRecord::PlatformStart { request_id, .. } => {
+                                invocation_context_buffer.insert(InvocationContext {
+                                    request_id,
+                                    runtime_duration_ms: 0.0,
+                                });
+                            }
                             TelemetryRecord::PlatformInitReport {
                                 initialization_type,
                                 phase,
@@ -316,8 +328,18 @@ async fn main() -> Result<()> {
                                 }
                             }
                             TelemetryRecord::PlatformRuntimeDone {
-                                request_id, status, ..
+                                request_id,
+                                status,
+                                metrics,
+                                ..
                             } => {
+                                if let Some(metrics) = metrics {
+                                    invocation_context_buffer
+                                        .add_runtime_duration(&request_id, metrics.duration_ms);
+                                    lambda_enhanced_metrics
+                                        .set_runtime_duration_metric(metrics.duration_ms);
+                                }
+
                                 if status != Status::Success {
                                     if let Err(e) =
                                         lambda_enhanced_metrics.increment_errors_metric()
@@ -350,6 +372,20 @@ async fn main() -> Result<()> {
                                     request_id, status
                                 );
                                 lambda_enhanced_metrics.set_report_log_metrics(&metrics);
+                                if let Some(invocation_context) =
+                                    invocation_context_buffer.remove(&request_id)
+                                {
+                                    if invocation_context.runtime_duration_ms > 0.0 {
+                                        let post_runtime_duration_ms = metrics.duration_ms
+                                            - invocation_context.runtime_duration_ms;
+                                        lambda_enhanced_metrics.set_post_runtime_duration_metric(
+                                            post_runtime_duration_ms,
+                                        );
+                                    } else {
+                                        debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
+                                    }
+                                }
+
                                 if shutdown {
                                     break;
                                 }
