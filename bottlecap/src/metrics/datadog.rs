@@ -1,7 +1,6 @@
 //!Types to serialize data into the Datadog API
 
 use datadog_protos::metrics::SketchPayload;
-use log::warn;
 use protobuf::Message;
 use reqwest;
 use serde::{Serialize, Serializer};
@@ -11,11 +10,10 @@ use tracing::{debug, error};
 /// Interface for the `DogStatsD` metrics intake API.
 #[derive(Debug)]
 pub struct DdApi {
-    api_key: Option<String>,
+    api_key: String,
     site: String,
     client: reqwest::Client,
 }
-
 /// Error relating to `ship`
 #[derive(thiserror::Error, Debug)]
 pub enum ShipError {
@@ -35,7 +33,7 @@ pub enum ShipError {
 
 impl DdApi {
     #[must_use]
-    pub fn new(api_key: Option<String>, site: String) -> Self {
+    pub fn new(api_key: String, site: String) -> Self {
         DdApi {
             api_key,
             site,
@@ -45,86 +43,70 @@ impl DdApi {
 
     /// Ship a serialized series to the API, blocking
     pub async fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
-        match &self.api_key {
-            Some(api_key) => {
-                let body = serde_json::to_vec(&series)?;
-                debug!("sending body: {:?}", &series);
+        let body = serde_json::to_vec(&series)?;
+        debug!("sending body: {:?}", &series);
 
-                let url = format!("https://api.{}/api/v2/series", &self.site);
-                let resp = self
-                    .client
-                    .post(&url)
-                    .header("DD-API-KEY", api_key)
-                    .header("Content-Type", "application/json")
-                    .body(body)
-                    .send()
-                    .await;
+        let url = format!("https://api.{}/api/v2/series", &self.site);
+        let resp = self
+            .client
+            .post(&url)
+            .header("DD-API-KEY", &self.api_key)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await;
 
-                match resp {
-                    Ok(resp) => match resp.status() {
-                        reqwest::StatusCode::ACCEPTED => Ok(()),
-                        _ => Err(ShipError::Failure {
-                            status: resp.status().as_u16(),
-                            body: resp.text().await.unwrap_or_default(),
-                        }),
-                    },
-                    Err(e) => Err(ShipError::Failure {
-                        status: 500,
-                        body: e.to_string(),
-                    }),
-                }
-            }
-            None => {
-                warn!("API key is not set, skipping sending metrics to Datadog");
-                Ok(())
-            }
+        match resp {
+            Ok(resp) => match resp.status() {
+                reqwest::StatusCode::ACCEPTED => Ok(()),
+                _ => Err(ShipError::Failure {
+                    status: resp.status().as_u16(),
+                    body: resp.text().await.unwrap_or_default(),
+                }),
+            },
+            Err(e) => Err(ShipError::Failure {
+                status: 500,
+                body: e.to_string(),
+            }),
         }
     }
 
     pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
-        match &self.api_key {
-            Some(api_key) => {
-                let url = format!("https://api.{}/api/beta/sketches", &self.site);
-                let mut buf = Vec::new();
-                log::info!("sending distributions: {:?}", &sketches);
-                // TODO maybe go to coded output stream if we incrementally
-                // add sketch payloads to the buffer
-                // something like this, but fix the utf-8 encoding issue
-                // {
-                //     let mut output_stream = CodedOutputStream::vec(&mut buf);
-                //     let _ = output_stream.write_tag(1, protobuf::rt::WireType::LengthDelimited);
-                //     let _ = output_stream.write_message_no_tag(&sketches);
-                //     TODO not working, has utf-8 encoding issue in dist-intake
-                //}
-                sketches
-                    .write_to_vec(&mut buf)
-                    .expect("can't write to buffer");
-                let resp = self
-                    .client
-                    .post(&url)
-                    .header("DD-API-KEY", api_key)
-                    .header("Content-Type", "application/x-protobuf")
-                    .body(buf)
-                    .send()
-                    .await;
-                match resp {
-                    Ok(resp) => match resp.status() {
-                        reqwest::StatusCode::ACCEPTED => Ok(()),
-                        _ => Err(ShipError::Failure {
-                            status: resp.status().as_u16(),
-                            body: resp.text().await.unwrap_or_default(),
-                        }),
-                    },
-                    Err(e) => Err(ShipError::Failure {
-                        status: 500,
-                        body: e.to_string(),
-                    }),
-                }
-            }
-            None => {
-                warn!("API key is not set, skipping sending metrics to Datadog");
-                Ok(())
-            }
+        let url = format!("https://api.{}/api/beta/sketches", &self.site);
+        let mut buf = Vec::new();
+        log::info!("sending distributions: {:?}", &sketches);
+        // TODO maybe go to coded output stream if we incrementally
+        // add sketch payloads to the buffer
+        // something like this, but fix the utf-8 encoding issue
+        // {
+        //     let mut output_stream = CodedOutputStream::vec(&mut buf);
+        //     let _ = output_stream.write_tag(1, protobuf::rt::WireType::LengthDelimited);
+        //     let _ = output_stream.write_message_no_tag(&sketches);
+        //     TODO not working, has utf-8 encoding issue in dist-intake
+        //}
+        sketches
+            .write_to_vec(&mut buf)
+            .expect("can't write to buffer");
+        let resp = self
+            .client
+            .post(&url)
+            .header("DD-API-KEY", &self.api_key)
+            .header("Content-Type", "application/x-protobuf")
+            .body(buf)
+            .send()
+            .await;
+        match resp {
+            Ok(resp) => match resp.status() {
+                reqwest::StatusCode::ACCEPTED => Ok(()),
+                _ => Err(ShipError::Failure {
+                    status: resp.status().as_u16(),
+                    body: resp.text().await.unwrap_or_default(),
+                }),
+            },
+            Err(e) => Err(ShipError::Failure {
+                status: 500,
+                body: e.to_string(),
+            }),
         }
     }
 }

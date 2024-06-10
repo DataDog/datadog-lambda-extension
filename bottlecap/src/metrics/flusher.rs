@@ -11,7 +11,7 @@ pub struct Flusher {
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
     pub fn new(
-        api_key: Option<String>,
+        api_key: String,
         aggregator: Arc<Mutex<Aggregator<1024>>>,
         site: String,
     ) -> Self {

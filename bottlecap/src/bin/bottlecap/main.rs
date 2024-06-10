@@ -45,7 +45,7 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 
-use bottlecap::config::AwsConfig;
+use bottlecap::config::{AwsConfig, Config};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -53,6 +53,7 @@ use std::io::Error;
 use std::io::Result;
 use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
+use reqwest::Client;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -117,7 +118,7 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    assert!(resp.status() == 200, "Unable to register extension");
+    assert_eq!(resp.status(), 200, "Unable to register extension");
 
     let extension_id = resp
         .headers()
@@ -144,8 +145,28 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 #[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<()> {
-    // First load the configuration
-    let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let (aws_config, config) = load_configs();
+
+    enable_logging_subsystem(&config);
+    let client = reqwest::Client::new();
+
+    let r = register(&client)
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
+    match resolve_secrets(Arc::clone(&config), &aws_config).await {
+        Ok(resolved_api_key) => {
+            extension_loop(&aws_config, &config, &client, &r, resolved_api_key).await
+        }
+        None => {
+            error!("Failed to resolve secrets, Datadog extension will be idle");
+            idle_extension(&client, &r).await
+        }
+    }
+}
+
+fn load_configs() -> (AwsConfig, Arc<Config>) {
+// First load the configuration
     let aws_config = AwsConfig {
         region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
         aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
@@ -155,6 +176,7 @@ async fn main() -> Result<()> {
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
             .expect("AWS_LAMBDA_FUNCTION_NAME not set"),
     };
+    let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(e) => {
@@ -164,8 +186,11 @@ async fn main() -> Result<()> {
             panic!("Error starting the extension: {err:?}");
         }
     };
+    (aws_config, config)
+}
 
-    // Bridge any `log` logs into the tracing subsystem. Note this is a global
+fn enable_logging_subsystem(config: &Arc<Config>) {
+// Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
         .with_max_level(config.log_level.as_level_filter())
@@ -189,14 +214,23 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     info!("logging subsystem enabled");
-    let client = reqwest::Client::new();
+}
 
-    let r = register(&client)
-        .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+async fn idle_extension(client: &Client, r: &RegisterResponse) -> Result<()> {
+    loop {
+        match next_event(&client, &r.extension_id).await {
+            Ok(evt) => {
+                debug!("Extension is idle, next event: {evt:?}");
+            }
+            Err(e) => {
+                error!("Error getting next event: {e:?}");
+                return Err(e);
+            }
+        };
+    }
+}
 
-    let resolved_api_key = resolve_secrets(Arc::clone(&config), &aws_config).await;
-
+async fn extension_loop(aws_config: &AwsConfig, config: &Arc<Config>, client: &Client, r: &RegisterResponse, resolved_api_key: String) -> Result<()> {
     let function_arn =
         build_function_arn(&r.account_id, &aws_config.region, &aws_config.function_name);
     let metadata_hash = hash_map::HashMap::from([(
@@ -242,7 +276,7 @@ async fn main() -> Result<()> {
         event_bus.get_sender_copy(),
         dogstats_cancel_token.clone(),
     )
-    .await;
+        .await;
 
     let mut statsd_flusher = MetricsFlusher::new(
         resolved_api_key,
@@ -263,8 +297,8 @@ async fn main() -> Result<()> {
         logs_agent_channel,
         telemetry_listener_cancel_token.clone(),
     )
-    .await
-    .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     tokio::spawn(async move {
         telemetry_listener.spin().await;
     });
@@ -283,10 +317,10 @@ async fn main() -> Result<()> {
         let evt = next_event(&client, &r.extension_id).await;
         match evt {
             Ok(NextEventResponse::Invoke {
-                request_id,
-                deadline_ms,
-                invoked_function_arn,
-            }) => {
+                   request_id,
+                   deadline_ms,
+                   invoked_function_arn,
+               }) => {
                 info!(
                     "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
@@ -296,9 +330,9 @@ async fn main() -> Result<()> {
                 }
             }
             Ok(NextEventResponse::Shutdown {
-                shutdown_reason,
-                deadline_ms,
-            }) => {
+                   shutdown_reason,
+                   deadline_ms,
+               }) => {
                 println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
                 shutdown = true;
             }
