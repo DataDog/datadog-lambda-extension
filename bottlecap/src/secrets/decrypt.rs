@@ -101,9 +101,7 @@ async fn decrypt_aws_sm(
         },
     );
 
-    let v = request(json_body, headers?, client)
-        .await
-        .map_err(|err| Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
+    let v = request(json_body, headers?, client).await?;
 
     if let Some(secret_string) = v["SecretString"].as_str() {
         Ok(secret_string.to_string())
@@ -127,11 +125,9 @@ async fn request(
 
     let body = req
         .send()
-        .await
-        .map_err(|err| Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?
+        .await?
         .text()
-        .await
-        .map_err(|err| Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
+        .await?;
     let v: Value = serde_json::from_str(&body)?;
     Ok(v)
 }
