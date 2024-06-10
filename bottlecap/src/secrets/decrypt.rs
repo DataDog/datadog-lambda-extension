@@ -123,11 +123,7 @@ async fn request(
         .json(json_body)
         .headers(headers);
 
-    let body = req
-        .send()
-        .await?
-        .text()
-        .await?;
+    let body = req.send().await?.text().await?;
     let v: Value = serde_json::from_str(&body)?;
     Ok(v)
 }
