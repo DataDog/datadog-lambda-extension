@@ -6,6 +6,7 @@ use tracing::error;
 
 use crate::config;
 use crate::events::Event;
+use crate::lifecycle::invocation_context::InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
@@ -23,17 +24,11 @@ pub struct LambdaProcessor {
     // Global Processing Rules
     rules: Option<Vec<Rule>>,
     // Current Invocation Context
-    execution_context: ExecutionContext,
-    // Main event bus
-    event_bus: Sender<Event>,
-}
-
-#[derive(Clone, Debug)]
-struct ExecutionContext {
-    request_id: Option<String>,
-    runtime_duration_ms: f64,
+    invocation_context: InvocationContext,
     // Logs which don't have a `request_id`
     orphan_logs: Vec<IntakeLog>,
+    // Main event bus
+    event_bus: Sender<Event>,
 }
 
 impl Processor<IntakeLog> for LambdaProcessor {}
@@ -56,11 +51,11 @@ impl LambdaProcessor {
             service,
             tags,
             rules,
-            execution_context: ExecutionContext {
-                request_id: None,
+            invocation_context: InvocationContext {
+                request_id: String::new(),
                 runtime_duration_ms: 0.0,
-                orphan_logs: Vec::new(),
             },
+            orphan_logs: Vec::new(),
             event_bus,
         }
     }
@@ -104,8 +99,11 @@ impl LambdaProcessor {
                 request_id,
                 version,
             } => {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
+                    error!("Failed to send PlatformStart to the main event bus: {}", e);
+                }
                 // Set request_id for unprocessed and future logs
-                self.execution_context.request_id = Some(request_id.clone());
+                self.invocation_context.request_id.clone_from(&request_id);
 
                 let version = version.unwrap_or("$LATEST".to_string());
                 Ok(Message::new(
@@ -121,7 +119,7 @@ impl LambdaProcessor {
                 }
 
                 if let Some(metrics) = metrics {
-                    self.execution_context.runtime_duration_ms = metrics.duration_ms;
+                    self.invocation_context.runtime_duration_ms = metrics.duration_ms;
                 }
 
                 Ok(Message::new(
@@ -138,15 +136,15 @@ impl LambdaProcessor {
 
                 let mut post_runtime_duration_ms = 0.0;
                 // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
-                if self.execution_context.runtime_duration_ms > 0.0 {
-                    post_runtime_duration_ms = metrics.duration_ms - self.execution_context.runtime_duration_ms;
+                if self.invocation_context.runtime_duration_ms > 0.0 {
+                    post_runtime_duration_ms = metrics.duration_ms - self.invocation_context.runtime_duration_ms;
                 }
 
                 let mut message = format!(
                     "REPORT RequestId: {} Duration: {} ms Runtime Duration: {} ms Post Runtime Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
                     request_id,
                     metrics.duration_ms,
-                    self.execution_context.runtime_duration_ms,
+                    self.invocation_context.runtime_duration_ms,
                     post_runtime_duration_ms,
                     metrics.billed_duration_ms,
                     metrics.memory_size_mb,
@@ -179,7 +177,8 @@ impl LambdaProcessor {
             // Log already has a `request_id`
             Some(request_id) => Some(request_id.clone()),
             // Default to the `request_id` we've seen so far, if any.
-            None => self.execution_context.request_id.clone(),
+            None => (!&self.invocation_context.request_id.is_empty())
+                .then(|| self.invocation_context.request_id.clone()),
         };
 
         lambda_message.lambda.request_id = request_id;
@@ -196,7 +195,7 @@ impl LambdaProcessor {
             Ok(log)
         } else {
             // We haven't seen a `request_id`, this is an orphan log
-            self.execution_context.orphan_logs.push(log);
+            self.orphan_logs.push(log);
             Err("No request_id available, queueing for later".into())
         }
     }
@@ -227,13 +226,9 @@ impl LambdaProcessor {
                 }
 
                 // Process orphan logs, since we have a `request_id` now
-                for mut orphan_log in self.execution_context.orphan_logs.drain(..) {
-                    orphan_log.message.lambda.request_id = Some(
-                        self.execution_context
-                            .request_id
-                            .clone()
-                            .expect("unable to retrieve request ID"),
-                    );
+                for mut orphan_log in self.orphan_logs.drain(..) {
+                    orphan_log.message.lambda.request_id =
+                        Some(self.invocation_context.request_id.clone());
                     if should_send_log {
                         if let Ok(serialized_log) = serde_json::to_string(&log) {
                             to_send.push(serialized_log);
@@ -510,7 +505,7 @@ mod tests {
             intake_log.to_string(),
             "No request_id available, queueing for later"
         );
-        assert_eq!(processor.execution_context.orphan_logs.len(), 1);
+        assert_eq!(processor.orphan_logs.len(), 1);
     }
 
     #[tokio::test]
@@ -632,7 +627,7 @@ mod tests {
         };
 
         processor.process(vec![event.clone()], &aggregator).await;
-        assert_eq!(processor.execution_context.orphan_logs.len(), 1);
+        assert_eq!(processor.orphan_logs.len(), 1);
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
@@ -671,8 +666,8 @@ mod tests {
             .process(vec![start_event.clone()], &aggregator)
             .await;
         assert_eq!(
-            processor.execution_context.request_id,
-            Some("test-request-id".to_string())
+            processor.invocation_context.request_id,
+            "test-request-id".to_string()
         );
 
         // This could be any event that doesn't have a `request_id`
