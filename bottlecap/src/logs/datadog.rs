@@ -1,7 +1,7 @@
 use reqwest;
-use std::error::Error;
 use tracing::{debug, error};
 
+#[derive(Clone)]
 pub struct Api {
     api_key: String,
     site: String,
@@ -18,7 +18,7 @@ impl Api {
         }
     }
 
-    pub async fn send(&self, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
+    pub async fn send(&self, data: Vec<u8>) -> Result<(), String> {
         let url = format!("https://http-intake.logs.{}/api/v2/logs", &self.site);
 
         // It could be an empty JSON array: []
