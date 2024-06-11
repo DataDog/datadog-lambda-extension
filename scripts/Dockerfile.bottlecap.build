@@ -11,11 +11,13 @@ RUN curl https://sh.rustup.rs -sSf | \
     ENV PATH=/root/.cargo/bin:$PATH
 RUN rustup component add rust-src --toolchain nightly-$PLATFORM-unknown-linux-gnu
 RUN mkdir -p /tmp/dd
-COPY ./bottlecap /tmp/dd/bottlecap
+COPY ./bottlecap/src /tmp/dd/bottlecap/src
+COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
+COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 ENV RUSTFLAGS="-C panic=abort -Zlocation-detail=none"
 WORKDIR /tmp/dd/bottlecap
-RUN --mount=type=cache,target=/tmp/dd/bottlecap/target --mount=type=cache,target=/usr/local/cargo/registry cargo +nightly build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --release --target $PLATFORM-unknown-linux-gnu
-RUN cp /tmp/dd/bottlecap/target/release/bottlecap /tmp/dd/bottlecap/bottlecap
+RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +nightly build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --release --target $PLATFORM-unknown-linux-gnu
+RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
 # zip the extension
 FROM ubuntu:latest as compresser
