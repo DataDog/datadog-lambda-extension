@@ -12,7 +12,11 @@ pub struct Flusher {
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
     pub fn new(config: Arc<config::Config>, aggregator: Arc<Mutex<Aggregator>>) -> Self {
-        Flusher { site: config.site.clone(), api_key: config.api_key.clone(), aggregator }
+        Flusher {
+            site: config.site.clone(),
+            api_key: config.api_key.clone(),
+            aggregator,
+        }
     }
     pub async fn flush(&self) {
         let mut guard = self.aggregator.lock().expect("lock poisoned");
@@ -24,9 +28,7 @@ impl Flusher {
             let api_key = self.api_key.clone();
             let site = self.site.clone();
             let cloned_client = client.clone();
-            set.spawn(async move {
-                Self::send(cloned_client, api_key, site, logs).await
-            });
+            set.spawn(async move { Self::send(cloned_client, api_key, site, logs).await });
             logs = guard.get_batch();
         }
         drop(guard);
@@ -37,8 +39,13 @@ impl Flusher {
         }
     }
 
-    async fn send(client: reqwest::Client, api_key: String, site: String, data: Vec<u8>) -> Result<(), String> {
-        let url = format!("https://http-intake.logs.{}/api/v2/logs", site);
+    async fn send(
+        client: reqwest::Client,
+        api_key: String,
+        site: String,
+        data: Vec<u8>,
+    ) -> Result<(), String> {
+        let url = format!("https://http-intake.logs.{site}/api/v2/logs");
 
         // It could be an empty JSON array: []
         if data.len() > 2 {
