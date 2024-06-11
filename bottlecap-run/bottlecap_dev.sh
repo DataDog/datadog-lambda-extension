@@ -46,7 +46,7 @@ build_local() {
 build_dockerized(){
   _require_argument ARCH
   # remove the target folder to avoid copying 12gb and invalidate cache during dockerized build
-  rm -rf bottlecap/target
+  rm -rf ../bottlecap/target
   cd ../scripts
   ARCHITECTURE=$ARCH ./build_bottlecap_layer.sh
 }
