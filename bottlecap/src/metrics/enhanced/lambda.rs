@@ -1,7 +1,8 @@
-use super::constants;
+use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::{errors, metric};
 use crate::telemetry::events::ReportMetrics;
+use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use tracing::error;
 
@@ -53,8 +54,61 @@ impl Lambda {
             .insert(&metric)
     }
 
+    pub fn set_runtime_duration_metric(&self, duration_ms: f64) {
+        let metric = metric::Metric::new(
+            constants::RUNTIME_DURATION_METRIC.into(),
+            metric::Type::Distribution,
+            // Datadog expects this value as milliseconds, not seconds
+            duration_ms.to_string().into(),
+            None,
+        );
+        if let Err(e) = self
+            .aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(&metric)
+        {
+            error!("failed to insert runtime duration metric: {}", e);
+        }
+    }
+
+    pub fn set_post_runtime_duration_metric(&self, duration_ms: f64) {
+        let metric = metric::Metric::new(
+            constants::POST_RUNTIME_DURATION_METRIC.into(),
+            metric::Type::Distribution,
+            // Datadog expects this value as milliseconds, not seconds
+            duration_ms.to_string().into(),
+            None,
+        );
+        if let Err(e) = self
+            .aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(&metric)
+        {
+            error!("failed to insert post runtime duration metric: {}", e);
+        }
+    }
+
+    fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
+        let gb_seconds = (billed_duration_ms as f64 * constants::MS_TO_SEC)
+            * (memory_size_mb as f64 / constants::MB_TO_GB);
+
+        let price_per_gb = match ARCH {
+            "x86_64" => constants::X86_LAMBDA_PRICE_PER_GB_SECOND,
+            "aarch64" => constants::ARM_LAMBDA_PRICE_PER_GB_SECOND,
+            _ => {
+                error!("unsupported architecture: {}", ARCH);
+                return 0.0;
+            }
+        };
+
+        ((BASE_LAMBDA_INVOCATION_PRICE + (gb_seconds * price_per_gb)) * 1e12).round() / 1e12
+    }
+
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
-        let mut aggr = self.aggregator.lock().expect("lock poisoned");
+        let mut aggr: std::sync::MutexGuard<Aggregator<1024>> =
+            self.aggregator.lock().expect("lock poisoned");
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
             metric::Type::Distribution,
@@ -94,6 +148,18 @@ impl Lambda {
         );
         if let Err(e) = aggr.insert(&metric) {
             error!("failed to insert memory size metric: {}", e);
+        }
+
+        let cost_usd =
+            Self::calculate_estimated_cost_usd(metrics.billed_duration_ms, metrics.memory_size_mb);
+        let metric = metric::Metric::new(
+            constants::ESTIMATED_COST_METRIC.into(),
+            metric::Type::Distribution,
+            cost_usd.to_string().into(),
+            None,
+        );
+        if let Err(e) = aggr.insert(&metric) {
+            error!("failed to insert estimated cost metric: {}", e);
         }
     }
 }
