@@ -6,14 +6,17 @@ use tracing::{debug, error};
 pub struct Flusher {
     api_key: String,
     site: String,
+    client: reqwest::Client,
     aggregator: Arc<Mutex<Aggregator>>,
 }
 
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
     pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
+        let client = reqwest::Client::new();
         Flusher {
             api_key,
+            client,
             site,
             aggregator,
         }
@@ -23,11 +26,10 @@ impl Flusher {
         let mut set = JoinSet::new();
         // It could be an empty JSON array: []
         let mut logs = guard.get_batch();
-        let client = reqwest::Client::new();
         while logs.len() > 2 {
             let api_key = self.api_key.clone();
             let site = self.site.clone();
-            let cloned_client = client.clone();
+            let cloned_client = self.client.clone();
             set.spawn(async move { Self::send(cloned_client, api_key, site, logs).await });
             logs = guard.get_batch();
         }
