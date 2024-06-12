@@ -1,51 +1,49 @@
-use crate::config::Config;
+use crate::config::{AwsConfig, Config};
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
+use log::error;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::env;
 use std::io::Error;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::debug;
 
-pub async fn resolve_secrets(config: Config) -> Result<Config, Box<dyn std::error::Error>> {
+pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Option<String> {
     if !config.api_key.is_empty() {
         debug!("DD_API_KEY found, not trying to resolve secrets");
-        Ok(config)
+        Some(config.api_key.clone())
     } else if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
         let before_decrypt = Instant::now();
 
-        let client = &Client::builder().use_rustls_tls().build()?;
-
-        let aws_config = AwsConfig {
-            region: env::var("AWS_DEFAULT_REGION")?,
-            aws_access_key_id: env::var("AWS_ACCESS_KEY_ID")?,
-            aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")?,
-            aws_session_token: env::var("AWS_SESSION_TOKEN")?,
-            function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")?,
+        let client = match Client::builder().use_rustls_tls().build() {
+            Ok(client) => client,
+            Err(err) => {
+                error!("Error creating reqwest client: {}", err);
+                return None;
+            }
         };
 
-        let decrypted_key: String = if config.api_key_secret_arn.is_empty() {
-            decrypt_aws_kms(client, config.kms_api_key.clone(), aws_config).await?
+        let decrypted_key = if config.api_key_secret_arn.is_empty() {
+            decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
         } else {
-            decrypt_aws_sm(client, config.api_key_secret_arn.clone(), aws_config).await?
+            decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
         };
 
         debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
 
-        Ok(Config {
-            api_key: decrypted_key,
-            ..config.clone()
-        })
+        match decrypted_key {
+            Ok(key) => Some(key),
+            Err(err) => {
+                error!("Error decrypting key: {}", err);
+                None
+            }
+        }
     } else {
-        Err(Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "No API key or secret ARN found".to_string(),
-        )
-        .into())
+        return None;
     }
 }
 
@@ -56,18 +54,10 @@ struct RequestArgs<'a> {
     x_amz_target: String,
 }
 
-struct AwsConfig {
-    region: String,
-    aws_access_key_id: String,
-    aws_secret_access_key: String,
-    aws_session_token: String,
-    function_name: String,
-}
-
 async fn decrypt_aws_kms(
     client: &Client,
     kms_key: String,
-    aws_config: AwsConfig,
+    aws_config: &AwsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let json_body = &serde_json::json!({
         "CiphertextBlob": kms_key,
@@ -75,7 +65,7 @@ async fn decrypt_aws_kms(
     );
 
     let headers = build_get_secret_signed_headers(
-        &aws_config,
+        aws_config,
         RequestArgs {
             service: "kms".to_string(),
             body: json_body,
@@ -97,12 +87,12 @@ async fn decrypt_aws_kms(
 async fn decrypt_aws_sm(
     client: &Client,
     secret_arn: String,
-    aws_config: AwsConfig,
+    aws_config: &AwsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
     let headers = build_get_secret_signed_headers(
-        &aws_config,
+        aws_config,
         RequestArgs {
             service: "secretsmanager".to_string(),
             body: json_body,
@@ -111,9 +101,7 @@ async fn decrypt_aws_sm(
         },
     );
 
-    let v = request(json_body, headers?, client)
-        .await
-        .map_err(|err| Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
+    let v = request(json_body, headers?, client).await?;
 
     if let Some(secret_string) = v["SecretString"].as_str() {
         Ok(secret_string.to_string())
@@ -135,13 +123,7 @@ async fn request(
         .json(json_body)
         .headers(headers);
 
-    let body = req
-        .send()
-        .await
-        .map_err(|err| Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?
-        .text()
-        .await
-        .map_err(|err| Error::new(std::io::ErrorKind::InvalidData, err.to_string()))?;
+    let body = req.send().await?.text().await?;
     let v: Value = serde_json::from_str(&body)?;
     Ok(v)
 }

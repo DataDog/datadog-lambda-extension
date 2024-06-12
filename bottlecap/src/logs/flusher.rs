@@ -1,4 +1,3 @@
-use crate::config;
 use crate::logs::aggregator::Aggregator;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinSet;
@@ -9,12 +8,13 @@ pub struct Flusher {
     site: String,
     aggregator: Arc<Mutex<Aggregator>>,
 }
+
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(config: Arc<config::Config>, aggregator: Arc<Mutex<Aggregator>>) -> Self {
+    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
         Flusher {
-            site: config.site.clone(),
-            api_key: config.api_key.clone(),
+            api_key,
+            site,
             aggregator,
         }
     }

@@ -45,6 +45,9 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 
+use bottlecap::config::{AwsConfig, Config};
+use bottlecap::telemetry::events::TelemetryEvent;
+use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;
@@ -52,6 +55,8 @@ use std::io::Error;
 use std::io::Result;
 use std::sync::{Arc, Mutex};
 use std::{os::unix::process::CommandExt, path::Path, process::Command};
+use tokio::sync::mpsc::Sender;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -116,7 +121,7 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    assert!(resp.status() == 200, "Unable to register extension");
+    assert_eq!(resp.status(), 200, "Unable to register extension");
 
     let extension_id = resp
         .headers()
@@ -140,13 +145,39 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
     format!("arn:aws:lambda:{region}:{account_id}:function:{function_name}")
 }
 
-#[allow(clippy::too_many_lines)]
 #[tokio::main]
 async fn main() -> Result<()> {
+    let (aws_config, config) = load_configs();
+
+    enable_logging_subsystem(&config);
+    let client = reqwest::Client::new();
+
+    let r = register(&client)
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
+    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
+        extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await
+    } else {
+        error!("Failed to resolve secrets, Datadog extension will be idle");
+        extension_loop_idle(&client, &r).await
+    }
+}
+
+fn load_configs() -> (AwsConfig, Arc<Config>) {
     // First load the configuration
+    let aws_config = AwsConfig {
+        region: env::var("AWS_DEFAULT_REGION").expect("AWS_DEFAULT_REGION not set"),
+        aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID not set"),
+        aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")
+            .expect("AWS_SECRET_ACCESS_KEY not set"),
+        aws_session_token: env::var("AWS_SESSION_TOKEN").expect("AWS_SESSION_TOKEN not set"),
+        function_name: env::var("AWS_LAMBDA_FUNCTION_NAME")
+            .expect("AWS_LAMBDA_FUNCTION_NAME not set"),
+    };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let env_config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => config,
+    let config = match config::get_config(Path::new(&lambda_directory)) {
+        Ok(config) => Arc::new(config),
         Err(e) => {
             // NOTE we must print here as the logging subsystem is not enabled yet.
             println!("Error loading configuration: {e:?}");
@@ -154,17 +185,20 @@ async fn main() -> Result<()> {
             panic!("Error starting the extension: {err:?}");
         }
     };
+    (aws_config, config)
+}
 
+fn enable_logging_subsystem(config: &Arc<Config>) {
     // Bridge any `log` logs into the tracing subsystem. Note this is a global
     // registration.
     tracing_log::LogTracer::builder()
-        .with_max_level(env_config.log_level.as_level_filter())
+        .with_max_level(config.log_level.as_level_filter())
         .init()
         .expect("failed to set up log bridge");
 
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_new(env_config.log_level)
+            EnvFilter::try_new(config.log_level)
                 .expect("could not parse log level in configuration"),
         )
         .with_level(true)
@@ -179,29 +213,38 @@ async fn main() -> Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     info!("logging subsystem enabled");
-    let client = reqwest::Client::new();
+}
 
-    let r = register(&client)
-        .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
+    loop {
+        match next_event(client, &r.extension_id).await {
+            Ok(_) => {
+                debug!("Extension is idle, skipping next event");
+            }
+            Err(e) => {
+                error!("Error getting next event: {e:?}");
+                return Err(e);
+            }
+        };
+    }
+}
 
-    let config = match resolve_secrets(env_config).await {
-        Ok(c) => Arc::new(c),
-        Err(e) => {
-            panic!("Error resolving key: {e}");
-        }
-    };
-
-    let region = env::var("AWS_REGION").expect("could not read AWS_REGION");
-    let function_name =
-        env::var("AWS_LAMBDA_FUNCTION_NAME").expect("could not read AWS_LAMBDA_FUNCTION_NAME");
-    let function_arn = build_function_arn(&r.account_id, &region, &function_name);
+#[allow(clippy::too_many_lines)]
+async fn extension_loop_active(
+    aws_config: &AwsConfig,
+    config: &Arc<Config>,
+    client: &Client,
+    r: &RegisterResponse,
+    resolved_api_key: String,
+) -> Result<()> {
+    let function_arn =
+        build_function_arn(&r.account_id, &aws_config.region, &aws_config.function_name);
     let metadata_hash = hash_map::HashMap::from([(
         lambda::tags::FUNCTION_ARN_KEY.to_string(),
         function_arn.clone(),
     )]);
     let tags_provider = Arc::new(provider::Provider::new(
-        Arc::clone(&config),
+        Arc::clone(config),
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
     ));
@@ -209,11 +252,15 @@ async fn main() -> Result<()> {
     let mut event_bus = EventBus::run();
     let mut logs_agent = LogsAgent::new(
         Arc::clone(&tags_provider),
-        Arc::clone(&config),
+        Arc::clone(config),
         event_bus.get_sender_copy(),
     );
     let logs_agent_channel = logs_agent.get_sender_copy();
-    let logs_flusher = LogsFlusher::new(Arc::clone(&config), Arc::clone(&logs_agent.aggregator));
+    let logs_flusher = LogsFlusher::new(
+        resolved_api_key.clone(),
+        Arc::clone(&logs_agent.aggregator),
+        config.site.clone(),
+    );
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
@@ -224,7 +271,7 @@ async fn main() -> Result<()> {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
-        datadog_config: Arc::clone(&config),
+        datadog_config: Arc::clone(config),
         aggregator: Arc::clone(&metrics_aggr),
         tags_provider: Arc::clone(&tags_provider),
     };
@@ -237,40 +284,24 @@ async fn main() -> Result<()> {
     )
     .await;
 
-    let mut statsd_flusher =
-        MetricsFlusher::new(Arc::clone(&config), Arc::clone(&dogstats_client.aggregator));
+    let mut statsd_flusher = MetricsFlusher::new(
+        resolved_api_key,
+        Arc::clone(&dogstats_client.aggregator),
+        config.site.clone(),
+    );
 
     tokio::spawn(async move {
         dogstats_client.spin().await;
     });
-    let telemetry_listener_config = TelemetryListenerConfig {
-        host: EXTENSION_HOST.to_string(),
-        port: TELEMETRY_PORT,
-    };
-    let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
-    let telemetry_listener = TelemetryListener::new(
-        &telemetry_listener_config,
-        logs_agent_channel,
-        telemetry_listener_cancel_token.clone(),
-    )
-    .await
-    .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    tokio::spawn(async move {
-        telemetry_listener.spin().await;
-    });
 
-    let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
-    telemetry_client
-        .subscribe()
-        .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    let telemetry_listener_cancel_token = setup_telemetry_client(r, logs_agent_channel).await?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
 
     loop {
-        let evt = next_event(&client, &r.extension_id).await;
+        let evt = next_event(client, &r.extension_id).await;
         match evt {
             Ok(NextEventResponse::Invoke {
                 request_id,
@@ -412,4 +443,32 @@ async fn main() -> Result<()> {
             return Ok(());
         }
     }
+}
+
+async fn setup_telemetry_client(
+    r: &RegisterResponse,
+    logs_agent_channel: Sender<Vec<TelemetryEvent>>,
+) -> Result<CancellationToken> {
+    let telemetry_listener_config = TelemetryListenerConfig {
+        host: EXTENSION_HOST.to_string(),
+        port: TELEMETRY_PORT,
+    };
+    let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
+    let telemetry_listener = TelemetryListener::new(
+        &telemetry_listener_config,
+        logs_agent_channel,
+        telemetry_listener_cancel_token.clone(),
+    )
+    .await
+    .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    tokio::spawn(async move {
+        telemetry_listener.spin().await;
+    });
+
+    let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
+    telemetry_client
+        .subscribe()
+        .await
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    Ok(telemetry_listener_cancel_token)
 }
