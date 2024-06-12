@@ -358,6 +358,10 @@ async fn main() -> Result<()> {
                                     "Runtime done for request_id: {:?} with status: {:?}",
                                     request_id, status
                                 );
+                                // TODO(astuyve) it'll be easy to
+                                // pass the invocation deadline to
+                                // flush tasks here, so they can
+                                // retry if we have more time
                                 tokio::join!(logs_flusher.flush(), statsd_flusher.flush());
                                 break;
                             }
