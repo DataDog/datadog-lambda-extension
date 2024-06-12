@@ -16,8 +16,8 @@ impl Flusher {
         let client = reqwest::Client::new();
         Flusher {
             api_key,
-            client,
             site,
+            client,
             aggregator,
         }
     }
