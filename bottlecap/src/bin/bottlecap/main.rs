@@ -40,11 +40,13 @@ use bottlecap::{
         events::{Status, TelemetryRecord},
         listener::TelemetryListener,
     },
+    traces,
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 
+use datadog_trace_mini_agent;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::env;

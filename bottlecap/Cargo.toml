@@ -6,6 +6,9 @@ publish = false
 
 [dependencies]
 chrono = { version = "0.4.38", features = ["serde", "std", "now"], default-features = false}
+datadog-trace-mini-agent = { version = "0.4.0", default-features = false, git = "https://github.com/DataDog/libdatadog" }
+datadog-trace-protobuf = { version = "10.0.0", default-features = false, git = "https://github.com/DataDog/libdatadog" }
+datadog-trace-utils = { version = "10.0.0", default-features = false, git = "https://github.com/DataDog/libdatadog" }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 figment = { version = "0.10.15", default-features = false, features = ["yaml", "env"] }
@@ -28,6 +31,8 @@ ustr = { version = "1.0.0", default-features = false }
 hmac = { version = "0.12.1", default-features = false }
 sha2 = { version = "0.10.8", default-features = false }
 hex = { version = "0.4.3", default-features = false, features = ["std"] }
+async-trait = { version = "0.1.80", default-features = false }
+hyper = { version = "1.3.1", default-features = false }
 
 [dev-dependencies]
 figment = { version = "0.10.15", default-features = false, features = ["yaml", "env", "test"] }
