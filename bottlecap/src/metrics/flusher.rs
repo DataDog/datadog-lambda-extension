@@ -1,5 +1,5 @@
-use crate::metrics::datadog;
 use crate::metrics::aggregator::Aggregator;
+use crate::metrics::datadog;
 use std::sync::{Arc, Mutex};
 use tracing::debug;
 

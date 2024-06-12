@@ -13,8 +13,8 @@ pub struct Flusher {
 impl Flusher {
     pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
         Flusher {
-            site: site,
-            api_key: api_key,
+            api_key,
+            site,
             aggregator,
         }
     }
