@@ -48,7 +48,8 @@ build_dockerized(){
   # remove the target folder to avoid copying 12gb and invalidate cache during dockerized build
   rm -rf ../bottlecap/target
   cd ../scripts
-  ARCHITECTURE=$ARCH ./build_bottlecap_layer.sh
+    ARCHITECTURE=$ARCH ./build_bottlecap_layer.sh
+  cd -
 }
 
 publish() {
@@ -100,9 +101,9 @@ all(){
 
 format () {
   cd ../bottlecap
-  cargo fmt
-  cargo clippy --workspace --all-features
-  cargo clippy --fix
+    cargo fmt
+    cargo clippy --workspace --all-features
+    cargo clippy --fix
   cd -
 }
 
