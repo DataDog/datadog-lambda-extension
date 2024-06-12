@@ -307,7 +307,7 @@ pub mod tests {
                         kind: processing_rule::Kind::ExcludeAtMatch,
                         name: "exclude".to_string(),
                         pattern: "exclude".to_string(),
-                        replace_placeholder: None,
+                        replace_placeholder: None
                     }]),
                     ..Config::default()
                 }
@@ -346,20 +346,20 @@ pub mod tests {
                             kind: processing_rule::Kind::ExcludeAtMatch,
                             name: "exclude".to_string(),
                             pattern: "exclude".to_string(),
-                            replace_placeholder: None,
+                            replace_placeholder: None
                         },
                         ProcessingRule {
                             kind: processing_rule::Kind::IncludeAtMatch,
                             name: "include".to_string(),
                             pattern: "include".to_string(),
-                            replace_placeholder: None,
+                            replace_placeholder: None
                         },
                         ProcessingRule {
                             kind: processing_rule::Kind::MaskSequences,
                             name: "mask".to_string(),
                             pattern: "mask".to_string(),
-                            replace_placeholder: Some("REPLACED".to_string()),
-                        },
+                            replace_placeholder: Some("REPLACED".to_string())
+                        }
                     ]),
                     ..Config::default()
                 }
