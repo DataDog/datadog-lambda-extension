@@ -129,13 +129,10 @@ impl InsertMetric for CountMetric {
 
 impl Entry {
     fn new_from_metric(id: u64, metric: &Metric) -> Self {
-        let new_metric_value = match metric.first_value() {
-            Ok(value) => value,
-            Err(e) => {
-                error!("failed to parse metric: {:?}", e);
-                0.0
-            }
-        };
+        let new_metric_value = metric.first_value().unwrap_or_else(|e| {
+            error!("failed to parse metric: {:?}", e);
+            0.0
+        });
         Self {
             id,
             metric_value: match metric.kind {
@@ -417,9 +414,9 @@ mod tests {
         let id2 = metric::id(metric2.name, metric2.tags);
         let id3 = metric::id(metric3.name, metric3.tags);
 
-        assert!(id1 != id2);
-        assert!(id1 != id3);
-        assert!(id2 != id3);
+        assert_ne!(id1, id2);
+        assert_ne!(id1, id3);
+        assert_ne!(id2, id3);
 
         assert!(aggregator.insert(&metric1).is_ok());
         assert_eq!(aggregator.map.len(), 1);
