@@ -46,7 +46,6 @@ use bottlecap::{
 };
 
 use bottlecap::config::{AwsConfig, Config};
-use bottlecap::logs::flusher::Flusher;
 use bottlecap::metrics::aggregator::Aggregator;
 use bottlecap::tags::provider::Provider;
 use bottlecap::telemetry::events::TelemetryEvent;
@@ -437,7 +436,7 @@ fn start_logs_agent(
     resolved_api_key: String,
     tags_provider: &Arc<Provider>,
     event_bus: Sender<Event>,
-) -> (Sender<Vec<TelemetryEvent>>, Flusher) {
+) -> (Sender<Vec<TelemetryEvent>>, LogsFlusher) {
     let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
