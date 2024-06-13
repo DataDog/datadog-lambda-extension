@@ -1,4 +1,5 @@
 #![deny(clippy::all)]
+#![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 #![deny(clippy::unwrap_used)]
 #![deny(unused_extern_crates)]
@@ -10,13 +11,24 @@
 #![deny(missing_debug_implementations)]
 
 use decrypt::resolve_secrets;
-use std::collections::hash_map;
+use std::{
+    collections::hash_map,
+    collections::HashMap,
+    env,
+    io::Error,
+    io::Result,
+    os::unix::process::CommandExt,
+    path::Path,
+    process::Command,
+    sync::{Arc, Mutex},
+};
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 use bottlecap::{
-    base_url, config,
+    base_url,
+    config::{self, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -24,10 +36,10 @@ use bottlecap::{
         invocation_context::{InvocationContext, InvocationContextBuffer},
     },
     logger,
-    logs::agent::LogsAgent,
-    logs::flusher::Flusher as LogsFlusher,
+    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     metrics::{
-        aggregator as metrics_aggregator, constants,
+        aggregator::Aggregator as MetricsAggregator,
+        constants::CONTEXTS,
         dogstatsd::{DogStatsD, DogStatsDConfig},
         enhanced::lambda::Lambda as enhanced_metrics,
         flusher::Flusher as MetricsFlusher,
@@ -37,6 +49,7 @@ use bottlecap::{
     telemetry::{
         self,
         client::TelemetryApiClient,
+        events::TelemetryEvent,
         events::{Status, TelemetryRecord},
         listener::TelemetryListener,
     },
@@ -45,16 +58,8 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 
-use bottlecap::config::{AwsConfig, Config};
-use bottlecap::telemetry::events::TelemetryEvent;
 use reqwest::Client;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::env;
-use std::io::Error;
-use std::io::Result;
-use std::sync::{Arc, Mutex};
-use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 
@@ -237,64 +242,30 @@ async fn extension_loop_active(
     r: &RegisterResponse,
     resolved_api_key: String,
 ) -> Result<()> {
-    let function_arn =
-        build_function_arn(&r.account_id, &aws_config.region, &aws_config.function_name);
-    let metadata_hash = hash_map::HashMap::from([(
-        lambda::tags::FUNCTION_ARN_KEY.to_string(),
-        function_arn.clone(),
-    )]);
-    let tags_provider = Arc::new(provider::Provider::new(
-        Arc::clone(config),
-        LAMBDA_RUNTIME_SLUG.to_string(),
-        &metadata_hash,
-    ));
-
     let mut event_bus = EventBus::run();
-    let mut logs_agent = LogsAgent::new(
-        Arc::clone(&tags_provider),
-        Arc::clone(config),
+
+    let tags_provider = setup_tag_provider(aws_config, config, &r.account_id);
+    let (logs_agent_channel, logs_flusher) = start_logs_agent(
+        config,
+        resolved_api_key.clone(),
+        &tags_provider,
         event_bus.get_sender_copy(),
     );
-    let logs_agent_channel = logs_agent.get_sender_copy();
-    let logs_flusher = LogsFlusher::new(
-        resolved_api_key.clone(),
-        Arc::clone(&logs_agent.aggregator),
-        config.site.clone(),
-    );
-    tokio::spawn(async move {
-        logs_agent.spin().await;
-    });
+
     let metrics_aggr = Arc::new(Mutex::new(
-        metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
+        MetricsAggregator::<{ CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
     ));
-    let dogstatsd_config = DogStatsDConfig {
-        host: EXTENSION_HOST.to_string(),
-        port: DOGSTATSD_PORT,
-        datadog_config: Arc::clone(config),
-        aggregator: Arc::clone(&metrics_aggr),
-        tags_provider: Arc::clone(&tags_provider),
-    };
-    let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
-    let dogstats_cancel_token = tokio_util::sync::CancellationToken::new();
-    let dogstats_client = DogStatsD::new(
-        &dogstatsd_config,
-        event_bus.get_sender_copy(),
-        dogstats_cancel_token.clone(),
-    )
-    .await;
-
-    let mut statsd_flusher = MetricsFlusher::new(
-        resolved_api_key,
-        Arc::clone(&dogstats_client.aggregator),
+    let mut metrics_flusher = MetricsFlusher::new(
+        resolved_api_key.clone(),
+        Arc::clone(&metrics_aggr),
         config.site.clone(),
     );
+    let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
+    let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
-    tokio::spawn(async move {
-        dogstats_client.spin().await;
-    });
-
-    let telemetry_listener_cancel_token = setup_telemetry_client(r, logs_agent_channel).await?;
+    let telemetry_listener_cancel_token =
+        setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut invocation_context_buffer = InvocationContextBuffer::default();
@@ -393,7 +364,7 @@ async fn extension_loop_active(
                                 // pass the invocation deadline to
                                 // flush tasks here, so they can
                                 // retry if we have more time
-                                tokio::join!(logs_flusher.flush(), statsd_flusher.flush());
+                                tokio::join!(logs_flusher.flush(), metrics_flusher.flush());
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -437,16 +408,77 @@ async fn extension_loop_active(
         }
 
         if shutdown {
-            dogstats_cancel_token.cancel();
+            dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            tokio::join!(logs_flusher.flush(), statsd_flusher.flush());
+            tokio::join!(logs_flusher.flush(), metrics_flusher.flush());
             return Ok(());
         }
     }
 }
 
+fn setup_tag_provider(
+    aws_config: &AwsConfig,
+    config: &Arc<Config>,
+    account_id: &str,
+) -> Arc<provider::Provider> {
+    let function_arn =
+        build_function_arn(account_id, &aws_config.region, &aws_config.function_name);
+    let metadata_hash = hash_map::HashMap::from([(
+        lambda::tags::FUNCTION_ARN_KEY.to_string(),
+        function_arn.clone(),
+    )]);
+    Arc::new(provider::Provider::new(
+        Arc::clone(config),
+        LAMBDA_RUNTIME_SLUG.to_string(),
+        &metadata_hash,
+    ))
+}
+
+fn start_logs_agent(
+    config: &Arc<Config>,
+    resolved_api_key: String,
+    tags_provider: &Arc<provider::Provider>,
+    event_bus: Sender<Event>,
+) -> (Sender<Vec<TelemetryEvent>>, LogsFlusher) {
+    let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
+    let logs_agent_channel = logs_agent.get_sender_copy();
+    let logs_flusher = LogsFlusher::new(
+        resolved_api_key,
+        Arc::clone(&logs_agent.aggregator),
+        config.site.clone(),
+    );
+    tokio::spawn(async move {
+        logs_agent.spin().await;
+    });
+    (logs_agent_channel, logs_flusher)
+}
+
+async fn start_dogstatsd(
+    event_bus: Sender<Event>,
+    metrics_aggr: &Arc<Mutex<MetricsAggregator<1024>>>,
+) -> CancellationToken {
+    let dogstatsd_config = DogStatsDConfig {
+        host: EXTENSION_HOST.to_string(),
+        port: DOGSTATSD_PORT,
+    };
+    let dogstatsd_cancel_token = tokio_util::sync::CancellationToken::new();
+    let dogstatsd_client = DogStatsD::new(
+        &dogstatsd_config,
+        Arc::clone(metrics_aggr),
+        event_bus,
+        dogstatsd_cancel_token.clone(),
+    )
+    .await;
+
+    tokio::spawn(async move {
+        dogstatsd_client.spin().await;
+    });
+
+    dogstatsd_cancel_token
+}
+
 async fn setup_telemetry_client(
-    r: &RegisterResponse,
+    extension_id: &str,
     logs_agent_channel: Sender<Vec<TelemetryEvent>>,
 ) -> Result<CancellationToken> {
     let telemetry_listener_config = TelemetryListenerConfig {
@@ -465,7 +497,7 @@ async fn setup_telemetry_client(
         telemetry_listener.spin().await;
     });
 
-    let telemetry_client = TelemetryApiClient::new(r.extension_id.to_string(), TELEMETRY_PORT);
+    let telemetry_client = TelemetryApiClient::new(extension_id.to_string(), TELEMETRY_PORT);
     telemetry_client
         .subscribe()
         .await

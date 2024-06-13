@@ -2,16 +2,14 @@ use tokio::sync::mpsc::Sender;
 
 use tracing::{error, info};
 
-use crate::config;
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::metric::Metric;
-use crate::tags::provider;
 use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
     cancel_token: tokio_util::sync::CancellationToken,
-    pub aggregator: Arc<Mutex<Aggregator<1024>>>,
+    aggregator: Arc<Mutex<Aggregator<1024>>>,
     socket: tokio::net::UdpSocket,
     event_bus: Sender<events::Event>,
 }
@@ -19,15 +17,13 @@ pub struct DogStatsD {
 pub struct DogStatsDConfig {
     pub host: String,
     pub port: u16,
-    pub datadog_config: Arc<config::Config>,
-    pub aggregator: Arc<Mutex<Aggregator<1024>>>,
-    pub tags_provider: Arc<provider::Provider>,
 }
 
 impl DogStatsD {
     #[must_use]
     pub async fn new(
         config: &DogStatsDConfig,
+        aggregator: Arc<Mutex<Aggregator<1024>>>,
         event_bus: Sender<events::Event>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> DogStatsD {
@@ -37,10 +33,10 @@ impl DogStatsD {
             .await
             .expect("couldn't bind to address");
         DogStatsD {
-            socket,
             cancel_token,
-            event_bus: event_bus.clone(),
-            aggregator: config.aggregator.clone(),
+            aggregator,
+            socket,
+            event_bus,
         }
     }
 
