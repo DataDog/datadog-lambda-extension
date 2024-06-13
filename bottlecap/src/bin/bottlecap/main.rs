@@ -10,13 +10,24 @@
 #![deny(missing_debug_implementations)]
 
 use decrypt::resolve_secrets;
-use std::collections::hash_map;
+use std::{
+    collections::hash_map,
+    collections::HashMap,
+    env,
+    io::Error,
+    io::Result,
+    os::unix::process::CommandExt,
+    path::Path,
+    process::Command,
+    sync::{Arc, Mutex},
+};
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 use bottlecap::{
-    base_url, config,
+    base_url,
+    config::{self, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -24,19 +35,20 @@ use bottlecap::{
         invocation_context::{InvocationContext, InvocationContextBuffer},
     },
     logger,
-    logs::agent::LogsAgent,
-    logs::flusher::Flusher as LogsFlusher,
+    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     metrics::{
-        aggregator as metrics_aggregator, constants,
+        aggregator::Aggregator as MetricsAggregator,
+        constants::CONTEXTS,
         dogstatsd::{DogStatsD, DogStatsDConfig},
         enhanced::lambda::Lambda as enhanced_metrics,
         flusher::Flusher as MetricsFlusher,
     },
     secrets::decrypt,
-    tags::{lambda, provider},
+    tags::{lambda, provider::Provider as TagProvider},
     telemetry::{
         self,
         client::TelemetryApiClient,
+        events::TelemetryEvent,
         events::{Status, TelemetryRecord},
         listener::TelemetryListener,
     },
@@ -45,19 +57,8 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 
-use bottlecap::config::{AwsConfig, Config};
-use bottlecap::logs::flusher::Flusher;
-use bottlecap::metrics::aggregator::Aggregator;
-use bottlecap::tags::provider::Provider;
-use bottlecap::telemetry::events::TelemetryEvent;
 use reqwest::Client;
 use serde::Deserialize;
-use std::collections::HashMap;
-use std::env;
-use std::io::Error;
-use std::io::Result;
-use std::sync::{Arc, Mutex};
-use std::{os::unix::process::CommandExt, path::Path, process::Command};
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 
@@ -251,7 +252,7 @@ async fn extension_loop_active(
     );
 
     let metrics_aggr = Arc::new(Mutex::new(
-        metrics_aggregator::Aggregator::<{ constants::CONTEXTS }>::new(tags_provider.clone())
+        MetricsAggregator::<{ CONTEXTS }>::new(tags_provider.clone())
             .expect("failed to create aggregator"),
     ));
     let mut metrics_flusher = MetricsFlusher::new(
@@ -418,14 +419,14 @@ fn setup_tag_provider(
     aws_config: &AwsConfig,
     config: &Arc<Config>,
     account_id: &str,
-) -> Arc<Provider> {
+) -> Arc<TagProvider> {
     let function_arn =
         build_function_arn(account_id, &aws_config.region, &aws_config.function_name);
     let metadata_hash = hash_map::HashMap::from([(
         lambda::tags::FUNCTION_ARN_KEY.to_string(),
         function_arn.clone(),
     )]);
-    Arc::new(provider::Provider::new(
+    Arc::new(TagProvider::new(
         Arc::clone(config),
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
@@ -435,9 +436,9 @@ fn setup_tag_provider(
 fn start_logs_agent(
     config: &Arc<Config>,
     resolved_api_key: String,
-    tags_provider: &Arc<Provider>,
+    tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
-) -> (Sender<Vec<TelemetryEvent>>, Flusher) {
+) -> (Sender<Vec<TelemetryEvent>>, LogsFlusher) {
     let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
@@ -453,7 +454,7 @@ fn start_logs_agent(
 
 async fn start_dogstatsd(
     event_bus: Sender<Event>,
-    metrics_aggr: &Arc<Mutex<Aggregator<1024>>>,
+    metrics_aggr: &Arc<Mutex<MetricsAggregator<1024>>>,
 ) -> CancellationToken {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
