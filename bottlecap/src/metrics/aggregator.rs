@@ -43,11 +43,13 @@ struct DistributionMetric {
 }
 
 #[derive(Debug, Clone)]
+#[repr(transparent)]
 struct CountMetric {
     value: f64,
 }
 
 #[derive(Debug, Clone)]
+#[repr(transparent)]
 struct GaugeMetric {
     value: f64,
 }
