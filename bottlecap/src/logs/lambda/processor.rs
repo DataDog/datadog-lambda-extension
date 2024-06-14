@@ -60,6 +60,7 @@ impl LambdaProcessor {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
         match event.record {
