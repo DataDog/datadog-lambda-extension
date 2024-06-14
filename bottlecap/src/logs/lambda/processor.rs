@@ -64,13 +64,14 @@ impl LambdaProcessor {
         let copy = event.clone();
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
-                let mut message = String::new();
-                if v.is_object() {
-                    message = serde_json::to_string(&v).unwrap_or_default();
-                } else if v.is_string() {
-                    message = v.as_str().unwrap_or_default().to_string();
-                } else {
-                    Err("Unable to parse log message")?;
+                let message = match v {
+                    serde_json::Value::Object(obj) => serde_json::to_string(&obj).unwrap_or_default(),
+                    serde_json::Value::String(s) => s,
+                    _ => String::new(),
+                };
+
+                if message.is_empty() {
+                    return Err("Unable to parse log".into());
                 }
 
                 Ok(Message::new(
