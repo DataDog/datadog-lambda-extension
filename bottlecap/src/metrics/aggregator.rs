@@ -463,7 +463,6 @@ mod tests {
         metric::{self, Metric},
         Aggregator,
     };
-    use crate::metrics::constants;
     use crate::tags::provider;
     use crate::LAMBDA_RUNTIME_SLUG;
     use hashbrown::hash_table;
@@ -598,47 +597,108 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf_serialized() {
-        let mut aggregator = Aggregator::<2> {
+        let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size: constants::MAX_ENTRIES_NUMBER,
-            max_content_size_bytes: constants::MAX_CONTENT_SIZE_BYTES,
+            max_batch_entries_size: 100,
+            max_content_size_bytes: 1500,
         };
 
-        let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
-        let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
+        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
 
-        assert!(aggregator.insert(&metric1).is_ok());
-        assert!(aggregator.insert(&metric2).is_ok());
+        assert!(aggregator
+            .insert(
+                &Metric::parse("test1:1|d|k:v".to_string().as_str()).expect("metric parse failed")
+            )
+            .is_ok());
+        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 100);
 
-        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 197);
+        assert!(aggregator
+            .insert(&Metric::parse("foo:1|c|k:v").expect("metric parse failed"))
+            .is_ok());
+        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 100);
 
-        let metric3 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
-        assert!(aggregator.insert(&metric3).is_ok());
+        for i in 10..20 {
+            assert!(aggregator
+                .insert(
+                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
+                        .expect("metric parse failed")
+                )
+                .is_ok());
+        }
 
-        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 197);
+        assert_eq!(
+            aggregator.distributions_to_protobuf_serialized().len(),
+            1110
+        );
+
+        aggregator = Aggregator::<1_000> {
+            tags_provider: create_tags_provider(),
+            map: hash_table::HashTable::new(),
+            max_batch_entries_size: 5,
+            max_content_size_bytes: 1500,
+        };
+
+        for i in 10..20 {
+            assert!(aggregator
+                .insert(
+                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
+                        .expect("metric parse failed")
+                )
+                .is_ok());
+        }
+        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 505);
     }
 
     #[test]
     fn to_series_serialized() {
-        let mut aggregator = Aggregator::<2> {
+        let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size: constants::MAX_ENTRIES_NUMBER,
-            max_content_size_bytes: constants::MAX_CONTENT_SIZE_BYTES,
+            max_batch_entries_size: 100,
+            max_content_size_bytes: 1500,
         };
 
-        let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
-        let metric2 = Metric::parse("foo:1|g|k:v").expect("metric parse failed");
+        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
 
-        assert!(aggregator.insert(&metric1).is_ok());
-        assert!(aggregator.insert(&metric2).is_ok());
+        assert!(aggregator
+            .insert(
+                &Metric::parse("test1:1|c|k:v".to_string().as_str()).expect("metric parse failed")
+            )
+            .is_ok());
+        assert_eq!(aggregator.to_series_serialized().len(), 143);
 
-        assert_eq!(aggregator.to_series_serialized().len(), 283);
+        assert!(aggregator
+            .insert(&Metric::parse("foo:1|d|k:v").expect("metric parse failed"))
+            .is_ok());
+        assert_eq!(aggregator.to_series_serialized().len(), 143);
 
-        let metric3 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
-        assert!(aggregator.insert(&metric3).is_ok());
+        for i in 10..20 {
+            assert!(aggregator
+                .insert(
+                    &Metric::parse(format!("test{i}:{i}|c|k:v").as_str())
+                        .expect("metric parse failed")
+                )
+                .is_ok());
+        }
 
-        assert_eq!(aggregator.to_series_serialized().len(), 283);
+        assert_eq!(aggregator.to_series_serialized().len(), 1448);
+
+        aggregator = Aggregator::<1_000> {
+            tags_provider: create_tags_provider(),
+            map: hash_table::HashTable::new(),
+            max_batch_entries_size: 5,
+            max_content_size_bytes: 1500,
+        };
+
+        for i in 10..20 {
+            assert!(aggregator
+                .insert(
+                    &Metric::parse(format!("test{i}:{i}|c|k:v").as_str())
+                        .expect("metric parse failed")
+                )
+                .is_ok());
+        }
+        assert_eq!(aggregator.to_series_serialized().len(), 725);
     }
 }
