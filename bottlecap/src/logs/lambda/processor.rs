@@ -66,17 +66,17 @@ impl LambdaProcessor {
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
                 let message = match v {
-                    serde_json::Value::Object(obj) => serde_json::to_string(&obj).unwrap_or_default(),
-                    serde_json::Value::String(s) => s,
-                    _ => String::new(),
+                    serde_json::Value::Object(obj) => Some(serde_json::to_string(&obj).unwrap_or_default()),
+                    serde_json::Value::String(s) => Some(s),
+                    _ => None,
                 };
 
-                if message.is_empty() {
+                if message.is_none() {
                     return Err("Unable to parse log".into());
                 }
 
                 Ok(Message::new(
-                    message,
+                    message.expect("infallible"),
                     None,
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
@@ -265,7 +265,7 @@ mod tests {
     use super::*;
 
     use chrono::{TimeZone, Utc};
-    use serde_json::Value;
+    use serde_json::{Number, Value};
     use std::collections::hash_map::HashMap;
 
     use crate::logs::lambda::Lambda;
@@ -441,6 +441,32 @@ mod tests {
                     status: "info".to_string(),
                 },
         ),
+    }
+
+    #[tokio::test]
+    async fn test_get_message_function_unsupported_value() {
+        let config = Arc::new(config::Config {
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _) = tokio::sync::mpsc::channel(2);
+
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::Number(Number::from(12))),
+        };
+
+        let result = processor.get_message(event).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unable to parse log"));
     }
 
     // get_intake_log
