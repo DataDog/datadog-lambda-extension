@@ -1,10 +1,9 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use http_body_util::Full;
 use hyper::{
-    header,
-    http::{self, HeaderMap},
-    body::Body, Response, StatusCode,
+    body::Bytes, header, http::{self, HeaderMap}, Response, StatusCode
 };
 use log::{error, info};
 use serde_json::json;
@@ -22,14 +21,16 @@ use serde_json::json;
 pub fn log_and_create_http_response(
     message: &str,
     status: StatusCode,
-) -> http::Result<Response<Box<dyn Body>>> {
+) -> http::Result<Response<Full<Bytes>>> {
     if status.is_success() {
         info!("{message}");
     } else {
         error!("{message}");
     }
     let body = json!({ "message": message }).to_string();
-    Response::builder().status(status).body(Body::from(body))
+    Response::builder().status(status).body(Full::new(body.into()))
+    // also works
+    // Ok(Response::new(Full::new(Bytes::from(body))))
 }
 
 /// Takes a request's header map, and verifies that the "content-length" header is present, valid,
@@ -41,7 +42,7 @@ pub fn verify_request_content_length(
     header_map: &HeaderMap,
     max_content_length: usize,
     error_message_prefix: &str,
-) -> Option<http::Result<Response<Body>>> {
+) -> Option<http::Result<Response<Full<Bytes>>>> {
     let content_length_header = match header_map.get(header::CONTENT_LENGTH) {
         Some(res) => res,
         None => {

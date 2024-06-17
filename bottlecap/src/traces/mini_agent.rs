@@ -2,10 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use hyper::service::service_fn;
-use hyper::{http, body::Body, Method, Request, Response, Server, StatusCode};
-use log::{debug, error, info};
+use hyper::{http, server::conn::http1, body::{Bytes, Incoming}, Method, Request, Response, StatusCode};
+use hyper_util::rt::TokioIo;
+use tokio::net::TcpListener;
+use http_body_util::Full;
+use log::{debug, error};
 use serde_json::json;
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -15,7 +17,6 @@ use crate::traces::http_utils::log_and_create_http_response;
 use crate::config;
 use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::trace_utils;
 use datadog_trace_utils::trace_utils::SendData;
 
 const MINI_AGENT_PORT: usize = 8126;
@@ -38,8 +39,6 @@ impl MiniAgent {
     pub async fn start_mini_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
-        // verify we are in a google cloud funtion environment. if not, shut down the mini agent.
-        let mini_agent_metadata = "";
 
         debug!(
             "Time taken to fetch Mini Agent metadata: {} ms",
@@ -55,7 +54,8 @@ impl MiniAgent {
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
         let trace_flusher = self.trace_flusher.clone();
-        let trace_config = self.config.clone();
+        // TODO astuyve check
+        let _trace_config = self.config.clone();
         tokio::spawn(async move {
             let trace_flusher = trace_flusher.clone();
             trace_flusher
@@ -79,69 +79,57 @@ impl MiniAgent {
                 .await;
         });
 
-        // setup our hyper http server, where the endpoint_handler handles incoming requests
-        let trace_processor = self.trace_processor.clone();
-        let stats_processor = self.stats_processor.clone();
-        let endpoint_config = self.config.clone();
+        let addr = SocketAddr::from(([127, 0, 0, 1], MINI_AGENT_PORT as u16));
+        let listener = TcpListener::bind(addr).await?;
+        loop {
+            let stats_tx_clone = stats_tx.clone();
+            let trace_tx_clone = trace_tx.clone();
+            let (stream, _) = listener.accept().await?;
 
-        let make_svc = service_fn(move |_| {
-            let trace_processor = trace_processor.clone();
-            let trace_tx = trace_tx.clone();
+            let io = TokioIo::new(stream);
+            // setup our hyper http server, where the endpoint_handler handles incoming requests
+            let trace_processor = self.trace_processor.clone();
+            let stats_processor = self.stats_processor.clone();
+            let endpoint_config = self.config.clone();
 
-            let stats_processor = stats_processor.clone();
-            let stats_tx = stats_tx.clone();
-
-            let endpoint_config = endpoint_config.clone();
-            let mini_agent_metadata = Arc::clone(&mini_agent_metadata);
 
             let service = service_fn(move |req| {
                 MiniAgent::trace_endpoint_handler(
                     endpoint_config.clone(),
                     req,
                     trace_processor.clone(),
-                    trace_tx.clone(),
+                    trace_tx_clone.clone(),
                     stats_processor.clone(),
-                    stats_tx.clone(),
-                    Arc::clone(&mini_agent_metadata),
-                )
+                    stats_tx_clone.clone(),
+                 )
             });
 
-            async move { Ok::<_, Infallible>(service) }
-        });
-
-        let addr = SocketAddr::from(([127, 0, 0, 1], MINI_AGENT_PORT as u16));
-        let server_builder = Server::try_bind(&addr)?;
-
-        let server = server_builder.serve(make_svc);
-
-        info!("Mini Agent started: listening on port {MINI_AGENT_PORT}");
-        debug!(
-            "Time taken start the Mini Agent: {} ms",
-            now.elapsed().as_millis()
-        );
-
-        // start hyper http server
-        if let Err(e) = server.await {
-            error!("Server error: {e}");
-            return Err(e.into());
+            // Spawn a tokio task to serve multiple connections concurrently
+            tokio::task::spawn(async move {
+                // Finally, we bind the incoming connection to our `hello` service
+                if let Err(err) = http1::Builder::new()
+                    // `service_fn` converts our function in a `Service`
+                    .serve_connection(io, service)
+                    .await
+                {
+                    error!("Error serving connection: {:?}", err);
+                }
+            });
         }
-
-        Ok(())
     }
 
     async fn trace_endpoint_handler(
         config: Arc<config::Config>,
-        req: Request<impl Body>,
+        req: Request<Incoming>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendData>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
-        mini_agent_metadata: Arc<trace_utils::MiniAgentMetadata>,
-    ) -> http::Result<Response<impl Body>> {
+    ) -> http::Result<Response<Full<Bytes>>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, TRACE_ENDPOINT_PATH) => {
                 match trace_processor
-                    .process_traces(config, req, trace_tx, mini_agent_metadata)
+                    .process_traces(config, req, trace_tx)
                     .await
                 {
                     Ok(res) => Ok(res),
@@ -175,7 +163,7 @@ impl MiniAgent {
         }
     }
 
-    fn info_handler() -> http::Result<Response<Body>> {
+    fn info_handler() -> http::Result<Response<Full<Bytes>>> {
         let response_json = json!(
             {
                 "endpoints": [
@@ -188,6 +176,6 @@ impl MiniAgent {
         );
         Response::builder()
             .status(200)
-            .body(Body::from(response_json.to_string()))
+            .body(Full::new(response_json.to_string().into()))
     }
 }

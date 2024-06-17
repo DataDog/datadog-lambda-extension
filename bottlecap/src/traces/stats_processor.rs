@@ -5,7 +5,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use hyper::{http, body::Body, Request, Response, StatusCode};
+use http_body_util::combinators::BoxBody;
+use hyper::{http, body::{Body, Bytes}, Request, Response, StatusCode};
 use log::info;
 use tokio::sync::mpsc::Sender;
 
@@ -13,7 +14,7 @@ use datadog_trace_protobuf::pb;
 use datadog_trace_utils::stats_utils;
 
 use crate::config::Config;
-use http_utils::{self, log_and_create_http_response};
+use crate::traces::http_utils::{self, log_and_create_http_response};
 
 #[async_trait]
 pub trait StatsProcessor {
@@ -22,9 +23,9 @@ pub trait StatsProcessor {
     async fn process_stats(
         &self,
         config: Arc<Config>,
-        req: Request<Body>,
+        req: Request<BoxBody<Bytes, hyper::Error>>,
         tx: Sender<pb::ClientStatsPayload>,
-    ) -> http::Result<Response<Body>>;
+    ) -> http::Result<Response<BoxBody<Bytes, hyper::Error>>>;
 }
 
 #[derive(Clone)]
@@ -35,9 +36,9 @@ impl StatsProcessor for ServerlessStatsProcessor {
     async fn process_stats(
         &self,
         config: Arc<Config>,
-        req: Request<Body>,
+        req: Request<BoxBody<Bytes, hyper::Error>>,
         tx: Sender<pb::ClientStatsPayload>,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<Response<BoxBody<Bytes, hyper::Error>>> {
         info!("Recieved trace stats to process");
         let (parts, body) = req.into_parts();
 

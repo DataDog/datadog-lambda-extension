@@ -4,17 +4,18 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use hyper::{http, Body, Request, Response, StatusCode};
+use hyper::{http, body::{Incoming, Bytes}, Request, Response, StatusCode};
+use http_body_util::{BodyExt, Full};
+
 use log::info;
 use tokio::sync::mpsc::Sender;
 
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
-use datadog_trace_utils::trace_utils::SendData;
-use datadog_trace_utils::trace_utils::{self};
+use crate::traces::trace_utils;
 
 use crate::{
     config::Config,
-    http_utils::{self, log_and_create_http_response},
+    traces::http_utils::{self, log_and_create_http_response},
 };
 
 #[async_trait]
@@ -24,10 +25,9 @@ pub trait TraceProcessor {
     async fn process_traces(
         &self,
         config: Arc<Config>,
-        req: Request<Body>,
+        req: Request<Incoming>,
         tx: Sender<trace_utils::SendData>,
-        mini_agent_metadata: Arc<trace_utils::MiniAgentMetadata>,
-    ) -> http::Result<Response<Body>>;
+    ) -> http::Result<Response<Full<Bytes>>> ;
 }
 
 #[derive(Clone)]
@@ -38,10 +38,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
     async fn process_traces(
         &self,
         config: Arc<Config>,
-        req: Request<Body>,
+        req: Request<Incoming>,
         tx: Sender<trace_utils::SendData>,
-        mini_agent_metadata: Arc<trace_utils::MiniAgentMetadata>,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<Response<Full<Bytes>>> {
         info!("Recieved traces to process");
         let (parts, body) = req.into_parts();
 
@@ -57,7 +56,17 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         // deserialize traces from the request body, convert to protobuf structs (see trace-protobuf
         // crate)
-        let (body_size, traces) = match trace_utils::get_traces_from_request_body(body).await {
+        let whole_body = match req.collect().await {
+            Ok(body) => body.aggregate(),
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error reading request body: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        };
+
+        let (body_size, traces) = match trace_utils::get_traces_from_request_body(whole_body).await {
             Ok(res) => res,
             Err(err) => {
                 return log_and_create_http_response(
@@ -77,11 +86,11 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     &config.env_type,
                 );
                 for span in chunk.spans.iter_mut() {
-                    trace_utils::enrich_span_with_mini_agent_metadata(span, &mini_agent_metadata);
-                    trace_utils::enrich_span_with_azure_metadata(
-                        span,
-                        config.mini_agent_version.as_str(),
-                    );
+                    // trace_utils::enrich_span_with_mini_agent_metadata(span, &mini_agent_metadata);
+                    // trace_utils::enrich_span_with_azure_metadata(
+                    //     span,
+                    //     config.mini_agent_version.as_str(),
+                    // );
                     obfuscate_span(span, &config.obfuscation_config);
                 }
             },
