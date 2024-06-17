@@ -33,6 +33,8 @@ pub struct Config {
     pub apm_enabled: bool,
     pub lambda_handler: String,
     pub serverless_flush_strategy: FlushStrategy,
+    pub trace_enabled: bool,
+    pub serverless_trace_enabled: bool,
 }
 
 impl Default for Config {
@@ -57,6 +59,8 @@ impl Default for Config {
             // APM
             apm_enabled: false,
             lambda_handler: String::default(),
+            serverless_trace_enabled: true,
+            trace_enabled: true
         }
     }
 }

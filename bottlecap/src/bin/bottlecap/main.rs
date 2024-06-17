@@ -53,6 +53,10 @@ use bottlecap::{
         events::{Status, TelemetryRecord},
         listener::TelemetryListener,
     },
+    traces::{
+    config as TraceConfig, mini_agent, stats_flusher, stats_processor, trace_flusher,
+    trace_processor,
+    },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
@@ -261,6 +265,25 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
         config.site.clone(),
     );
+    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {});
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {});
+
+    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {});
+    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
+
+    let trace_config = TraceConfig::Config::new().unwrap(); 
+
+    let mini_agent = Box::new(mini_agent::MiniAgent {
+        config: Arc::new(trace_config),
+        trace_processor,
+        trace_flusher,
+        stats_processor,
+        stats_flusher,
+    });
+
+    if let Err(e) = mini_agent.start_mini_agent() {
+        error!("Error when starting serverless trace mini agent: {e}");
+    }
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
     let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
