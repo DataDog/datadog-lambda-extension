@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 /// Payload received from the Telemetry API
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -17,10 +18,10 @@ pub struct TelemetryEvent {
 #[serde(tag = "type", content = "record", rename_all = "lowercase")]
 pub enum TelemetryRecord {
     /// Function log records
-    Function(String),
+    Function(Value),
 
     /// Extension log records
-    Extension(String),
+    Extension(Value),
 
     /// Platform init start record
     #[serde(rename = "platform.initStart", rename_all = "camelCase")]
@@ -219,13 +220,20 @@ mod tests {
         // function
         function: (
             r#"{"time": "2024-04-24T12:34:56.789Z","type": "function", "record": "datadog <3 serverless"}"#,
-            TelemetryRecord::Function("datadog <3 serverless".to_string()),
+            TelemetryRecord::Function(Value::String("datadog <3 serverless".to_string())),
+        ),
+
+        function_with_json: (
+            r#"{"time": "2024-04-24T12:34:56.789Z","type": "function", "record": {"hello": "world"}}"#,
+            TelemetryRecord::Function(Value::Object(
+                serde_json::from_str(r#"{"hello": "world"}"#).unwrap()
+            )),
         ),
 
         // extension
         extension: (
             r#"{"time": "2024-04-24T12:34:56.789Z","type": "extension", "record": "datadog <3 serverless"}"#,
-            TelemetryRecord::Extension("datadog <3 serverless".to_string()),
+            TelemetryRecord::Extension(Value::String("datadog <3 serverless".to_string())),
         ),
 
         // platform.initStart

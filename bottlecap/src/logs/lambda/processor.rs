@@ -60,12 +60,23 @@ impl LambdaProcessor {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
+                let message = match v {
+                    serde_json::Value::Object(obj) => Some(serde_json::to_string(&obj).unwrap_or_default()),
+                    serde_json::Value::String(s) => Some(s),
+                    _ => None,
+                };
+
+                if message.is_none() {
+                    return Err("Unable to parse log".into());
+                }
+
                 Ok(Message::new(
-                    v,
+                    message.expect("infallible"),
                     None,
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
@@ -121,6 +132,9 @@ impl LambdaProcessor {
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
                 }
+
+                // Remove the `request_id` since no more orphan logs will be processed with this one
+                self.invocation_context.request_id = String::new();
 
                 Ok(Message::new(
                     format!("END RequestId: {request_id}"),
@@ -251,6 +265,7 @@ mod tests {
     use super::*;
 
     use chrono::{TimeZone, Utc};
+    use serde_json::{Number, Value};
     use std::collections::hash_map::HashMap;
 
     use crate::logs::lambda::Lambda;
@@ -301,7 +316,7 @@ mod tests {
         function: (
             &TelemetryEvent {
                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::Function("test-function".to_string())
+                record: TelemetryRecord::Function(Value::String("test-function".to_string()))
             },
             Message {
                     message: "test-function".to_string(),
@@ -318,7 +333,7 @@ mod tests {
         extension: (
             &TelemetryEvent {
                 time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::Extension("test-extension".to_string())
+                record: TelemetryRecord::Extension(Value::String("test-extension".to_string()))
             },
             Message {
                     message: "test-extension".to_string(),
@@ -428,6 +443,35 @@ mod tests {
         ),
     }
 
+    #[tokio::test]
+    async fn test_get_message_function_unsupported_value() {
+        let config = Arc::new(config::Config {
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _) = tokio::sync::mpsc::channel(2);
+
+        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::Number(Number::from(12))),
+        };
+
+        let result = processor.get_message(event).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unable to parse log"));
+    }
+
     // get_intake_log
     #[tokio::test]
     async fn test_get_intake_log() {
@@ -494,7 +538,7 @@ mod tests {
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
@@ -539,7 +583,7 @@ mod tests {
         // This could be any event that doesn't have a `request_id`
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
@@ -623,7 +667,7 @@ mod tests {
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
         processor.process(vec![event.clone()], &aggregator).await;
@@ -673,7 +717,7 @@ mod tests {
         // This could be any event that doesn't have a `request_id`
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-            record: TelemetryRecord::Function("test-function".to_string()),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
         processor.process(vec![event.clone()], &aggregator).await;
