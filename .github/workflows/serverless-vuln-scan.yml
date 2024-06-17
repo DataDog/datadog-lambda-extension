@@ -1,12 +1,9 @@
 name: "Serverless Vulnerability Scan"
 
 on:
-  pull_request:
-    paths:
-      - 'cmd/serverless/**'
-      - 'cmd/serverless-init/**'
-      - 'pkg/serverless/**'
-      - '.github/workflows/serverless-vuln-scan.yml'
+  schedule:
+    # daily at midnight
+    - cron: "0 0 * * *"
 
 env:
   VERSION: 1  # env var required when building extension
