@@ -466,7 +466,10 @@ mod tests {
 
         let result = processor.get_message(event).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unable to parse log"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unable to parse log"));
     }
 
     // get_intake_log
