@@ -3,7 +3,7 @@
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
-use log::{debug, error, info};
+use tracing::{debug, error, info};
 use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -32,7 +32,6 @@ pub struct MiniAgent {
 }
 
 impl MiniAgent {
-    #[tokio::main]
     pub async fn start_mini_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
@@ -47,7 +46,7 @@ impl MiniAgent {
         //         .await,
         // );
 
-        debug!(
+        println!(
             "Time taken to fetch Mini Agent metadata: {} ms",
             now.elapsed().as_millis()
         );
@@ -61,11 +60,10 @@ impl MiniAgent {
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
         let trace_flusher = self.trace_flusher.clone();
-        let trace_config = self.config.clone();
         tokio::spawn(async move {
             let trace_flusher = trace_flusher.clone();
             trace_flusher
-                .start_trace_flusher(trace_config.clone(), trace_rx)
+                .start_trace_flusher(trace_rx)
                 .await;
         });
 
@@ -118,8 +116,8 @@ impl MiniAgent {
 
         let server = server_builder.serve(make_svc);
 
-        info!("Mini Agent started: listening on port {MINI_AGENT_PORT}");
-        debug!(
+        println!("Mini Agent started: listening on port {MINI_AGENT_PORT}");
+        println!(
             "Time taken start the Mini Agent: {} ms",
             now.elapsed().as_millis()
         );

@@ -279,6 +279,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "10.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#b92f4eb4d1966e7525281d7421a00b992e52d855"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -287,6 +288,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "10.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#b92f4eb4d1966e7525281d7421a00b992e52d855"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -303,6 +305,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "10.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#b92f4eb4d1966e7525281d7421a00b992e52d855"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -312,6 +315,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "10.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#b92f4eb4d1966e7525281d7421a00b992e52d855"
 dependencies = [
  "anyhow",
  "bytes",
@@ -334,6 +338,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "10.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#b92f4eb4d1966e7525281d7421a00b992e52d855"
 dependencies = [
  "anyhow",
  "futures",

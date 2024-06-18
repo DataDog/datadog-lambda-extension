@@ -22,10 +22,11 @@ use std::{
     process::Command,
     sync::{Arc, Mutex},
 };
+use tokio::sync::Mutex as TokioMutex;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
-
+use datadog_trace_utils::trace_utils::SendData;
 use bottlecap::{
     base_url,
     config::{self, AwsConfig, Config},
@@ -54,7 +55,7 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-    config as TraceConfig, mini_agent, stats_flusher, stats_processor, trace_flusher,
+    config as TraceConfig, mini_agent, stats_flusher, stats_processor, trace_flusher::{self, TraceFlusher},
     trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -265,25 +266,36 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
         config.site.clone(),
     );
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {});
+
+    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher { buffer: Arc::new(TokioMutex::new(Vec::new())) });
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {});
 
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {});
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
-    let trace_config = TraceConfig::Config::new().unwrap(); 
+    let trace_config = match TraceConfig::Config::new() {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Error loading trace config: {e:?}");
+            panic!("{e}");
+        }
+    };
+
+    let trace_flusher_clone = trace_flusher.clone();
 
     let mini_agent = Box::new(mini_agent::MiniAgent {
         config: Arc::new(trace_config),
         trace_processor,
-        trace_flusher,
+        trace_flusher: trace_flusher_clone,
         stats_processor,
         stats_flusher,
     });
-
-    if let Err(e) = mini_agent.start_mini_agent() {
-        error!("Error when starting serverless trace mini agent: {e}");
-    }
+    tokio::spawn(async move {
+        let res = mini_agent.start_mini_agent().await;
+        if let Err(e) = res {
+            error!("Error starting mini agent: {e:?}");
+        }
+    });
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
     let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
@@ -387,7 +399,7 @@ async fn extension_loop_active(
                                 // pass the invocation deadline to
                                 // flush tasks here, so they can
                                 // retry if we have more time
-                                tokio::join!(logs_flusher.flush(), metrics_flusher.flush());
+                                tokio::join!(logs_flusher.flush(), metrics_flusher.flush(), trace_flusher.manual_flush());
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -433,7 +445,7 @@ async fn extension_loop_active(
         if shutdown {
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            tokio::join!(logs_flusher.flush(), metrics_flusher.flush());
+            tokio::join!(logs_flusher.flush(), metrics_flusher.flush(), trace_flusher.manual_flush());
             return Ok(());
         }
     }

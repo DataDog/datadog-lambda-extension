@@ -139,6 +139,9 @@ impl EnvVerifier for ServerlessEnvVerifier {
                     .verify_gcp_environment_or_exit(verify_env_timeout)
                     .await;
             }
+            trace_utils::EnvironmentType::LambdaFunction => {
+                trace_utils::MiniAgentMetadata::default()
+            }
         }
     }
 }

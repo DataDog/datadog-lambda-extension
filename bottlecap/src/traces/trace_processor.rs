@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hyper::{http, Body, Request, Response, StatusCode};
-use log::info;
+use tracing::info;
 use tokio::sync::mpsc::Sender;
 
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
