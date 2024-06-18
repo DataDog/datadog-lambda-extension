@@ -60,7 +60,7 @@ impl Default for Config {
             apm_enabled: false,
             lambda_handler: String::default(),
             serverless_trace_enabled: true,
-            trace_enabled: true
+            trace_enabled: true,
         }
     }
 }

@@ -27,7 +27,7 @@ pub trait StatsProcessor {
     ) -> http::Result<Response<Body>>;
 }
 
-#[derive(Clone,Copy)]
+#[derive(Clone, Copy)]
 pub struct ServerlessStatsProcessor {}
 
 #[async_trait]

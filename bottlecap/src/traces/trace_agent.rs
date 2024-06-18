@@ -3,16 +3,18 @@
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
-use tracing::{debug, error, info};
 use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tracing::{debug, error, info};
 
 use crate::traces::http_utils::log_and_create_http_response;
-use crate::traces::{config as TraceConfig, stats_flusher, stats_processor, trace_flusher, trace_processor};
+use crate::traces::{
+    config as TraceConfig, stats_flusher, stats_processor, trace_flusher, trace_processor,
+};
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;
 
@@ -62,9 +64,7 @@ impl TraceAgent {
         let trace_flusher = self.trace_flusher.clone();
         tokio::spawn(async move {
             let trace_flusher = trace_flusher.clone();
-            trace_flusher
-                .start_trace_flusher(trace_rx)
-                .await;
+            trace_flusher.start_trace_flusher(trace_rx).await;
         });
 
         // channels to send processed stats to our stats flusher.
@@ -141,10 +141,7 @@ impl TraceAgent {
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, TRACE_ENDPOINT_PATH) => {
-                match trace_processor
-                    .process_traces(config, req, trace_tx)
-                    .await
-                {
+                match trace_processor.process_traces(config, req, trace_tx).await {
                     Ok(res) => Ok(res),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),

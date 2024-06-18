@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use hyper::{http, Body, Request, Response, StatusCode};
-use tracing::info;
 use tokio::sync::mpsc::Sender;
+use tracing::{debug, info};
 
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_utils::trace_utils::SendData;
@@ -74,7 +74,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     config.function_name.clone(),
                     &config.env_type,
                 );
+                chunk.spans.retain(|span| {
+                    return (span.name != "dns.lookup" && span.resource != "0.0.0.0")
+                        || (span.name != "dns.lookup" && span.resource != "127.0.0.1");
+                });
                 for span in chunk.spans.iter_mut() {
+                    debug!("ASTUYVE span is {:?}", span);
                     // trace_utils::enrich_span_with_mini_agent_metadata(span, &mini_agent_metadata);
                     // trace_utils::enrich_span_with_azure_metadata(
                     //     span,

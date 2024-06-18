@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use async_trait::async_trait;
-use tracing::{error, info};
 use std::sync::Arc;
 use tokio::sync::{mpsc::Receiver, Mutex};
+use tracing::{error, info};
 
 use datadog_trace_utils::trace_utils::{self, SendData};
-
 
 #[async_trait]
 pub trait TraceFlusher {
@@ -16,7 +15,7 @@ pub trait TraceFlusher {
     async fn start_trace_flusher(&self, mut rx: Receiver<SendData>);
     /// Flushes traces to the Datadog trace intake.
     async fn flush_traces(&self, traces: Vec<SendData>);
-    
+
     async fn manual_flush(&self);
 }
 
@@ -44,7 +43,6 @@ impl TraceFlusher for ServerlessTraceFlusher {
             buffer.clear();
         }
     }
-
 
     async fn flush_traces(&self, traces: Vec<SendData>) {
         if traces.is_empty() {
