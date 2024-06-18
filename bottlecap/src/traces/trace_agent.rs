@@ -16,14 +16,14 @@ use crate::traces::{config as TraceConfig, stats_flusher, stats_processor, trace
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;
 
-const MINI_AGENT_PORT: usize = 8126;
+const trace_agent_PORT: usize = 8126;
 const TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
 const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 
-pub struct MiniAgent {
+pub struct TraceAgent {
     pub config: Arc<TraceConfig::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     pub trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
@@ -31,12 +31,12 @@ pub struct MiniAgent {
     pub stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
 }
 
-impl MiniAgent {
-    pub async fn start_mini_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
+impl TraceAgent {
+    pub async fn start_trace_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
         // // verify we are in a google cloud funtion environment. if not, shut down the mini agent.
-        // let mini_agent_metadata = Arc::new(
+        // let trace_agent_metadata = Arc::new(
         //     self.env_verifier
         //         .verify_environment(
         //             self.config.verify_env_timeout,
@@ -47,7 +47,7 @@ impl MiniAgent {
         // );
 
         println!(
-            "Time taken to fetch Mini Agent metadata: {} ms",
+            "Time taken to fetch Trace Agent metadata: {} ms",
             now.elapsed().as_millis()
         );
 
@@ -98,7 +98,7 @@ impl MiniAgent {
             let endpoint_config = endpoint_config.clone();
 
             let service = service_fn(move |req| {
-                MiniAgent::trace_endpoint_handler(
+                TraceAgent::trace_endpoint_handler(
                     endpoint_config.clone(),
                     req,
                     trace_processor.clone(),
@@ -111,14 +111,14 @@ impl MiniAgent {
             async move { Ok::<_, Infallible>(service) }
         });
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], MINI_AGENT_PORT as u16));
+        let addr = SocketAddr::from(([127, 0, 0, 1], trace_agent_PORT as u16));
         let server_builder = Server::try_bind(&addr)?;
 
         let server = server_builder.serve(make_svc);
 
-        println!("Mini Agent started: listening on port {MINI_AGENT_PORT}");
+        println!("Trace Agent started: listening on port {trace_agent_PORT}");
         println!(
-            "Time taken start the Mini Agent: {} ms",
+            "Time taken start the Trace Agent: {} ms",
             now.elapsed().as_millis()
         );
 

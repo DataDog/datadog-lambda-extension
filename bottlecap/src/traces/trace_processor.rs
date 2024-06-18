@@ -184,7 +184,6 @@ mod tests {
         let trace_processor = trace_processor::ServerlessTraceProcessor {};
         let res = trace_processor
             .process_traces(
-                Arc::new(create_test_config()),
                 request,
                 tx,
                 Arc::new(trace_utils::MiniAgentMetadata::default()),

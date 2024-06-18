@@ -26,7 +26,6 @@ use tokio::sync::Mutex as TokioMutex;
 use telemetry::listener::TelemetryListenerConfig;
 use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
-use datadog_trace_utils::trace_utils::SendData;
 use bottlecap::{
     base_url,
     config::{self, AwsConfig, Config},
@@ -55,7 +54,7 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-    config as TraceConfig, mini_agent, stats_flusher, stats_processor, trace_flusher::{self, TraceFlusher},
+    config as TraceConfig, trace_agent, stats_flusher, stats_processor, trace_flusher::{self, TraceFlusher},
     trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -283,7 +282,7 @@ async fn extension_loop_active(
 
     let trace_flusher_clone = trace_flusher.clone();
 
-    let mini_agent = Box::new(mini_agent::MiniAgent {
+    let trace_agent = Box::new(trace_agent::TraceAgent {
         config: Arc::new(trace_config),
         trace_processor,
         trace_flusher: trace_flusher_clone,
@@ -291,7 +290,7 @@ async fn extension_loop_active(
         stats_flusher,
     });
     tokio::spawn(async move {
-        let res = mini_agent.start_mini_agent().await;
+        let res = trace_agent.start_trace_agent().await;
         if let Err(e) = res {
             error!("Error starting mini agent: {e:?}");
         }

@@ -19,7 +19,7 @@ pub struct Config {
     pub env_type: trace_utils::EnvironmentType,
     pub function_name: Option<String>,
     pub max_request_content_length: usize,
-    pub mini_agent_version: String,
+    pub trace_agent_version: String,
     pub obfuscation_config: obfuscation_config::ObfuscationConfig,
     pub os: String,
     /// how often to flush stats, in seconds
@@ -39,7 +39,7 @@ impl Config {
             .into();
 
         let (function_name, env_type) = read_cloud_env().ok_or_else(|| {
-            anyhow::anyhow!("Unable to identify environment. Shutting down Mini Agent.")
+            anyhow::anyhow!("Unable to identify environment. Shutting down Trace Agent.")
         })?;
 
         let dd_site = env::var("DD_SITE").unwrap_or_else(|_| "datadoghq.com".to_string());
@@ -58,11 +58,11 @@ impl Config {
 
         let obfuscation_config = obfuscation_config::ObfuscationConfig::new().map_err(|err| {
             anyhow::anyhow!(
-                "Error creating obfuscation config, Mini Agent will not start. Error: {err}",
+                "Error creating obfuscation config, Trace Agent will not start. Error: {err}",
             )
         })?;
 
-        let mini_agent_version: String = env!("CARGO_PKG_VERSION").to_string();
+        let trace_agent_version: String = env!("CARGO_PKG_VERSION").to_string();
 
         Ok(Config {
             function_name: Some(function_name),
@@ -82,7 +82,7 @@ impl Config {
                 api_key: Some(api_key),
             },
             obfuscation_config,
-            mini_agent_version,
+            trace_agent_version,
         })
     }
 }
