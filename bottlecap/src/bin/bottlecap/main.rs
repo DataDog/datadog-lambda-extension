@@ -494,7 +494,7 @@ async fn setup_telemetry_client(
     .await
     .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     tokio::spawn(async move {
-        telemetry_listener.spin().await;
+        telemetry_listener.hyper_spin().await;
     });
 
     let telemetry_client = TelemetryApiClient::new(extension_id.to_string(), TELEMETRY_PORT);

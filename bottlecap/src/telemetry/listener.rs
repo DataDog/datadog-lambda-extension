@@ -1,6 +1,11 @@
 use crate::telemetry::events::TelemetryEvent;
 use core::fmt::Display;
 
+use http_body_util::BodyExt;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Request, Response};
+use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -216,6 +221,59 @@ impl TelemetryListener {
             cancel_token,
             listener,
         })
+    }
+
+    pub async fn handle(
+        req: Request<hyper::body::Incoming>,
+        event_bus: Sender<Vec<TelemetryEvent>>,
+    ) -> Result<Response<String>, hyper::Error> {
+        let whole_body = req.collect().await?.to_bytes();
+
+        let body = whole_body.to_vec();
+
+        let body = std::str::from_utf8(&body).expect("infallible");
+        debug!("[jordan] Received a Telemetry API connection: {}", body);
+        
+        let telemetry_events = serde_json::from_str::<Vec<TelemetryEvent>>(body).expect("infallible");
+        event_bus.send(telemetry_events).await.expect("infallible");
+
+        let ack = Response::builder()
+            .status(200)
+            .body(String::from("OK"))
+            .expect("infallible");
+        Ok(ack)
+    }
+
+    pub async fn hyper_spin(self) {
+        loop {
+            tokio::select! {
+                biased;
+                stream = self.listener.accept() => {
+                    match stream {
+                        Ok((stream, _)) => {
+                            let io = TokioIo::new(stream);
+                            let cloned_event_bus = self.event_bus.clone();
+                            tokio::spawn(async move {
+                                if let Err(err) = http1::Builder::new()
+                                    .serve_connection(io, service_fn(|req| {
+                                        Self::handle(req, cloned_event_bus.clone())
+                                    }))
+                                    .await
+                                    {
+                                        error!("Error serving connection: {:?}", err);
+                                    }
+                            });
+                        }
+                        Err(e) => {
+                            error!("Error accepting connection: {:?}", e);
+                        }
+                    }
+                }
+                () = self.cancel_token.cancelled() => {
+                    break;
+                }
+            }
+        }
     }
 
     pub async fn spin(self) {
