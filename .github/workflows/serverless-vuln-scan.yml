@@ -32,7 +32,7 @@ jobs:
           ./scripts/build_binary_and_layer_dockerized.sh
 
       - name: Scan amd64 image with trivy
-        uses: aquasecurity/trivy-action@d710430a6722f083d3b36b8339ff66b32f22ee55 # v0.19.0
+        uses: aquasecurity/trivy-action@7c2007bcb556501da015201bcba5aa14069b74e2 # v0.23.0
         with:
           image-ref: "datadog/build-lambda-extension-amd64:${{ env.VERSION }}"
           ignore-unfixed: true
@@ -40,7 +40,7 @@ jobs:
           format: table
 
       - name: Scan arm64 image with trivy
-        uses: aquasecurity/trivy-action@d710430a6722f083d3b36b8339ff66b32f22ee55 # v0.19.0
+        uses: aquasecurity/trivy-action@7c2007bcb556501da015201bcba5aa14069b74e2 # v0.23.0
         with:
           image-ref: "datadog/build-lambda-extension-arm64:${{ env.VERSION }}"
           ignore-unfixed: true
