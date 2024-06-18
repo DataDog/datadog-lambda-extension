@@ -18,7 +18,7 @@ use crate::traces::{
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;
 
-const trace_agent_PORT: usize = 8126;
+const TRACE_AGENT_PORT: usize = 8126;
 const TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
 const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
 const INFO_ENDPOINT_PATH: &str = "/info";
@@ -36,19 +36,7 @@ pub struct TraceAgent {
 impl TraceAgent {
     pub async fn start_trace_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
-
-        // // verify we are in a google cloud funtion environment. if not, shut down the mini agent.
-        // let trace_agent_metadata = Arc::new(
-        //     self.env_verifier
-        //         .verify_environment(
-        //             self.config.verify_env_timeout,
-        //             &self.config.env_type,
-        //             &self.config.os,
-        //         )
-        //         .await,
-        // );
-
-        println!(
+        info!(
             "Time taken to fetch Trace Agent metadata: {} ms",
             now.elapsed().as_millis()
         );
@@ -111,13 +99,13 @@ impl TraceAgent {
             async move { Ok::<_, Infallible>(service) }
         });
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], trace_agent_PORT as u16));
+        let addr = SocketAddr::from(([127, 0, 0, 1], TRACE_AGENT_PORT as u16));
         let server_builder = Server::try_bind(&addr)?;
 
         let server = server_builder.serve(make_svc);
 
-        println!("Trace Agent started: listening on port {trace_agent_PORT}");
-        println!(
+        info!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
+        info!(
             "Time taken start the Trace Agent: {} ms",
             now.elapsed().as_millis()
         );
