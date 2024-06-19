@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# requires FUNCTION_NAME, REGION, and AWS_PROFILE to be set
+# requires FUNCTION_NAME, REGION, VERSION, and AWS_PROFILE to be set
 set -eu pipefail
 
 INVOKES="${INVOKES:-10}"
@@ -13,10 +13,10 @@ function update_timeout {
 }
 
 function invoke_and_store_report {
-    aws-vault exec "$AWS_PROFILE" -- aws lambda invoke --region "$REGION" --function-name "$FUNCTION_NAME" "$RESPONSE_FILE" --log-type Tail | jq -r '.LogResult' | base64 -d | grep -e '^REPORT ' | tee -a reports.log
+    aws-vault exec "$AWS_PROFILE" -- aws lambda invoke --region "$REGION" --function-name "$FUNCTION_NAME" "$RESPONSE_FILE" --log-type Tail | jq -r '.LogResult' | base64 -d | grep -e '^REPORT ' | tee -a "reports$VERSION.log"
 }
 
-true > reports.log
+true > "reports$VERSION.log"
 
 for i in $(seq "$INVOKES"); do
     update_timeout $((60 + i % 2))
@@ -27,4 +27,4 @@ for i in $(seq "$INVOKES"); do
 done
 
 echo
-python report_stats.py reports.log
+python report_stats.py "reports$VERSION.log"

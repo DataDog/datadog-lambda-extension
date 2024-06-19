@@ -49,6 +49,12 @@ mkdir -p $EXTENSION_DIR
 # First prepare a folder with only *mod and *sum files to enable Docker caching capabilities
 mkdir -p $ROOT_DIR/scripts/.src $ROOT_DIR/scripts/.cache
 echo "Copy mod files to build a cache"
+
+if [ -n "$AGENT_COMMIT" ]; then
+    echo "Checking out agent commit $AGENT_COMMIT"
+    cd $AGENT_PATH && git checkout $AGENT_COMMIT
+fi
+
 cp $AGENT_PATH/go.mod $ROOT_DIR/scripts/.cache
 cp $AGENT_PATH/go.sum $ROOT_DIR/scripts/.cache
 
