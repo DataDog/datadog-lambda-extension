@@ -35,6 +35,11 @@ pub struct Config {
     pub serverless_flush_strategy: FlushStrategy,
     pub trace_enabled: bool,
     pub serverless_trace_enabled: bool,
+    pub capture_lambda_payload: bool,
+    // Deprecated or ignored, just here so we don't failover
+    pub flush_to_log: bool,
+    pub logs_injection: bool,
+    pub merge_xray_traces: bool,
 }
 
 impl Default for Config {
@@ -61,6 +66,10 @@ impl Default for Config {
             lambda_handler: String::default(),
             serverless_trace_enabled: true,
             trace_enabled: true,
+            capture_lambda_payload: false,
+            flush_to_log: false,
+            logs_injection: false,
+            merge_xray_traces: false,
         }
     }
 }
