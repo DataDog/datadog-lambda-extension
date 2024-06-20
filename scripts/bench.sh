@@ -13,10 +13,10 @@ function update_timeout {
 }
 
 function invoke_and_store_report {
-    aws-vault exec "$AWS_PROFILE" -- aws lambda invoke --region "$REGION" --function-name "$FUNCTION_NAME" "$RESPONSE_FILE" --log-type Tail | jq -r '.LogResult' | base64 -d | grep -e '^REPORT ' | tee -a "reports$VERSION.log"
+    aws-vault exec "$AWS_PROFILE" -- aws lambda invoke --region "$REGION" --function-name "$FUNCTION_NAME" "$RESPONSE_FILE" --log-type Tail | jq -r '.LogResult' | base64 -d | grep -e '^REPORT ' | tee -a "reports$FUNCTION_NAME.log"
 }
 
-true > "reports$VERSION.log"
+true > "reports$FUNCTION_NAME.log"
 
 for i in $(seq "$INVOKES"); do
     update_timeout $((60 + i % 2))
@@ -28,9 +28,9 @@ done
 
 sleep "$SLEEP_TIME"
 
-true > "goinit$VERSION.log"
+true > "goinit$FUNCTION_NAME.log"
 
-(cd deploy && aws-vault exec "$AWS_PROFILE" -- sls logs -f gustavo-bench | grep -e 'init github.com/DataDog/datadog-agent/pkg/serverless/trace @' | tee -a "../goinit$VERSION.log")
+(cd deploy && aws-vault exec "$AWS_PROFILE" -- sls logs -f gustavo-bench | grep -e 'init github.com/DataDog/datadog-agent/pkg/serverless/trace @' | tee -a "../goinit$FUNCTION_NAME.log")
 
 echo
-python report_stats.py "reports$VERSION.log" "goinit$VERSION.log"
+python report_stats.py "reports$FUNCTION_NAME.log" "goinit$FUNCTION_NAME.log"
