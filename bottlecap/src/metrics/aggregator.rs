@@ -94,17 +94,11 @@ impl MetricValue {
 impl Entry {
     fn new_from_metric(id: u64, metric: &Metric) -> Self {
         let mut metric_value = match metric.kind {
-            Type::Count => MetricValue::Count(CountMetric {
-                value: 0.0,
+            Type::Count => MetricValue::Count(CountMetric { value: 0.0 }),
+            Type::Gauge => MetricValue::Gauge(GaugeMetric { value: 0.0 }),
+            Type::Distribution => MetricValue::Distribution(DistributionMetric {
+                sketch: DDSketch::default(),
             }),
-            Type::Gauge => MetricValue::Gauge(GaugeMetric {
-                value: 0.0,
-            }),
-            Type::Distribution => {
-                MetricValue::Distribution(DistributionMetric {
-                    sketch: DDSketch::default(),
-                })
-            }
         };
         metric_value.insert_metric(metric);
         Self {
@@ -117,7 +111,7 @@ impl Entry {
     }
 
     /// Return an iterator over key, value pairs
-    fn tag(&self) -> impl Iterator<Item=(Ustr, Ustr)> {
+    fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
             let mut split = tags.split(',');
             match (split.next(), split.next()) {
@@ -251,7 +245,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         if entry.kind != metric::Type::Distribution {
             return None;
         }
-        let sketch = entry.metric_value.get_sketch();
+        let sketch = entry.metric_value.get_sketch()?;
         let mut dogsketch = Dogsketch::default();
         sketch.merge_to_dogsketch(&mut dogsketch);
         // TODO(Astuyve) allow users to specify timestamp
@@ -307,7 +301,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             metric::Type::Distribution => unreachable!(),
         };
         let point = datadog::Point {
-            value: entry.metric_value.get_value(),
+            value: entry.metric_value.get_value()?,
             // TODO(astuyve) allow user to specify timestamp
             timestamp: time::SystemTime::now()
                 .duration_since(time::UNIX_EPOCH)
@@ -380,24 +374,6 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     #[cfg(test)]
-    pub fn get_sketch_by_id(
-        &mut self,
-        name: Ustr,
-        tags: Option<Ustr>,
-    ) -> Option<ddsketch_agent::DDSketch> {
-        let id = metric::id(name, tags);
-
-        match self.map.entry(
-            id,
-            |m| m.id == id,
-            |m| crate::metrics::metric::id(m.name, m.tags),
-        ) {
-            hash_table::Entry::Vacant(_) => None,
-            hash_table::Entry::Occupied(entry) => entry.get().metric_value.get_value(),
-        }
-    }
-
-    #[cfg(test)]
     pub fn get_value_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<f64> {
         let id = metric::id(name, tags);
 
@@ -407,7 +383,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             |m| crate::metrics::metric::id(m.name, m.tags),
         ) {
             hash_table::Entry::Vacant(_) => None,
-            hash_table::Entry::Occupied(entry) => Some(entry.get().metric_value.get_value()),
+            hash_table::Entry::Occupied(entry) => entry.get().metric_value.get_value(),
         }
     }
 }
