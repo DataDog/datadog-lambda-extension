@@ -17,7 +17,9 @@ provider:
     GODEBUG: inittrace=1
 
 functions:
-  pierre-bench:
+  # Ensure to change the name of your top level function
+  # Also change the name in the bench.sh#33
+  gustavo-bench:
     runtime: nodejs20.x
     name: ${env:FUNCTION_NAME}
     # in order to disable the tracer, set handler to index.handler, and comment the tracer layer line

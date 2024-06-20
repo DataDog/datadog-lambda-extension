@@ -17,9 +17,9 @@ if [ -z "${USER_NAME}" ]; then
 fi
 
 export DEPLOYMENT_BUCKET="$USER_NAME-sa-east-1" # need to create a bucket
-export SERVICE_NAME="$USER_NAME-test"
-export FUNCTION_NAME="$USER_NAME-test"
-export SUFFIX=$USER_NAME-testing
+export SERVICE_NAME="${FUNCTION_NAME:-$USER_NAME-test}"
+export FUNCTION_NAME="${FUNCTION_NAME:-$USER_NAME-test}"
+export SUFFIX=$FUNCTION_NAME
 export LAYER_NAME="Datadog-Extension-$SUFFIX"
 
 if [ -z "${DD_API_KEY+set}" ]; then
