@@ -47,5 +47,4 @@ if [ "${DEPLOY}" == true ]; then
     (cd scripts/deploy && aws-vault exec $AWS_PROFILE -- sls deploy)
 fi
 
-
 (cd scripts && ./bench.sh)

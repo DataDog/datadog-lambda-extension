@@ -26,5 +26,11 @@ for i in $(seq "$INVOKES"); do
     sleep "$SLEEP_TIME"
 done
 
+sleep "$SLEEP_TIME"
+
+true > "goinit$VERSION.log"
+
+(cd deploy && aws-vault exec "$AWS_PROFILE" -- sls logs -f pierre-bench | grep -e 'init github.com/DataDog/datadog-agent/pkg/serverless/trace @' | tee -a "../goinit$VERSION.log")
+
 echo
-python report_stats.py "reports$VERSION.log"
+python report_stats.py "reports$VERSION.log" "goinit$VERSION.log"
