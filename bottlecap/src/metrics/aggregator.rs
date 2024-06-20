@@ -9,6 +9,7 @@ use metric::{Metric, Type};
 use std::sync::Arc;
 
 use datadog_protos::metrics::{Dogsketch, Sketch, SketchPayload};
+use ddsketch_agent::DDSketch;
 use hashbrown::hash_table;
 use protobuf::Message;
 use std::time;
@@ -40,7 +41,7 @@ struct Entry {
 
 #[derive(Debug, Clone)]
 struct DistributionMetric {
-    sketch: ddsketch_agent::DDSketch,
+    sketch: DDSketch,
 }
 
 #[derive(Debug, Clone)]
@@ -62,105 +63,61 @@ enum MetricValue {
     Distribution(DistributionMetric),
 }
 
-trait InsertMetric {
-    fn insert_metric(&mut self, metric: &Metric);
-}
-
-trait GetValue {
-    fn get_value(&self) -> f64;
-}
-
-trait GetSketch {
-    fn get_sketch(&self) -> &ddsketch_agent::DDSketch;
-}
-
-impl InsertMetric for MetricValue {
-    fn insert_metric(&mut self, metric: &Metric) {
-        match self {
-            MetricValue::Count(count_metric) => {
-                count_metric.insert_metric(metric);
-            }
-            MetricValue::Gauge(gauge_metric) => {
-                gauge_metric.insert_metric(metric);
-            }
-            MetricValue::Distribution(distribution_metric) => {
-                distribution_metric.insert_metric(metric);
-            }
-        }
-    }
-}
-
-impl GetSketch for MetricValue {
-    fn get_sketch(&self) -> &ddsketch_agent::DDSketch {
-        match self {
-            MetricValue::Count(_) | MetricValue::Gauge(_) => unreachable!(),
-            MetricValue::Distribution(distribution_metric) => &distribution_metric.sketch,
-        }
-    }
-}
-
-impl GetValue for MetricValue {
-    fn get_value(&self) -> f64 {
-        match self {
-            MetricValue::Count(count_metric) => count_metric.value,
-            MetricValue::Gauge(gauge_metric) => gauge_metric.value,
-            MetricValue::Distribution(_distribution_metric) => unreachable!(),
-        }
-    }
-}
-
-impl InsertMetric for DistributionMetric {
+impl MetricValue {
     fn insert_metric(&mut self, metric: &Metric) {
         // safe because we know there's at least one value when we parse
-        self.sketch.insert(metric.first_value().unwrap_or_default());
+        match self {
+            MetricValue::Count(count) => count.value += metric.first_value().unwrap_or_default(),
+            MetricValue::Gauge(gauge) => gauge.value = metric.first_value().unwrap_or_default(),
+            MetricValue::Distribution(distribution) => distribution
+                .sketch
+                .insert(metric.first_value().unwrap_or_default()),
+        }
     }
-}
 
-impl InsertMetric for GaugeMetric {
-    fn insert_metric(&mut self, metric: &Metric) {
-        // safe because we know there's at least one value when we parse
-        self.value = metric.first_value().unwrap_or_default();
+    fn get_value(&self) -> Option<f64> {
+        match self {
+            MetricValue::Count(count) => Some(count.value),
+            MetricValue::Gauge(gauge) => Some(gauge.value),
+            MetricValue::Distribution(_) => None,
+        }
     }
-}
 
-impl InsertMetric for CountMetric {
-    fn insert_metric(&mut self, metric: &Metric) {
-        // safe because we know there's at least one value when we parse
-        self.value += metric.first_value().unwrap_or_default();
+    fn get_sketch(&self) -> Option<&DDSketch> {
+        match self {
+            MetricValue::Distribution(distribution) => Some(&distribution.sketch),
+            _ => None,
+        }
     }
 }
 
 impl Entry {
     fn new_from_metric(id: u64, metric: &Metric) -> Self {
-        let new_metric_value = metric.first_value().unwrap_or_else(|e| {
-            error!("failed to parse metric: {:?}", e);
-            0.0
-        });
+        let mut metric_value = match metric.kind {
+            Type::Count => MetricValue::Count(CountMetric {
+                value: 0.0,
+            }),
+            Type::Gauge => MetricValue::Gauge(GaugeMetric {
+                value: 0.0,
+            }),
+            Type::Distribution => {
+                MetricValue::Distribution(DistributionMetric {
+                    sketch: DDSketch::default(),
+                })
+            }
+        };
+        metric_value.insert_metric(metric);
         Self {
             id,
-            metric_value: match metric.kind {
-                Type::Count => MetricValue::Count(CountMetric {
-                    value: new_metric_value,
-                }),
-                Type::Gauge => MetricValue::Gauge(GaugeMetric {
-                    value: new_metric_value,
-                }),
-                Type::Distribution => {
-                    let mut empty_sketch = MetricValue::Distribution(DistributionMetric {
-                        sketch: ddsketch_agent::DDSketch::default(),
-                    });
-                    empty_sketch.insert_metric(metric);
-                    empty_sketch
-                }
-            },
             name: metric.name,
             tags: metric.tags,
             kind: metric.kind,
+            metric_value,
         }
     }
 
     /// Return an iterator over key, value pairs
-    fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
+    fn tag(&self) -> impl Iterator<Item=(Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
             let mut split = tags.split(',');
             match (split.next(), split.next()) {
@@ -409,6 +366,20 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     #[cfg(test)]
+    pub fn get_sketch_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<DDSketch> {
+        let id = metric::id(name, tags);
+
+        match self.map.entry(
+            id,
+            |m| m.id == id,
+            |m| crate::metrics::metric::id(m.name, m.tags),
+        ) {
+            hash_table::Entry::Vacant(_) => None,
+            hash_table::Entry::Occupied(entry) => entry.get().metric_value.get_sketch().cloned(),
+        }
+    }
+
+    #[cfg(test)]
     pub fn get_sketch_by_id(
         &mut self,
         name: Ustr,
@@ -422,9 +393,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             |m| crate::metrics::metric::id(m.name, m.tags),
         ) {
             hash_table::Entry::Vacant(_) => None,
-            hash_table::Entry::Occupied(entry) => {
-                Some(entry.get().metric_value.get_sketch().clone())
-            }
+            hash_table::Entry::Occupied(entry) => entry.get().metric_value.get_value(),
         }
     }
 
