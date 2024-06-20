@@ -268,10 +268,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let Some(sketch) = self.build_sketch(now, entry) else {
                 continue;
             };
-            let pb_size = sketch.compute_size();
-            if pb_size > self.max_content_size_bytes as u64
-                || pb_size + buffer.len() as u64 > self.max_content_size_bytes as u64
-            {
+            if sketch.compute_size() + buffer.len() as u64 > self.max_content_size_bytes as u64 {
                 break;
             }
 
