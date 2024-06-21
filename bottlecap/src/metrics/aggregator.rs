@@ -39,52 +39,35 @@ struct Entry {
 }
 
 #[derive(Debug, Clone)]
-struct DistributionMetric {
-    sketch: DDSketch,
-}
-
-#[derive(Debug, Clone)]
-#[repr(transparent)]
-struct CountMetric {
-    value: f64,
-}
-
-#[derive(Debug, Clone)]
-#[repr(transparent)]
-struct GaugeMetric {
-    value: f64,
-}
-
-#[derive(Debug, Clone)]
 enum MetricValue {
-    Count(CountMetric),
-    Gauge(GaugeMetric),
-    Distribution(DistributionMetric),
+    Count(f64),
+    Gauge(f64),
+    Distribution(DDSketch),
 }
 
 impl MetricValue {
     fn insert_metric(&mut self, metric: &Metric) {
         // safe because we know there's at least one value when we parse
         match self {
-            MetricValue::Count(count) => count.value += metric.first_value().unwrap_or_default(),
-            MetricValue::Gauge(gauge) => gauge.value = metric.first_value().unwrap_or_default(),
-            MetricValue::Distribution(distribution) => distribution
-                .sketch
-                .insert(metric.first_value().unwrap_or_default()),
+            MetricValue::Count(count) => *count += metric.first_value().unwrap_or_default(),
+            MetricValue::Gauge(gauge) => *gauge = metric.first_value().unwrap_or_default(),
+            MetricValue::Distribution(distribution) => {
+                distribution.insert(metric.first_value().unwrap_or_default());
+            }
         }
     }
 
     fn get_value(&self) -> Option<f64> {
         match self {
-            MetricValue::Count(count) => Some(count.value),
-            MetricValue::Gauge(gauge) => Some(gauge.value),
+            MetricValue::Count(count) => Some(*count),
+            MetricValue::Gauge(gauge) => Some(*gauge),
             MetricValue::Distribution(_) => None,
         }
     }
 
     fn get_sketch(&self) -> Option<&DDSketch> {
         match self {
-            MetricValue::Distribution(distribution) => Some(&distribution.sketch),
+            MetricValue::Distribution(distribution) => Some(distribution),
             _ => None,
         }
     }
@@ -93,11 +76,9 @@ impl MetricValue {
 impl Entry {
     fn new_from_metric(id: u64, metric: &Metric) -> Self {
         let mut metric_value = match metric.kind {
-            Type::Count => MetricValue::Count(CountMetric { value: 0.0 }),
-            Type::Gauge => MetricValue::Gauge(GaugeMetric { value: 0.0 }),
-            Type::Distribution => MetricValue::Distribution(DistributionMetric {
-                sketch: DDSketch::default(),
-            }),
+            Type::Count => MetricValue::Count(0.0),
+            Type::Gauge => MetricValue::Gauge(0.0),
+            Type::Distribution => MetricValue::Distribution(DDSketch::default()),
         };
         metric_value.insert_metric(metric);
         Self {
