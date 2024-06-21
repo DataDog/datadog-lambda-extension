@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# requires FUNCTION_NAME, REGION, and AWS_PROFILE to be set
+# requires FUNCTION_NAME, REGION, VERSION, and AWS_PROFILE to be set
 set -eu pipefail
 
 INVOKES="${INVOKES:-10}"
@@ -13,10 +13,10 @@ function update_timeout {
 }
 
 function invoke_and_store_report {
-    aws-vault exec "$AWS_PROFILE" -- aws lambda invoke --region "$REGION" --function-name "$FUNCTION_NAME" "$RESPONSE_FILE" --log-type Tail | jq -r '.LogResult' | base64 -d | grep -e '^REPORT ' | tee -a reports.log
+    aws-vault exec "$AWS_PROFILE" -- aws lambda invoke --region "$REGION" --function-name "$FUNCTION_NAME" "$RESPONSE_FILE" --log-type Tail | jq -r '.LogResult' | base64 -d | grep -e '^REPORT ' | tee -a "reports$FUNCTION_NAME.log"
 }
 
-true > reports.log
+true > "reports$FUNCTION_NAME.log"
 
 for i in $(seq "$INVOKES"); do
     update_timeout $((60 + i % 2))
@@ -26,5 +26,11 @@ for i in $(seq "$INVOKES"); do
     sleep "$SLEEP_TIME"
 done
 
+sleep "$SLEEP_TIME"
+
+true > "goinit$FUNCTION_NAME.log"
+
+(cd deploy && aws-vault exec "$AWS_PROFILE" -- sls logs -f gustavo-bench | grep -e 'init github.com/DataDog/datadog-agent/pkg/serverless/trace @' | tee -a "../goinit$FUNCTION_NAME.log")
+
 echo
-python report_stats.py reports.log
+python report_stats.py "reports$FUNCTION_NAME.log" "goinit$FUNCTION_NAME.log"

@@ -30,11 +30,11 @@ WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \ 
-    /usr/lib/go/bin/go build -ldflags="-w \
+    GOWORK=off /usr/lib/go/bin/go build -ldflags="-w \
     -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
     -tags "${BUILD_TAGS}" -o datadog-agent;
 
-RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
+RUN  GOWORK=off /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension

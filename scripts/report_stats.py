@@ -20,6 +20,10 @@ REPORT_RE = re.compile(
     r"\s*$"
 )
 
+GO_INIT_RE = re.compile(
+    r"init github.com/DataDog/datadog-agent/pkg/serverless/trace @(?P<init_duration>\d+) ms"
+)
+
 
 def parse_reports(log_lines: Iterable[str]) -> Iterable[Report]:
     for log_line in log_lines:
@@ -41,10 +45,25 @@ def parse_reports(log_lines: Iterable[str]) -> Iterable[Report]:
         )
 
 
+def parse_go_init(log_lines: Iterable[str]):
+    for log_line in log_lines:
+        res = GO_INIT_RE.match(log_line)
+        if res is None:
+            continue
+
+        init_duration = res.group("init_duration")
+        if init_duration is not None:
+            init_duration = int(init_duration)
+
+        yield init_duration
+
+
 def print_stats(values, name, unit):
     mean = sum(values) / len(values)
     median = statistics.median(values)
-    print(f"{name}: min={min(values)}{unit}, max={max(values)}{unit}, avg={mean}{unit}, median={median}{unit}")
+    print(
+        f"{name}: min={min(values)}{unit}, max={max(values)}{unit}, avg={mean}{unit}, median={median}{unit}"
+    )
 
 
 if __name__ == "__main__":
@@ -67,3 +86,13 @@ if __name__ == "__main__":
     print_stats(memories, "Memory", " MB")
     print_stats(durations, "Duration", " ms")
     print_stats(init_durations, "Init Duration", " ms")
+
+    with open(sys.argv[2], "r") as f:
+        goinit_reports = f.readlines()
+
+        init_duirations = []
+
+        for init in parse_go_init(goinit_reports):
+            init_duirations.append(init)
+
+        print_stats(init_duirations, "Go init", " ms")
