@@ -35,7 +35,6 @@ struct Entry {
     id: u64,
     name: Ustr,
     tags: Option<Ustr>,
-    kind: metric::Type,
     metric_value: MetricValue,
 }
 
@@ -105,7 +104,6 @@ impl Entry {
             id,
             name: metric.name,
             tags: metric.tags,
-            kind: metric.kind,
             metric_value,
         }
     }
@@ -164,11 +162,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         let id = metric::id(metric.name, metric.tags);
         let len = self.map.len();
 
-        match self.map.entry(
-            id,
-            |m| m.id == id,
-            |m| crate::metrics::metric::id(m.name, m.tags),
-        ) {
+        match self
+            .map
+            .entry(id, |m| m.id == id, |m| metric::id(m.name, m.tags))
+        {
             hash_table::Entry::Vacant(entry) => {
                 if len >= CONTEXTS {
                     return Err(errors::Insert::Overflow);
@@ -242,9 +239,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     fn build_sketch(&self, now: i64, entry: &Entry) -> Option<Sketch> {
-        if entry.kind != metric::Type::Distribution {
+        if let MetricValue::Distribution(_) = entry.metric_value {
+        } else {
             return None;
-        }
+        };
         let sketch = entry.metric_value.get_sketch()?;
         let mut dogsketch = Dogsketch::default();
         sketch.merge_to_dogsketch(&mut dogsketch);
@@ -284,9 +282,9 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     fn build_metric(&self, entry: &Entry) -> Option<DatadogMetric> {
-        if entry.kind == metric::Type::Distribution {
+        if let MetricValue::Distribution(_) = entry.metric_value {
             return None;
-        }
+        };
         let mut resources = Vec::with_capacity(constants::MAX_TAGS);
         for (name, kind) in entry.tag() {
             let resource = datadog::Resource {
@@ -295,10 +293,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             };
             resources.push(resource);
         }
-        let kind = match entry.kind {
-            metric::Type::Count => datadog::DdMetricKind::Count,
-            metric::Type::Gauge => datadog::DdMetricKind::Gauge,
-            metric::Type::Distribution => unreachable!(),
+        let kind = match entry.metric_value {
+            MetricValue::Count(_) => datadog::DdMetricKind::Count,
+            MetricValue::Gauge(_) => datadog::DdMetricKind::Gauge,
+            MetricValue::Distribution(_) => unreachable!(),
         };
         let point = datadog::Point {
             value: entry.metric_value.get_value()?,
@@ -335,10 +333,9 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes);
         let mut count_entries = 0;
         for entry in &self.map {
-            if entry.kind == metric::Type::Distribution {
+            let Some(metric) = self.build_metric(entry) else {
                 continue;
-            }
-            let metric = self.build_metric(entry);
+            };
             let serialized_metric = match serde_json::to_vec(&metric) {
                 Ok(serialized_metric) => serialized_metric,
                 Err(e) => {
@@ -363,11 +360,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     pub fn get_sketch_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<DDSketch> {
         let id = metric::id(name, tags);
 
-        match self.map.entry(
-            id,
-            |m| m.id == id,
-            |m| crate::metrics::metric::id(m.name, m.tags),
-        ) {
+        match self
+            .map
+            .entry(id, |m| m.id == id, |m| metric::id(m.name, m.tags))
+        {
             hash_table::Entry::Vacant(_) => None,
             hash_table::Entry::Occupied(entry) => entry.get().metric_value.get_sketch().cloned(),
         }
