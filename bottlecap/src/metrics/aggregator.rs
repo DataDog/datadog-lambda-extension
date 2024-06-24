@@ -90,7 +90,7 @@ impl Entry {
     }
 
     /// Return an iterator over key, value pairs
-    fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
+    fn tag(&self) -> impl Iterator<Item=(Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
             let mut split = tags.split(',');
             match (split.next(), split.next()) {
@@ -107,8 +107,10 @@ impl Entry {
 pub struct Aggregator<const CONTEXTS: usize> {
     tags_provider: Arc<provider::Provider>,
     map: hash_table::HashTable<Entry>,
-    max_batch_entries_size: usize,
-    max_content_size_bytes: usize,
+    max_batch_entries_size_single_metric: usize,
+    max_content_size_bytes_single_metric: usize,
+    max_batch_entries_size_sketch_metric: usize,
+    max_content_size_bytes_sketch_metric: usize,
 }
 
 impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
@@ -128,8 +130,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         Ok(Self {
             tags_provider,
             map: hash_table::HashTable::new(),
-            max_batch_entries_size: constants::MAX_ENTRIES_NUMBER,
-            max_content_size_bytes: constants::MAX_CONTENT_SIZE_BYTES,
+            max_batch_entries_size_single_metric: constants::MAX_ENTRIES_NUMBER_SINGLE_METRIC,
+            max_content_size_bytes_single_metric: constants::MAX_CONTENT_SIZE_BYTES_SINGLE_METRIC,
+            max_batch_entries_size_sketch_metric: constants::MAX_ENTRIES_NUMBER_SKETCH_METRIC,
+            max_content_size_bytes_sketch_metric: constants::MAX_CONTENT_SIZE_SKETCH_METRIC,
         })
     }
 
@@ -185,7 +189,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 
     #[must_use]
     pub fn distributions_to_protobuf_serialized(&self) -> Vec<u8> {
-        let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes);
+        let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes_sketch_metric);
         let mut count_entries = 0;
         let now = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
@@ -197,7 +201,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let Some(sketch) = self.build_sketch(now, entry) else {
                 continue;
             };
-            if sketch.compute_size() + buffer.len() as u64 > self.max_content_size_bytes as u64 {
+            if sketch.compute_size() + buffer.len() as u64 > self.max_content_size_bytes_sketch_metric as u64 {
                 break;
             }
 
@@ -212,7 +216,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             buffer.extend(serialized_metric);
             count_entries += 1;
 
-            if count_entries >= self.max_batch_entries_size {
+            if count_entries >= self.max_batch_entries_size_sketch_metric {
                 break;
             }
         }
@@ -220,8 +224,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     fn build_sketch(&self, now: i64, entry: &Entry) -> Option<Sketch> {
-        if let MetricValue::Distribution(_) = entry.metric_value {
-        } else {
+        if let MetricValue::Distribution(_) = entry.metric_value {} else {
             return None;
         };
         let sketch = entry.metric_value.get_sketch()?;
@@ -311,7 +314,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
     pub fn to_series_serialized(&self) -> Vec<u8> {
-        let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes);
+        let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes_single_metric);
         let mut count_entries = 0;
         for entry in &self.map {
             let Some(metric) = self.build_metric(entry) else {
@@ -324,13 +327,13 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                     continue;
                 }
             };
-            if serialized_metric.len() + buffer.len() > self.max_content_size_bytes {
+            if serialized_metric.len() + buffer.len() > self.max_content_size_bytes_single_metric {
                 break;
             }
             buffer.extend(serialized_metric);
             count_entries += 1;
 
-            if count_entries >= self.max_batch_entries_size {
+            if count_entries >= self.max_batch_entries_size_single_metric {
                 break;
             }
         }
@@ -519,8 +522,10 @@ mod tests {
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size: 100,
-            max_content_size_bytes: 1500,
+            max_batch_entries_size_single_metric: 1_000,
+            max_content_size_bytes_single_metric: 1_000,
+            max_batch_entries_size_sketch_metric: 100,
+            max_content_size_bytes_sketch_metric: 1_500,
         };
 
         assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
@@ -554,8 +559,10 @@ mod tests {
         aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size: 5,
-            max_content_size_bytes: 1500,
+            max_batch_entries_size_single_metric: 1_000,
+            max_content_size_bytes_single_metric: 1_000,
+            max_batch_entries_size_sketch_metric: 5,
+            max_content_size_bytes_sketch_metric: 1_500,
         };
 
         for i in 10..20 {
@@ -574,8 +581,10 @@ mod tests {
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size: 100,
-            max_content_size_bytes: 1500,
+            max_batch_entries_size_single_metric: 100,
+            max_content_size_bytes_single_metric: 1_500,
+            max_batch_entries_size_sketch_metric: 1_000,
+            max_content_size_bytes_sketch_metric: 1_000,
         };
 
         assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
@@ -606,8 +615,10 @@ mod tests {
         aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size: 5,
-            max_content_size_bytes: 1500,
+            max_batch_entries_size_single_metric: 5,
+            max_content_size_bytes_single_metric: 1_500,
+            max_batch_entries_size_sketch_metric: 1_000,
+            max_content_size_bytes_sketch_metric: 1_000,
         };
 
         for i in 10..20 {
