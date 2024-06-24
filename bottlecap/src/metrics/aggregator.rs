@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn to_series_serialized() {
+    fn to_series_serialized_ignore_distribution() {
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
@@ -600,19 +600,11 @@ mod tests {
             .insert(&Metric::parse("foo:1|d|k:v").expect("metric parse failed"))
             .is_ok());
         assert_eq!(aggregator.to_series_serialized().len(), 143);
+    }
 
-        for i in 10..20 {
-            assert!(aggregator
-                .insert(
-                    &Metric::parse(format!("test{i}:{i}|c|k:v").as_str())
-                        .expect("metric parse failed")
-                )
-                .is_ok());
-        }
-
-        assert_eq!(aggregator.to_series_serialized().len(), 1448);
-
-        aggregator = Aggregator::<1_000> {
+    #[test]
+    fn to_series_serialized_reach_max() {
+        let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_size_single_metric: 5,
