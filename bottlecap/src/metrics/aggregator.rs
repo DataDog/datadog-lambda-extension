@@ -90,7 +90,7 @@ impl Entry {
     }
 
     /// Return an iterator over key, value pairs
-    fn tag(&self) -> impl Iterator<Item=(Ustr, Ustr)> {
+    fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
             let mut split = tags.split(',');
             match (split.next(), split.next()) {
@@ -104,16 +104,17 @@ impl Entry {
 #[derive(Clone)]
 // NOTE by construction we know that intervals and contexts do not explore the
 // full space of usize but the type system limits how we can express this today.
-pub struct Aggregator<const CONTEXTS: usize> {
+pub struct Aggregator {
     tags_provider: Arc<provider::Provider>,
     map: hash_table::HashTable<Entry>,
     max_batch_entries_size_single_metric: usize,
     max_content_size_bytes_single_metric: usize,
     max_batch_entries_size_sketch_metric: usize,
     max_content_size_bytes_sketch_metric: usize,
+    context_size: usize,
 }
 
-impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
+impl Aggregator {
     /// Create a new instance of `Aggregator`
     ///
     /// # Errors
@@ -122,8 +123,11 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     /// counterparts in `constants`. This would be better as a compile-time
     /// issue, although leaving this open allows for runtime configuration.
     #[allow(clippy::cast_precision_loss)]
-    pub fn new(tags_provider: Arc<provider::Provider>) -> Result<Self, errors::Creation> {
-        if CONTEXTS > constants::MAX_CONTEXTS {
+    pub fn new(
+        tags_provider: Arc<provider::Provider>,
+        context_size: usize,
+    ) -> Result<Self, errors::Creation> {
+        if context_size > constants::MAX_CONTEXTS {
             return Err(errors::Creation::Contexts);
         }
 
@@ -134,6 +138,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             max_content_size_bytes_single_metric: constants::MAX_CONTENT_SIZE_BYTES_SINGLE_METRIC,
             max_batch_entries_size_sketch_metric: constants::MAX_ENTRIES_NUMBER_SKETCH_METRIC,
             max_content_size_bytes_sketch_metric: constants::MAX_CONTENT_SIZE_SKETCH_METRIC,
+            context_size,
         })
     }
 
@@ -152,7 +157,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             .entry(id, |m| m.id == id, |m| metric::id(m.name, m.tags))
         {
             hash_table::Entry::Vacant(entry) => {
-                if len >= CONTEXTS {
+                if len >= self.context_size {
                     return Err(errors::Insert::Overflow);
                 }
                 let ent = Entry::new_from_metric(id, metric);
@@ -201,7 +206,9 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let Some(sketch) = self.build_sketch(now, entry) else {
                 continue;
             };
-            if sketch.compute_size() + buffer.len() as u64 > self.max_content_size_bytes_sketch_metric as u64 {
+            if sketch.compute_size() + buffer.len() as u64
+                > self.max_content_size_bytes_sketch_metric as u64
+            {
                 break;
             }
 
@@ -224,7 +231,8 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     fn build_sketch(&self, now: i64, entry: &Entry) -> Option<Sketch> {
-        if let MetricValue::Distribution(_) = entry.metric_value {} else {
+        if let MetricValue::Distribution(_) = entry.metric_value {
+        } else {
             return None;
         };
         let sketch = entry.metric_value.get_sketch()?;
@@ -402,7 +410,7 @@ mod tests {
 
     #[test]
     fn insertion() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -416,7 +424,7 @@ mod tests {
 
     #[test]
     fn distribution_insertion() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
@@ -430,7 +438,7 @@ mod tests {
 
     #[test]
     fn overflow() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -458,7 +466,7 @@ mod tests {
 
     #[test]
     fn clear() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:3|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:5|c|k:v").expect("metric parse failed");
@@ -481,7 +489,7 @@ mod tests {
 
     #[test]
     fn to_series() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -502,7 +510,7 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
@@ -519,13 +527,14 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf_serialized() {
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_size_single_metric: 1_000,
             max_content_size_bytes_single_metric: 1_000,
             max_batch_entries_size_sketch_metric: 100,
             max_content_size_bytes_sketch_metric: 1_500,
+            context_size: 1_000,
         };
 
         assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
@@ -556,13 +565,14 @@ mod tests {
             1110
         );
 
-        aggregator = Aggregator::<1_000> {
+        aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_size_single_metric: 1_000,
             max_content_size_bytes_single_metric: 1_000,
             max_batch_entries_size_sketch_metric: 5,
             max_content_size_bytes_sketch_metric: 1_500,
+            context_size: 1_000,
         };
 
         for i in 10..20 {
@@ -578,13 +588,14 @@ mod tests {
 
     #[test]
     fn to_series_serialized_ignore_distribution() {
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_size_single_metric: 100,
             max_content_size_bytes_single_metric: 1_500,
             max_batch_entries_size_sketch_metric: 1_000,
             max_content_size_bytes_sketch_metric: 1_000,
+            context_size: 1_000,
         };
 
         assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
@@ -604,13 +615,14 @@ mod tests {
 
     #[test]
     fn to_series_serialized_reach_max() {
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_size_single_metric: 5,
             max_content_size_bytes_single_metric: 1_500,
             max_batch_entries_size_sketch_metric: 1_000,
             max_content_size_bytes_sketch_metric: 1_000,
+            context_size: 1_000,
         };
 
         for i in 10..20 {
