@@ -90,7 +90,7 @@ impl Entry {
     }
 
     /// Return an iterator over key, value pairs
-    fn tag(&self) -> impl Iterator<Item=(Ustr, Ustr)> {
+    fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
             let mut split = tags.split(',');
             match (split.next(), split.next()) {
@@ -201,7 +201,9 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let Some(sketch) = self.build_sketch(now, entry) else {
                 continue;
             };
-            if sketch.compute_size() + buffer.len() as u64 > self.max_content_size_bytes_sketch_metric as u64 {
+            if sketch.compute_size() + buffer.len() as u64
+                > self.max_content_size_bytes_sketch_metric as u64
+            {
                 break;
             }
 
@@ -224,7 +226,8 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     fn build_sketch(&self, now: i64, entry: &Entry) -> Option<Sketch> {
-        if let MetricValue::Distribution(_) = entry.metric_value {} else {
+        if let MetricValue::Distribution(_) = entry.metric_value {
+        } else {
             return None;
         };
         let sketch = entry.metric_value.get_sketch()?;
