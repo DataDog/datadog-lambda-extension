@@ -5,12 +5,12 @@ use tracing::debug;
 
 pub struct Flusher {
     dd_api: datadog::DdApi,
-    aggregator: Arc<Mutex<Aggregator>>,
+    aggregator: Arc<Mutex<Aggregator<1024>>>,
 }
 
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
+    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator<1024>>>, site: String) -> Self {
         let dd_api = datadog::DdApi::new(api_key, site);
         Flusher { dd_api, aggregator }
     }

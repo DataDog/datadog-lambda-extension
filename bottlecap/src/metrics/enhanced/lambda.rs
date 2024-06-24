@@ -7,12 +7,12 @@ use std::sync::{Arc, Mutex};
 use tracing::error;
 
 pub struct Lambda {
-    pub aggregator: Arc<Mutex<Aggregator>>,
+    pub aggregator: Arc<Mutex<Aggregator<1024>>>,
 }
 
 impl Lambda {
     #[must_use]
-    pub fn new(aggregator: Arc<Mutex<Aggregator>>) -> Lambda {
+    pub fn new(aggregator: Arc<Mutex<Aggregator<1024>>>) -> Lambda {
         Lambda { aggregator }
     }
 
@@ -107,7 +107,7 @@ impl Lambda {
     }
 
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
-        let mut aggr: std::sync::MutexGuard<Aggregator> =
+        let mut aggr: std::sync::MutexGuard<Aggregator<1024>> =
             self.aggregator.lock().expect("lock poisoned");
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
@@ -172,7 +172,7 @@ mod tests {
     use crate::LAMBDA_RUNTIME_SLUG;
     use std::collections::hash_map::HashMap;
 
-    fn setup() -> Arc<Mutex<Aggregator>> {
+    fn setup() -> Arc<Mutex<Aggregator<1024>>> {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tags".to_string()),
@@ -184,7 +184,7 @@ mod tests {
             &HashMap::new(),
         ));
         Arc::new(Mutex::new(
-            Aggregator::new(tags_provider.clone(), 1024).expect("failed to create aggregator"),
+            Aggregator::<1024>::new(tags_provider.clone()).expect("failed to create aggregator"),
         ))
     }
 
