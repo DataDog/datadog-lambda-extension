@@ -188,41 +188,29 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     #[must_use]
-    pub fn distributions_to_protobuf_serialized(&self) -> Vec<u8> {
-        let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes_sketch_metric);
-        let mut count_entries = 0;
+    pub fn distributions_to_protobuf_api_limited(&self) -> Vec<u8> {
         let now = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
             .expect("unable to poll clock, unrecoverable")
             .as_secs()
             .try_into()
             .unwrap_or_default();
+        let mut sketch_payload = SketchPayload::new();
         for entry in &self.map {
             let Some(sketch) = self.build_sketch(now, entry) else {
                 continue;
             };
-            if sketch.compute_size() + buffer.len() as u64
-                > self.max_content_size_bytes_sketch_metric as u64
-            {
+            if sketch_payload.compute_size() + sketch.compute_size() > self.max_content_size_bytes_sketch_metric as u64 {
                 break;
             }
 
-            let serialized_metric = match sketch.write_to_bytes() {
-                Ok(serialized_sketch) => serialized_sketch,
-                Err(e) => {
-                    error!("failed to serialize metric: {:?}", e);
-                    continue;
-                }
-            };
+            sketch_payload.sketches.push(sketch);
 
-            buffer.extend(serialized_metric);
-            count_entries += 1;
-
-            if count_entries >= self.max_batch_entries_size_sketch_metric {
+            if sketch_payload.sketches.len() >= self.max_batch_entries_size_sketch_metric {
                 break;
             }
         }
-        buffer
+        sketch_payload.write_to_bytes().expect("Can't serialize proto")
     }
 
     fn build_sketch(&self, now: i64, entry: &Entry) -> Option<Sketch> {
@@ -315,8 +303,10 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 
     #[allow(clippy::cast_precision_loss)]
     #[must_use]
-    pub fn to_series_serialized(&self) -> Vec<u8> {
-        let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes_single_metric);
+    pub fn to_series_api_limited(&self) -> Vec<u8> {
+        let mut series = datadog::Series {
+            series: Vec::with_capacity(1_024),
+        };
         let mut count_entries = 0;
         for entry in &self.map {
             let Some(metric) = self.build_metric(entry) else {
@@ -329,17 +319,16 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                     continue;
                 }
             };
-            if serialized_metric.len() + buffer.len() > self.max_content_size_bytes_single_metric {
+            if serialized_metric.len() + series.len() > self.max_content_size_bytes_single_metric {
                 break;
             }
-            buffer.extend(serialized_metric);
-            count_entries += 1;
+            series.series.push(metric);
 
             if count_entries >= self.max_batch_entries_size_single_metric {
                 break;
             }
         }
-        buffer
+        serde_json::to_vec(&series)?
     }
 
     #[cfg(test)]
@@ -392,6 +381,8 @@ mod tests {
     use hashbrown::hash_table;
     use std::collections::hash_map;
     use std::sync::Arc;
+    use datadog_protos::metrics::SketchPayload;
+    use protobuf::Message;
 
     fn create_tags_provider() -> Arc<provider::Provider> {
         let config = Arc::new(config::Config::default());
@@ -530,19 +521,19 @@ mod tests {
             max_content_size_bytes_sketch_metric: 1_500,
         };
 
-        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
 
         assert!(aggregator
             .insert(
                 &Metric::parse("test1:1|d|k:v".to_string().as_str()).expect("metric parse failed")
             )
             .is_ok());
-        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 100);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 100);
 
         assert!(aggregator
             .insert(&Metric::parse("foo:1|c|k:v").expect("metric parse failed"))
             .is_ok());
-        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 100);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 100);
     }
 
     #[test]
@@ -564,7 +555,7 @@ mod tests {
                 )
                 .is_ok());
         }
-        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 505);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 505);
     }
 
     #[test]
@@ -578,19 +569,19 @@ mod tests {
             max_content_size_bytes_sketch_metric: 1_000,
         };
 
-        assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 0);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
 
         assert!(aggregator
             .insert(
                 &Metric::parse("test1:1|c|k:v".to_string().as_str()).expect("metric parse failed")
             )
             .is_ok());
-        assert_eq!(aggregator.to_series_serialized().len(), 143);
+        assert_eq!(aggregator.to_series_api_limited().len(), 143);
 
         assert!(aggregator
             .insert(&Metric::parse("foo:1|d|k:v").expect("metric parse failed"))
             .is_ok());
-        assert_eq!(aggregator.to_series_serialized().len(), 143);
+        assert_eq!(aggregator.to_series_api_limited().len(), 143);
     }
 
     #[test]
@@ -612,6 +603,69 @@ mod tests {
                 )
                 .is_ok());
         }
-        assert_eq!(aggregator.to_series_serialized().len(), 725);
+        assert_eq!(aggregator.to_series_api_limited().len(), 725);
+    }
+
+    #[test]
+    fn distribution_serialized_deserialized() {
+        let mut aggregator = Aggregator::<1_000> {
+            tags_provider: create_tags_provider(),
+            map: hash_table::HashTable::new(),
+            max_batch_entries_size_single_metric: 1_000,
+            max_content_size_bytes_single_metric: 1_000,
+            max_batch_entries_size_sketch_metric: 100,
+            max_content_size_bytes_sketch_metric: 1_500,
+        };
+
+        for i in 0..10 {
+            assert!(aggregator
+                .insert(
+                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
+                        .expect("metric parse failed")
+                )
+                .is_ok());
+        }
+        let pre_serialized_payload = aggregator.distributions_to_protobuf();
+        assert_eq!(pre_serialized_payload.sketches().len(), 10);
+
+        let serialized_proto_from_full_payload = pre_serialized_payload.write_to_bytes().expect("Can't serialized proto");
+
+        let deserialized_payload = SketchPayload::parse_from_bytes(serialized_proto_from_full_payload.as_slice()).expect("failed to parse proto");
+
+        assert_eq!(deserialized_payload.sketches().len(), 10);
+        assert_eq!(deserialized_payload, pre_serialized_payload);
+    }
+
+    #[test]
+    fn distribution_serialized_deserialized_api_limit() {
+        let mut aggregator = Aggregator::<1_000> {
+            tags_provider: create_tags_provider(),
+            map: hash_table::HashTable::new(),
+            max_batch_entries_size_single_metric: 1_000,
+            max_content_size_bytes_single_metric: 1_000,
+            max_batch_entries_size_sketch_metric: 100,
+            max_content_size_bytes_sketch_metric: 1_500,
+        };
+
+        for i in 0..10 {
+            assert!(aggregator
+                .insert(
+                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
+                        .expect("metric parse failed")
+                )
+                .is_ok());
+        }
+        let pre_serialized_payload = aggregator.distributions_to_protobuf();
+        assert_eq!(pre_serialized_payload.sketches().len(), 10);
+
+        let serialized_proto_from_full_payload = pre_serialized_payload.write_to_bytes().expect("Can't serialized proto");
+        let serialized_protos_with_api_limit = aggregator.distributions_to_protobuf_api_limited();
+
+        assert_eq!(serialized_protos_with_api_limit.len(), serialized_proto_from_full_payload.len());
+        assert_eq!(serialized_protos_with_api_limit, serialized_proto_from_full_payload);
+
+        let deserialized_payload = SketchPayload::parse_from_bytes(serialized_protos_with_api_limit.as_slice()).expect("failed to parse proto");
+
+        assert_eq!(deserialized_payload.sketches().len(), 10);
     }
 }
