@@ -5,6 +5,12 @@ pub const CONTEXTS: usize = 1024;
 
 pub static MAX_CONTEXTS: usize = 65_536; // 2**16, arbitrary
 
-pub(crate) const MAX_ENTRIES_NUMBER: usize = 1_000;
+const MB: usize = 1_024 * 1_024;
 
-pub(crate) const MAX_CONTENT_SIZE_BYTES: usize = 5 * 1_024 * 1_024;
+pub(crate) const MAX_ENTRIES_NUMBER_SINGLE_METRIC: usize = 1_000;
+
+pub(crate) const MAX_CONTENT_SIZE_BYTES_SINGLE_METRIC: usize = 5 * MB;
+
+pub(crate) const MAX_ENTRIES_NUMBER_SKETCH_METRIC: usize = 1_000;
+
+pub(crate) const MAX_CONTENT_SIZE_SKETCH_METRIC: usize = 62 * MB;
