@@ -193,13 +193,14 @@ mod tests {
         let metrics_aggr = setup();
         let lambda = Lambda::new(metrics_aggr.clone());
         lambda.increment_invocation_metric().unwrap();
-        let pbuf = metrics_aggr
+        match metrics_aggr
             .lock()
             .expect("lock poisoned")
-            .distributions_to_protobuf();
-        let _ = pbuf.sketches().iter().map(|sketch| {
-            assert_eq!(sketch.metric, constants::INVOCATIONS_METRIC.into());
-        });
+            .get_sketch_by_id(constants::INVOCATIONS_METRIC.into(), None)
+        {
+            Some(pbuf) => assert_eq!(1f64, pbuf.sum().unwrap()),
+            None => panic!("failed to get value by id"),
+        };
     }
 
     #[test]
@@ -207,13 +208,14 @@ mod tests {
         let metrics_aggr = setup();
         let lambda = Lambda::new(metrics_aggr.clone());
         lambda.increment_errors_metric().unwrap();
-        let pbuf = metrics_aggr
+        match metrics_aggr
             .lock()
             .expect("lock poisoned")
-            .distributions_to_protobuf();
-        let _ = pbuf.sketches().iter().map(|sketch| {
-            assert_eq!(sketch.metric, constants::ERRORS_METRIC.into());
-        });
+            .get_sketch_by_id(constants::ERRORS_METRIC.into(), None)
+        {
+            Some(pbuf) => assert_eq!(1f64, pbuf.sum().unwrap()),
+            None => panic!("failed to get value by id"),
+        };
     }
 
     #[test]
@@ -234,26 +236,26 @@ mod tests {
         let mut ms_sketch = ddsketch_agent::DDSketch::default();
         ms_sketch.insert(0.1);
         assert_eq!(
-            aggr.get_value_by_id(constants::DURATION_METRIC.into(), None)
+            aggr.get_sketch_by_id(constants::DURATION_METRIC.into(), None)
                 .unwrap(),
             ms_sketch
         );
         assert_eq!(
-            aggr.get_value_by_id(constants::BILLED_DURATION_METRIC.into(), None)
+            aggr.get_sketch_by_id(constants::BILLED_DURATION_METRIC.into(), None)
                 .unwrap(),
             ms_sketch
         );
         let mut mem_used_sketch = ddsketch_agent::DDSketch::default();
         mem_used_sketch.insert(128.0);
         assert_eq!(
-            aggr.get_value_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None)
+            aggr.get_sketch_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None)
                 .unwrap(),
             mem_used_sketch
         );
         let mut max_mem_sketch = ddsketch_agent::DDSketch::default();
         max_mem_sketch.insert(256.0);
         assert_eq!(
-            aggr.get_value_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
+            aggr.get_sketch_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
                 .unwrap(),
             max_mem_sketch
         );
