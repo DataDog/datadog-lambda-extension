@@ -19,7 +19,8 @@ use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;
 
 const TRACE_AGENT_PORT: usize = 8126;
-const TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
+const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
+const V5_TRACE_ENDPOINT_PATH: &str = "/v0.5/traces";
 const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -125,8 +126,17 @@ impl TraceAgent {
         stats_tx: Sender<pb::ClientStatsPayload>,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
-            (&Method::PUT | &Method::POST, TRACE_ENDPOINT_PATH) => {
-                match trace_processor.process_traces(config, req, trace_tx).await {
+            (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => {
+                match trace_processor.process_traces_v4(config, req, trace_tx).await {
+                    Ok(res) => Ok(res),
+                    Err(err) => log_and_create_http_response(
+                        &format!("Error processing traces: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ),
+                }
+            }
+            (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => {
+                match trace_processor.process_traces_v5(config, req, trace_tx).await {
                     Ok(res) => Ok(res),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),
@@ -162,7 +172,7 @@ impl TraceAgent {
         let response_json = json!(
             {
                 "endpoints": [
-                    TRACE_ENDPOINT_PATH,
+                    V4_TRACE_ENDPOINT_PATH,
                     STATS_ENDPOINT_PATH,
                     INFO_ENDPOINT_PATH
                 ],
