@@ -29,7 +29,7 @@ impl Flusher {
             current_points = locked_aggr.to_series_api_limited();
             // TODO(astuyve) retry and do not panic
         }
-        let mut current_distribution_points = locked_aggr.distributions_to_protobuf();
+        let mut current_distribution_points = locked_aggr.distributions_to_protobuf_api_limited();
         while !current_distribution_points.sketches().is_empty() {
             match &self
                 .dd_api
@@ -41,7 +41,7 @@ impl Flusher {
                     debug!("failed to ship distributions to datadog: {:?}", e);
                 }
             }
-            current_distribution_points = locked_aggr.distributions_to_protobuf();
+            current_distribution_points = locked_aggr.distributions_to_protobuf_api_limited();
         }
         locked_aggr.clear();
     }
