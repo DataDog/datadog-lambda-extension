@@ -331,7 +331,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     #[cfg(test)]
-    pub fn get_sketch_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<DDSketch> {
+    pub fn get_value_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<ValueVariant> {
         let id = metric::id(name, tags);
 
         match self
@@ -339,23 +339,29 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             .entry(id, |m| m.id == id, |m| metric::id(m.name, m.tags))
         {
             hash_table::Entry::Vacant(_) => None,
-            hash_table::Entry::Occupied(entry) => entry.get().metric_value.get_sketch().cloned(),
+            hash_table::Entry::Occupied(entry) => match entry.get() {
+                Entry {
+                    metric_value: MetricValue::Count(count),
+                    ..
+                } => Some(ValueVariant::Value(*count)),
+                Entry {
+                    metric_value: MetricValue::Gauge(gauge),
+                    ..
+                } => Some(ValueVariant::Value(*gauge)),
+                Entry {
+                    metric_value: MetricValue::Distribution(distribution),
+                    ..
+                } => Some(ValueVariant::DDSketch(distribution.clone())),
+            },
         }
     }
+}
 
-    #[cfg(test)]
-    pub fn get_value_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<f64> {
-        let id = metric::id(name, tags);
-
-        match self.map.entry(
-            id,
-            |m| m.id == id,
-            |m| crate::metrics::metric::id(m.name, m.tags),
-        ) {
-            hash_table::Entry::Vacant(_) => None,
-            hash_table::Entry::Occupied(entry) => entry.get().metric_value.get_value(),
-        }
-    }
+#[cfg(test)]
+#[derive(Debug, Clone)]
+pub enum ValueVariant {
+    DDSketch(DDSketch),
+    Value(f64),
 }
 
 fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
@@ -373,7 +379,7 @@ mod tests {
     use crate::config;
     use crate::metrics::aggregator::{
         metric::{self, Metric},
-        Aggregator, Limit,
+        Aggregator, Limit, ValueVariant,
     };
     use crate::metrics::constants;
     use crate::tags::provider;
@@ -460,14 +466,18 @@ mod tests {
         assert!(aggregator.insert(&metric2).is_ok());
 
         assert_eq!(aggregator.map.len(), 2);
-        assert_eq!(
-            aggregator.get_value_by_id("foo".into(), None).unwrap(),
-            5f64
-        );
-        assert_eq!(
-            aggregator.get_value_by_id("test".into(), None).unwrap(),
-            3f64
-        );
+        if let Some(ValueVariant::Value(v)) = aggregator.get_value_by_id("foo".into(), None) {
+            assert_eq!(v, 5f64);
+        } else {
+            panic!("failed to get value by id");
+        }
+
+        if let Some(ValueVariant::Value(v)) = aggregator.get_value_by_id("test".into(), None) {
+            assert_eq!(v, 3f64);
+        } else {
+            panic!("failed to get value by id");
+        }
+
         aggregator.clear();
         assert_eq!(aggregator.map.len(), 0);
     }
