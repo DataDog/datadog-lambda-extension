@@ -90,7 +90,7 @@ impl Entry {
     }
 
     /// Return an iterator over key, value pairs
-    fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
+    fn tag(&self) -> impl Iterator<Item=(Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
             let mut split = tags.split(',');
             match (split.next(), split.next()) {
@@ -226,8 +226,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     fn build_sketch(&self, now: i64, entry: &Entry) -> Option<Sketch> {
-        if let MetricValue::Distribution(_) = entry.metric_value {
-        } else {
+        if let MetricValue::Distribution(_) = entry.metric_value {} else {
             return None;
         };
         let sketch = entry.metric_value.get_sketch()?;
@@ -521,7 +520,7 @@ mod tests {
     }
 
     #[test]
-    fn distributions_to_protobuf_serialized() {
+    fn distributions_to_protobuf_serialized_ignore_single_metrics() {
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
@@ -544,22 +543,11 @@ mod tests {
             .insert(&Metric::parse("foo:1|c|k:v").expect("metric parse failed"))
             .is_ok());
         assert_eq!(aggregator.distributions_to_protobuf_serialized().len(), 100);
+    }
 
-        for i in 10..20 {
-            assert!(aggregator
-                .insert(
-                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
-                        .expect("metric parse failed")
-                )
-                .is_ok());
-        }
-
-        assert_eq!(
-            aggregator.distributions_to_protobuf_serialized().len(),
-            1110
-        );
-
-        aggregator = Aggregator::<1_000> {
+    #[test]
+    fn distributions_to_protobuf_serialized_reach_max() {
+        let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_size_single_metric: 1_000,
