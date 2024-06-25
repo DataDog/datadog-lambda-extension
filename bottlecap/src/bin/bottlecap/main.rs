@@ -1,4 +1,5 @@
 #![deny(clippy::all)]
+#![deny(clippy::all)]
 #![deny(clippy::pedantic)]
 #![deny(clippy::unwrap_used)]
 #![deny(unused_extern_crates)]
@@ -44,7 +45,7 @@ use bottlecap::{
         flusher::Flusher as MetricsFlusher,
     },
     secrets::decrypt,
-    tags::{lambda, provider::Provider as TagProvider},
+    tags::{lambda, provider},
     telemetry::{
         self,
         client::TelemetryApiClient,
@@ -419,14 +420,14 @@ fn setup_tag_provider(
     aws_config: &AwsConfig,
     config: &Arc<Config>,
     account_id: &str,
-) -> Arc<TagProvider> {
+) -> Arc<provider::Provider> {
     let function_arn =
         build_function_arn(account_id, &aws_config.region, &aws_config.function_name);
     let metadata_hash = hash_map::HashMap::from([(
         lambda::tags::FUNCTION_ARN_KEY.to_string(),
         function_arn.clone(),
     )]);
-    Arc::new(TagProvider::new(
+    Arc::new(provider::Provider::new(
         Arc::clone(config),
         LAMBDA_RUNTIME_SLUG.to_string(),
         &metadata_hash,
@@ -436,7 +437,7 @@ fn setup_tag_provider(
 fn start_logs_agent(
     config: &Arc<Config>,
     resolved_api_key: String,
-    tags_provider: &Arc<TagProvider>,
+    tags_provider: &Arc<provider::Provider>,
     event_bus: Sender<Event>,
 ) -> (Sender<Vec<TelemetryEvent>>, LogsFlusher) {
     let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);

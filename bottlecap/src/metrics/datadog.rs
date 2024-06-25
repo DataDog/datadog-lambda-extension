@@ -1,9 +1,11 @@
 //!Types to serialize data into the Datadog API
 
+use datadog_protos::metrics::SketchPayload;
+use protobuf::Message;
 use reqwest;
 use serde::{Serialize, Serializer};
 use serde_json;
-use tracing::error;
+use tracing::{debug, error};
 
 /// Interface for the `DogStatsD` metrics intake API.
 #[derive(Debug)]
@@ -12,7 +14,6 @@ pub struct DdApi {
     site: String,
     client: reqwest::Client,
 }
-
 /// Error relating to `ship`
 #[derive(thiserror::Error, Debug)]
 pub enum ShipError {
@@ -41,14 +42,17 @@ impl DdApi {
     }
 
     /// Ship a serialized series to the API, blocking
-    pub async fn ship_series(&self, payload: Vec<u8>) -> Result<(), ShipError> {
+    pub async fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
+        let body = serde_json::to_vec(&series)?;
+        debug!("sending body: {:?}", &series);
+
         let url = format!("https://api.{}/api/v2/series", &self.site);
         let resp = self
             .client
             .post(&url)
             .header("DD-API-KEY", &self.api_key)
             .header("Content-Type", "application/json")
-            .body(payload)
+            .body(body)
             .send()
             .await;
 
@@ -67,8 +71,10 @@ impl DdApi {
         }
     }
 
-    pub async fn ship_distributions(&self, sketches: Vec<u8>) -> Result<(), ShipError> {
+    pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
         let url = format!("https://api.{}/api/beta/sketches", &self.site);
+        let mut buf = Vec::new();
+        log::info!("sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
         // add sketch payloads to the buffer
         // something like this, but fix the utf-8 encoding issue
@@ -78,12 +84,15 @@ impl DdApi {
         //     let _ = output_stream.write_message_no_tag(&sketches);
         //     TODO not working, has utf-8 encoding issue in dist-intake
         //}
+        sketches
+            .write_to_vec(&mut buf)
+            .expect("can't write to buffer");
         let resp = self
             .client
             .post(&url)
             .header("DD-API-KEY", &self.api_key)
             .header("Content-Type", "application/x-protobuf")
-            .body(sketches)
+            .body(buf)
             .send()
             .await;
         match resp {
