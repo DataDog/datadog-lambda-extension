@@ -90,7 +90,7 @@ impl Entry {
     }
 
     /// Return an iterator over key, value pairs
-    fn tag(&self) -> impl Iterator<Item=(Ustr, Ustr)> {
+    fn tag(&self) -> impl Iterator<Item = (Ustr, Ustr)> {
         self.tags.into_iter().filter_map(|tags| {
             let mut split = tags.split(',');
             match (split.next(), split.next()) {
@@ -101,16 +101,20 @@ impl Entry {
     }
 }
 
+#[derive(Debug, Clone)]
+enum Limit {
+    ApiLimit(usize, usize),
+}
+
 #[derive(Clone)]
 // NOTE by construction we know that intervals and contexts do not explore the
 // full space of usize but the type system limits how we can express this today.
 pub struct Aggregator<const CONTEXTS: usize> {
     tags_provider: Arc<provider::Provider>,
     map: hash_table::HashTable<Entry>,
-    max_batch_entries_size_single_metric: usize,
-    max_content_size_bytes_single_metric: usize,
-    max_batch_entries_size_sketch_metric: usize,
-    max_content_size_bytes_sketch_metric: usize,
+    no_limit: Limit,
+    series_limit: Limit,
+    distribution_limit: Limit,
 }
 
 impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
@@ -126,14 +130,18 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         if CONTEXTS > constants::MAX_CONTEXTS {
             return Err(errors::Creation::Contexts);
         }
-
         Ok(Self {
             tags_provider,
             map: hash_table::HashTable::new(),
-            max_batch_entries_size_single_metric: constants::MAX_ENTRIES_NUMBER_SINGLE_METRIC,
-            max_content_size_bytes_single_metric: constants::MAX_CONTENT_SIZE_BYTES_SINGLE_METRIC,
-            max_batch_entries_size_sketch_metric: constants::MAX_ENTRIES_NUMBER_SKETCH_METRIC,
-            max_content_size_bytes_sketch_metric: constants::MAX_CONTENT_SIZE_SKETCH_METRIC,
+            no_limit: Limit::ApiLimit(usize::MAX, usize::MAX),
+            series_limit: Limit::ApiLimit(
+                constants::MAX_ENTRIES_SINGLE_METRIC,
+                constants::MAX_SIZE_BYTES_SINGLE_METRIC,
+            ),
+            distribution_limit: Limit::ApiLimit(
+                constants::MAX_ENTRIES_SKETCH_METRIC,
+                constants::MAX_SIZE_SKETCH_METRIC,
+            ),
         })
     }
 
@@ -171,50 +179,46 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 
     #[must_use]
     pub fn distributions_to_protobuf(&self) -> SketchPayload {
-        let mut sketch_payload = SketchPayload::new();
+        self.distributions_to_protobuf_limited(&self.no_limit)
+    }
+
+    #[must_use]
+    pub fn distributions_to_protobuf_api_limited(&self) -> SketchPayload {
+        self.distributions_to_protobuf_limited(&self.distribution_limit)
+    }
+
+    #[must_use]
+    fn distributions_to_protobuf_limited(&self, limit: &Limit) -> SketchPayload {
         let now = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
             .expect("unable to poll clock, unrecoverable")
             .as_secs()
             .try_into()
             .unwrap_or_default();
+        let mut sketch_payload = SketchPayload::new();
+        let (entry_limit, size_limit) = match *limit {
+            Limit::ApiLimit(entry_limit, size_limit) => (entry_limit, size_limit),
+        };
         for entry in &self.map {
             let Some(sketch) = self.build_sketch(now, entry) else {
                 continue;
             };
+            if sketch_payload.compute_size() + sketch.compute_size() > size_limit as u64 {
+                break;
+            }
+
             sketch_payload.sketches.push(sketch);
+
+            if sketch_payload.sketches.len() >= entry_limit {
+                break;
+            }
         }
         sketch_payload
     }
 
-    #[must_use]
-    pub fn distributions_to_protobuf_api_limited(&self) -> Vec<u8> {
-        let now = time::SystemTime::now()
-            .duration_since(time::UNIX_EPOCH)
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        let mut sketch_payload = SketchPayload::new();
-        for entry in &self.map {
-            let Some(sketch) = self.build_sketch(now, entry) else {
-                continue;
-            };
-            if sketch_payload.compute_size() + sketch.compute_size() > self.max_content_size_bytes_sketch_metric as u64 {
-                break;
-            }
-
-            sketch_payload.sketches.push(sketch);
-
-            if sketch_payload.sketches.len() >= self.max_batch_entries_size_sketch_metric {
-                break;
-            }
-        }
-        sketch_payload.write_to_bytes().expect("Can't serialize proto")
-    }
-
     fn build_sketch(&self, now: i64, entry: &Entry) -> Option<Sketch> {
-        if let MetricValue::Distribution(_) = entry.metric_value {} else {
+        if let MetricValue::Distribution(_) = entry.metric_value {
+        } else {
             return None;
         };
         let sketch = entry.metric_value.get_sketch()?;
@@ -236,23 +240,6 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                 .collect(),
         );
         Some(sketch)
-    }
-
-    #[allow(clippy::cast_precision_loss)]
-    #[must_use]
-    pub fn to_series(&self) -> datadog::Series {
-        // TODO it would be really slick to use a bump allocator here since
-        // there's so many tiny allocations
-        let mut series = datadog::Series {
-            series: Vec::with_capacity(1_024),
-        };
-        for entry in &self.map {
-            let Some(metric) = self.build_metric(entry) else {
-                continue;
-            };
-            series.series.push(metric);
-        }
-        series
     }
 
     fn build_metric(&self, entry: &Entry) -> Option<DatadogMetric> {
@@ -301,17 +288,29 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
         })
     }
 
-    #[allow(clippy::cast_precision_loss)]
     #[must_use]
-    pub fn to_series_api_limited(&self) -> Vec<u8> {
+    pub fn to_series(&self) -> datadog::Series {
+        self.to_series_limited(&self.no_limit)
+    }
+
+    #[must_use]
+    pub fn to_series_api_limited(&self) -> datadog::Series {
+        self.to_series_limited(&self.series_limit)
+    }
+
+    #[must_use]
+    fn to_series_limited(&self, limit: &Limit) -> datadog::Series {
         let mut series = datadog::Series {
             series: Vec::with_capacity(1_024),
         };
-        let mut count_entries = 0;
+        let (entry_limit, size_limit) = match *limit {
+            Limit::ApiLimit(entry_limit, size_limit) => (entry_limit, size_limit),
+        };
         for entry in &self.map {
             let Some(metric) = self.build_metric(entry) else {
                 continue;
             };
+
             let serialized_metric = match serde_json::to_vec(&metric) {
                 Ok(serialized_metric) => serialized_metric,
                 Err(e) => {
@@ -319,16 +318,16 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                     continue;
                 }
             };
-            if serialized_metric.len() + series.len() > self.max_content_size_bytes_single_metric {
+            if serialized_metric.len() + series.series.len() > size_limit {
                 break;
             }
             series.series.push(metric);
 
-            if count_entries >= self.max_batch_entries_size_single_metric {
+            if series.series.len() >= entry_limit {
                 break;
             }
         }
-        serde_json::to_vec(&series)?
+        series
     }
 
     #[cfg(test)]
@@ -374,15 +373,16 @@ mod tests {
     use crate::config;
     use crate::metrics::aggregator::{
         metric::{self, Metric},
-        Aggregator,
+        Aggregator, Limit,
     };
+    use crate::metrics::constants;
     use crate::tags::provider;
     use crate::LAMBDA_RUNTIME_SLUG;
+    use datadog_protos::metrics::SketchPayload;
     use hashbrown::hash_table;
+    use protobuf::Message;
     use std::collections::hash_map;
     use std::sync::Arc;
-    use datadog_protos::metrics::SketchPayload;
-    use protobuf::Message;
 
     fn create_tags_provider() -> Arc<provider::Provider> {
         let config = Arc::new(config::Config::default());
@@ -511,43 +511,38 @@ mod tests {
     }
 
     #[test]
-    fn distributions_to_protobuf_serialized_ignore_single_metrics() {
-        let mut aggregator = Aggregator::<1_000> {
-            tags_provider: create_tags_provider(),
-            map: hash_table::HashTable::new(),
-            max_batch_entries_size_single_metric: 1_000,
-            max_content_size_bytes_single_metric: 1_000,
-            max_batch_entries_size_sketch_metric: 100,
-            max_content_size_bytes_sketch_metric: 1_500,
-        };
-
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
+    fn distributions_to_protobuf_ignore_single_metrics() {
+        let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
 
         assert!(aggregator
             .insert(
                 &Metric::parse("test1:1|d|k:v".to_string().as_str()).expect("metric parse failed")
             )
             .is_ok());
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 100);
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 1);
 
         assert!(aggregator
             .insert(&Metric::parse("foo:1|c|k:v").expect("metric parse failed"))
             .is_ok());
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 100);
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 1);
     }
 
     #[test]
-    fn distributions_to_protobuf_serialized_reach_max() {
+    fn distributions_to_protobuf_limited_max() {
+        let max = 5;
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size_single_metric: 1_000,
-            max_content_size_bytes_single_metric: 1_000,
-            max_batch_entries_size_sketch_metric: 5,
-            max_content_size_bytes_sketch_metric: 1_500,
+            no_limit: Limit::ApiLimit(usize::MAX, usize::MAX),
+            series_limit: Limit::ApiLimit(
+                constants::MAX_ENTRIES_SINGLE_METRIC,
+                constants::MAX_SIZE_BYTES_SINGLE_METRIC,
+            ),
+            distribution_limit: Limit::ApiLimit(max, constants::MAX_SIZE_SKETCH_METRIC),
         };
 
-        for i in 10..20 {
+        for i in 1..max * 2 {
             assert!(aggregator
                 .insert(
                     &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
@@ -555,47 +550,49 @@ mod tests {
                 )
                 .is_ok());
         }
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 505);
+        assert_eq!(
+            aggregator
+                .distributions_to_protobuf_api_limited()
+                .sketches
+                .len(),
+            max
+        );
     }
 
     #[test]
-    fn to_series_serialized_ignore_distribution() {
-        let mut aggregator = Aggregator::<1_000> {
-            tags_provider: create_tags_provider(),
-            map: hash_table::HashTable::new(),
-            max_batch_entries_size_single_metric: 100,
-            max_content_size_bytes_single_metric: 1_500,
-            max_batch_entries_size_sketch_metric: 1_000,
-            max_content_size_bytes_sketch_metric: 1_000,
-        };
+    fn to_series_ignore_distribution() {
+        let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
 
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
+        assert_eq!(aggregator.to_series().series.len(), 0);
 
         assert!(aggregator
             .insert(
                 &Metric::parse("test1:1|c|k:v".to_string().as_str()).expect("metric parse failed")
             )
             .is_ok());
-        assert_eq!(aggregator.to_series_api_limited().len(), 143);
+        assert_eq!(aggregator.to_series().series.len(), 1);
 
         assert!(aggregator
             .insert(&Metric::parse("foo:1|d|k:v").expect("metric parse failed"))
             .is_ok());
-        assert_eq!(aggregator.to_series_api_limited().len(), 143);
+        assert_eq!(aggregator.to_series().series.len(), 1);
     }
 
     #[test]
-    fn to_series_serialized_reach_max() {
+    fn to_series_limited_max() {
+        let max = 5;
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
-            max_batch_entries_size_single_metric: 5,
-            max_content_size_bytes_single_metric: 1_500,
-            max_batch_entries_size_sketch_metric: 1_000,
-            max_content_size_bytes_sketch_metric: 1_000,
+            no_limit: Limit::ApiLimit(usize::MAX, usize::MAX),
+            series_limit: Limit::ApiLimit(5, constants::MAX_SIZE_BYTES_SINGLE_METRIC),
+            distribution_limit: Limit::ApiLimit(
+                constants::MAX_ENTRIES_SKETCH_METRIC,
+                constants::MAX_SIZE_SKETCH_METRIC,
+            ),
         };
 
-        for i in 10..20 {
+        for i in 1..max * 2 {
             assert!(aggregator
                 .insert(
                     &Metric::parse(format!("test{i}:{i}|c|k:v").as_str())
@@ -603,19 +600,12 @@ mod tests {
                 )
                 .is_ok());
         }
-        assert_eq!(aggregator.to_series_api_limited().len(), 725);
+        assert_eq!(aggregator.to_series_api_limited().series.len(), max);
     }
 
     #[test]
     fn distribution_serialized_deserialized() {
-        let mut aggregator = Aggregator::<1_000> {
-            tags_provider: create_tags_provider(),
-            map: hash_table::HashTable::new(),
-            max_batch_entries_size_single_metric: 1_000,
-            max_content_size_bytes_single_metric: 1_000,
-            max_batch_entries_size_sketch_metric: 100,
-            max_content_size_bytes_sketch_metric: 1_500,
-        };
+        let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
 
         for i in 0..10 {
             assert!(aggregator
@@ -625,47 +615,17 @@ mod tests {
                 )
                 .is_ok());
         }
-        let pre_serialized_payload = aggregator.distributions_to_protobuf();
-        assert_eq!(pre_serialized_payload.sketches().len(), 10);
+        let distribution = aggregator.distributions_to_protobuf();
+        assert_eq!(distribution.sketches().len(), 10);
 
-        let serialized_proto_from_full_payload = pre_serialized_payload.write_to_bytes().expect("Can't serialized proto");
+        let serialized = distribution
+            .write_to_bytes()
+            .expect("Can't serialized proto");
 
-        let deserialized_payload = SketchPayload::parse_from_bytes(serialized_proto_from_full_payload.as_slice()).expect("failed to parse proto");
+        let deserialized =
+            SketchPayload::parse_from_bytes(serialized.as_slice()).expect("failed to parse proto");
 
-        assert_eq!(deserialized_payload.sketches().len(), 10);
-        assert_eq!(deserialized_payload, pre_serialized_payload);
-    }
-
-    #[test]
-    fn distribution_serialized_deserialized_api_limit() {
-        let mut aggregator = Aggregator::<1_000> {
-            tags_provider: create_tags_provider(),
-            map: hash_table::HashTable::new(),
-            max_batch_entries_size_single_metric: 1_000,
-            max_content_size_bytes_single_metric: 1_000,
-            max_batch_entries_size_sketch_metric: 100,
-            max_content_size_bytes_sketch_metric: 1_500,
-        };
-
-        for i in 0..10 {
-            assert!(aggregator
-                .insert(
-                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
-                        .expect("metric parse failed")
-                )
-                .is_ok());
-        }
-        let pre_serialized_payload = aggregator.distributions_to_protobuf();
-        assert_eq!(pre_serialized_payload.sketches().len(), 10);
-
-        let serialized_proto_from_full_payload = pre_serialized_payload.write_to_bytes().expect("Can't serialized proto");
-        let serialized_protos_with_api_limit = aggregator.distributions_to_protobuf_api_limited();
-
-        assert_eq!(serialized_protos_with_api_limit.len(), serialized_proto_from_full_payload.len());
-        assert_eq!(serialized_protos_with_api_limit, serialized_proto_from_full_payload);
-
-        let deserialized_payload = SketchPayload::parse_from_bytes(serialized_protos_with_api_limit.as_slice()).expect("failed to parse proto");
-
-        assert_eq!(deserialized_payload.sketches().len(), 10);
+        assert_eq!(deserialized.sketches().len(), 10);
+        assert_eq!(deserialized, distribution);
     }
 }
