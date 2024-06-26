@@ -12,6 +12,7 @@ use crate::metrics::datadog::Series;
 use datadog_protos::metrics::{Dogsketch, Sketch, SketchPayload};
 use ddsketch_agent::DDSketch;
 use hashbrown::hash_table;
+use log::warn;
 use protobuf::Message;
 use std::time;
 use tracing::error;
@@ -217,9 +218,13 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             if (sketch_payload.sketches.len() >= self.max_batch_entries_sketch_metric)
                 || (count_bytes + next_chunk_size >= self.max_batch_bytes_sketch_metric)
             {
-                batched_payloads.push(sketch_payload);
-                sketch_payload = SketchPayload::new();
-                count_bytes = 0u64;
+                if count_bytes == 0 {
+                    warn!("Only one distribution exceeds max batch size, adding it anyway: {:?} with {}", sketch.metric, next_chunk_size);
+                } else {
+                    batched_payloads.push(sketch_payload);
+                    sketch_payload = SketchPayload::new();
+                    count_bytes = 0u64;
+                }
             }
             count_bytes += next_chunk_size;
             sketch_payload.sketches.push(sketch);
@@ -275,11 +280,15 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                 if (series.series.len() >= self.max_batch_entries_single_metric)
                     || (count_bytes + serialized_metric_size >= self.max_batch_bytes_single_metric)
                 {
-                    batched_payloads.push(series);
-                    series = Series {
-                        series: Vec::with_capacity(1_024),
-                    };
-                    count_bytes = 0u64;
+                    if count_bytes == 0 {
+                        warn!("Only one metric exceeds max batch size, adding it anyway: {:?} with {}", metric.metric, serialized_metric_size);
+                    } else {
+                        batched_payloads.push(series);
+                        series = Series {
+                            series: Vec::with_capacity(1_024),
+                        };
+                        count_bytes = 0u64;
+                    }
                 }
                 series.series.push(metric);
                 count_bytes += serialized_metric_size;
@@ -573,14 +582,7 @@ mod tests {
             max_batch_bytes_sketch_metric: 1_500,
         };
 
-        for i in 0..tot {
-            assert!(aggregator
-                .insert(
-                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
-                        .expect("metric parse failed")
-                )
-                .is_ok());
-        }
+        add_metrics(tot, &mut aggregator, "d".to_string());
         let batched = aggregator.distributions_to_protobuf_api_limited();
         assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
 
@@ -592,7 +594,8 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf_limited_max_bytes() {
-        let max_bytes = 250; // one distribution is 102 bytes
+        let single_proto_size = 102;
+        let max_bytes = 250;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
@@ -603,39 +606,81 @@ mod tests {
             max_batch_bytes_sketch_metric: max_bytes,
         };
 
+        add_metrics(tot, &mut aggregator, "d".to_string());
+        let batched = aggregator.distributions_to_protobuf_api_limited();
+
+        assert_eq!(batched.len(), tot / 2 + 1);
+        assert_eq!(
+            batched.first().unwrap().compute_size(),
+            single_proto_size * 2
+        );
+        assert_eq!(
+            batched.get(1).unwrap().compute_size(),
+            single_proto_size * 2
+        );
+        assert_eq!(batched.get(2).unwrap().compute_size(), single_proto_size);
+    }
+
+    #[test]
+    fn distribution_to_protobuf_limited_one_element_bigger_than_max_size() {
+        let single_proto_size = 102;
+        let max_bytes = 1;
+        let tot = 5;
+        let mut aggregator = Aggregator::<1_000> {
+            tags_provider: create_tags_provider(),
+            map: hash_table::HashTable::new(),
+            max_batch_entries_single_metric: 1_000,
+            max_batch_bytes_single_metric: 1_000,
+            max_batch_entries_sketch_metric: 1_000,
+            max_batch_bytes_sketch_metric: max_bytes,
+        };
+
+        add_metrics(tot, &mut aggregator, "d".to_string());
+        let batched = aggregator.distributions_to_protobuf_api_limited();
+
+        assert_eq!(batched.len(), tot);
+        for a_batch in batched {
+            assert_eq!(a_batch.compute_size(), single_proto_size);
+        }
+    }
+
+    fn add_metrics(tot: usize, aggregator: &mut Aggregator<1000>, counter_or_distro: String) {
         for i in 1..=tot {
             assert!(aggregator
                 .insert(
-                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
+                    &Metric::parse(format!("test{i}:{i}|{counter_or_distro}|k:v").as_str())
                         .expect("metric parse failed")
                 )
                 .is_ok());
         }
-        let batched = aggregator.distributions_to_protobuf_api_limited();
-
-        assert_eq!(batched.len(), tot / 2 + 1);
-        assert_eq!(batched.first().unwrap().compute_size(), 204);
-        assert_eq!(batched.get(1).unwrap().compute_size(), 204);
-        assert_eq!(batched.get(2).unwrap().compute_size(), 102);
     }
 
     #[test]
     fn to_series_ignore_distribution() {
         let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
 
-        assert_eq!(aggregator.to_series().series.len(), 0);
+        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 0);
 
         assert!(aggregator
             .insert(
                 &Metric::parse("test1:1|c|k:v".to_string().as_str()).expect("metric parse failed")
             )
             .is_ok());
-        assert_eq!(aggregator.to_series().series.len(), 1);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
+        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 1);
+        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 0);
 
+        assert!(aggregator
+            .insert(
+                &Metric::parse("test1:1|c|k:v".to_string().as_str()).expect("metric parse failed")
+            )
+            .is_ok());
         assert!(aggregator
             .insert(&Metric::parse("foo:1|d|k:v").expect("metric parse failed"))
             .is_ok());
-        assert_eq!(aggregator.to_series().series.len(), 1);
+        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 1);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 1);
+        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
     }
 
     #[test]
@@ -651,14 +696,7 @@ mod tests {
             max_batch_bytes_sketch_metric: 1_500,
         };
 
-        for i in 0..tot {
-            assert!(aggregator
-                .insert(
-                    &Metric::parse(format!("test{i}:{i}|c|k:v").as_str())
-                        .expect("metric parse failed")
-                )
-                .is_ok());
-        }
+        add_metrics(tot, &mut aggregator, "c".to_string());
 
         let batched = aggregator.metrics_to_series_api_limited();
         assert_eq!(batched.len(), 3);
@@ -671,7 +709,9 @@ mod tests {
 
     #[test]
     fn metrics_to_series_limited_max_bytes() {
-        let max_bytes = 350; // one metric is 156 bytes, 2x are 300 bytes
+        let single_metric_size = 156;
+        let two_metrics_size = 300;
+        let max_bytes = 350;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
@@ -682,43 +722,55 @@ mod tests {
             max_batch_bytes_sketch_metric: 1_000,
         };
 
-        for i in 1..=tot {
-            assert!(aggregator
-                .insert(
-                    &Metric::parse(format!("test{i}:{i}|c|k:v").as_str())
-                        .expect("metric parse failed")
-                )
-                .is_ok());
-        }
+        add_metrics(tot, &mut aggregator, "c".to_string());
         let batched = aggregator.metrics_to_series_api_limited();
 
         assert_eq!(batched.len(), tot / 2 + 1);
         assert_eq!(
             serde_json::to_vec(batched.first().unwrap()).unwrap().len(),
-            300
+            two_metrics_size
         );
         assert_eq!(
             serde_json::to_vec(batched.get(1).unwrap()).unwrap().len(),
-            300
+            two_metrics_size
         );
         assert_eq!(
             serde_json::to_vec(batched.get(2).unwrap()).unwrap().len(),
-            156
+            single_metric_size
         );
+    }
+
+    #[test]
+    fn metrics_to_series_limited_one_element_bigger_than_max_size() {
+        let single_metric_size = 156;
+        let max_bytes = 1;
+        let tot = 5;
+        let mut aggregator = Aggregator::<1_000> {
+            tags_provider: create_tags_provider(),
+            map: hash_table::HashTable::new(),
+            max_batch_entries_single_metric: 1_000,
+            max_batch_bytes_single_metric: max_bytes,
+            max_batch_entries_sketch_metric: 1_000,
+            max_batch_bytes_sketch_metric: 1_000,
+        };
+
+        add_metrics(tot, &mut aggregator, "c".to_string());
+        let batched = aggregator.metrics_to_series_api_limited();
+
+        assert_eq!(batched.len(), tot);
+        for a_batch in batched {
+            assert_eq!(
+                serde_json::to_vec(&a_batch).unwrap().len(),
+                single_metric_size
+            );
+        }
     }
 
     #[test]
     fn distribution_serialized_deserialized() {
         let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
 
-        for i in 0..10 {
-            assert!(aggregator
-                .insert(
-                    &Metric::parse(format!("test{i}:{i}|d|k:v").as_str())
-                        .expect("metric parse failed")
-                )
-                .is_ok());
-        }
+        add_metrics(10, &mut aggregator, "d".to_string());
         let distribution = aggregator.distributions_to_protobuf();
         assert_eq!(distribution.sketches().len(), 10);
 
