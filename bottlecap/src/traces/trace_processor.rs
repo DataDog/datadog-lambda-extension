@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::sync::Arc;
+use datadog_trace_utils::tracer_payload::TraceEncoding;
 use rmp;
 
 use async_trait::async_trait;
@@ -102,6 +103,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 }
             },
             true, // In mini agent, we always send agentless
+            TraceEncoding::V07
         );
 
         let send_data = SendData::new(body_size, payload, tracer_header_tags, &config.trace_intake);
@@ -178,6 +180,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 }
             },
             true, // In mini agent, we always send agentless
+            TraceEncoding::V07
         );
 
         let send_data = SendData::new(body_size, payload, tracer_header_tags, &config.trace_intake);
