@@ -171,7 +171,9 @@ mod tests {
     use crate::metrics::aggregator::ValueVariant;
     use crate::tags::provider;
     use crate::LAMBDA_RUNTIME_SLUG;
+    use ddsketch_agent::DDSketch;
     use std::collections::hash_map::HashMap;
+    use std::sync::MutexGuard;
 
     fn setup() -> Arc<Mutex<Aggregator<1024>>> {
         let config = Arc::new(config::Config {
@@ -234,33 +236,35 @@ mod tests {
         lambda.set_report_log_metrics(&report_metrics);
         let mut aggr = metrics_aggr.lock().expect("lock poisoned");
 
-        let mut ms_sketch = ddsketch_agent::DDSketch::default();
-        ms_sketch.insert(0.1);
-        if let Some(ValueVariant::DDSketch(variant)) =
-            aggr.get_value_by_id(constants::DURATION_METRIC.into(), None)
-        {
-            assert_eq!(variant, ms_sketch);
-        }
-        if let Some(ValueVariant::DDSketch(variant)) =
-            aggr.get_value_by_id(constants::BILLED_DURATION_METRIC.into(), None)
-        {
-            assert_eq!(variant, ms_sketch);
-        }
+        assert_value(
+            &mut aggr,
+            0.1,
+            vec![
+                constants::DURATION_METRIC,
+                constants::BILLED_DURATION_METRIC,
+            ],
+        );
 
-        let mut mem_used_sketch = ddsketch_agent::DDSketch::default();
-        mem_used_sketch.insert(128.0);
-        if let Some(ValueVariant::DDSketch(variant)) =
-            aggr.get_value_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None)
-        {
-            assert_eq!(variant, mem_used_sketch);
-        }
+        assert_value(&mut aggr, 128.0, vec![constants::MAX_MEMORY_USED_METRIC]);
+        assert_value(&mut aggr, 256.0, vec![constants::MEMORY_SIZE_METRIC]);
+    }
 
-        let mut max_mem_sketch = ddsketch_agent::DDSketch::default();
-        max_mem_sketch.insert(256.0);
-        if let Some(ValueVariant::DDSketch(variant)) =
-            aggr.get_value_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
-        {
-            assert_eq!(variant, max_mem_sketch);
+    fn assert_value(
+        aggr: &mut MutexGuard<Aggregator<1024>>,
+        sketch_val: f64,
+        metric_names: Vec<&str>,
+    ) {
+        let mut ms_sketch = DDSketch::default();
+        ms_sketch.insert(sketch_val);
+
+        for a_metric_name in metric_names {
+            if let Some(ValueVariant::DDSketch(variant)) =
+                aggr.get_value_by_id(a_metric_name.into(), None)
+            {
+                assert_eq!(variant, ms_sketch);
+            } else {
+                panic!("failed to get {a_metric_name} by id");
+            }
         }
     }
 }
