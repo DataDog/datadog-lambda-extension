@@ -212,15 +212,17 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             })
             .filter_map(|entry| build_sketch(now, &entry, base_tag_vec.clone()))
         {
-            count_bytes += sketch.compute_size();
-            sketch_payload.sketches.push(sketch);
+            let next_chunk_size = sketch.compute_size();
+
             if (sketch_payload.sketches.len() >= self.max_batch_entries_sketch_metric)
-                || (count_bytes >= self.max_batch_bytes_sketch_metric)
+                || (count_bytes + next_chunk_size >= self.max_batch_bytes_sketch_metric)
             {
                 batched_payloads.push(sketch_payload);
                 sketch_payload = SketchPayload::new();
                 count_bytes = 0u64;
             }
+            count_bytes += next_chunk_size;
+            sketch_payload.sketches.push(sketch);
         }
         if !sketch_payload.sketches.is_empty() {
             batched_payloads.push(sketch_payload);
@@ -270,11 +272,8 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             };
 
             if serialized_metric_size > 0 {
-                series.series.push(metric);
-                count_bytes += serialized_metric_size;
-
                 if (series.series.len() >= self.max_batch_entries_single_metric)
-                    || (count_bytes >= self.max_batch_bytes_single_metric)
+                    || (count_bytes + serialized_metric_size >= self.max_batch_bytes_single_metric)
                 {
                     batched_payloads.push(series);
                     series = Series {
@@ -282,6 +281,8 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                     };
                     count_bytes = 0u64;
                 }
+                series.series.push(metric);
+                count_bytes += serialized_metric_size;
             }
         }
 
@@ -591,7 +592,7 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf_limited_max_bytes() {
-        let max_bytes = 200; // one distribution is 102 bytes
+        let max_bytes = 250; // one distribution is 102 bytes
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
@@ -670,7 +671,7 @@ mod tests {
 
     #[test]
     fn metrics_to_series_limited_max_bytes() {
-        let max_bytes = 250; // one metric is 156 bytes
+        let max_bytes = 350; // one metric is 156 bytes, 2x are 300 bytes
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
             tags_provider: create_tags_provider(),
