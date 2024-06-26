@@ -1,21 +1,21 @@
 //! The aggregation of metrics.
 
 use crate::{
-    metrics::{constants, datadog, errors, metric},
+    metrics::{
+        constants,
+        datadog::{self, Metric as MetricToShip, Series},
+        errors,
+        metric::{self, Metric as DogstatsdMetric, Type},
+    },
     tags::provider,
 };
-use datadog::Metric as DatadogMetric;
-use metric::{Metric, Type};
-use std::sync::Arc;
+use std::{sync::Arc, time};
 
-use crate::metrics::datadog::Series;
 use datadog_protos::metrics::{Dogsketch, Sketch, SketchPayload};
 use ddsketch_agent::DDSketch;
 use hashbrown::hash_table;
-use log::warn;
 use protobuf::Message;
-use std::time;
-use tracing::error;
+use tracing::{error, warn};
 use ustr::Ustr;
 
 /// Error for the `aggregate` function
@@ -48,7 +48,7 @@ enum MetricValue {
 }
 
 impl MetricValue {
-    fn insert_metric(&mut self, metric: &Metric) {
+    fn insert_metric(&mut self, metric: &DogstatsdMetric) {
         // safe because we know there's at least one value when we parse
         match self {
             MetricValue::Count(count) => *count += metric.first_value().unwrap_or_default(),
@@ -76,7 +76,7 @@ impl MetricValue {
 }
 
 impl Entry {
-    fn new_from_metric(id: u64, metric: &Metric) -> Self {
+    fn new_from_metric(id: u64, metric: &DogstatsdMetric) -> Self {
         let mut metric_value = match metric.kind {
             Type::Count => MetricValue::Count(0.0),
             Type::Gauge => MetricValue::Gauge(0.0),
@@ -144,7 +144,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     ///
     /// Function will return overflow error if more than
     /// `min(constants::MAX_CONTEXTS, CONTEXTS)` is exceeded.
-    pub fn insert(&mut self, metric: &Metric) -> Result<(), errors::Insert> {
+    pub fn insert(&mut self, metric: &DogstatsdMetric) -> Result<(), errors::Insert> {
         let id = metric::id(metric.name, metric.tags);
         let len = self.map.len();
 
@@ -349,7 +349,7 @@ fn build_sketch(now: i64, entry: &Entry, mut base_tag_vec: Vec<String>) -> Optio
     Some(sketch)
 }
 
-fn build_metric(entry: &Entry, mut base_tag_vec: Vec<String>) -> Option<DatadogMetric> {
+fn build_metric(entry: &Entry, mut base_tag_vec: Vec<String>) -> Option<MetricToShip> {
     let mut resources = Vec::with_capacity(constants::MAX_TAGS);
     for (name, kind) in entry.tag() {
         let resource = datadog::Resource {
@@ -380,7 +380,7 @@ fn build_metric(entry: &Entry, mut base_tag_vec: Vec<String>) -> Option<DatadogM
         final_tags = tags.split(',').map(ToString::to_string).collect();
     }
     final_tags.append(&mut base_tag_vec);
-    Some(DatadogMetric {
+    Some(MetricToShip {
         metric: entry.name.as_str(),
         resources,
         kind,
