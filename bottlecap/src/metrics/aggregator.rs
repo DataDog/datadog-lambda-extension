@@ -192,7 +192,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     #[must_use]
-    pub fn distributions_to_protobuf_api_limited(&mut self) -> Vec<SketchPayload> {
+    pub fn consume_distributions(&mut self) -> Vec<SketchPayload> {
         let now = time::SystemTime::now()
             .duration_since(time::UNIX_EPOCH)
             .expect("unable to poll clock, unrecoverable")
@@ -252,7 +252,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     }
 
     #[must_use]
-    pub fn metrics_to_series_api_limited(&mut self) -> Vec<Series> {
+    pub fn consume_metrics(&mut self) -> Vec<Series> {
         let mut batched_payloads = Vec::new();
         let mut series = Series {
             series: Vec::with_capacity(1_024),
@@ -552,7 +552,7 @@ mod tests {
     }
 
     #[test]
-    fn distributions_to_protobuf_ignore_single_metrics() {
+    fn consume_distributions_ignore_single_metrics() {
         let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
         assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
 
@@ -570,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn distributions_to_protobuf_limited_max_entries() {
+    fn consume_distributions_batch_entries() {
         let max_batch = 5;
         let tot = 12;
         let mut aggregator = Aggregator::<1_000> {
@@ -583,8 +583,8 @@ mod tests {
         };
 
         add_metrics(tot, &mut aggregator, "d".to_string());
-        let batched = aggregator.distributions_to_protobuf_api_limited();
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
+        let batched = aggregator.consume_distributions();
+        assert_eq!(aggregator.consume_distributions().len(), 0);
 
         assert_eq!(batched.len(), 3);
         assert_eq!(batched.first().unwrap().sketches.len(), max_batch);
@@ -593,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn distributions_to_protobuf_limited_max_bytes() {
+    fn consume_distributions_batch_bytes() {
         let single_proto_size = 102;
         let max_bytes = 250;
         let tot = 5;
@@ -607,7 +607,7 @@ mod tests {
         };
 
         add_metrics(tot, &mut aggregator, "d".to_string());
-        let batched = aggregator.distributions_to_protobuf_api_limited();
+        let batched = aggregator.consume_distributions();
 
         assert_eq!(batched.len(), tot / 2 + 1);
         assert_eq!(
@@ -622,7 +622,7 @@ mod tests {
     }
 
     #[test]
-    fn distribution_to_protobuf_limited_one_element_bigger_than_max_size() {
+    fn consume_distribution_one_element_bigger_than_max_size() {
         let single_proto_size = 102;
         let max_bytes = 1;
         let tot = 5;
@@ -636,7 +636,7 @@ mod tests {
         };
 
         add_metrics(tot, &mut aggregator, "d".to_string());
-        let batched = aggregator.distributions_to_protobuf_api_limited();
+        let batched = aggregator.consume_distributions();
 
         assert_eq!(batched.len(), tot);
         for a_batch in batched {
@@ -656,19 +656,19 @@ mod tests {
     }
 
     #[test]
-    fn to_series_ignore_distribution() {
+    fn consume_series_ignore_distribution() {
         let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
 
-        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 0);
+        assert_eq!(aggregator.consume_metrics().len(), 0);
 
         assert!(aggregator
             .insert(
                 &Metric::parse("test1:1|c|k:v".to_string().as_str()).expect("metric parse failed")
             )
             .is_ok());
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
-        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 1);
-        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 0);
+        assert_eq!(aggregator.consume_distributions().len(), 0);
+        assert_eq!(aggregator.consume_metrics().len(), 1);
+        assert_eq!(aggregator.consume_metrics().len(), 0);
 
         assert!(aggregator
             .insert(
@@ -678,13 +678,13 @@ mod tests {
         assert!(aggregator
             .insert(&Metric::parse("foo:1|d|k:v").expect("metric parse failed"))
             .is_ok());
-        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 1);
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 1);
-        assert_eq!(aggregator.distributions_to_protobuf_api_limited().len(), 0);
+        assert_eq!(aggregator.consume_metrics().len(), 1);
+        assert_eq!(aggregator.consume_distributions().len(), 1);
+        assert_eq!(aggregator.consume_distributions().len(), 0);
     }
 
     #[test]
-    fn metrics_to_series_limited_max_entries() {
+    fn consume_series_batch_entries() {
         let max_batch = 5;
         let tot = 13;
         let mut aggregator = Aggregator::<1_000> {
@@ -698,17 +698,17 @@ mod tests {
 
         add_metrics(tot, &mut aggregator, "c".to_string());
 
-        let batched = aggregator.metrics_to_series_api_limited();
+        let batched = aggregator.consume_metrics();
         assert_eq!(batched.len(), 3);
         assert_eq!(batched.first().unwrap().series.len(), max_batch);
         assert_eq!(batched.get(1).unwrap().series.len(), max_batch);
         assert_eq!(batched.get(2).unwrap().series.len(), tot - max_batch * 2);
 
-        assert_eq!(aggregator.metrics_to_series_api_limited().len(), 0);
+        assert_eq!(aggregator.consume_metrics().len(), 0);
     }
 
     #[test]
-    fn metrics_to_series_limited_max_bytes() {
+    fn consume_metrics_batch_bytes() {
         let single_metric_size = 156;
         let two_metrics_size = 300;
         let max_bytes = 350;
@@ -723,7 +723,7 @@ mod tests {
         };
 
         add_metrics(tot, &mut aggregator, "c".to_string());
-        let batched = aggregator.metrics_to_series_api_limited();
+        let batched = aggregator.consume_metrics();
 
         assert_eq!(batched.len(), tot / 2 + 1);
         assert_eq!(
@@ -741,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn metrics_to_series_limited_one_element_bigger_than_max_size() {
+    fn consume_series_one_element_bigger_than_max_size() {
         let single_metric_size = 156;
         let max_bytes = 1;
         let tot = 5;
@@ -755,7 +755,7 @@ mod tests {
         };
 
         add_metrics(tot, &mut aggregator, "c".to_string());
-        let batched = aggregator.metrics_to_series_api_limited();
+        let batched = aggregator.consume_metrics();
 
         assert_eq!(batched.len(), tot);
         for a_batch in batched {
