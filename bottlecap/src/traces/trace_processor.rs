@@ -116,7 +116,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         );
         let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&intake_url).unwrap(),
+            url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
             api_key: Some(config.api_key.clone().into()),
         };
 
@@ -160,10 +160,10 @@ mod tests {
     use datadog_trace_utils::{trace_utils, tracer_payload::TracerPayloadCollection};
 
     fn get_current_timestamp_nanos() -> i64 {
-        SystemTime::now()
+        i64::try_from(SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_nanos() as i64
+            .as_nanos()).expect("can't parse time")
     }
 
     fn create_test_config() -> Arc<Config> {
