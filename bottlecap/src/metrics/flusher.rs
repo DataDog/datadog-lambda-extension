@@ -16,8 +16,14 @@ impl Flusher {
     }
 
     pub async fn flush(&mut self) {
-        let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned");
-        for a_batch in locked_aggr.consume_metrics() {
+        let all_series;
+        let all_distributions;
+        {
+            let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned").clone();
+            all_series = locked_aggr.consume_metrics();
+            all_distributions = locked_aggr.consume_distributions();
+        }
+        for a_batch in all_series {
             debug!("flushing {} series to datadog", a_batch.series.len());
             match &self.dd_api.ship_series(&a_batch).await {
                 Ok(()) => {}
@@ -27,7 +33,7 @@ impl Flusher {
             }
             // TODO(astuyve) retry and do not panic
         }
-        for a_batch in locked_aggr.consume_distributions() {
+        for a_batch in all_distributions {
             match &self.dd_api.ship_distributions(&a_batch).await {
                 Ok(()) => {}
                 Err(e) => {
@@ -35,6 +41,5 @@ impl Flusher {
                 }
             }
         }
-        locked_aggr.clear();
     }
 }

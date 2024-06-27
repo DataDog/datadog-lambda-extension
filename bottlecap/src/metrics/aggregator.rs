@@ -279,7 +279,8 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 
             if serialized_metric_size > 0 {
                 if (series_payload.series.len() >= self.max_batch_entries_single_metric)
-                    || (this_batch_size + serialized_metric_size >= self.max_batch_bytes_single_metric)
+                    || (this_batch_size + serialized_metric_size
+                        >= self.max_batch_bytes_single_metric)
                 {
                     if this_batch_size == 0 {
                         warn!("Only one metric exceeds max batch size, adding it anyway: {:?} with {}", metric.metric, serialized_metric_size);
