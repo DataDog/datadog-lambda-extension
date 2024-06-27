@@ -42,32 +42,23 @@ pub fn verify_request_content_length(
     max_content_length: usize,
     error_message_prefix: &str,
 ) -> Option<http::Result<Response<Body>>> {
-    let content_length_header = match header_map.get(header::CONTENT_LENGTH) {
-        Some(res) => res,
-        None => {
-            return Some(log_and_create_http_response(
-                &format!("{error_message_prefix}: Missing Content-Length header"),
-                StatusCode::LENGTH_REQUIRED,
-            ));
-        }
+    let Some(content_length_header) = header_map.get(header::CONTENT_LENGTH) else {
+        return Some(log_and_create_http_response(
+            &format!("{error_message_prefix}: Missing Content-Length header"),
+            StatusCode::LENGTH_REQUIRED,
+        ));
     };
-    let header_as_string = match content_length_header.to_str() {
-        Ok(res) => res,
-        Err(_) => {
-            return Some(log_and_create_http_response(
-                &format!("{error_message_prefix}: Invalid Content-Length header"),
-                StatusCode::BAD_REQUEST,
-            ));
-        }
+    let Ok(header_as_string) = content_length_header.to_str() else {
+        return Some(log_and_create_http_response(
+            &format!("{error_message_prefix}: Invalid Content-Length header"),
+            StatusCode::BAD_REQUEST,
+        ));
     };
-    let content_length = match header_as_string.to_string().parse::<usize>() {
-        Ok(res) => res,
-        Err(_) => {
-            return Some(log_and_create_http_response(
-                &format!("{error_message_prefix}: Invalid Content-Length header"),
-                StatusCode::BAD_REQUEST,
-            ));
-        }
+    let Ok(content_length) = header_as_string.to_string().parse::<usize>() else {
+        return Some(log_and_create_http_response(
+            &format!("{error_message_prefix}: Invalid Content-Length header"),
+            StatusCode::BAD_REQUEST,
+        ));
     };
     if content_length > max_content_length {
         return Some(log_and_create_http_response(

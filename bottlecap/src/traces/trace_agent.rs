@@ -141,7 +141,7 @@ impl TraceAgent {
                     .process_traces(config, req, trace_tx, tags_provider, ApiVersion::V04)
                     .await
                 {
-                    Ok(res) => Ok(res),
+                    Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -153,7 +153,7 @@ impl TraceAgent {
                     .process_traces(config, req, trace_tx, tags_provider, ApiVersion::V05)
                     .await
                 {
-                    Ok(res) => Ok(res),
+                    Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -162,7 +162,7 @@ impl TraceAgent {
             }
             (&Method::PUT | &Method::POST, STATS_ENDPOINT_PATH) => {
                 match stats_processor.process_stats(req, stats_tx).await {
-                    Ok(res) => Ok(res),
+                    Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing trace stats: {err}"),
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -170,7 +170,7 @@ impl TraceAgent {
                 }
             }
             (_, INFO_ENDPOINT_PATH) => match Self::info_handler() {
-                Ok(res) => Ok(res),
+                Ok(result) => Ok(result),
                 Err(err) => log_and_create_http_response(
                     &format!("Info endpoint error: {err}"),
                     StatusCode::INTERNAL_SERVER_ERROR,

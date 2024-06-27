@@ -50,7 +50,7 @@ impl StatsProcessor for ServerlessStatsProcessor {
         // trace-protobuf crate)
         let mut stats: pb::ClientStatsPayload =
             match stats_utils::get_stats_from_request_body(body).await {
-                Ok(res) => res,
+                Ok(result) => result,
                 Err(err) => {
                     return log_and_create_http_response(
                         &format!("Error deserializing trace stats from request body: {err}"),
@@ -64,7 +64,15 @@ impl StatsProcessor for ServerlessStatsProcessor {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        stats.stats[0].start = timestamp as u64;
+        stats.stats[0].start = match u64::try_from(timestamp) {
+            Ok(result) => result,
+            Err(_) => {
+                return log_and_create_http_response(
+                    "Error converting timestamp to u64",
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        };
 
         // send trace payload to our trace flusher
         match tx.send(stats).await {

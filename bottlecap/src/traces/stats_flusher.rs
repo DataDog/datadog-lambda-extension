@@ -71,7 +71,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
         let stats_url = trace_stats_url(&self.config.site);
 
         let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&stats_url).unwrap(),
+            url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
             api_key: Some(self.config.api_key.clone().into()),
         };
 

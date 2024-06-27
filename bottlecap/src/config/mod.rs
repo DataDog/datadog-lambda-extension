@@ -17,6 +17,7 @@ use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRul
 #[derive(Debug, PartialEq, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     pub site: String,
     pub api_key: String,

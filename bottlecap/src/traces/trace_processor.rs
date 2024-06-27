@@ -35,7 +35,7 @@ pub trait TraceProcessor {
         version: ApiVersion,
     ) -> http::Result<Response<Body>>;
 }
-
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
@@ -68,7 +68,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         // crate)
         let (body_size, traces) = match version {
             ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
-                Ok(res) => res,
+                Ok(result) => result,
                 Err(err) => {
                     return log_and_create_http_response(
                         &format!("Error deserializing trace from request body: {err}"),
@@ -77,7 +77,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 }
             },
             ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(body).await {
-                Ok(res) => res,
+                Ok(result) => result,
                 Err(err) => {
                     return log_and_create_http_response(
                         &format!("Error deserializing trace from request body: {err}"),
