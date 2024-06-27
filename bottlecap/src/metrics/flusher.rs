@@ -19,7 +19,7 @@ impl Flusher {
         let all_series;
         let all_distributions;
         {
-            let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned").clone();
+            let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned");
             all_series = locked_aggr.consume_metrics();
             all_distributions = locked_aggr.consume_distributions();
         }
