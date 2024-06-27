@@ -38,8 +38,9 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-        config as TraceConfig, stats_flusher, stats_processor, trace_agent,
+        config as TraceConfig, stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
+        stats_flusher::{self, StatsFlusher},
         trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -272,7 +273,10 @@ async fn extension_loop_active(
     });
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {});
 
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {});
+    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
+        buffer: Arc::new(TokioMutex::new(Vec::new())),
+        config: Arc::clone(config),
+    });
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     let trace_config = match TraceConfig::Config::new() {
@@ -284,13 +288,15 @@ async fn extension_loop_active(
     };
 
     let trace_flusher_clone = trace_flusher.clone();
+    let stats_flusher_clone = stats_flusher.clone();
 
     let trace_agent = Box::new(trace_agent::TraceAgent {
         config: Arc::new(trace_config),
         trace_processor,
         trace_flusher: trace_flusher_clone,
         stats_processor,
-        stats_flusher,
+        stats_flusher: stats_flusher_clone,
+        tags_provider,
     });
     tokio::spawn(async move {
         let res = trace_agent.start_trace_agent().await;
@@ -404,7 +410,8 @@ async fn extension_loop_active(
                                 tokio::join!(
                                     logs_flusher.flush(),
                                     metrics_flusher.flush(),
-                                    trace_flusher.manual_flush()
+                                    trace_flusher.manual_flush(),
+                                    stats_flusher.manual_flush()
                                 );
                                 break;
                             }
@@ -454,7 +461,8 @@ async fn extension_loop_active(
             tokio::join!(
                 logs_flusher.flush(),
                 metrics_flusher.flush(),
-                trace_flusher.manual_flush()
+                trace_flusher.manual_flush(),
+                stats_flusher.manual_flush()
             );
             return Ok(());
         }

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::sync::Arc;
+use crate::tags::provider;
 use datadog_trace_utils::tracer_payload::TraceEncoding;
 use rmp;
 
@@ -23,22 +24,19 @@ use crate::traces::{
     http_utils::{self, log_and_create_http_response},
 };
 
+use super::trace_agent::ApiVersion;
+
 #[async_trait]
 pub trait TraceProcessor {
     /// Deserializes traces from a hyper request body and sends them through the provided tokio mpsc
     /// Sender.
-    async fn process_traces_v4(
+    async fn process_traces(
         &self,
         config: Arc<TraceConfig>,
         req: Request<Body>,
         tx: Sender<trace_utils::SendData>,
-    ) -> http::Result<Response<Body>>;
-
-    async fn process_traces_v5(
-        &self,
-        config: Arc<TraceConfig>,
-        req: Request<Body>,
-        tx: Sender<trace_utils::SendData>,
+        tags_provider: Arc<provider::Provider>,
+        version: ApiVersion
     ) -> http::Result<Response<Body>>;
 }
 
@@ -47,89 +45,13 @@ pub struct ServerlessTraceProcessor {}
 
 #[async_trait]
 impl TraceProcessor for ServerlessTraceProcessor {
-    async fn process_traces_v5(
+    async fn process_traces(
         &self,
         config: Arc<TraceConfig>,
         req: Request<Body>,
         tx: Sender<trace_utils::SendData>,
-    ) -> http::Result<Response<Body>> {
-        info!("Recieved traces to process");
-        let (parts, body) = req.into_parts();
-
-        if let Some(response) = http_utils::verify_request_content_length(
-            &parts.headers,
-            config.max_request_content_length,
-            "Error processing traces and verifying length",
-        ) {
-            return response;
-        }
-
-        println!("astuyve no error in verifying request content length");
-
-        let tracer_header_tags = (&parts.headers).into();
-
-        // deserialize traces from the request body, convert to protobuf structs (see trace-protobuf
-        // crate)
-        let (body_size, traces) = match trace_utils::get_v05_traces_from_request_body(body).await {
-            Ok(res) => res,
-            Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error deserializing trace from request body: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
-        let payload = trace_utils::collect_trace_chunks(
-            traces,
-            &tracer_header_tags,
-            |chunk, root_span_index| {
-                trace_utils::set_serverless_root_span_tags(
-                    &mut chunk.spans[root_span_index],
-                    config.function_name.clone(),
-                    &config.env_type,
-                );
-                chunk.spans.retain(|span| {
-                    return (span.name != "dns.lookup" && span.resource != "0.0.0.0")
-                        || (span.name != "dns.lookup" && span.resource != "127.0.0.1");
-                });
-                for span in chunk.spans.iter_mut() {
-                    debug!("ASTUYVE span is {:?}", span);
-                    // trace_utils::enrich_span_with_mini_agent_metadata(span, &mini_agent_metadata);
-                    // trace_utils::enrich_span_with_azure_metadata(
-                    //     span,
-                    //     config.mini_agent_version.as_str(),
-                    // );
-                    obfuscate_span(span, &config.obfuscation_config);
-                }
-            },
-            true, // In mini agent, we always send agentless
-            TraceEncoding::V07
-        );
-
-        let send_data = SendData::new(body_size, payload, tracer_header_tags, &config.trace_intake);
-
-        // send trace payload to our trace flusher
-        match tx.send(send_data).await {
-            Ok(_) => {
-                return log_and_create_http_response(
-                    "Successfully buffered traces to be flushed.",
-                    StatusCode::ACCEPTED,
-                );
-            }
-            Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error sending traces to the trace flusher: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        }
-    }
-
-    async fn process_traces_v4(
-        &self,
-        config: Arc<TraceConfig>,
-        req: Request<Body>,
-        tx: Sender<trace_utils::SendData>,
+        tags_provider: Arc<provider::Provider>,
+        version: ApiVersion,
     ) -> http::Result<Response<Body>> {
         info!("Recieved traces to process");
         let (parts, body) = req.into_parts();
@@ -146,16 +68,27 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         // deserialize traces from the request body, convert to protobuf structs (see trace-protobuf
         // crate)
-        let (body_size, traces) = match trace_utils::get_traces_from_request_body(body).await {
-            Ok(res) => res,
-            Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error deserializing trace from request body: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
+        let (body_size, traces) = match version {
+            ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
+                Ok(res) => res,
+                Err(err) => {
+                    return log_and_create_http_response(
+                        &format!("Error deserializing trace from request body: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    );
+                }
+            },
+            ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(body).await {
+                Ok(res) => res,
+                Err(err) => {
+                    return log_and_create_http_response(
+                        &format!("Error deserializing trace from request body: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    );
+                }
             }
         };
-
+        
         let payload = trace_utils::collect_trace_chunks(
             traces,
             &tracer_header_tags,
@@ -170,16 +103,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
                         || (span.name != "dns.lookup" && span.resource != "127.0.0.1");
                 });
                 for span in chunk.spans.iter_mut() {
-                    debug!("ASTUYVE span is {:?}", span);
-                    // trace_utils::enrich_span_with_mini_agent_metadata(span, &mini_agent_metadata);
-                    // trace_utils::enrich_span_with_azure_metadata(
-                    //     span,
-                    //     config.mini_agent_version.as_str(),
-                    // );
+                    tags_provider.get_tags_map().iter().for_each(|(k, v)| {
+                        span.meta.insert(k.clone(), v.clone());
+                    });
                     obfuscate_span(span, &config.obfuscation_config);
                 }
             },
-            true, // In mini agent, we always send agentless
+            true,
             TraceEncoding::V07
         );
 

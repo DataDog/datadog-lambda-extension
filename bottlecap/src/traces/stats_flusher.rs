@@ -3,12 +3,14 @@
 
 use async_trait::async_trait;
 use log::{debug, error, info};
-use std::{sync::Arc, time};
+use std::sync::Arc;
+use std::str::FromStr;
 use tokio::sync::{mpsc::Receiver, Mutex};
 
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::stats_utils;
 use datadog_trace_utils::config_utils::trace_stats_url;
+use ddcommon::Endpoint;
 use crate::config;
 
 #[async_trait]
@@ -72,9 +74,16 @@ impl StatsFlusher for ServerlessStatsFlusher {
             }
         };
 
+        let stats_url = trace_stats_url(&self.config.site);
+
+        let endpoint = Endpoint {
+                url: hyper::Uri::from_str(&stats_url).unwrap(),
+                api_key: Some(self.config.api_key.clone().into()),
+            };
+
         match stats_utils::send_stats_payload(
             serialized_stats_payload,
-            trace_stats_url(&self.config.site),
+            &endpoint,
             &self.config.api_key,
         )
         .await

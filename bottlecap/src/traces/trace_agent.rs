@@ -15,6 +15,7 @@ use crate::traces::http_utils::log_and_create_http_response;
 use crate::traces::{
     config as TraceConfig, stats_flusher, stats_processor, trace_flusher, trace_processor,
 };
+use crate::tags::provider;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;
 
@@ -32,6 +33,13 @@ pub struct TraceAgent {
     pub trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
+    pub tags_provider: Arc<provider::Provider>,
+}
+
+#[derive(Clone, Copy)]
+pub enum ApiVersion {
+    V04,
+    V05,
 }
 
 impl TraceAgent {
@@ -61,11 +69,11 @@ impl TraceAgent {
 
         // start our stats flusher.
         let stats_flusher = self.stats_flusher.clone();
-        let stats_config = self.config.clone();
+        // let stats_config = self.config.clone();
         tokio::spawn(async move {
             let stats_flusher = stats_flusher.clone();
             stats_flusher
-                .start_stats_flusher(stats_config, stats_rx)
+                .start_stats_flusher(stats_rx)
                 .await;
         });
 
@@ -73,6 +81,7 @@ impl TraceAgent {
         let trace_processor = self.trace_processor.clone();
         let stats_processor = self.stats_processor.clone();
         let endpoint_config = self.config.clone();
+        let tags_provider = self.tags_provider.clone();
 
         let make_svc = make_service_fn(move |_| {
             let trace_processor = trace_processor.clone();
@@ -82,6 +91,7 @@ impl TraceAgent {
             let stats_tx = stats_tx.clone();
 
             let endpoint_config = endpoint_config.clone();
+            let tags_provider = tags_provider.clone();
 
             let service = service_fn(move |req| {
                 TraceAgent::trace_endpoint_handler(
@@ -91,6 +101,7 @@ impl TraceAgent {
                     trace_tx.clone(),
                     stats_processor.clone(),
                     stats_tx.clone(),
+                    tags_provider.clone()
                 )
             });
 
@@ -124,10 +135,11 @@ impl TraceAgent {
         trace_tx: Sender<SendData>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
+        tags_provider: Arc<provider::Provider>
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => {
-                match trace_processor.process_traces_v4(config, req, trace_tx).await {
+                match trace_processor.process_traces(config, req, trace_tx, tags_provider, ApiVersion::V04).await {
                     Ok(res) => Ok(res),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),
@@ -136,7 +148,7 @@ impl TraceAgent {
                 }
             }
             (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => {
-                match trace_processor.process_traces_v5(config, req, trace_tx).await {
+                match trace_processor.process_traces(config, req, trace_tx, tags_provider, ApiVersion::V05).await {
                     Ok(res) => Ok(res),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),
