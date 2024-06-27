@@ -28,7 +28,7 @@ impl TelemetryApiClient {
                     "protocol": "HTTP",
                     "URI": format!("http://sandbox:{}/", &self.port),
                 },
-                "types": ["function", "platform"],
+                "types": ["extension", "function", "platform"],
                 "buffering": { // TODO: re evaluate using default values
                     "maxItems": 1000,
                     "maxBytes": 256 * 1024,
