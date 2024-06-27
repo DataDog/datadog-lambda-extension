@@ -38,7 +38,7 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-        config as TraceConfig, stats_processor, trace_agent,
+        stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         stats_flusher::{self, StatsFlusher},
         trace_processor,
@@ -47,6 +47,7 @@ use bottlecap::{
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
+use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
 use std::{
     collections::hash_map,
@@ -271,7 +272,11 @@ async fn extension_loop_active(
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),
     });
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {});
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+        obfuscation_config: Arc::new(obfuscation_config::ObfuscationConfig::new().map_err(
+            |e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+        )?),
+    });
 
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),
@@ -279,19 +284,11 @@ async fn extension_loop_active(
     });
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
-    let trace_config = match TraceConfig::Config::new() {
-        Ok(config) => config,
-        Err(e) => {
-            error!("Error loading trace config: {e:?}");
-            panic!("{e}");
-        }
-    };
-
     let trace_flusher_clone = trace_flusher.clone();
     let stats_flusher_clone = stats_flusher.clone();
 
     let trace_agent = Box::new(trace_agent::TraceAgent {
-        config: Arc::new(trace_config),
+        config: Arc::clone(config),
         trace_processor,
         trace_flusher: trace_flusher_clone,
         stats_processor,

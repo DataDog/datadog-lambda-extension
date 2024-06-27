@@ -1,7 +1,6 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
@@ -12,8 +11,8 @@ use tokio::sync::mpsc::Sender;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::stats_utils;
 
-use crate::traces::config::Config as TraceConfig;
 use crate::traces::http_utils::{self, log_and_create_http_response};
+use super::trace_agent::MAX_CONTENT_LENGTH;
 
 #[async_trait]
 pub trait StatsProcessor {
@@ -21,7 +20,6 @@ pub trait StatsProcessor {
     /// the provided tokio mpsc Sender.
     async fn process_stats(
         &self,
-        config: Arc<TraceConfig>,
         req: Request<Body>,
         tx: Sender<pb::ClientStatsPayload>,
     ) -> http::Result<Response<Body>>;
@@ -34,7 +32,6 @@ pub struct ServerlessStatsProcessor {}
 impl StatsProcessor for ServerlessStatsProcessor {
     async fn process_stats(
         &self,
-        config: Arc<TraceConfig>,
         req: Request<Body>,
         tx: Sender<pb::ClientStatsPayload>,
     ) -> http::Result<Response<Body>> {
@@ -43,7 +40,7 @@ impl StatsProcessor for ServerlessStatsProcessor {
 
         if let Some(response) = http_utils::verify_request_content_length(
             &parts.headers,
-            config.max_request_content_length,
+            MAX_CONTENT_LENGTH,
             "Error processing trace stats",
         ) {
             return response;

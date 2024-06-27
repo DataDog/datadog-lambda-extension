@@ -12,10 +12,9 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{debug, error, info};
 
 use crate::traces::http_utils::log_and_create_http_response;
-use crate::traces::{
-    config as TraceConfig, stats_flusher, stats_processor, trace_flusher, trace_processor,
-};
+use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
 use crate::tags::provider;
+use crate::config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;
 
@@ -26,9 +25,10 @@ const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
+pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 
 pub struct TraceAgent {
-    pub config: Arc<TraceConfig::Config>,
+    pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     pub trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
@@ -129,7 +129,7 @@ impl TraceAgent {
     }
 
     async fn trace_endpoint_handler(
-        config: Arc<TraceConfig::Config>,
+        config: Arc<config::Config>,
         req: Request<Body>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendData>,
@@ -157,7 +157,7 @@ impl TraceAgent {
                 }
             }
             (&Method::PUT | &Method::POST, STATS_ENDPOINT_PATH) => {
-                match stats_processor.process_stats(config, req, stats_tx).await {
+                match stats_processor.process_stats(req, stats_tx).await {
                     Ok(res) => Ok(res),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing trace stats: {err}"),

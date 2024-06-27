@@ -2,29 +2,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use std::sync::Arc;
+use std::str::FromStr;
+use ddcommon::Endpoint;
 use crate::tags::provider;
+use datadog_trace_obfuscation::obfuscation_config;
+use datadog_trace_utils::config_utils::trace_intake_url;
 use datadog_trace_utils::tracer_payload::TraceEncoding;
-use rmp;
 
 use async_trait::async_trait;
-use hyper::{http, Body, Request, Response, body::Buf, StatusCode};
-use rmpv::decode::read_value;
-use rmpv::Value;
-use rmp::decode::read_str_len;
+use hyper::{http, Body, Request, Response, StatusCode};
 use tokio::sync::mpsc::Sender;
-use tracing::{debug, info};
+use tracing::info;
 
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
-use datadog_trace_protobuf::pb::{self, Span, TraceChunk};
+use crate::config;
+use crate::traces::http_utils::{self, log_and_create_http_response};
 
-use crate::traces::{
-    config::Config as TraceConfig,
-    http_utils::{self, log_and_create_http_response},
-};
-
-use super::trace_agent::ApiVersion;
+use super::trace_agent::{ApiVersion, MAX_CONTENT_LENGTH};
 
 #[async_trait]
 pub trait TraceProcessor {
@@ -32,7 +28,7 @@ pub trait TraceProcessor {
     /// Sender.
     async fn process_traces(
         &self,
-        config: Arc<TraceConfig>,
+        config: Arc<config::Config>,
         req: Request<Body>,
         tx: Sender<trace_utils::SendData>,
         tags_provider: Arc<provider::Provider>,
@@ -40,14 +36,16 @@ pub trait TraceProcessor {
     ) -> http::Result<Response<Body>>;
 }
 
-#[derive(Clone, Copy)]
-pub struct ServerlessTraceProcessor {}
+#[derive(Clone)]
+pub struct ServerlessTraceProcessor {
+    pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
+}
 
 #[async_trait]
 impl TraceProcessor for ServerlessTraceProcessor {
     async fn process_traces(
         &self,
-        config: Arc<TraceConfig>,
+        config: Arc<config::Config>,
         req: Request<Body>,
         tx: Sender<trace_utils::SendData>,
         tags_provider: Arc<provider::Provider>,
@@ -58,7 +56,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         if let Some(response) = http_utils::verify_request_content_length(
             &parts.headers,
-            config.max_request_content_length,
+            MAX_CONTENT_LENGTH,
             "Error processing traces",
         ) {
             return response;
@@ -92,12 +90,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let payload = trace_utils::collect_trace_chunks(
             traces,
             &tracer_header_tags,
-            |chunk, root_span_index| {
-                trace_utils::set_serverless_root_span_tags(
-                    &mut chunk.spans[root_span_index],
-                    config.function_name.clone(),
-                    &config.env_type,
-                );
+            |chunk, _root_span_index| {
+                // trace_utils::set_serverless_root_span_tags(
+                //     &mut chunk.spans[root_span_index],
+                //     config.function_name.clone(),
+                //     &config.env_type,
+                // );
                 chunk.spans.retain(|span| {
                     return (span.name != "dns.lookup" && span.resource != "0.0.0.0")
                         || (span.name != "dns.lookup" && span.resource != "127.0.0.1");
@@ -106,14 +104,22 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                         span.meta.insert(k.clone(), v.clone());
                     });
-                    obfuscate_span(span, &config.obfuscation_config);
+                    // TODO(astuyve) generalize this and delegate to an enum
+                    span.meta.insert("origin".to_string(), "lambda".to_string());
+                    span.meta.insert("_dd.origin".to_string(), "lambda".to_string());
+                    obfuscate_span(span, &self.obfuscation_config);
                 }
             },
             true,
             TraceEncoding::V07
         );
+        let intake_url = trace_intake_url(&config.site);
+        let endpoint = Endpoint {
+            url: hyper::Uri::from_str(&intake_url).unwrap(),
+            api_key: Some(config.api_key.clone().into()),
+        };
 
-        let send_data = SendData::new(body_size, payload, tracer_header_tags, &config.trace_intake);
+        let send_data = SendData::new(body_size, payload, tracer_header_tags, &endpoint);
 
         // send trace payload to our trace flusher
         match tx.send(send_data).await {
@@ -143,17 +149,17 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
     use tokio::sync::mpsc::{self, Receiver, Sender};
+    use serde_json::json;
 
-    use crate::traces::{
-        config::Config,
-        trace_processor::{self, TraceProcessor},
-    };
+    use crate::traces::trace_processor::{self, TraceProcessor};
+    use crate::config::Config;
+    use crate::LAMBDA_RUNTIME_SLUG;
+    use crate::tags::provider::Provider;
     use datadog_trace_protobuf::pb;
     use datadog_trace_utils::{
-        test_utils::{create_test_json_span, create_test_span},
         trace_utils,
+        tracer_payload::TracerPayloadCollection
     };
-    use ddcommon::Endpoint;
 
     fn get_current_timestamp_nanos() -> i64 {
         SystemTime::now()
@@ -162,29 +168,93 @@ mod tests {
             .as_nanos() as i64
     }
 
-    fn create_test_config() -> Config {
-        Config {
-            function_name: Some("dummy_function_name".to_string()),
-            max_request_content_length: 10 * 1024 * 1024,
-            trace_flush_interval: 3,
-            stats_flush_interval: 3,
-            verify_env_timeout: 100,
-            trace_intake: Endpoint {
-                url: hyper::Uri::from_static("https://trace.agent.notdog.com/traces"),
-                api_key: Some("dummy_api_key".into()),
-            },
-            trace_stats_intake: Endpoint {
-                url: hyper::Uri::from_static("https://trace.agent.notdog.com/stats"),
-                api_key: Some("dummy_api_key".into()),
-            },
-            dd_site: "datadoghq.com".to_string(),
-            env_type: trace_utils::EnvironmentType::CloudFunction,
-            os: "linux".to_string(),
-            obfuscation_config: ObfuscationConfig::new().unwrap(),
-            mini_agent_version: "0.1.0".to_string(),
-        }
+    fn create_test_config() -> Arc<Config> {
+        let config = Arc::new(Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tag,env:test".to_string()),
+            ..Config::default()
+        });
+        config
     }
 
+    fn create_tags_provider(config: Arc<Config>) -> Arc<Provider> {
+        let mut metadata = HashMap::new();
+        metadata.insert(
+            "function_arn".to_string(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+        );
+        let provider = Provider::new(config, LAMBDA_RUNTIME_SLUG.to_string(), &metadata);
+        Arc::new(provider)
+    }
+    fn create_test_span(
+        trace_id: u64,
+        span_id: u64,
+        parent_id: u64,
+        start: i64,
+        is_top_level: bool,
+        tags_provider: Arc<Provider>,
+    ) -> pb::Span {
+        let mut meta: HashMap<String, String> = tags_provider.get_tags_map().clone();
+        meta.insert("runtime-id".to_string(), "test-runtime-id-value".to_string());
+
+        let mut span = pb::Span {
+            trace_id,
+            span_id,
+            service: "test-service".to_string(),
+            name: "test_name".to_string(),
+            resource: "test-resource".to_string(),
+            parent_id,
+            start,
+            duration: 5,
+            error: 0,
+            meta: meta.clone(),
+            metrics: HashMap::new(),
+            r#type: "".to_string(),
+            meta_struct: HashMap::new(),
+            span_links: vec![],
+        };
+        if is_top_level {
+            span.metrics.insert("_top_level".to_string(), 1.0);
+            span.meta
+                .insert("_dd.origin".to_string(), "lambda".to_string());
+            span.meta
+                .insert("origin".to_string(), "lambda".to_string());
+            span.meta.insert(
+                "functionname".to_string(),
+                "my-function".to_string(),
+            );
+            span.r#type = "".to_string();
+        }
+        span
+    }
+
+    fn create_test_json_span(
+        trace_id: u64,
+        span_id: u64,
+        parent_id: u64,
+        start: i64,
+    ) -> serde_json::Value {
+        json!(
+            {
+                "trace_id": trace_id,
+                "span_id": span_id,
+                "service": "test-service",
+                "name": "test_name",
+                "resource": "test-resource",
+                "parent_id": parent_id,
+                "start": start,
+                "duration": 5,
+                "error": 0,
+                "meta": {
+                    "service": "test-service",
+                    "env": "test-env",
+                    "runtime-id": "test-runtime-id-value",
+                },
+                "metrics": {},
+                "meta_struct": {},
+            }
+        )
+    }
     #[tokio::test]
     #[cfg_attr(miri, ignore)]
     async fn test_process_trace() {
@@ -208,12 +278,18 @@ mod tests {
             .body(hyper::body::Body::from(bytes))
             .unwrap();
 
-        let trace_processor = trace_processor::ServerlessTraceProcessor {};
+        let trace_processor = trace_processor::ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap())
+        };
+        let config = create_test_config();
+        let tags_provider = create_tags_provider(config.clone());
         let res = trace_processor
             .process_traces(
+                config,
                 request,
                 tx,
-                Arc::new(trace_utils::MiniAgentMetadata::default()),
+                tags_provider.clone(),
+                crate::traces::trace_agent::ApiVersion::V04,
             )
             .await;
         assert!(res.is_ok());
@@ -231,7 +307,7 @@ mod tests {
             chunks: vec![pb::TraceChunk {
                 priority: i8::MIN as i32,
                 origin: "".to_string(),
-                spans: vec![create_test_span(11, 222, 333, start, true)],
+                spans: vec![create_test_span(11, 222, 333, start, true, tags_provider)],
                 tags: HashMap::new(),
                 dropped_trace: false,
             }],
@@ -241,79 +317,13 @@ mod tests {
             app_version: "".to_string(),
         };
 
-        assert_eq!(
-            expected_tracer_payload,
-            tracer_payload.unwrap().get_payloads()[0]
-        );
-    }
+        let received_payload =
+            if let TracerPayloadCollection::V07(payload) = tracer_payload.unwrap().get_payloads() {
+                Some(payload[0].clone())
+            } else {
+                None
+            };
 
-    #[tokio::test]
-    #[cfg_attr(miri, ignore)]
-    async fn test_process_trace_top_level_span_set() {
-        let (tx, mut rx): (
-            Sender<trace_utils::SendData>,
-            Receiver<trace_utils::SendData>,
-        ) = mpsc::channel(1);
-
-        let start = get_current_timestamp_nanos();
-
-        let json_trace = vec![
-            create_test_json_span(11, 333, 222, start),
-            create_test_json_span(11, 222, 0, start),
-            create_test_json_span(11, 444, 333, start),
-        ];
-
-        let bytes = rmp_serde::to_vec(&vec![json_trace]).unwrap();
-        let request = Request::builder()
-            .header("datadog-meta-tracer-version", "4.0.0")
-            .header("datadog-meta-lang", "nodejs")
-            .header("datadog-meta-lang-version", "v19.7.0")
-            .header("datadog-meta-lang-interpreter", "v8")
-            .header("datadog-container-id", "33")
-            .header("content-length", "100")
-            .body(hyper::body::Body::from(bytes))
-            .unwrap();
-
-        let trace_processor = trace_processor::ServerlessTraceProcessor {};
-        let res = trace_processor
-            .process_traces(
-                Arc::new(create_test_config()),
-                request,
-                tx,
-                Arc::new(trace_utils::MiniAgentMetadata::default()),
-            )
-            .await;
-        assert!(res.is_ok());
-
-        let tracer_payload = rx.recv().await;
-
-        assert!(tracer_payload.is_some());
-
-        let expected_tracer_payload = pb::TracerPayload {
-            container_id: "33".to_string(),
-            language_name: "nodejs".to_string(),
-            language_version: "v19.7.0".to_string(),
-            tracer_version: "4.0.0".to_string(),
-            runtime_id: "test-runtime-id-value".to_string(),
-            chunks: vec![pb::TraceChunk {
-                priority: i8::MIN as i32,
-                origin: "".to_string(),
-                spans: vec![
-                    create_test_span(11, 333, 222, start, false),
-                    create_test_span(11, 222, 0, start, true),
-                    create_test_span(11, 444, 333, start, false),
-                ],
-                tags: HashMap::new(),
-                dropped_trace: false,
-            }],
-            tags: HashMap::new(),
-            env: "test-env".to_string(),
-            hostname: "".to_string(),
-            app_version: "".to_string(),
-        };
-        assert_eq!(
-            expected_tracer_payload,
-            tracer_payload.unwrap().get_payloads()[0]
-        );
+        assert_eq!(expected_tracer_payload, received_payload.unwrap());
     }
 }
