@@ -46,7 +46,7 @@ impl Provider {
     pub fn get_canonical_id(&self) -> Option<String> {
         self.tag_provider.get_canonical_id()
     }
-    
+
     #[must_use]
     pub fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
         self.tag_provider.get_tags_map()
@@ -71,7 +71,7 @@ impl GetTags for TagProvider {
             TagProvider::Lambda(lambda_tags) => lambda_tags.get_function_arn().cloned(),
         }
     }
-    
+
     fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
         match self {
             TagProvider::Lambda(lambda_tags) => lambda_tags.get_tags_map(),

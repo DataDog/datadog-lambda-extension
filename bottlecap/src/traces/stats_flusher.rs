@@ -3,24 +3,21 @@
 
 use async_trait::async_trait;
 use log::{debug, error, info};
-use std::sync::Arc;
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::sync::{mpsc::Receiver, Mutex};
 
-use datadog_trace_protobuf::pb;
-use datadog_trace_utils::stats_utils;
-use datadog_trace_utils::config_utils::trace_stats_url;
-use ddcommon::Endpoint;
 use crate::config;
+use datadog_trace_protobuf::pb;
+use datadog_trace_utils::config_utils::trace_stats_url;
+use datadog_trace_utils::stats_utils;
+use ddcommon::Endpoint;
 
 #[async_trait]
 pub trait StatsFlusher {
     /// Starts a stats flusher that listens for stats payloads sent to the tokio mpsc Receiver,
     /// implementing flushing logic that calls flush_stats.
-    async fn start_stats_flusher(
-        &self,
-        mut rx: Receiver<pb::ClientStatsPayload>,
-    );
+    async fn start_stats_flusher(&self, mut rx: Receiver<pb::ClientStatsPayload>);
     /// Flushes stats to the Datadog trace stats intake.
     async fn flush_stats(&self, traces: Vec<pb::ClientStatsPayload>);
 
@@ -35,10 +32,7 @@ pub struct ServerlessStatsFlusher {
 
 #[async_trait]
 impl StatsFlusher for ServerlessStatsFlusher {
-    async fn start_stats_flusher(
-        &self,
-        mut rx: Receiver<pb::ClientStatsPayload>,
-    ) {
+    async fn start_stats_flusher(&self, mut rx: Receiver<pb::ClientStatsPayload>) {
         let buffer_producer = self.buffer.clone();
 
         tokio::spawn(async move {
@@ -77,9 +71,9 @@ impl StatsFlusher for ServerlessStatsFlusher {
         let stats_url = trace_stats_url(&self.config.site);
 
         let endpoint = Endpoint {
-                url: hyper::Uri::from_str(&stats_url).unwrap(),
-                api_key: Some(self.config.api_key.clone().into()),
-            };
+            url: hyper::Uri::from_str(&stats_url).unwrap(),
+            api_key: Some(self.config.api_key.clone().into()),
+        };
 
         match stats_utils::send_stats_payload(
             serialized_stats_payload,

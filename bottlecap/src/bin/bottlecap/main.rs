@@ -38,9 +38,9 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
+        stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
-        stats_flusher::{self, StatsFlusher},
         trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -273,9 +273,10 @@ async fn extension_loop_active(
         buffer: Arc::new(TokioMutex::new(Vec::new())),
     });
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(obfuscation_config::ObfuscationConfig::new().map_err(
-            |e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
-        )?),
+        obfuscation_config: Arc::new(
+            obfuscation_config::ObfuscationConfig::new()
+                .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        ),
     });
 
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {

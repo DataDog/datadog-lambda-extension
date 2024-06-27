@@ -1,24 +1,24 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use std::sync::Arc;
-use std::str::FromStr;
-use ddcommon::Endpoint;
 use crate::tags::provider;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::config_utils::trace_intake_url;
 use datadog_trace_utils::tracer_payload::TraceEncoding;
+use ddcommon::Endpoint;
+use std::str::FromStr;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use hyper::{http, Body, Request, Response, StatusCode};
 use tokio::sync::mpsc::Sender;
 use tracing::info;
 
+use crate::config;
+use crate::traces::http_utils::{self, log_and_create_http_response};
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
-use crate::config;
-use crate::traces::http_utils::{self, log_and_create_http_response};
 
 use super::trace_agent::{ApiVersion, MAX_CONTENT_LENGTH};
 
@@ -32,7 +32,7 @@ pub trait TraceProcessor {
         req: Request<Body>,
         tx: Sender<trace_utils::SendData>,
         tags_provider: Arc<provider::Provider>,
-        version: ApiVersion
+        version: ApiVersion,
     ) -> http::Result<Response<Body>>;
 }
 
@@ -84,9 +84,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
                         StatusCode::INTERNAL_SERVER_ERROR,
                     );
                 }
-            }
+            },
         };
-        
+
         let payload = trace_utils::collect_trace_chunks(
             traces,
             &tracer_header_tags,
@@ -106,12 +106,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     });
                     // TODO(astuyve) generalize this and delegate to an enum
                     span.meta.insert("origin".to_string(), "lambda".to_string());
-                    span.meta.insert("_dd.origin".to_string(), "lambda".to_string());
+                    span.meta
+                        .insert("_dd.origin".to_string(), "lambda".to_string());
                     obfuscate_span(span, &self.obfuscation_config);
                 }
             },
             true,
-            TraceEncoding::V07
+            TraceEncoding::V07,
         );
         let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
@@ -143,23 +144,20 @@ impl TraceProcessor for ServerlessTraceProcessor {
 mod tests {
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
     use hyper::Request;
+    use serde_json::json;
     use std::{
         collections::HashMap,
         sync::Arc,
         time::{SystemTime, UNIX_EPOCH},
     };
     use tokio::sync::mpsc::{self, Receiver, Sender};
-    use serde_json::json;
 
-    use crate::traces::trace_processor::{self, TraceProcessor};
     use crate::config::Config;
-    use crate::LAMBDA_RUNTIME_SLUG;
     use crate::tags::provider::Provider;
+    use crate::traces::trace_processor::{self, TraceProcessor};
+    use crate::LAMBDA_RUNTIME_SLUG;
     use datadog_trace_protobuf::pb;
-    use datadog_trace_utils::{
-        trace_utils,
-        tracer_payload::TracerPayloadCollection
-    };
+    use datadog_trace_utils::{trace_utils, tracer_payload::TracerPayloadCollection};
 
     fn get_current_timestamp_nanos() -> i64 {
         SystemTime::now()
@@ -195,7 +193,10 @@ mod tests {
         tags_provider: Arc<Provider>,
     ) -> pb::Span {
         let mut meta: HashMap<String, String> = tags_provider.get_tags_map().clone();
-        meta.insert("runtime-id".to_string(), "test-runtime-id-value".to_string());
+        meta.insert(
+            "runtime-id".to_string(),
+            "test-runtime-id-value".to_string(),
+        );
 
         let mut span = pb::Span {
             trace_id,
@@ -217,12 +218,9 @@ mod tests {
             span.metrics.insert("_top_level".to_string(), 1.0);
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
+            span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
-                .insert("origin".to_string(), "lambda".to_string());
-            span.meta.insert(
-                "functionname".to_string(),
-                "my-function".to_string(),
-            );
+                .insert("functionname".to_string(), "my-function".to_string());
             span.r#type = "".to_string();
         }
         span
@@ -279,7 +277,7 @@ mod tests {
             .unwrap();
 
         let trace_processor = trace_processor::ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap())
+            obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());

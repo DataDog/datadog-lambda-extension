@@ -11,10 +11,10 @@ use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{debug, error, info};
 
+use crate::config;
+use crate::tags::provider;
 use crate::traces::http_utils::log_and_create_http_response;
 use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
-use crate::tags::provider;
-use crate::config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;
 
@@ -72,9 +72,7 @@ impl TraceAgent {
         // let stats_config = self.config.clone();
         tokio::spawn(async move {
             let stats_flusher = stats_flusher.clone();
-            stats_flusher
-                .start_stats_flusher(stats_rx)
-                .await;
+            stats_flusher.start_stats_flusher(stats_rx).await;
         });
 
         // setup our hyper http server, where the endpoint_handler handles incoming requests
@@ -101,7 +99,7 @@ impl TraceAgent {
                     trace_tx.clone(),
                     stats_processor.clone(),
                     stats_tx.clone(),
-                    tags_provider.clone()
+                    tags_provider.clone(),
                 )
             });
 
@@ -135,11 +133,14 @@ impl TraceAgent {
         trace_tx: Sender<SendData>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
-        tags_provider: Arc<provider::Provider>
+        tags_provider: Arc<provider::Provider>,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => {
-                match trace_processor.process_traces(config, req, trace_tx, tags_provider, ApiVersion::V04).await {
+                match trace_processor
+                    .process_traces(config, req, trace_tx, tags_provider, ApiVersion::V04)
+                    .await
+                {
                     Ok(res) => Ok(res),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),
@@ -148,7 +149,10 @@ impl TraceAgent {
                 }
             }
             (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => {
-                match trace_processor.process_traces(config, req, trace_tx, tags_provider, ApiVersion::V05).await {
+                match trace_processor
+                    .process_traces(config, req, trace_tx, tags_provider, ApiVersion::V05)
+                    .await
+                {
                     Ok(res) => Ok(res),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing traces: {err}"),
