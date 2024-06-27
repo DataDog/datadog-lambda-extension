@@ -8,8 +8,8 @@ use tokio::sync::{mpsc::Receiver, Mutex};
 
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::stats_utils;
-
-use crate::traces::config::Config as TraceConfig;
+use datadog_trace_utils::config_utils::trace_stats_url;
+use crate::config;
 
 #[async_trait]
 pub trait StatsFlusher {
@@ -17,27 +17,27 @@ pub trait StatsFlusher {
     /// implementing flushing logic that calls flush_stats.
     async fn start_stats_flusher(
         &self,
-        config: Arc<TraceConfig>,
         mut rx: Receiver<pb::ClientStatsPayload>,
     );
     /// Flushes stats to the Datadog trace stats intake.
-    async fn flush_stats(&self, config: Arc<TraceConfig>, traces: Vec<pb::ClientStatsPayload>);
+    async fn flush_stats(&self, traces: Vec<pb::ClientStatsPayload>);
+
+    async fn manual_flush(&self);
 }
 
-#[derive(Clone, Copy)]
-pub struct ServerlessStatsFlusher {}
+#[derive(Clone)]
+pub struct ServerlessStatsFlusher {
+    pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
+    pub config: Arc<config::Config>,
+}
 
 #[async_trait]
 impl StatsFlusher for ServerlessStatsFlusher {
     async fn start_stats_flusher(
         &self,
-        config: Arc<TraceConfig>,
         mut rx: Receiver<pb::ClientStatsPayload>,
     ) {
-        let buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>> = Arc::new(Mutex::new(Vec::new()));
-
-        let buffer_producer = buffer.clone();
-        let buffer_consumer = buffer.clone();
+        let buffer_producer = self.buffer.clone();
 
         tokio::spawn(async move {
             while let Some(stats_payload) = rx.recv().await {
@@ -45,19 +45,16 @@ impl StatsFlusher for ServerlessStatsFlusher {
                 buffer.push(stats_payload);
             }
         });
-
-        loop {
-            tokio::time::sleep(time::Duration::from_secs(config.stats_flush_interval)).await;
-
-            let mut buffer = buffer_consumer.lock().await;
-            if !buffer.is_empty() {
-                self.flush_stats(config.clone(), buffer.to_vec()).await;
-                buffer.clear();
-            }
-        }
     }
 
-    async fn flush_stats(&self, config: Arc<TraceConfig>, stats: Vec<pb::ClientStatsPayload>) {
+    async fn manual_flush(&self) {
+        let mut buffer = self.buffer.lock().await;
+        if !buffer.is_empty() {
+            self.flush_stats(buffer.to_vec()).await;
+            buffer.clear();
+        }
+    }
+    async fn flush_stats(&self, stats: Vec<pb::ClientStatsPayload>) {
         if stats.is_empty() {
             return;
         }
@@ -77,8 +74,8 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         match stats_utils::send_stats_payload(
             serialized_stats_payload,
-            &config.trace_stats_intake,
-            config.trace_stats_intake.api_key.as_ref().unwrap(),
+            trace_stats_url(&self.config.site),
+            &self.config.api_key,
         )
         .await
         {

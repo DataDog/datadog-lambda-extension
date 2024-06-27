@@ -269,7 +269,7 @@ dependencies = [
 [[package]]
 name = "datadog-protos"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki/#08fab4086401e3e5e3f1ad57013761040908870d"
+source = "git+https://github.com/DataDog/saluki/#ecebc9a69134b01e9e3f2a17ae271289fc67f02d"
 dependencies = [
  "bytes",
  "prost 0.12.6",
@@ -282,7 +282,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#5aebb909d3766a53e25251907ca26b2d09614ea7"
+source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -291,7 +291,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#5aebb909d3766a53e25251907ca26b2d09614ea7"
+source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -308,7 +308,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#5aebb909d3766a53e25251907ca26b2d09614ea7"
+source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -318,7 +318,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#5aebb909d3766a53e25251907ca26b2d09614ea7"
+source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
 dependencies = [
  "anyhow",
  "bytes",
@@ -343,7 +343,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=aj/bottlecap-mini-agent#5aebb909d3766a53e25251907ca26b2d09614ea7"
+source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
 dependencies = [
  "anyhow",
  "futures",
@@ -368,7 +368,7 @@ dependencies = [
 [[package]]
 name = "ddsketch-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki/#08fab4086401e3e5e3f1ad57013761040908870d"
+source = "git+https://github.com/DataDog/saluki/#ecebc9a69134b01e9e3f2a17ae271289fc67f02d"
 dependencies = [
  "datadog-protos",
  "float_eq",

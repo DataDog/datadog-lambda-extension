@@ -10,11 +10,11 @@ anyhow = "1.0"
 chrono = { version = "0.4.38", features = ["serde", "std", "now"], default-features = false}
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { version = "10.0", git = "https://github.com/DataDog/libdatadog", branch="aj/bottlecap-mini-agent" }
-datadog-trace-protobuf = { version = "10.0.0", git = "https://github.com/DataDog/libdatadog", branch = "aj/bottlecap-mini-agent" }
-datadog-trace-utils = { version = "10.0.0", git= "https://github.com/DataDog/libdatadog", branch="aj/bottlecap-mini-agent"}
-datadog-trace-normalization = { version = "10.0.0", git= "https://github.com/DataDog/libdatadog", branch="aj/bottlecap-mini-agent" }
-datadog-trace-obfuscation = { version = "10.0.0", git= "https://github.com/DataDog/libdatadog", branch="aj/bottlecap-mini-agent" }
+ddcommon = { version = "10.0", git = "https://github.com/DataDog/libdatadog" }
+datadog-trace-protobuf = { version = "10.0.0", git = "https://github.com/DataDog/libdatadog" }
+datadog-trace-utils = { version = "10.0.0", git= "https://github.com/DataDog/libdatadog" }
+datadog-trace-normalization = { version = "10.0.0", git= "https://github.com/DataDog/libdatadog" }
+datadog-trace-obfuscation = { version = "10.0.0", git= "https://github.com/DataDog/libdatadog" }
 figment = { version = "0.10.15", default-features = false, features = ["yaml", "env"] }
 fnv = { version = "1.0.7", default-features = false }
 hashbrown = { version = "0.14.3", default-features = false, features = ["inline-more"] }

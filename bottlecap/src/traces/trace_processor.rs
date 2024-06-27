@@ -70,7 +70,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         // deserialize traces from the request body, convert to protobuf structs (see trace-protobuf
         // crate)
-        let (body_size, traces) = match trace_utils::v5_get_traces_from_request_body(body).await {
+        let (body_size, traces) = match trace_utils::get_v05_traces_from_request_body(body).await {
             Ok(res) => res,
             Err(err) => {
                 return log_and_create_http_response(
