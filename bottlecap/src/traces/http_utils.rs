@@ -33,7 +33,7 @@ pub fn log_and_create_http_response(
 }
 
 /// Takes a request's header map, and verifies that the "content-length" header is present, valid,
-/// and less than the given max_content_length.
+/// and less than the given `max_content_length`.
 ///
 /// Will return None if no issues are found. Otherwise logs an error (with the given prefix) and
 /// returns and HTTP Response with the appropriate error status code.

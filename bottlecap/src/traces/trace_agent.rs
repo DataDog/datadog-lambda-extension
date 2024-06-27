@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::config;
 use crate::tags::provider;

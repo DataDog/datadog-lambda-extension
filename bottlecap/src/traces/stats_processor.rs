@@ -68,7 +68,7 @@ impl StatsProcessor for ServerlessStatsProcessor {
 
         // send trace payload to our trace flusher
         match tx.send(stats).await {
-            Ok(_) => {
+            Ok(()) => {
                 return log_and_create_http_response(
                     "Successfully buffered stats to be flushed.",
                     StatusCode::ACCEPTED,

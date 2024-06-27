@@ -54,7 +54,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             match traces.send().await.last_result {
                 Ok(_) => info!("Successfully flushed traces"),
                 Err(e) => {
-                    error!("Error sending trace: {e:?}")
+                    error!("Error sending trace: {e:?}");
                     // TODO: Retries
                 }
             }

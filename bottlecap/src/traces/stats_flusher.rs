@@ -82,9 +82,9 @@ impl StatsFlusher for ServerlessStatsFlusher {
         )
         .await
         {
-            Ok(_) => info!("Successfully flushed stats"),
+            Ok(()) => info!("Successfully flushed stats"),
             Err(e) => {
-                error!("Error sending stats: {e:?}")
+                error!("Error sending stats: {e:?}");
             }
         }
     }

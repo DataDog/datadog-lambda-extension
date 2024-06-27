@@ -97,10 +97,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 //     &config.env_type,
                 // );
                 chunk.spans.retain(|span| {
-                    return (span.name != "dns.lookup" && span.resource != "0.0.0.0")
-                        || (span.name != "dns.lookup" && span.resource != "127.0.0.1");
+                    (span.name != "dns.lookup" && span.resource != "0.0.0.0")
+                        || (span.name != "dns.lookup" && span.resource != "127.0.0.1")
                 });
-                for span in chunk.spans.iter_mut() {
+                for span in &mut chunk.spans {
                     tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                         span.meta.insert(k.clone(), v.clone());
                     });
@@ -124,7 +124,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         // send trace payload to our trace flusher
         match tx.send(send_data).await {
-            Ok(_) => {
+            Ok(()) => {
                 return log_and_create_http_response(
                     "Successfully buffered traces to be flushed.",
                     StatusCode::ACCEPTED,
@@ -167,12 +167,11 @@ mod tests {
     }
 
     fn create_test_config() -> Arc<Config> {
-        let config = Arc::new(Config {
+        Arc::new(Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tag,env:test".to_string()),
             ..Config::default()
-        });
-        config
+        })
     }
 
     fn create_tags_provider(config: Arc<Config>) -> Arc<Provider> {
@@ -210,7 +209,7 @@ mod tests {
             error: 0,
             meta: meta.clone(),
             metrics: HashMap::new(),
-            r#type: "".to_string(),
+            r#type: String::new(),
             meta_struct: HashMap::new(),
             span_links: vec![],
         };
@@ -221,7 +220,7 @@ mod tests {
             span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
                 .insert("functionname".to_string(), "my-function".to_string());
-            span.r#type = "".to_string();
+            span.r#type = String::new();
         }
         span
     }
@@ -303,16 +302,16 @@ mod tests {
             tracer_version: "4.0.0".to_string(),
             runtime_id: "test-runtime-id-value".to_string(),
             chunks: vec![pb::TraceChunk {
-                priority: i8::MIN as i32,
-                origin: "".to_string(),
+                priority: i32::from(i8::MIN),
+                origin: String::new(),
                 spans: vec![create_test_span(11, 222, 333, start, true, tags_provider)],
                 tags: HashMap::new(),
                 dropped_trace: false,
             }],
             tags: HashMap::new(),
             env: "test-env".to_string(),
-            hostname: "".to_string(),
-            app_version: "".to_string(),
+            hostname: String::new(),
+            app_version: String::new(),
         };
 
         let received_payload =
