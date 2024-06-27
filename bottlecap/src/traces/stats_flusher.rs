@@ -24,6 +24,7 @@ pub trait StatsFlusher {
     async fn manual_flush(&self);
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
 pub struct ServerlessStatsFlusher {
     pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,

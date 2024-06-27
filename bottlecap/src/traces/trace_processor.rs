@@ -35,8 +35,8 @@ pub trait TraceProcessor {
         version: ApiVersion,
     ) -> http::Result<Response<Body>>;
 }
-#[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
+#[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
 }
@@ -97,8 +97,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 //     &config.env_type,
                 // );
                 chunk.spans.retain(|span| {
-                    (span.name != "dns.lookup" && span.resource != "0.0.0.0")
-                        || (span.name != "dns.lookup" && span.resource != "127.0.0.1")
+                    (span.resource != "127.0.0.1" || span.resource != "0.0.0.0")
+                        && span.name != "dns.lookup"
                 });
                 for span in &mut chunk.spans {
                     tags_provider.get_tags_map().iter().for_each(|(k, v)| {
@@ -160,10 +160,13 @@ mod tests {
     use datadog_trace_utils::{trace_utils, tracer_payload::TracerPayloadCollection};
 
     fn get_current_timestamp_nanos() -> i64 {
-        i64::try_from(SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()).expect("can't parse time")
+        i64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos(),
+        )
+        .expect("can't parse time")
     }
 
     fn create_test_config() -> Arc<Config> {

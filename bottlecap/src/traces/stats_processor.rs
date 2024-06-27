@@ -26,6 +26,7 @@ pub trait StatsProcessor {
 }
 
 #[derive(Clone, Copy)]
+#[allow(clippy::module_name_repetitions)]
 pub struct ServerlessStatsProcessor {}
 
 #[async_trait]

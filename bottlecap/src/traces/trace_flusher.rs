@@ -20,6 +20,7 @@ pub trait TraceFlusher {
 }
 
 #[derive(Clone)]
+#[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceFlusher {
     pub buffer: Arc<Mutex<Vec<SendData>>>,
 }

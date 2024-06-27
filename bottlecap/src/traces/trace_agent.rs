@@ -106,7 +106,8 @@ impl TraceAgent {
             async move { Ok::<_, Infallible>(service) }
         });
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], TRACE_AGENT_PORT as u16));
+        let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
+        let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let server_builder = Server::try_bind(&addr)?;
 
         let server = server_builder.serve(make_svc);
