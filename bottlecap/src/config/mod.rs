@@ -78,7 +78,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 
     let config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => {
-            println!("{{\"reason\":\"{field}\"}}");
+            println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{field}\"}}");
             ConfigError::UnsupportedField(field)
         }
         _ => ConfigError::ParseError(err.to_string()),
