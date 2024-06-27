@@ -201,7 +201,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             .unwrap_or_default();
         let mut batched_payloads = Vec::new();
         let mut sketch_payload = SketchPayload::new();
-        let mut count_bytes = 0u64;
+        let mut this_batch_size = 0u64;
         let base_tag_vec = self.tags_provider.get_tags_vec();
         for sketch in self
             .map
@@ -216,17 +216,17 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             let next_chunk_size = sketch.compute_size();
 
             if (sketch_payload.sketches.len() >= self.max_batch_entries_sketch_metric)
-                || (count_bytes + next_chunk_size >= self.max_batch_bytes_sketch_metric)
+                || (this_batch_size + next_chunk_size >= self.max_batch_bytes_sketch_metric)
             {
-                if count_bytes == 0 {
+                if this_batch_size == 0 {
                     warn!("Only one distribution exceeds max batch size, adding it anyway: {:?} with {}", sketch.metric, next_chunk_size);
                 } else {
                     batched_payloads.push(sketch_payload);
                     sketch_payload = SketchPayload::new();
-                    count_bytes = 0u64;
+                    this_batch_size = 0u64;
                 }
             }
-            count_bytes += next_chunk_size;
+            this_batch_size += next_chunk_size;
             sketch_payload.sketches.push(sketch);
         }
         if !sketch_payload.sketches.is_empty() {
@@ -237,7 +237,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
 
     #[must_use]
     pub fn to_series(&self) -> Series {
-        let mut series = Series {
+        let mut series_payload = Series {
             series: Vec::with_capacity(1_024),
         };
 
@@ -247,17 +247,17 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
                 MetricValue::Distribution(_) => None,
                 _ => build_metric(entry, self.tags_provider.get_tags_vec()),
             })
-            .for_each(|metric| series.series.push(metric));
-        series
+            .for_each(|metric| series_payload.series.push(metric));
+        series_payload
     }
 
     #[must_use]
     pub fn consume_metrics(&mut self) -> Vec<Series> {
         let mut batched_payloads = Vec::new();
-        let mut series = Series {
+        let mut series_payload = Series {
             series: Vec::with_capacity(1_024),
         };
-        let mut count_bytes = 0u64;
+        let mut this_batch_size = 0u64;
         for metric in self
             .map
             .extract_if(|entry| {
@@ -268,6 +268,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             })
             .filter_map(|entry| build_metric(&entry, self.tags_provider.get_tags_vec()))
         {
+            // TODO serialization is made twice for each point. If we return a Vec<u8> we can avoid that
             let serialized_metric_size = match serde_json::to_vec(&metric) {
                 Ok(serialized_metric) => serialized_metric.len() as u64,
                 Err(e) => {
@@ -277,26 +278,26 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             };
 
             if serialized_metric_size > 0 {
-                if (series.series.len() >= self.max_batch_entries_single_metric)
-                    || (count_bytes + serialized_metric_size >= self.max_batch_bytes_single_metric)
+                if (series_payload.series.len() >= self.max_batch_entries_single_metric)
+                    || (this_batch_size + serialized_metric_size >= self.max_batch_bytes_single_metric)
                 {
-                    if count_bytes == 0 {
+                    if this_batch_size == 0 {
                         warn!("Only one metric exceeds max batch size, adding it anyway: {:?} with {}", metric.metric, serialized_metric_size);
                     } else {
-                        batched_payloads.push(series);
-                        series = Series {
+                        batched_payloads.push(series_payload);
+                        series_payload = Series {
                             series: Vec::with_capacity(1_024),
                         };
-                        count_bytes = 0u64;
+                        this_batch_size = 0u64;
                     }
                 }
-                series.series.push(metric);
-                count_bytes += serialized_metric_size;
+                series_payload.series.push(metric);
+                this_batch_size += serialized_metric_size;
             }
         }
 
-        if !series.series.is_empty() {
-            batched_payloads.push(series);
+        if !series_payload.series.is_empty() {
+            batched_payloads.push(series_payload);
         }
         batched_payloads
     }
