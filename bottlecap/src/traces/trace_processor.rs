@@ -91,11 +91,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
             traces,
             &tracer_header_tags,
             |chunk, _root_span_index| {
-                // trace_utils::set_serverless_root_span_tags(
-                //     &mut chunk.spans[root_span_index],
-                //     config.function_name.clone(),
-                //     &config.env_type,
-                // );
                 chunk.spans.retain(|span| {
                     (span.resource != "127.0.0.1" || span.resource != "0.0.0.0")
                         && span.name != "dns.lookup"
