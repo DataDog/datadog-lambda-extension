@@ -13,7 +13,7 @@ use tracing::{error, info};
 
 use crate::config;
 use crate::tags::provider;
-use crate::traces::http_utils::log_and_create_http_response;
+use datadog_trace_mini_agent::http_utils::log_and_create_http_response;
 use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::SendData;

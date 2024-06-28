@@ -143,6 +143,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "datadog-protos",
+ "datadog-trace-mini-agent",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
  "datadog-trace-protobuf",
@@ -280,9 +281,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "datadog-trace-mini-agent"
+version = "0.4.2"
+source = "git+https://github.com/DataDog/libdatadog#15aa48dae5f53b853cee7ba0a0f4860a48d7970f"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "datadog-trace-normalization",
+ "datadog-trace-obfuscation",
+ "datadog-trace-protobuf",
+ "datadog-trace-utils",
+ "ddcommon",
+ "hyper 0.14.29",
+ "log",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "datadog-trace-normalization"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
+source = "git+https://github.com/DataDog/libdatadog#15aa48dae5f53b853cee7ba0a0f4860a48d7970f"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -291,7 +311,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
+source = "git+https://github.com/DataDog/libdatadog#15aa48dae5f53b853cee7ba0a0f4860a48d7970f"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -308,7 +328,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
+source = "git+https://github.com/DataDog/libdatadog#15aa48dae5f53b853cee7ba0a0f4860a48d7970f"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -318,7 +338,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
+source = "git+https://github.com/DataDog/libdatadog#15aa48dae5f53b853cee7ba0a0f4860a48d7970f"
 dependencies = [
  "anyhow",
  "bytes",
@@ -343,7 +363,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "10.0.0"
-source = "git+https://github.com/DataDog/libdatadog#2d7534d6fbd496793418df993b97b7ec076d647b"
+source = "git+https://github.com/DataDog/libdatadog#15aa48dae5f53b853cee7ba0a0f4860a48d7970f"
 dependencies = [
  "anyhow",
  "futures",

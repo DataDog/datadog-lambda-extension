@@ -15,7 +15,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::info;
 
 use crate::config;
-use crate::traces::http_utils::{self, log_and_create_http_response};
+use datadog_trace_mini_agent::http_utils::{self, log_and_create_http_response};
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
