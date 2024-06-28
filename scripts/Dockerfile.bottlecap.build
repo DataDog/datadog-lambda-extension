@@ -6,7 +6,6 @@ RUN yum install -y curl gcc gcc-c++ make unzip openssl openssl-devel
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
 RUN chmod +x /install-protoc.sh && /install-protoc.sh
-
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal --default-toolchain nightly-$PLATFORM-unknown-linux-gnu -y
 ENV PATH=/root/.cargo/bin:$PATH
@@ -17,7 +16,7 @@ COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
 COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 ENV RUSTFLAGS="-C panic=abort -Zlocation-detail=none"
 WORKDIR /tmp/dd/bottlecap
-RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +nightly build --release --target $PLATFORM-unknown-linux-gnu
+RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +nightly build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --release --target $PLATFORM-unknown-linux-gnu
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
 # zip the extension
