@@ -16,13 +16,10 @@ impl Flusher {
     }
 
     pub async fn flush(&mut self) {
-        let all_series;
-        let all_distributions;
-        {
-            let locked_aggr = &mut self.aggregator.lock().expect("lock poisoned");
-            all_series = locked_aggr.consume_metrics();
-            all_distributions = locked_aggr.consume_distributions();
-        }
+        let (all_series, all_distributions) = {
+            let mut aggregator = self.aggregator.lock().expect("lock poisoned");
+            (aggregator.consume_metrics(), aggregator.consume_distributions())
+        };
         for a_batch in all_series {
             debug!("flushing {} series to datadog", a_batch.series.len());
             match &self.dd_api.ship_series(&a_batch).await {
