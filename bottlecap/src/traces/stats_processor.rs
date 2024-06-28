@@ -5,8 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use hyper::{http, Body, Request, Response, StatusCode};
-use tracing::debug;
 use tokio::sync::mpsc::Sender;
+use tracing::debug;
 
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::stats_utils;

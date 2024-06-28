@@ -2,7 +2,6 @@ use crate::config::{AwsConfig, Config};
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
-use tracing::error;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde_json::Value;
@@ -11,6 +10,7 @@ use std::io::Error;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::debug;
+use tracing::error;
 
 pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Option<String> {
     if !config.api_key.is_empty() {
