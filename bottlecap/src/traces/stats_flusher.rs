@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use async_trait::async_trait;
-use log::{debug, error, info};
+use tracing::{debug, error, info};
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::{mpsc::Receiver, Mutex};

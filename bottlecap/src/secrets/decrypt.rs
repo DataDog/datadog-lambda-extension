@@ -2,7 +2,7 @@ use crate::config::{AwsConfig, Config};
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
-use log::error;
+use tracing::error;
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde_json::Value;

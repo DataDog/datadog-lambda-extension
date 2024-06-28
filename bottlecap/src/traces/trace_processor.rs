@@ -12,7 +12,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hyper::{http, Body, Request, Response, StatusCode};
 use tokio::sync::mpsc::Sender;
-use tracing::info;
+use tracing::debug;
 
 use crate::config;
 use datadog_trace_mini_agent::http_utils::{self, log_and_create_http_response};
@@ -51,7 +51,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
     ) -> http::Result<Response<Body>> {
-        info!("Recieved traces to process");
+        debug!("Recieved traces to process");
         let (parts, body) = req.into_parts();
 
         if let Some(response) = http_utils::verify_request_content_length(
