@@ -10,22 +10,6 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use decrypt::resolve_secrets;
-use std::{
-    collections::hash_map,
-    collections::HashMap,
-    env,
-    io::Error,
-    io::Result,
-    os::unix::process::CommandExt,
-    path::Path,
-    process::Command,
-    sync::{Arc, Mutex},
-};
-use telemetry::listener::TelemetryListenerConfig;
-use tracing::{debug, error, info};
-use tracing_subscriber::EnvFilter;
-
 use bottlecap::{
     base_url,
     config::{self, AwsConfig, Config},
@@ -53,10 +37,33 @@ use bottlecap::{
         events::{Status, TelemetryRecord},
         listener::TelemetryListener,
     },
+    traces::{
+        stats_flusher::{self, StatsFlusher},
+        stats_processor, trace_agent,
+        trace_flusher::{self, TraceFlusher},
+        trace_processor,
+    },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
+use datadog_trace_obfuscation::obfuscation_config;
+use decrypt::resolve_secrets;
+use std::{
+    collections::hash_map,
+    collections::HashMap,
+    env,
+    io::Error,
+    io::Result,
+    os::unix::process::CommandExt,
+    path::Path,
+    process::Command,
+    sync::{Arc, Mutex},
+};
+use telemetry::listener::TelemetryListenerConfig;
+use tokio::sync::Mutex as TokioMutex;
+use tracing::{debug, error, info};
+use tracing_subscriber::EnvFilter;
 
 use reqwest::Client;
 use serde::Deserialize;
@@ -261,6 +268,40 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
         config.site.clone(),
     );
+
+    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
+        buffer: Arc::new(TokioMutex::new(Vec::new())),
+    });
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+        obfuscation_config: Arc::new(
+            obfuscation_config::ObfuscationConfig::new()
+                .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
+        ),
+    });
+
+    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
+        buffer: Arc::new(TokioMutex::new(Vec::new())),
+        config: Arc::clone(config),
+    });
+    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
+
+    let trace_flusher_clone = trace_flusher.clone();
+    let stats_flusher_clone = stats_flusher.clone();
+
+    let trace_agent = Box::new(trace_agent::TraceAgent {
+        config: Arc::clone(config),
+        trace_processor,
+        trace_flusher: trace_flusher_clone,
+        stats_processor,
+        stats_flusher: stats_flusher_clone,
+        tags_provider,
+    });
+    tokio::spawn(async move {
+        let res = trace_agent.start_trace_agent().await;
+        if let Err(e) = res {
+            error!("Error starting trace agent: {e:?}");
+        }
+    });
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
     let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
@@ -364,7 +405,12 @@ async fn extension_loop_active(
                                 // pass the invocation deadline to
                                 // flush tasks here, so they can
                                 // retry if we have more time
-                                tokio::join!(logs_flusher.flush(), metrics_flusher.flush());
+                                tokio::join!(
+                                    logs_flusher.flush(),
+                                    metrics_flusher.flush(),
+                                    trace_flusher.manual_flush(),
+                                    stats_flusher.manual_flush()
+                                );
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -410,7 +456,12 @@ async fn extension_loop_active(
         if shutdown {
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            tokio::join!(logs_flusher.flush(), metrics_flusher.flush());
+            tokio::join!(
+                logs_flusher.flush(),
+                metrics_flusher.flush(),
+                trace_flusher.manual_flush(),
+                stats_flusher.manual_flush()
+            );
             return Ok(());
         }
     }

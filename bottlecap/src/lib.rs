@@ -27,6 +27,7 @@ pub mod metrics;
 pub mod secrets;
 pub mod tags;
 pub mod telemetry;
+pub mod traces;
 
 use std::{env, io};
 

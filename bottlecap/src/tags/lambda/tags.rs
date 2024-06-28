@@ -155,6 +155,11 @@ impl Lambda {
     pub fn get_function_arn(&self) -> Option<&String> {
         self.tags_map.get(FUNCTION_ARN_KEY)
     }
+
+    #[must_use]
+    pub fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
+        &self.tags_map
+    }
 }
 
 #[cfg(test)]
