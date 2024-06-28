@@ -17,6 +17,7 @@ use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRul
 #[derive(Debug, PartialEq, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     pub site: String,
     pub api_key: String,
@@ -33,6 +34,13 @@ pub struct Config {
     pub apm_enabled: bool,
     pub lambda_handler: String,
     pub serverless_flush_strategy: FlushStrategy,
+    pub trace_enabled: bool,
+    pub serverless_trace_enabled: bool,
+    pub capture_lambda_payload: bool,
+    // Deprecated or ignored, just here so we don't failover
+    pub flush_to_log: bool,
+    pub logs_injection: bool,
+    pub merge_xray_traces: bool,
 }
 
 impl Default for Config {
@@ -57,6 +65,12 @@ impl Default for Config {
             // APM
             apm_enabled: false,
             lambda_handler: String::default(),
+            serverless_trace_enabled: true,
+            trace_enabled: true,
+            capture_lambda_payload: false,
+            flush_to_log: false,
+            logs_injection: false,
+            merge_xray_traces: false,
         }
     }
 }
