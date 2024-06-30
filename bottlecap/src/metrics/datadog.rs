@@ -1,16 +1,18 @@
 //!Types to serialize data into the Datadog API
 
+use datadog_protos::metrics::SketchPayload;
+use protobuf::Message;
+use reqwest;
 use serde::{Serialize, Serializer};
 use serde_json;
-use tracing::error;
-use ureq;
+use tracing::{debug, error};
 
-/// Interface for the DogStatsD metrics intake API.
+/// Interface for the `DogStatsD` metrics intake API.
 #[derive(Debug)]
 pub struct DdApi {
     api_key: String,
     site: String,
-    ureq_agent: ureq::Agent,
+    client: reqwest::Client,
 }
 /// Error relating to `ship`
 #[derive(thiserror::Error, Debug)]
@@ -30,33 +32,77 @@ pub enum ShipError {
 }
 
 impl DdApi {
+    #[must_use]
     pub fn new(api_key: String, site: String) -> Self {
         DdApi {
             api_key,
             site,
-            ureq_agent: ureq::AgentBuilder::new().build(),
+            client: reqwest::Client::new(),
         }
     }
 
     /// Ship a serialized series to the API, blocking
-    pub fn ship(&self, series: &Series) -> Result<(), ShipError> {
-        // call inner_ship onto the runtime
+    pub async fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
         let body = serde_json::to_vec(&series)?;
-        log::info!("sending body: {:?}", &series);
+        debug!("sending body: {:?}", &series);
 
         let url = format!("https://api.{}/api/v2/series", &self.site);
-        let resp: Result<ureq::Response, ureq::Error> = self
-            .ureq_agent
+        let resp = self
+            .client
             .post(&url)
-            .set("DD-API-KEY", &self.api_key)
-            .set("Content-Type", "application/json")
-            .send_bytes(body.as_slice());
+            .header("DD-API-KEY", &self.api_key)
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await;
+
         match resp {
-            Ok(_resp) => Ok(()),
-            Err(ureq::Error::Status(code, response)) => Err(ShipError::Failure {
-                status: code,
-                body: response.into_string().unwrap(),
+            Ok(resp) => match resp.status() {
+                reqwest::StatusCode::ACCEPTED => Ok(()),
+                _ => Err(ShipError::Failure {
+                    status: resp.status().as_u16(),
+                    body: resp.text().await.unwrap_or_default(),
+                }),
+            },
+            Err(e) => Err(ShipError::Failure {
+                status: 500,
+                body: e.to_string(),
             }),
+        }
+    }
+
+    pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
+        let url = format!("https://api.{}/api/beta/sketches", &self.site);
+        let mut buf = Vec::new();
+        log::info!("sending distributions: {:?}", &sketches);
+        // TODO maybe go to coded output stream if we incrementally
+        // add sketch payloads to the buffer
+        // something like this, but fix the utf-8 encoding issue
+        // {
+        //     let mut output_stream = CodedOutputStream::vec(&mut buf);
+        //     let _ = output_stream.write_tag(1, protobuf::rt::WireType::LengthDelimited);
+        //     let _ = output_stream.write_message_no_tag(&sketches);
+        //     TODO not working, has utf-8 encoding issue in dist-intake
+        //}
+        sketches
+            .write_to_vec(&mut buf)
+            .expect("can't write to buffer");
+        let resp = self
+            .client
+            .post(&url)
+            .header("DD-API-KEY", &self.api_key)
+            .header("Content-Type", "application/x-protobuf")
+            .body(buf)
+            .send()
+            .await;
+        match resp {
+            Ok(resp) => match resp.status() {
+                reqwest::StatusCode::ACCEPTED => Ok(()),
+                _ => Err(ShipError::Failure {
+                    status: resp.status().as_u16(),
+                    body: resp.text().await.unwrap_or_default(),
+                }),
+            },
             Err(e) => Err(ShipError::Failure {
                 status: 500,
                 body: e.to_string(),
@@ -91,8 +137,6 @@ pub(crate) enum DdMetricKind {
     Count,
     /// An instantaneous value
     Gauge,
-    /// A distribution of values
-    Distribution,
 }
 
 impl Serialize for DdMetricKind {
@@ -103,7 +147,6 @@ impl Serialize for DdMetricKind {
         match *self {
             DdMetricKind::Count => serializer.serialize_u32(0),
             DdMetricKind::Gauge => serializer.serialize_u32(1),
-            DdMetricKind::Distribution => serializer.serialize_u32(2),
         }
     }
 }

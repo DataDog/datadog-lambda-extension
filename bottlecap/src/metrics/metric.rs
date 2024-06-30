@@ -13,6 +13,7 @@ pub enum Type {
     /// Dogstatsd 'distribution' metric type, histogram
     Distribution,
 }
+
 /// Representation of a dogstatsd Metric
 ///
 /// For now this implementation covers only counters and gauges. We hope this is
@@ -21,7 +22,7 @@ pub enum Type {
 pub struct Metric {
     /// Name of the metric.
     ///
-    /// Never more bytes than constants::MAX_METRIC_NAME_BYTES,
+    /// Never more bytes than `constants::MAX_METRIC_NAME_BYTES`,
     /// enforced by construction. Note utf8 issues.
     pub(crate) name: Ustr,
     /// What kind/type of metric this is.
@@ -35,12 +36,12 @@ pub struct Metric {
     /// Parsing of the values to an integer type is deferred until the last
     /// moment.
     ///
-    /// Never longer than constants::MAX_VALUE_BYTES. Note utf8 issues.
+    /// Never longer than `constants::MAX_VALUE_BYTES`. Note utf8 issues.
     values: Ustr,
     /// Tags of the metric.
     ///
-    /// The key is never longer than constants::MAX_TAG_KEY_BYTES, the value
-    /// never more than constants::MAX_TAG_VALUE_BYTES. These are enforced by
+    /// The key is never longer than `constants::MAX_TAG_KEY_BYTES`, the value
+    /// never more than `constants::MAX_TAG_VALUE_BYTES`. These are enforced by
     /// the parser. We assume here that tags are not sent in random order by the
     /// clien or that, if they are, the API will tidy that up. That is `a:1,b:2`
     /// is a different tagset from `b:2,a:1`.
@@ -48,10 +49,19 @@ pub struct Metric {
 }
 
 impl Metric {
+    #[must_use]
+    pub fn new(name: Ustr, kind: Type, values: Ustr, tags: Option<Ustr>) -> Self {
+        Self {
+            name,
+            kind,
+            values,
+            tags,
+        }
+    }
     /// Parse a metric from given input.
     ///
     /// This function parses a passed `&str` into a `Metric`. We assume that
-    /// DogStatsD metrics must be utf8 and are not ascii or some other encoding.
+    /// `DogStatsD` metrics must be utf8 and are not ascii or some other encoding.
     ///
     /// # Errors
     ///
@@ -134,9 +144,8 @@ impl Metric {
     pub(crate) fn tags(&self) -> Vec<String> {
         self.tags
             .unwrap_or_default()
-            .to_string()
             .split(',')
-            .map(|tag| tag.to_string())
+            .map(std::string::ToString::to_string)
             .collect()
     }
 
@@ -195,7 +204,7 @@ pub fn id(name: Ustr, tagset: Option<Ustr>) -> u64 {
     }
     hasher.finish()
 }
-// <METRIC_NAME>:<VALUE>:<VALUE>:<VALUE>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_KEY_2>:<TAG_VALUE_2>|c:<CONTAINER_ID>
+// <METRIC_NAME>:<VALUE>:<VALUE>:<VALUE>|<TYPE>|@<SAMPLE_RATE>|#<TAG_KEY_1>:<TAG_VALUE_1>,<TAG_KEY_2>:<TAG_VALUE_2>|T<METRIC_TIMESTAMP>|c:<CONTAINER_ID>
 //
 // Types:
 //  * c -- COUNT, allows packed values, summed
@@ -284,7 +293,7 @@ mod tests {
         ) {
             // If there is a ':' in the values we cannot distinguish where the
             // name and the first value are.
-            let value = values.split(":").next().unwrap();
+            let value = values.split(':').next().unwrap();
             let input = if let Some(ref tagset) = tagset {
                 format!("{name}{value}|{mtype}|#{tagset}")
             } else {
@@ -332,16 +341,16 @@ mod tests {
 
             for (k,v) in &tags {
                 tagset1.push_str(k);
-                tagset1.push_str(":");
+                tagset1.push(':');
                 tagset1.push_str(v);
-                tagset1.push_str(",");
+                tagset1.push(',');
             }
             tags.reverse();
             for (k,v) in &tags {
                 tagset2.push_str(k);
-                tagset2.push_str(":");
+                tagset2.push(':');
                 tagset2.push_str(v);
-                tagset2.push_str(",");
+                tagset2.push(',');
             }
             if !tags.is_empty() {
                 tagset1.pop();

@@ -1,4 +1,4 @@
-use crate::config::FlushStrategy;
+use crate::config::flush_strategy::FlushStrategy;
 use crate::lifecycle::invocation_times::InvocationTimes;
 use ::std::time;
 use tracing::debug;
@@ -24,6 +24,7 @@ pub struct FlushControl {
 //  3. End strategy
 //      - Always flush at the end of the invocation
 impl FlushControl {
+    #[must_use]
     pub fn new(flush_strategy: FlushStrategy) -> FlushControl {
         FlushControl {
             flush_strategy,
@@ -74,33 +75,35 @@ impl FlushControl {
 
 #[cfg(test)]
 mod tests {
-    use crate::config::{self, FlushStrategy};
+    use super::*;
+    use crate::config::flush_strategy::PeriodicStrategy;
+
     #[test]
     fn should_flush_default_end() {
         let mut flush_control = super::FlushControl::new(FlushStrategy::Default);
-        assert_eq!(flush_control.should_flush(), true);
+        assert!(flush_control.should_flush());
     }
     #[test]
     fn should_flush_default_periodic() {
         const LOOKBACK_COUNT: usize = 20;
         let mut flush_control = super::FlushControl::new(FlushStrategy::Default);
         for _ in 0..LOOKBACK_COUNT - 1 {
-            assert_eq!(flush_control.should_flush(), true);
+            assert!(flush_control.should_flush());
         }
-        assert_eq!(flush_control.should_flush(), false);
+        assert!(!flush_control.should_flush());
     }
     #[test]
     fn should_flush_end() {
         let mut flush_control = super::FlushControl::new(FlushStrategy::End);
-        assert_eq!(flush_control.should_flush(), true);
+        assert!(flush_control.should_flush());
     }
     #[test]
     fn should_flush_periodically() {
         let mut flush_control =
-            super::FlushControl::new(FlushStrategy::Periodically(config::PeriodicStrategy {
+            super::FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
                 interval: 1,
             }));
-        assert_eq!(flush_control.should_flush(), true);
-        assert_eq!(flush_control.should_flush(), false);
+        assert!(flush_control.should_flush());
+        assert!(!flush_control.should_flush());
     }
 }

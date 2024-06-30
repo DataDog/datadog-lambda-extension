@@ -1,332 +1,220 @@
-use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc::Sender;
 
-use serde::Serialize;
+use tracing::debug;
 
-use crate::config;
-use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
+use crate::config::processing_rule;
+use crate::events::Event;
+use crate::tags;
+use crate::telemetry::events::TelemetryEvent;
+use crate::{config, LAMBDA_RUNTIME_SLUG};
 
-const LOGS_SOURCE: &str = "lambda";
+use crate::logs::aggregator::Aggregator;
+use crate::logs::lambda::processor::LambdaProcessor;
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct Lambda {
-    pub arn: String,
-    pub request_id: String,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct LambdaMessage {
-    pub message: String,
-    pub lambda: Lambda,
-    pub timestamp: i64,
-    pub status: String,
-}
-
-#[derive(Serialize, Debug, Clone, PartialEq)]
-pub struct IntakeLog {
-    pub message: LambdaMessage,
-    pub hostname: String,
-    pub service: String,
-    #[serde(rename(serialize = "ddtags"))]
-    pub tags: String,
-    #[serde(rename(serialize = "ddsource"))]
-    pub source: String,
-}
-
-#[derive(Clone)]
-pub struct Processor {
-    function_arn: String,
-    datadog_config: Arc<config::Config>,
-}
-
-impl Processor {
-    pub fn new(function_arn: String, datadog_config: Arc<config::Config>) -> Processor {
-        Processor {
-            function_arn,
-            datadog_config,
+impl LogsProcessor {
+    #[must_use]
+    pub fn new(
+        config: Arc<config::Config>,
+        tags_provider: Arc<tags::provider::Provider>,
+        event_bus: Sender<Event>,
+        runtime: String,
+    ) -> Self {
+        match runtime.as_str() {
+            LAMBDA_RUNTIME_SLUG => {
+                let lambda_processor = LambdaProcessor::new(tags_provider, config, event_bus);
+                LogsProcessor::Lambda(lambda_processor)
+            }
+            _ => panic!("Unsupported runtime: {runtime}"),
         }
     }
 
-    pub fn process(&self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
-        let service = self.datadog_config.service.clone().unwrap_or_default();
-        let tags = self.datadog_config.tags.clone().unwrap_or_default();
-        let mut log = IntakeLog {
-            hostname: self.function_arn.clone(),
-            source: LOGS_SOURCE.to_string(),
-            service,
-            tags,
-            message: LambdaMessage {
-                message: "placeholder-message".to_string(),
-                lambda: Lambda {
-                    arn: self.function_arn.clone(),
-                    request_id: "placeholder-request-id".to_string(), // TODO: replace with incoming request id
-                },
-                timestamp: event.time.timestamp_millis(),
-                // Default status
-                status: "info".to_string(),
-            },
-        };
-        match event.record {
-            TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
-                log.message.status = "info".to_string();
-                log.message.message = v;
-
-                Ok(log)
+    pub async fn process(
+        &mut self,
+        events: Vec<TelemetryEvent>,
+        aggregator: &Arc<Mutex<Aggregator>>,
+    ) {
+        match self {
+            LogsProcessor::Lambda(lambda_processor) => {
+                lambda_processor.process(events, aggregator).await;
             }
-            TelemetryRecord::PlatformInitStart {
-                runtime_version,
-                runtime_version_arn,
-                .. // TODO: check if we could do something with this metrics: `initialization_type` and `phase`
-            } => {
-                let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
-                let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
-                log.message.message = format!("INIT_START Runtime Version: {} Runtime Version ARN: {}", rv, rv_arn);
+        }
+    }
+}
 
-                Ok(log)
-            },
-            TelemetryRecord::PlatformStart {
-                request_id,
-                version,
-            } => {
-                let version = version.unwrap_or("$LATEST".to_string());
-                log.message.message =
-                    format!("START RequestId: {} Version: {}", request_id, version);
-                log.message.lambda.request_id = request_id;
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone, Debug)]
+pub enum LogsProcessor {
+    Lambda(LambdaProcessor),
+}
 
-                Ok(log)
-            },
-            TelemetryRecord::PlatformRuntimeDone { request_id , .. } => {  // TODO: check what to do with rest of the fields
-                log.message.message = format!("END RequestId: {}", request_id);
-                log.message.lambda.request_id = request_id;
-                Ok(log)
-            },
-            TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
-                let mut message = format!(
-                    "REPORT RequestId: {} Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
-                    request_id,
-                    metrics.duration_ms,
-                    metrics.billed_duration_ms,
-                    metrics.memory_size_mb,
-                    metrics.max_memory_used_mb,
-                );
+#[derive(Clone, Debug)]
+pub struct Rule {
+    pub kind: processing_rule::Kind,
+    pub regex: regex::Regex,
+    pub placeholder: String,
+}
 
-                let init_duration_ms = metrics.init_duration_ms;
-                if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{} Init Duration: {} ms", message, init_duration_ms)
+pub trait Processor<L> {
+    fn apply_rules(rules: &Option<Vec<Rule>>, message: &mut String) -> bool {
+        match &rules {
+            // No need to apply if there are no rules
+            None => true,
+            Some(rules) => {
+                // If rules are empty, we don't need to apply them
+                if rules.is_empty() {
+                    return true;
                 }
 
-                log.message.message = message;
-                log.message.lambda.request_id = request_id;
+                // Process rules
+                for rule in rules {
+                    match rule.kind {
+                        processing_rule::Kind::ExcludeAtMatch => {
+                            if rule.regex.is_match(message) {
+                                return false;
+                            }
+                        }
+                        processing_rule::Kind::IncludeAtMatch => {
+                            if !rule.regex.is_match(message) {
+                                return false;
+                            }
+                        }
+                        processing_rule::Kind::MaskSequences => {
+                            *message = rule
+                                .regex
+                                .replace_all(message, rule.placeholder.as_str())
+                                .to_string();
+                        }
+                    }
+                }
+                true
+            }
+        }
+    }
 
-                Ok(log)
-            },
-            // TODO: PlatformInitRuntimeDone
-            // TODO: PlatformInitReport
-            // TODO: PlatformExtension
-            // TODO: PlatformTelemetrySubscription
-            // TODO: PlatformLogsDropped
-            _ => Err("Unsupported event type".into()),
+    fn compile_rules(
+        rules: &Option<Vec<config::processing_rule::ProcessingRule>>,
+    ) -> Option<Vec<Rule>> {
+        match rules {
+            None => None,
+            Some(rules) => {
+                if rules.is_empty() {
+                    return None;
+                }
+                let mut compiled_rules = Vec::new();
+
+                for rule in rules {
+                    match regex::Regex::new(&rule.pattern) {
+                        Ok(regex) => {
+                            let placeholder = rule.replace_placeholder.clone().unwrap_or_default();
+                            compiled_rules.push(Rule {
+                                kind: rule.kind,
+                                regex,
+                                placeholder,
+                            });
+                        }
+                        Err(e) => {
+                            debug!("Failed to compile rule: {}", e);
+                        }
+                    }
+                }
+
+                Some(compiled_rules)
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::telemetry::events::{
-        InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
-    };
-
     use super::*;
 
-    use chrono::{TimeZone, Utc};
+    struct TestProcessor;
+    impl Processor<String> for TestProcessor {}
 
-    macro_rules! process_tests {
-        ($($name:ident: $value:expr,)*) => {
-            $(
-                #[test]
-                fn $name() {
-                    let (input, expected): (&TelemetryEvent, IntakeLog) = $value;
+    #[test]
+    fn test_apply_rules_mask_sequences() {
+        let rules = vec![Rule {
+            kind: processing_rule::Kind::MaskSequences,
+            regex: regex::Regex::new("replace-me").unwrap(),
+            placeholder: "test-placeholder".to_string(),
+        }];
+        let mut message = "do-not-replace replace-me".to_string();
 
-                    let processor = Processor::new(
-                        "arn".to_string(),
-                        Arc::new(config::Config {
-                            service: Some("test-service".to_string()),
-                            tags: Some("test:tag,env:test".to_string()),
-                            ..config::Config::default()})
-                    );
-                    let result = processor.process(input.clone()).unwrap();
-
-                    assert_eq!(result, expected);
-                }
-            )*
-        }
+        let should_include = TestProcessor::apply_rules(&Some(rules), &mut message);
+        assert!(should_include);
+        assert_eq!(message, "do-not-replace test-placeholder");
     }
 
-    process_tests! {
-        // function
-        function: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::Function("test-function".to_string())
-            },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
-                    message: "test-function".to_string(),
-                    lambda: Lambda {
-                        arn: "arn".to_string(),
-                        request_id: "placeholder-request-id".to_string(),
-                    },
-                    timestamp: 1673061827000,
-                    status: "info".to_string(),
-                },
-            }
-        ),
+    #[test]
+    fn test_apply_rules_exclude_at_match() {
+        let rules = vec![Rule {
+            kind: processing_rule::Kind::ExcludeAtMatch,
+            regex: regex::Regex::new("exclude-me").unwrap(),
+            placeholder: "test-placeholder".to_string(),
+        }];
+        let mut message = "exclude-me".to_string();
 
-        // extension
-        extension: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::Extension("test-extension".to_string())
-            },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
-                    message: "test-extension".to_string(),
-                    lambda: Lambda {
-                        arn: "arn".to_string(),
-                        request_id: "placeholder-request-id".to_string(),
-                    },
-                    timestamp: 1673061827000,
-                    status: "info".to_string(),
-                },
-            }
-        ),
+        let should_include = TestProcessor::apply_rules(&Some(rules), &mut message);
+        assert!(!should_include);
+    }
 
-        // platform init start
-        platform_init_start: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformInitStart {
-                    runtime_version: Some("test-runtime-version".to_string()),
-                    runtime_version_arn: Some("test-runtime-version-arn".to_string()),
-                    initialization_type: InitType::OnDemand,
-                    phase: InitPhase::Init,
-                }
-            },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
-                    message: "INIT_START Runtime Version: test-runtime-version Runtime Version ARN: test-runtime-version-arn".to_string(),
-                    lambda: Lambda {
-                        arn: "arn".to_string(),
-                        request_id: "placeholder-request-id".to_string(),
-                    },
-                    timestamp: 1673061827000,
-                    status: "info".to_string(),
-                },
-            }
-        ),
+    #[test]
+    fn test_apply_rules_include_at_match() {
+        let rules = Some(vec![Rule {
+            kind: processing_rule::Kind::IncludeAtMatch,
+            regex: regex::Regex::new("include-me").unwrap(),
+            placeholder: "test-placeholder".to_string(),
+        }]);
 
-        // platform start
-        platform_start: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformStart {
-                    request_id: "test-request-id".to_string(),
-                    version: Some("test-version".to_string()),
-                }
-            },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
-                    message: "START RequestId: test-request-id Version: test-version".to_string(),
-                    lambda: Lambda {
-                        arn: "arn".to_string(),
-                        request_id: "test-request-id".to_string(),
-                    },
-                    timestamp: 1673061827000,
-                    status: "info".to_string(),
-                },
-            }
-        ),
+        let mut message = "include-me".to_string();
+        let should_include = TestProcessor::apply_rules(&rules, &mut message);
+        assert!(should_include);
 
-        // platform runtime done
-        platform_runtime_done: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformRuntimeDone {
-                    request_id: "test-request-id".to_string(),
-                    status: Status::Success,
-                    error_type: None,
-                    metrics: Some(RuntimeDoneMetrics {
-                        duration_ms: 100.0,
-                        produced_bytes: Some(42)
-                    })
-                }
-            },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
-                    message: "END RequestId: test-request-id".to_string(),
-                    lambda: Lambda {
-                        arn: "arn".to_string(),
-                        request_id: "test-request-id".to_string(),
-                    },
-                    timestamp: 1673061827000,
-                    status: "info".to_string(),
-                },
-            }
-        ),
+        let mut message = "do-not-include-me".to_string();
+        let should_include = TestProcessor::apply_rules(&rules, &mut message);
+        assert!(should_include);
+    }
 
-        // platform report
-        platform_report: (
-            &TelemetryEvent {
-                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-                record: TelemetryRecord::PlatformReport {
-                    error_type: None,
-                    status: Status::Success,
-                    request_id: "test-request-id".to_string(),
-                    metrics: ReportMetrics {
-                        duration_ms: 100.0,
-                        billed_duration_ms: 128,
-                        memory_size_mb: 256,
-                        max_memory_used_mb: 64,
-                        init_duration_ms: Some(50.0),
-                        restore_duration_ms: None
-                    }
-                }
-            },
-            IntakeLog {
-                hostname: "arn".to_string(),
-                source: "lambda".to_string(),
-                service: "test-service".to_string(),
-                tags: "test:tag,env:test".to_string(),
-                message: LambdaMessage {
-                    message: "REPORT RequestId: test-request-id Duration: 100 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
-                    lambda: Lambda {
-                        arn: "arn".to_string(),
-                        request_id: "test-request-id".to_string(),
-                    },
-                    timestamp: 1673061827000,
-                    status: "info".to_string(),
-                },
-            }
-        ),
+    #[test]
+    fn test_compile_rules() {
+        let rules = vec![processing_rule::ProcessingRule {
+            kind: processing_rule::Kind::MaskSequences,
+            name: "test".to_string(),
+            pattern: "test-pattern".to_string(),
+            replace_placeholder: Some("test-placeholder".to_string()),
+        }];
+
+        let compiled_rules = TestProcessor::compile_rules(&Some(rules));
+        assert!(compiled_rules.is_some());
+        assert_eq!(compiled_rules.unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_compile_rules_empty() {
+        let rules = vec![];
+
+        let compiled_rules = TestProcessor::compile_rules(&Some(rules));
+        assert!(compiled_rules.is_none());
+    }
+
+    #[test]
+    fn test_compile_rules_none() {
+        let compiled_rules = TestProcessor::compile_rules(&None);
+        assert!(compiled_rules.is_none());
+    }
+
+    #[test]
+    fn test_compile_rules_invalid_regex() {
+        let rules = vec![processing_rule::ProcessingRule {
+            kind: processing_rule::Kind::MaskSequences,
+            name: "test".to_string(),
+            pattern: "(".to_string(),
+            replace_placeholder: Some("test-placeholder".to_string()),
+        }];
+
+        let compiled_rules = TestProcessor::compile_rules(&Some(rules));
+        assert!(compiled_rules.is_some());
+        assert_eq!(compiled_rules.unwrap().len(), 0);
     }
 }

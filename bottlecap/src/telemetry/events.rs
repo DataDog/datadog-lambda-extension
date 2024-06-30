@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 /// Payload received from the Telemetry API
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -12,15 +13,15 @@ pub struct TelemetryEvent {
     pub record: TelemetryRecord,
 }
 
-/// Record in a LambdaTelemetry entry
+/// Record in a `LambdaTelemetry` entry
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "record", rename_all = "lowercase")]
 pub enum TelemetryRecord {
     /// Function log records
-    Function(String),
+    Function(Value),
 
     /// Extension log records
-    Extension(String),
+    Extension(Value),
 
     /// Platform init start record
     #[serde(rename = "platform.initStart", rename_all = "camelCase")]
@@ -44,7 +45,7 @@ pub enum TelemetryRecord {
         phase: Option<InitPhase>,
         /// Status of initalization
         status: Status,
-        /// When the status = failure, the error_type describes what kind of error occurred
+        /// When the status = failure, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
     },
 
@@ -74,7 +75,7 @@ pub enum TelemetryRecord {
         request_id: String,
         /// Status of the invocation
         status: Status,
-        /// When unsuccessful, the error_type describes what kind of error occurred
+        /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
         /// Metrics corresponding to the runtime
         metrics: Option<RuntimeDoneMetrics>,
@@ -87,7 +88,7 @@ pub enum TelemetryRecord {
         request_id: String,
         /// Status of the invocation
         status: Status,
-        /// When unsuccessful, the error_type describes what kind of error occurred
+        /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
         metrics: ReportMetrics,
     },
@@ -127,19 +128,19 @@ pub enum TelemetryRecord {
 }
 
 /// Type of Initialization
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum InitType {
     /// Initialised on demand
     OnDemand,
     /// Initialized to meet the provisioned concurrency
     ProvisionedConcurrency,
-    /// SnapStart
+    /// `SnapStart`
     SnapStart,
 }
 
 /// Phase in which initialization occurs
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum InitPhase {
     /// Initialization phase
@@ -149,7 +150,7 @@ pub enum InitPhase {
 }
 
 /// Status of invocation/initialization
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
     Success,
@@ -159,7 +160,7 @@ pub enum Status {
 }
 
 ///Init report metrics
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InitReportMetrics {
     /// Duration of initialization
@@ -167,20 +168,21 @@ pub struct InitReportMetrics {
 }
 
 /// Runtime done metrics
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeDoneMetrics {
-    /// Duration in milliseconds
+    /// Runtime duration in milliseconds
     pub duration_ms: f64,
     /// Number of bytes produced as a result of the invocation
     pub produced_bytes: Option<u64>,
 }
 
 /// Report metrics
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportMetrics {
-    /// Duration in milliseconds
+    /// Total duration in milliseconds, includes Extension
+    /// and Lambda execution time.
     pub duration_ms: f64,
     /// Billed duration in milliseconds
     pub billed_duration_ms: u64,
@@ -218,13 +220,20 @@ mod tests {
         // function
         function: (
             r#"{"time": "2024-04-24T12:34:56.789Z","type": "function", "record": "datadog <3 serverless"}"#,
-            TelemetryRecord::Function("datadog <3 serverless".to_string()),
+            TelemetryRecord::Function(Value::String("datadog <3 serverless".to_string())),
+        ),
+
+        function_with_json: (
+            r#"{"time": "2024-04-24T12:34:56.789Z","type": "function", "record": {"hello": "world"}}"#,
+            TelemetryRecord::Function(Value::Object(
+                serde_json::from_str(r#"{"hello": "world"}"#).unwrap()
+            )),
         ),
 
         // extension
         extension: (
             r#"{"time": "2024-04-24T12:34:56.789Z","type": "extension", "record": "datadog <3 serverless"}"#,
-            TelemetryRecord::Extension("datadog <3 serverless".to_string()),
+            TelemetryRecord::Extension(Value::String("datadog <3 serverless".to_string())),
         ),
 
         // platform.initStart

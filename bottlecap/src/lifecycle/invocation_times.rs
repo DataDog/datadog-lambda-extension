@@ -1,28 +1,28 @@
 const LOOKBACK_COUNT: usize = 20;
 const ONE_TWENTY_SECONDS: f64 = 120.0;
 
-pub struct InvocationTimes {
+pub(crate) struct InvocationTimes {
     times: [u64; LOOKBACK_COUNT],
     head: usize,
 }
 
 impl InvocationTimes {
-    pub fn new() -> InvocationTimes {
+    pub(crate) fn new() -> InvocationTimes {
         InvocationTimes {
             times: [0; LOOKBACK_COUNT],
             head: 0,
         }
     }
 
-    pub fn add(&mut self, timestamp: u64) {
+    pub(crate) fn add(&mut self, timestamp: u64) {
         self.times[self.head] = timestamp;
         self.head = (self.head + 1) % LOOKBACK_COUNT;
     }
 
-    pub fn should_adapt_to_periodic(&self, now: u64) -> bool {
+    pub(crate) fn should_adapt_to_periodic(&self, now: u64) -> bool {
         let mut count = 0;
         let mut last = 0;
-        for time in self.times.iter() {
+        for time in &self.times {
             if *time != 0 {
                 count += 1;
                 last = *time;
@@ -58,31 +58,31 @@ mod tests {
         invocation_times.add(timestamp);
         assert_eq!(invocation_times.times[0], timestamp);
         assert_eq!(invocation_times.head, 1);
-        assert_eq!(invocation_times.should_adapt_to_periodic(1), false);
+        assert!(!invocation_times.should_adapt_to_periodic(1));
     }
 
     #[test]
     fn insertion_with_full_buffer_fast_invokes() {
         let mut invocation_times = invocation_times::InvocationTimes::new();
-        for i in 0..invocation_times::LOOKBACK_COUNT + 1 {
+        for i in 0..=invocation_times::LOOKBACK_COUNT {
             invocation_times.add(i as u64);
         }
         // should wrap around
         assert_eq!(invocation_times.times[0], 20);
         assert_eq!(invocation_times.head, 1);
-        assert_eq!(invocation_times.should_adapt_to_periodic(21), true);
+        assert!(invocation_times.should_adapt_to_periodic(21));
     }
 
     #[test]
     fn insertion_with_full_buffer_slow_invokes() {
         let mut invocation_times = invocation_times::InvocationTimes::new();
-        invocation_times.add(1 as u64);
+        invocation_times.add(1_u64);
         for i in 0..invocation_times::LOOKBACK_COUNT {
             invocation_times.add((i + 5000) as u64);
         }
         // should wrap around
         assert_eq!(invocation_times.times[0], 5019);
         assert_eq!(invocation_times.head, 1);
-        assert_eq!(invocation_times.should_adapt_to_periodic(10000), false);
+        assert!(!invocation_times.should_adapt_to_periodic(10000));
     }
 }

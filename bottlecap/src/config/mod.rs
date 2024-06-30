@@ -1,93 +1,46 @@
-use std::path::Path;
+pub mod flush_strategy;
+pub mod log_level;
+pub mod processing_rule;
 
-use serde::{self, Deserialize, Deserializer};
-use tracing::debug;
+use std::path::Path;
 
 use figment::{
     providers::{Env, Format, Yaml},
     Figment,
 };
+use serde::Deserialize;
 
-#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Default)]
-pub enum LogLevel {
-    Trace,
-    Debug,
-    #[default]
-    Info,
-    Warn,
-    Error,
-}
+use crate::config::flush_strategy::FlushStrategy;
+use crate::config::log_level::LogLevel;
+use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PeriodicStrategy {
-    pub interval: u64,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum FlushStrategy {
-    Default,
-    End,
-    Periodically(PeriodicStrategy),
-}
-
-// Deserialize for FlushStrategy
-// Flush Strategy can be either "end" or "periodically,<ms>"
-impl<'de> Deserialize<'de> for FlushStrategy {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = String::deserialize(deserializer)?;
-        match value.as_str() {
-            "end" => Ok(FlushStrategy::End),
-            _ => {
-                let mut split_value = value.as_str().split(',');
-                // "periodically,60000"
-                match split_value.next() {
-                    Some(first_value) if first_value.starts_with("periodically") => {
-                        let interval = split_value.next();
-                        // "60000"
-                        match interval {
-                            Some(interval) => {
-                                if let Ok(parsed_interval) = interval.parse() {
-                                    return Ok(FlushStrategy::Periodically(PeriodicStrategy {
-                                        interval: parsed_interval,
-                                    }));
-                                }
-                                debug!("invalid flush interval: {}, using default", interval);
-                                Ok(FlushStrategy::Default)
-                            }
-                            None => {
-                                debug!("invalid flush strategy: {}, using default", value);
-                                Ok(FlushStrategy::Default)
-                            }
-                        }
-                    }
-                    _ => {
-                        debug!("invalid flush strategy: {}, using default", value);
-                        Ok(FlushStrategy::Default)
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, PartialEq, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct Config {
     pub site: String,
     pub api_key: String,
+    pub api_key_secret_arn: String,
+    pub kms_api_key: String,
     pub env: Option<String>,
     pub service: Option<String>,
     pub version: Option<String>,
     pub tags: Option<String>,
     pub log_level: LogLevel,
     pub serverless_logs_enabled: bool,
+    #[serde(deserialize_with = "deserialize_processing_rules")]
+    pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub apm_enabled: bool,
     pub lambda_handler: String,
     pub serverless_flush_strategy: FlushStrategy,
+    pub trace_enabled: bool,
+    pub serverless_trace_enabled: bool,
+    pub capture_lambda_payload: bool,
+    // Deprecated or ignored, just here so we don't failover
+    pub flush_to_log: bool,
+    pub logs_injection: bool,
+    pub merge_xray_traces: bool,
 }
 
 impl Default for Config {
@@ -96,6 +49,8 @@ impl Default for Config {
             // General
             site: "datadoghq.com".to_string(),
             api_key: String::default(),
+            api_key_secret_arn: String::default(),
+            kms_api_key: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
             // Unified Tagging
             env: None,
@@ -105,19 +60,29 @@ impl Default for Config {
             // Logs
             log_level: LogLevel::default(),
             serverless_logs_enabled: true,
+            // TODO(duncanista): Add serializer for YAML
+            logs_config_processing_rules: None,
             // APM
             apm_enabled: false,
             lambda_handler: String::default(),
+            serverless_trace_enabled: true,
+            trace_enabled: true,
+            capture_lambda_payload: false,
+            flush_to_log: false,
+            logs_injection: false,
+            merge_xray_traces: false,
         }
     }
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(clippy::module_name_repetitions)]
 pub enum ConfigError {
     ParseError(String),
     UnsupportedField(String),
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
     let figment = Figment::new()
@@ -126,16 +91,31 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         .merge(Env::prefixed("DD_"));
 
     let config = figment.extract().map_err(|err| match err.kind {
-        figment::error::Kind::UnknownField(field, _) => ConfigError::UnsupportedField(field),
+        figment::error::Kind::UnknownField(field, _) => {
+            println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{field}\"}}");
+            ConfigError::UnsupportedField(field)
+        }
         _ => ConfigError::ParseError(err.to_string()),
     })?;
 
     Ok(config)
 }
 
+#[allow(clippy::module_name_repetitions)]
+pub struct AwsConfig {
+    pub region: String,
+    pub aws_access_key_id: String,
+    pub aws_secret_access_key: String,
+    pub aws_session_token: String,
+    pub function_name: String,
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    use crate::config::flush_strategy::PeriodicStrategy;
+    use crate::config::processing_rule;
 
     #[test]
     fn test_reject_unknown_fields_yaml() {
@@ -143,9 +123,9 @@ pub mod tests {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
-                r#"
+                r"
                 unknown_field: true
-            "#,
+            ",
             )?;
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
@@ -176,9 +156,9 @@ pub mod tests {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
-                r#"
+                r"
                 apm_enabled: true
-            "#,
+            ",
             )?;
             jail.set_env("DD_APM_ENABLED", "false");
             let config = get_config(Path::new("")).expect("should parse config");
@@ -199,9 +179,9 @@ pub mod tests {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
-                r#"
+                r"
                 apm_enabled: true
-            "#,
+            ",
             )?;
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
@@ -284,7 +264,7 @@ pub mod tests {
                 config,
                 Config {
                     serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
-                        interval: 100000
+                        interval: 100_000
                     }),
                     ..Config::default()
                 }
@@ -321,6 +301,83 @@ pub mod tests {
             assert_eq!(
                 config,
                 Config {
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_logs_config_processing_rules_from_env() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_LOGS_CONFIG_PROCESSING_RULES",
+                r#"[{"type":"exclude_at_match","name":"exclude","pattern":"exclude"}]"#,
+            );
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    logs_config_processing_rules: Some(vec![ProcessingRule {
+                        kind: processing_rule::Kind::ExcludeAtMatch,
+                        name: "exclude".to_string(),
+                        pattern: "exclude".to_string(),
+                        replace_placeholder: None
+                    }]),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_logs_config_processing_rules_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            // TODO(duncanista): Update to use YAML configuration field `logs_config`: `processing_rules`: - ...
+            jail.create_file(
+                "datadog.yaml",
+                r#"
+                logs_config_processing_rules:
+                   - type: exclude_at_match
+                     name: "exclude"
+                     pattern: "exclude"
+                   - type: include_at_match
+                     name: "include"
+                     pattern: "include"
+                   - type: mask_sequences
+                     name: "mask"
+                     pattern: "mask"
+                     replace_placeholder: "REPLACED"
+            "#,
+            )?;
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    logs_config_processing_rules: Some(vec![
+                        ProcessingRule {
+                            kind: processing_rule::Kind::ExcludeAtMatch,
+                            name: "exclude".to_string(),
+                            pattern: "exclude".to_string(),
+                            replace_placeholder: None
+                        },
+                        ProcessingRule {
+                            kind: processing_rule::Kind::IncludeAtMatch,
+                            name: "include".to_string(),
+                            pattern: "include".to_string(),
+                            replace_placeholder: None
+                        },
+                        ProcessingRule {
+                            kind: processing_rule::Kind::MaskSequences,
+                            name: "mask".to_string(),
+                            pattern: "mask".to_string(),
+                            replace_placeholder: Some("REPLACED".to_string())
+                        }
+                    ]),
                     ..Config::default()
                 }
             );
