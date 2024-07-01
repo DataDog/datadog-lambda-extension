@@ -41,6 +41,7 @@ pub struct Config {
     pub flush_to_log: bool,
     pub logs_injection: bool,
     pub merge_xray_traces: bool,
+    pub appsec_enabled: bool,
 }
 
 impl Default for Config {
@@ -71,6 +72,7 @@ impl Default for Config {
             flush_to_log: false,
             logs_injection: false,
             merge_xray_traces: false,
+            appsec_enabled: false,
         }
     }
 }
@@ -90,13 +92,17 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         .merge(Env::prefixed("DATADOG_"))
         .merge(Env::prefixed("DD_"));
 
-    let config = figment.extract().map_err(|err| match err.kind {
+    let config: Config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => {
             println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{field}\"}}");
             ConfigError::UnsupportedField(field)
         }
         _ => ConfigError::ParseError(err.to_string()),
     })?;
+
+    if config.appsec_enabled {
+        return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
+    }
 
     Ok(config)
 }
@@ -131,6 +137,25 @@ pub mod tests {
             assert_eq!(
                 config,
                 ConfigError::UnsupportedField("unknown_field".to_string())
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_allowed_but_disabled() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                appsec_enabled: true
+            ",
+            )?;
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("appsec_enabled".to_string())
             );
             Ok(())
         });
