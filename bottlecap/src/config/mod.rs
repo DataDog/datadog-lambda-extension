@@ -41,7 +41,7 @@ pub struct Config {
     pub flush_to_log: bool,
     pub logs_injection: bool,
     pub merge_xray_traces: bool,
-    pub appsec_enabled: bool,
+    pub serverless_appsec_enabled: bool,
 }
 
 impl Default for Config {
@@ -72,7 +72,7 @@ impl Default for Config {
             flush_to_log: false,
             logs_injection: false,
             merge_xray_traces: false,
-            appsec_enabled: false,
+            serverless_appsec_enabled: false,
         }
     }
 }
@@ -85,7 +85,7 @@ pub enum ConfigError {
 }
 
 fn log_failover_reason(reason: &str) {
-    println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{}\"}}", reason);
+    println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{reason}\"}}");
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -98,13 +98,13 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 
     let config: Config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => {
-            log_failover_reason(&field.to_owned());
+            log_failover_reason(&field.clone());
             ConfigError::UnsupportedField(field)
         }
         _ => ConfigError::ParseError(err.to_string()),
     })?;
 
-    if config.appsec_enabled {
+    if config.serverless_appsec_enabled {
         log_failover_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
