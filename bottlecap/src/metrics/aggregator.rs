@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn consume_distributions_batch_bytes() {
-        let single_proto_size = 102;
+        let single_proto_size = 104;
         let max_bytes = 250;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn consume_distribution_one_element_bigger_than_max_size() {
-        let single_proto_size = 102;
+        let single_proto_size = 104;
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {

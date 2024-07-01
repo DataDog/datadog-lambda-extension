@@ -21,7 +21,7 @@ fnv = { version = "1.0.7", default-features = false }
 hashbrown = { version = "0.14.3", default-features = false, features = ["inline-more"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
 log = { version = "0.4.21", default-features = false }
-protobuf = { version = "3.4.0", default-features = false }
+protobuf = { version = "3.5.0", default-features = false }
 regex = { version = "1.10.4", default-features = false }
 reqwest = { version = "0.12.4", features = ["json", "http2", "rustls-tls"], default-features = false }
 serde = { version = "1.0.197", default-features = false, features = ["derive"] }
