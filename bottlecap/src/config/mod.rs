@@ -84,6 +84,10 @@ pub enum ConfigError {
     UnsupportedField(String),
 }
 
+fn log_failover_reason(reason: &str) {
+    println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{}\"}}", reason);
+}
+
 #[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
@@ -94,13 +98,14 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 
     let config: Config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => {
-            println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{field}\"}}");
+            log_failover_reason(&field.to_owned());
             ConfigError::UnsupportedField(field)
         }
         _ => ConfigError::ParseError(err.to_string()),
     })?;
 
     if config.appsec_enabled {
+        log_failover_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
 
