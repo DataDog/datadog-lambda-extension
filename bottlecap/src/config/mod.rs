@@ -41,6 +41,7 @@ pub struct Config {
     pub flush_to_log: bool,
     pub logs_injection: bool,
     pub merge_xray_traces: bool,
+    pub serverless_appsec_enabled: bool,
 }
 
 impl Default for Config {
@@ -71,6 +72,7 @@ impl Default for Config {
             flush_to_log: false,
             logs_injection: false,
             merge_xray_traces: false,
+            serverless_appsec_enabled: false,
         }
     }
 }
@@ -82,6 +84,10 @@ pub enum ConfigError {
     UnsupportedField(String),
 }
 
+fn log_failover_reason(reason: &str) {
+    println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{reason}\"}}");
+}
+
 #[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
@@ -90,13 +96,18 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         .merge(Env::prefixed("DATADOG_"))
         .merge(Env::prefixed("DD_"));
 
-    let config = figment.extract().map_err(|err| match err.kind {
+    let config: Config = figment.extract().map_err(|err| match err.kind {
         figment::error::Kind::UnknownField(field, _) => {
-            println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{field}\"}}");
+            log_failover_reason(&field.clone());
             ConfigError::UnsupportedField(field)
         }
         _ => ConfigError::ParseError(err.to_string()),
     })?;
+
+    if config.serverless_appsec_enabled {
+        log_failover_reason("appsec_enabled");
+        return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
+    }
 
     Ok(config)
 }
@@ -131,6 +142,25 @@ pub mod tests {
             assert_eq!(
                 config,
                 ConfigError::UnsupportedField("unknown_field".to_string())
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_allowed_but_disabled() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                appsec_enabled: true
+            ",
+            )?;
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("appsec_enabled".to_string())
             );
             Ok(())
         });
