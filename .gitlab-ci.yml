@@ -17,12 +17,12 @@ ci image:
   variables:
     DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   script:
-    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} -f ./gitlab/Dockerfile .
+    - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} -f .gitlab/Dockerfile .
 
 build layer:
   stage: build
   tags: ["arch:arm64"]
-  image: registry.ddbuild.io/images/docker:24.0.5
+  image: registry.ddbuild.io/images/docker:20.10-py3
   artifacts:
     expire_in: 1 hr
     paths:
