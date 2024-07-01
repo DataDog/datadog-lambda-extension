@@ -37,7 +37,7 @@ _docker_build_bottlecap_zip() {
         PLATFORM="aarch64"
     fi
 
-    docker build --platform linux/${arch} \
+    docker buildx build --platform linux/${arch} \
         -t datadog/build-bottlecap-${arch} \
         -f ./scripts/Dockerfile.bottlecap.build \
         --build-arg PLATFORM=$PLATFORM \
