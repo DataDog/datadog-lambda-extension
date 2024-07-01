@@ -22,11 +22,13 @@ ci image:
 build layer:
   stage: build
   tags: ["arch:arm64"]
-  image: registry.ddbuild.io/images/docker:20.10-py3
+  image: registry.ddbuild.io/images/docker:20.10
   artifacts:
     expire_in: 1 hr
     paths:
       - .layers/datadog_bottlecap-arm64.zip
+  variables:
+    CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
   script:
     - ARCHITECTURE=arm64 ./scripts/build_bottlecap_layer.sh
 
