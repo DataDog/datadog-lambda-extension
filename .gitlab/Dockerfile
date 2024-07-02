@@ -6,5 +6,5 @@ RUN apt-get update && apt-get install -y --fix-missing \
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 
-RUN echo 'source $HOME/.cargo/env' >> $HOME/.bashrc
-ENV PATH="$HOME/.cargo/bin:${PATH}"
+RUN source $HOME/.cargo/env
+ENV PATH /root/.cargo/bin/:$PATH
