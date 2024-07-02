@@ -206,15 +206,14 @@ impl LambdaProcessor {
             message: lambda_message,
         };
 
-        Ok(log)
-        // if log.message.lambda.request_id.is_some() {
-        //     Ok(log)
-        // } else {
-        //     // We haven't seen a `request_id`, this is an orphan log
-        //     self.orphan_logs.push(log);
-        //     println!("No request_id available, queueing for later");
-        //     Err("No request_id available, queueing for later".into())
-        // }
+        if log.message.lambda.request_id.is_some() {
+            Ok(log)
+        } else {
+            // We haven't seen a `request_id`, this is an orphan log
+            self.orphan_logs.push(log);
+            println!("No request_id available, queueing for later");
+            Err("No request_id available, queueing for later".into())
+        }
     }
 
     async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
