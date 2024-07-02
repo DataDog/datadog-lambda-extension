@@ -287,6 +287,7 @@ impl TelemetryListener {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use chrono::DateTime;
 
@@ -319,7 +320,7 @@ mod tests {
             body: String::new(),
         };
         let buf = b"GET /path HTTP/1.1\r\nHeader1: Value1\r\n\r\n";
-        let body_start_index = parser.parse_headers(buf).unwrap();
+        let body_start_index = parser.parse_headers(buf).expect("invalid buffer");
         parser.parse_body(buf, body_start_index).unwrap();
     }
 
@@ -332,7 +333,7 @@ mod tests {
         };
         let buf =
             b"GET /path HTTP/1.1\r\nContent-Length: 56\r\nHeader1: Value1\r\n\r\nHello, World!";
-        let body_start_index = parser.parse_headers(buf).unwrap();
+        let body_start_index = parser.parse_headers(buf).expect("invalid buffer");
         parser.parse_body(buf, body_start_index).unwrap();
     }
 
@@ -346,7 +347,7 @@ mod tests {
             body: String::new(),
         };
         let buf = b"GET /path HTTP/1.1\r\nContent-Length: Bottlecap!\r\nHeader1: Value1\r\n\r\nHello, World!";
-        let body_start_index = parser.parse_headers(buf).unwrap();
+        let body_start_index = parser.parse_headers(buf).expect("invalid buffer");
         parser.parse_body(buf, body_start_index).unwrap();
     }
 
@@ -366,18 +367,29 @@ mod tests {
     }
 
     async fn get_stream(data: Vec<u8>) -> TcpStream {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("Failed to bind listener");
+        let addr = listener.local_addr().expect("Failed to get local address");
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(10000);
         tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            stream.write_all(&data).await.unwrap();
-            tx.send(()).await.unwrap(); // Signal that the request has been sent
+            let (mut stream, _) = listener
+                .accept()
+                .await
+                .expect("Failed to accept connection");
+            stream.write_all(&data).await.expect("Failed to write data");
+            tx.send(())
+                .await
+                .expect("Signal that the request has not been sent");
         });
 
-        let stream = TcpStream::connect(addr).await.unwrap();
-        rx.recv().await.unwrap(); // Wait for the signal from the spawned thread
+        let stream = TcpStream::connect(addr)
+            .await
+            .expect("Failed to connect to the listener");
+        rx.recv()
+            .await
+            .expect("Error while waiting for the signal from the spawned thread");
 
         stream
     }
@@ -391,7 +403,8 @@ mod tests {
         let events = rx.recv().await.expect("No events received");
         let telemetry_event = events.first().expect("failed to get event");
 
-        let expected_time = DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").unwrap();
+        let expected_time =
+            DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").expect("failed to parse time");
         assert_eq!(telemetry_event.time, expected_time);
         assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
             initialization_type: InitType::OnDemand,
@@ -406,7 +419,7 @@ mod tests {
         ($($name:ident: $value:tt,)*) => {
             $(
                 #[tokio::test]
-                #[should_panic]
+                #[should_panic(expected = "attempt to subtract with overflow")]
                 async fn $name() {
                     let mut stream = get_stream($value.to_vec()).await;
                     let (tx, _) = tokio::sync::mpsc::channel(4);
@@ -430,7 +443,7 @@ mod tests {
         let result = HttpRequestParser::from_stream(&mut stream).await;
 
         assert!(result.is_ok());
-        let parser = result.unwrap();
+        let parser = result.expect("invalid header parser");
         assert_eq!(parser.headers.len(), 2);
         assert_eq!(
             parser.headers.get("content-length"),

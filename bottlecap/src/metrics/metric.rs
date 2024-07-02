@@ -213,6 +213,7 @@ pub fn id(name: Ustr, tagset: Option<Ustr>) -> u64 {
 // SAMPLE_RATE ignored for the sake of simplicity.
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use proptest::{collection, option, strategy::Strategy, string::string_regex};
     use ustr::Ustr;
