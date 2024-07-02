@@ -38,7 +38,7 @@ fmt:
   image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   # needs: []
   script:
-    - cargo fmt
+    - cd bottlecap && cargo fmt
 
 check:
   stage: test
@@ -46,7 +46,7 @@ check:
   image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   # needs: []
   script:
-    - cargo check
+    - cd bottlecap && cargo check
 
 clippy:
   stage: test
@@ -54,4 +54,4 @@ clippy:
   image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   # needs: []
   script:
-    - cargo clippy --all-features
+    - cd bottlecap && cargo clippy --all-features
