@@ -361,12 +361,27 @@ async fn extension_loop_active(
                                 initialization_type,
                                 phase,
                                 metrics,
+                                status,
                             } => {
-                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                                debug!("Platform init report for initialization_type: {:?} with phase: {:?}, status: {:?}, and metrics: {:?}", initialization_type, phase, status, metrics,);
                                 if let Err(e) = lambda_enhanced_metrics
                                     .set_init_duration_metric(metrics.duration_ms)
                                 {
                                     error!("Failed to set init duration metric: {e:?}");
+                                }
+
+                                if status != Status::Success {
+                                    if let Err(e) =
+                                        lambda_enhanced_metrics.increment_errors_metric()
+                                    {
+                                        error!("Failed to increment error metric: {e:?}");
+                                    }
+                                    tokio::join!(
+                                        logs_flusher.flush(),
+                                        metrics_flusher.flush(),
+                                        trace_flusher.manual_flush(),
+                                        stats_flusher.manual_flush()
+                                    );
                                 }
                             }
                             TelemetryRecord::PlatformRuntimeDone {

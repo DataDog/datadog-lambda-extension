@@ -57,6 +57,7 @@ pub enum TelemetryRecord {
         /// Phase of initialisation
         phase: InitPhase,
         metrics: InitReportMetrics,
+        status: Status,
     },
 
     /// Record marking start of an invocation
@@ -260,10 +261,11 @@ mod tests {
 
         // platform.initReport
         platform_init_report: (
-            r#"{"time":"2022-10-19T13:52:16.136Z","type":"platform.initReport","record":{"initializationType":"on-demand","metrics":{"durationMs":500.0},"phase":"init"}}"#,
+            r#"{"time":"2022-10-19T13:52:16.136Z","type":"platform.initReport","record":{"initializationType":"on-demand","metrics":{"durationMs":500.0},"status":"success","phase":"init"}}"#,
             TelemetryRecord::PlatformInitReport {
                 initialization_type: InitType::OnDemand,
                 phase: InitPhase::Init,
+                status: Status::Success,
                 metrics: InitReportMetrics { duration_ms: 500.0 },
             }
         ),

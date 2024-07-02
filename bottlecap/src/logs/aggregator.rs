@@ -39,6 +39,7 @@ impl Aggregator {
 
     pub fn add_batch(&mut self, logs: Vec<String>) {
         for log in logs {
+            println!("log in aggr: {}", log);
             self.messages.push_back(log);
         }
     }

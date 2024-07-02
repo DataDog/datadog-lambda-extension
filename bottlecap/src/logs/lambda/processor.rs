@@ -72,6 +72,7 @@ impl LambdaProcessor {
                 };
 
                 if message.is_none() {
+                    println!("Unable to parse log");
                     return Err("Unable to parse log".into());
                 }
 
@@ -205,20 +206,25 @@ impl LambdaProcessor {
             message: lambda_message,
         };
 
-        if log.message.lambda.request_id.is_some() {
-            Ok(log)
-        } else {
-            // We haven't seen a `request_id`, this is an orphan log
-            self.orphan_logs.push(log);
-            Err("No request_id available, queueing for later".into())
-        }
+        Ok(log)
+        // if log.message.lambda.request_id.is_some() {
+        //     Ok(log)
+        // } else {
+        //     // We haven't seen a `request_id`, this is an orphan log
+        //     self.orphan_logs.push(log);
+        //     println!("No request_id available, queueing for later");
+        //     Err("No request_id available, queueing for later".into())
+        // }
     }
 
     async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
         match self.get_message(event).await {
             Ok(lambda_message) => self.get_intake_log(lambda_message),
             // TODO: Check what to do when we can't process the event
-            Err(e) => Err(e),
+            Err(e) => {
+                println!("Error processing event: {:?}", e);
+                Err(e)
+            }
         }
     }
 
@@ -230,13 +236,18 @@ impl LambdaProcessor {
         let mut to_send = Vec::<String>::new();
 
         for event in events {
+            let cloned = event.clone();
             if let Ok(mut log) = self.make_log(event).await {
                 let should_send_log =
                     LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
                     if let Ok(serialized_log) = serde_json::to_string(&log) {
                         to_send.push(serialized_log);
+                    } else {
+                        println!("Log can't be serialized: {}", log.message.message);
                     }
+                } else {
+                    println!("Log was dropped due to processing rules: {}", log.message.message);
                 }
 
                 // Process orphan logs, since we have a `request_id` now
@@ -246,9 +257,15 @@ impl LambdaProcessor {
                     if should_send_log {
                         if let Ok(serialized_log) = serde_json::to_string(&log) {
                             to_send.push(serialized_log);
+                        } else {
+                            println!("orphan Log can't be serialized: {}", orphan_log.message.message);
                         }
+                    } else {
+                        println!("orphan Log was dropped due to processing rules: {}", orphan_log.message.message);
                     }
                 }
+            } else {
+                println!("Log can't be processed: {:?}", cloned);
             }
         }
 
