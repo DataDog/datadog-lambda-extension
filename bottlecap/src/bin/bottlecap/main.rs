@@ -168,7 +168,20 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
-        extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await
+        let loop_res =
+            extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await;
+        match loop_res {
+            Ok(()) => {
+                info!("Extension loop completed successfully");
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    "Extension loop failed: {e:?}, Calling /next without Datadog instrumentation"
+                );
+                extension_loop_idle(&client, &r).await
+            }
+        }
     } else {
         error!("Failed to resolve secrets, Datadog extension will be idle");
         extension_loop_idle(&client, &r).await
