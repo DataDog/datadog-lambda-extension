@@ -42,7 +42,7 @@ fmt:
 
 check:
   stage: test
-  tags: ["arch:arm64"]
+  tags: ["arch:amd64"]
   image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   # needs: []
   script:
