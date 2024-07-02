@@ -192,40 +192,13 @@ mod tests {
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
         );
         let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
+        assert_eq!(tags.tags_map.get(REGION_KEY).unwrap(), "us-west-2");
+        assert_eq!(tags.tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
+        assert_eq!(tags.tags_map.get(AWS_ACCOUNT_KEY).unwrap(), "123456789012");
+        assert_eq!(tags.tags_map.get(FUNCTION_NAME_KEY).unwrap(), "my-function");
+        assert_eq!(tags.tags_map.get(RESOURCE_KEY).unwrap(), "my-function");
         assert_eq!(
-            tags.tags_map
-                .get(REGION_KEY)
-                .expect("Can't get REGION_KEY value"),
-            "us-west-2"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(ACCOUNT_ID_KEY)
-                .expect("Can't get ACCOUNT_ID_KEY value"),
-            "123456789012"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(AWS_ACCOUNT_KEY)
-                .expect("Can't get AWS_ACCOUNT_KEY value"),
-            "123456789012"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(FUNCTION_NAME_KEY)
-                .expect("Can't get FUNCTION_NAME_KEY value"),
-            "my-function"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(RESOURCE_KEY)
-                .expect("Can't get RESOURCE_KEY value"),
-            "my-function"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(FUNCTION_ARN_KEY)
-                .expect("Can't get FUNCTION_ARN_KEY value"),
+            tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function"
         );
     }
@@ -246,28 +219,9 @@ mod tests {
         });
         std::env::set_var(MEMORY_SIZE_VAR, "128");
         let tags = Lambda::new_from_config(config, &metadata);
-        assert_eq!(
-            tags.tags_map.get(ENV_KEY).expect("Can't get ENV_KEY value"),
-            "test"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(VERSION_KEY)
-                .expect("Can't get VERSION_KEY value"),
-            "1.0.0"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(SERVICE_KEY)
-                .expect("Can't get SERVICE_KEY value"),
-            "my-service"
-        );
-        assert_eq!(
-            tags.tags_map
-                .get(MEMORY_SIZE_KEY)
-                .expect("Can't get MEMORY_SIZE_KEY value"),
-            "128"
-        );
-        std::env::remove_var(MEMORY_SIZE_VAR);
+        assert_eq!(tags.tags_map.get(ENV_KEY).unwrap(), "test");
+        assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
+        assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
+        assert_eq!(tags.tags_map.get(MEMORY_SIZE_KEY).unwrap(), "128");
     }
 }
