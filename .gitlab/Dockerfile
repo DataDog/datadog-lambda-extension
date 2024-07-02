@@ -1,7 +1,16 @@
 FROM registry.ddbuild.io/images/docker:24.0.5
 
 RUN apt-get update && apt-get install -y --fix-missing \
-  curl gcc gnupg g++ make unzip openssl g++
+  curl gcc gnupg g++ make cmake unzip openssl g++
+
+ENV PB_VERSION 25.3
+ENV PB_URL https://github.com/protocolbuffers/protobuf/releases/download
+ENV PB_TARGET linux-x86_64
+
+# Install protobuy 25.3 compiler from binary for linux-86_64
+RUN curl -LO ${PB_URL}/v${PB_VERSION}/protoc-${PB_VERSION}-${PB_TARGET}.zip
+RUN unzip protoc-${PB_VERSION}-${PB_TARGET}.zip -d "$HOME/.local"
+ENV PATH $PATH:$HOME/.local/bin
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
