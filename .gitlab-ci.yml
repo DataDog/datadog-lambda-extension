@@ -50,7 +50,7 @@ check:
 
 clippy:
   stage: test
-  tags: ["arch:amd64"]
+  tags: ["arch:arm64"]
   image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   # needs: []
   script:
