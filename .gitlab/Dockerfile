@@ -13,7 +13,10 @@ RUN unzip protoc-${PB_VERSION}-${PB_TARGET}.zip -d "$HOME/.local"
 ENV PATH $PATH:$HOME/.local/bin
 
 # Install Rust
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+  sh -s -- --profile minimal --default-toolchain nightly-x86_84-unknown-linux-gnu -y
 
 RUN source $HOME/.cargo/env
 ENV PATH /root/.cargo/bin/:$PATH
+
+RUN rustup component add rust-src --toolchain nightly-x86_84-unknown-linux-gnu
