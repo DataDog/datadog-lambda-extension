@@ -278,10 +278,13 @@ pub mod tests {
             jail.clear_env();
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(config, Config{
-                extension_version: Some("next".to_string()),
-                ..Config::default()
-            });
+            assert_eq!(
+                config,
+                Config {
+                    extension_version: Some("next".to_string()),
+                    ..Config::default()
+                }
+            );
             Ok(())
         });
     }
