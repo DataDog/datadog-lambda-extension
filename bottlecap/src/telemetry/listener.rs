@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 
-use tracing::{debug, error};
+use tracing::error;
 
 pub struct HttpRequestParser {
     headers: HashMap<String, String>,
