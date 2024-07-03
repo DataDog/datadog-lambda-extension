@@ -39,6 +39,7 @@ pub trait TraceProcessor {
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
+    pub resolved_api_key: String,
 }
 
 #[async_trait]
@@ -112,7 +113,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
-            api_key: Some(config.api_key.clone().into()),
+            api_key: Some(self.resolved_api_key.clone().into()),
         };
 
         let send_data = SendData::new(body_size, payload, tracer_header_tags, &endpoint);
@@ -274,6 +275,7 @@ mod tests {
             .unwrap();
 
         let trace_processor = trace_processor::ServerlessTraceProcessor {
+            resolved_api_key: "foo".to_string(),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
