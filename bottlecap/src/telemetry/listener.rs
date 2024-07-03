@@ -6,7 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 
-use tracing::{debug, error};
+use tracing::error;
 
 pub struct HttpRequestParser {
     headers: HashMap<String, String>,
@@ -225,7 +225,6 @@ impl TelemetryListener {
                 stream = self.listener.accept() => {
                     match stream {
                         Ok((mut stream, _)) => {
-                            debug!("Received a Telemetry API connection");
                             let cloned_event_bus = self.event_bus.clone();
                             tokio::spawn(async move {
                                 let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
