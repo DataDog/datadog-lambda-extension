@@ -1,0 +1,3 @@
+architectures:
+  - name: amd64
+  - name: arm64

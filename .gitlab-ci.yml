@@ -3,55 +3,43 @@ variables:
   DOCKER_TARGET_VERSION: latest
 
 stages:
+  - generate
   - build
-  - test
-  - deploy
 
 ci image:
   stage: build
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:arm64"]
-  # rules:
-  #   - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
-  #     when: on_success
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      when: on_success
   variables:
     DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   script:
     - docker buildx build --platform linux/amd64,linux/arm64 --no-cache --pull --push --tag ${DOCKER_TARGET} -f .gitlab/Dockerfile .
 
-build layer:
-  stage: build
+.go-cache: &go-cache
+  key: datadog-lambda-extension-go-cache
+  policy: pull
+
+generator:
+  stage: generate
+  image: registry.ddbuild.io/images/mirror/golang:alpine
   tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
+  cache: *go-cache
+  script:
+    - apk add --no-cache gomplate
+    - gomplate --config .gitlab/config.yaml
   artifacts:
-    expire_in: 1 hr
     paths:
-      - .layers/datadog_bottlecap-arm64.zip
-  variables:
-    CI_ENABLE_CONTAINER_IMAGE_BUILDS: "true"
-  script:
-    - ARCHITECTURE=arm64 ./scripts/build_bottlecap_layer.sh
+      - .gitlab/pipeline.yaml
 
-fmt:
-  stage: test
-  tags: ["arch:amd64"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
-  # needs: []
-  script:
-    - cd bottlecap && cargo fmt
-
-check:
-  stage: test
-  tags: ["arch:amd64"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
-  # needs: []
-  script:
-    - cd bottlecap && cargo check
-
-clippy:
-  stage: test
-  tags: ["arch:arm64"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
-  # needs: []
-  script:
-    - cd bottlecap && cargo clippy --all-features
+bottlecap:
+  stage: build
+  trigger:
+    include:
+      - artifact: .gitlab/pipeline.yaml
+        job: generator
+    strategy: depend
+  rules:
+    - when: on_success
