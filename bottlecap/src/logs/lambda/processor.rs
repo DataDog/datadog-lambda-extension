@@ -183,7 +183,10 @@ impl LambdaProcessor {
             // TODO: PlatformExtension
             // TODO: PlatformTelemetrySubscription
             // TODO: PlatformLogsDropped
-            _ => Err("Unsupported event type".into()),
+            _ => {
+                println!("Unsupported event type {:?}", event.record);
+                Err("Unsupported event type".into())
+            }
         }
     }
 
@@ -251,6 +254,7 @@ impl LambdaProcessor {
 
                 // Process orphan logs, since we have a `request_id` now
                 for mut orphan_log in self.orphan_logs.drain(..) {
+                    println!("Processing orphan log: {:?}", orphan_log);
                     orphan_log.message.lambda.request_id =
                         Some(self.invocation_context.request_id.clone());
                     if should_send_log {
@@ -269,6 +273,7 @@ impl LambdaProcessor {
         }
 
         if to_send.is_empty() {
+            println!("bailing early, to_send is empty");
             return;
         }
         let mut aggregator = aggregator.lock().expect("lock poisoned");
