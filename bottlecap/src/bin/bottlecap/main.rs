@@ -115,7 +115,6 @@ async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventR
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
 }
 
-#[allow(clippy::unwrap_used)]
 async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
     let mut map = HashMap::new();
     let base_url = base_url(EXTENSION_ROUTE)

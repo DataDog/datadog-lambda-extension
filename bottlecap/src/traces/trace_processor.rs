@@ -252,6 +252,7 @@ mod tests {
         )
     }
     #[tokio::test]
+    #[allow(clippy::unwrap_used)]
     #[cfg_attr(miri, ignore)]
     async fn test_process_trace() {
         let (tx, mut rx): (
