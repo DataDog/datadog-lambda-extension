@@ -596,7 +596,7 @@ mod tests {
 
     #[test]
     fn consume_distributions_batch_bytes() {
-        let single_proto_size = 104;
+        let single_proto_size = 103;
         let max_bytes = 250;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn consume_distribution_one_element_bigger_than_max_size() {
-        let single_proto_size = 104;
+        let single_proto_size = 103;
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
@@ -711,8 +711,8 @@ mod tests {
 
     #[test]
     fn consume_metrics_batch_bytes() {
-        let single_metric_size = 156;
-        let two_metrics_size = 300;
+        let single_metric_size = 155;
+        let two_metrics_size = 298;
         let max_bytes = 350;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {
@@ -744,7 +744,7 @@ mod tests {
 
     #[test]
     fn consume_series_one_element_bigger_than_max_size() {
-        let single_metric_size = 156;
+        let single_metric_size = 155;
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator::<1_000> {

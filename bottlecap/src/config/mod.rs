@@ -193,13 +193,26 @@ pub mod tests {
     }
 
     #[test]
+    fn test_reject_without_opt_in() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("extension_version".to_string())
+            );
+            Ok(())
+        });
+    }
+    #[test]
     fn test_precedence() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
                 r"
-                apm_enabled: true
+                apm_enabled: true,
+                extension_version: next
             ",
             )?;
             jail.set_env("DD_APM_ENABLED", "false");
@@ -208,6 +221,7 @@ pub mod tests {
                 config,
                 Config {
                     apm_enabled: false,
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -223,6 +237,7 @@ pub mod tests {
                 "datadog.yaml",
                 r"
                 apm_enabled: true
+                extension_version: next
             ",
             )?;
             let config = get_config(Path::new("")).expect("should parse config");
@@ -230,6 +245,7 @@ pub mod tests {
                 config,
                 Config {
                     apm_enabled: true,
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -242,11 +258,13 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_APM_ENABLED", "true");
+            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
                     apm_enabled: true,
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -258,23 +276,12 @@ pub mod tests {
     fn test_parse_default() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
+            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(config, Config::default());
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_parse_flush_strategy_default() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config, Config{
+                extension_version: Some("next".to_string()),
+                ..Config::default()
+            });
             Ok(())
         });
     }
@@ -284,11 +291,13 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "end");
+            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
                     serverless_flush_strategy: FlushStrategy::End,
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -301,6 +310,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,100000");
+            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
@@ -308,6 +318,7 @@ pub mod tests {
                     serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                         interval: 100_000
                     }),
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -320,10 +331,12 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "invalid_strategy");
+            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -339,10 +352,12 @@ pub mod tests {
                 "DD_SERVERLESS_FLUSH_STRATEGY",
                 "periodically,invalid_interval",
             );
+            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -358,6 +373,7 @@ pub mod tests {
                 "DD_LOGS_CONFIG_PROCESSING_RULES",
                 r#"[{"type":"exclude_at_match","name":"exclude","pattern":"exclude"}]"#,
             );
+            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
@@ -368,6 +384,7 @@ pub mod tests {
                         pattern: "exclude".to_string(),
                         replace_placeholder: None
                     }]),
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
@@ -383,6 +400,7 @@ pub mod tests {
             jail.create_file(
                 "datadog.yaml",
                 r#"
+                extension_version: next
                 logs_config_processing_rules:
                    - type: exclude_at_match
                      name: "exclude"
@@ -420,6 +438,7 @@ pub mod tests {
                             replace_placeholder: Some("REPLACED".to_string())
                         }
                     ]),
+                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
