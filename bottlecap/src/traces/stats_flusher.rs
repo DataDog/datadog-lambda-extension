@@ -29,6 +29,7 @@ pub trait StatsFlusher {
 pub struct ServerlessStatsFlusher {
     pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
     pub config: Arc<config::Config>,
+    pub resolved_api_key: String,
 }
 
 #[async_trait]
@@ -73,7 +74,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
-            api_key: Some(self.config.api_key.clone().into()),
+            api_key: Some(self.resolved_api_key.clone().into()),
         };
 
         match stats_utils::send_stats_payload(

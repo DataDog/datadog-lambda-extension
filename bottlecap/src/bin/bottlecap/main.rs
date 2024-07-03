@@ -276,11 +276,13 @@ async fn extension_loop_active(
             obfuscation_config::ObfuscationConfig::new()
                 .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
         ),
+        resolved_api_key: resolved_api_key.clone(),
     });
 
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),
         config: Arc::clone(config),
+        resolved_api_key: resolved_api_key.clone(),
     });
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
