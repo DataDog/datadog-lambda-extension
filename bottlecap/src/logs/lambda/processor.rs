@@ -235,6 +235,9 @@ impl LambdaProcessor {
                     LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
                     if let Ok(serialized_log) = serde_json::to_string(&log) {
+                        // explicitly drop log so we don't accidentally re-use it and push
+                        // duplicate logs to the aggregator
+                        drop(log);
                         to_send.push(serialized_log);
                     }
                 }
@@ -244,7 +247,8 @@ impl LambdaProcessor {
                     orphan_log.message.lambda.request_id =
                         Some(self.invocation_context.request_id.clone());
                     if should_send_log {
-                        if let Ok(serialized_log) = serde_json::to_string(&log) {
+                        if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
+                            drop(orphan_log);
                             to_send.push(serialized_log);
                         }
                     }
