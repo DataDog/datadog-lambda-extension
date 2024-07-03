@@ -137,7 +137,7 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
     let extension_id = resp
         .headers()
         .get(EXTENSION_ID_HEADER)
-        .unwrap()
+        .expect("Extension ID header not found")
         .to_str()
         .expect("Can't convert header to string")
         .to_string();
@@ -168,9 +168,7 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
-        let loop_res =
-            extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await;
-        match loop_res {
+        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
             Ok(()) => {
                 info!("Extension loop completed successfully");
                 Ok(())
