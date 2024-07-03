@@ -376,12 +376,7 @@ async fn extension_loop_active(
                                     {
                                         error!("Failed to increment error metric: {e:?}");
                                     }
-                                    tokio::join!(
-                                        logs_flusher.flush(),
-                                        metrics_flusher.flush(),
-                                        trace_flusher.manual_flush(),
-                                        stats_flusher.manual_flush()
-                                    );
+                                    println!("astuyve maybe flush because init report not success");
                                 }
                             }
                             TelemetryRecord::PlatformRuntimeDone {

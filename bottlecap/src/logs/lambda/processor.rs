@@ -118,6 +118,7 @@ impl LambdaProcessor {
                 self.invocation_context.request_id.clone_from(&request_id);
 
                 let version = version.unwrap_or("$LATEST".to_string());
+                println!("astuyve got request start for request_id: {}", request_id);
                 Ok(Message::new(
                     format!("START RequestId: {request_id} Version: {version}"),
                     Some(request_id),
@@ -155,6 +156,7 @@ impl LambdaProcessor {
                     post_runtime_duration_ms = metrics.duration_ms - self.invocation_context.runtime_duration_ms;
                 }
 
+                println!("astuyve got report for request_id: {}", request_id);
                 let mut message = format!(
                     "REPORT RequestId: {} Duration: {} ms Runtime Duration: {} ms Post Runtime Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
                     request_id,
@@ -237,6 +239,7 @@ impl LambdaProcessor {
     ) {
         let mut to_send = Vec::<String>::new();
 
+        println!("astuyve processing {} events", events.len());
         for event in events {
             let cloned = event.clone();
             if let Ok(mut log) = self.make_log(event).await {
@@ -244,6 +247,12 @@ impl LambdaProcessor {
                     LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
                 if should_send_log {
                     if let Ok(serialized_log) = serde_json::to_string(&log) {
+                        match cloned.record {
+                            TelemetryRecord::PlatformStart { request_id, .. } => {
+                                println!("astuyve pushing start event with request_id: {} to aggr", request_id);
+                            }
+                            _ => {}
+                        }
                         to_send.push(serialized_log);
                     } else {
                         println!("Log can't be serialized: {}", log.message.message);
@@ -258,7 +267,7 @@ impl LambdaProcessor {
                     orphan_log.message.lambda.request_id =
                         Some(self.invocation_context.request_id.clone());
                     if should_send_log {
-                        if let Ok(serialized_log) = serde_json::to_string(&log) {
+                        if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
                             to_send.push(serialized_log);
                         } else {
                             println!("orphan Log can't be serialized: {}", orphan_log.message.message);
@@ -276,6 +285,8 @@ impl LambdaProcessor {
             println!("bailing early, to_send is empty");
             return;
         }
+        println!("batch size is {}", to_send.len());
+        println!("to_send: {:?}", to_send);
         let mut aggregator = aggregator.lock().expect("lock poisoned");
         aggregator.add_batch(to_send);
     }
