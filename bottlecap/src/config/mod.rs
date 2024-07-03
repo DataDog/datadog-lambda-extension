@@ -42,6 +42,7 @@ pub struct Config {
     pub logs_injection: bool,
     pub merge_xray_traces: bool,
     pub serverless_appsec_enabled: bool,
+    pub extension_version: Option<String>,
 }
 
 impl Default for Config {
@@ -73,6 +74,7 @@ impl Default for Config {
             logs_injection: false,
             merge_xray_traces: false,
             serverless_appsec_enabled: false,
+            extension_version: None,
         }
     }
 }
@@ -107,6 +109,16 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     if config.serverless_appsec_enabled {
         log_failover_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
+    }
+
+    match config.extension_version.as_deref() {
+        Some("next") => {}
+        Some(&_) | None => {
+            log_failover_reason("extension_version");
+            return Err(ConfigError::UnsupportedField(
+                "extension_version".to_string(),
+            ));
+        }
     }
 
     Ok(config)
