@@ -3,7 +3,7 @@
 # Unless explicitly stated otherwise all files in this repository are licensed
 # under the Apache License Version 2.0.
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
-# Copyright 2019 Datadog, Inc.
+# Copyright 2024 Datadog, Inc.
 
 # Compares layer size to threshold, and fails if below that threshold
 
@@ -15,7 +15,7 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 15 \* 1024) # 15 MB
+MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 16 \* 1024) # 16 MB, amd64 is 16, while arm64 is 15
 MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 43 \* 1024) # 43 MB
 
 
