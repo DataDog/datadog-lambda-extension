@@ -169,7 +169,7 @@ async fn main() -> Result<()> {
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
         match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
             Ok(()) => {
-                info!("Extension loop completed successfully");
+                debug!("Extension loop completed successfully");
                 Ok(())
             }
             Err(e) => {
