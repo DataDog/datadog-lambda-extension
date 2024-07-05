@@ -409,6 +409,7 @@ fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::config;
     use crate::metrics::aggregator::{
@@ -489,6 +490,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn clear() {
         let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
 

@@ -115,7 +115,6 @@ async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventR
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
 }
 
-#[allow(clippy::unwrap_used)]
 async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
     let mut map = HashMap::new();
     let base_url = base_url(EXTENSION_ROUTE)
@@ -137,7 +136,7 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
     let extension_id = resp
         .headers()
         .get(EXTENSION_ID_HEADER)
-        .unwrap()
+        .expect("Extension ID header not found")
         .to_str()
         .expect("Can't convert header to string")
         .to_string();
@@ -168,7 +167,18 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
-        extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await
+        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
+            Ok(()) => {
+                debug!("Extension loop completed successfully");
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    "Extension loop failed: {e:?}, Calling /next without Datadog instrumentation"
+                );
+                extension_loop_idle(&client, &r).await
+            }
+        }
     } else {
         error!("Failed to resolve secrets, Datadog extension will be idle");
         extension_loop_idle(&client, &r).await

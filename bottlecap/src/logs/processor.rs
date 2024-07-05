@@ -126,6 +126,7 @@ pub trait Processor<L> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 

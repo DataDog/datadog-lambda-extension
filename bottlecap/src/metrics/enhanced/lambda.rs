@@ -165,6 +165,7 @@ impl Lambda {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::config;
@@ -192,6 +193,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_increment_invocation_metric() {
         let metrics_aggr = setup();
         let lambda = Lambda::new(metrics_aggr.clone());
@@ -207,6 +209,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)]
     fn test_increment_errors_metric() {
         let metrics_aggr = setup();
         let lambda = Lambda::new(metrics_aggr.clone());
