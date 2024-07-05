@@ -163,6 +163,7 @@ impl Lambda {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::config::Config;
@@ -222,6 +223,5 @@ mod tests {
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
         assert_eq!(tags.tags_map.get(MEMORY_SIZE_KEY).unwrap(), "128");
-        std::env::remove_var(MEMORY_SIZE_VAR);
     }
 }

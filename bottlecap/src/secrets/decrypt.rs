@@ -229,6 +229,7 @@ mod tests {
     use chrono::{NaiveDateTime, TimeZone};
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn test_build_get_secret_signed_headers() {
         let time = Utc.from_utc_datetime(
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
@@ -273,7 +274,7 @@ mod tests {
         );
 
         for (k, v) in &expected_headers {
-            assert_eq!(headers.get(k).unwrap(), v);
+            assert_eq!(headers.get(k).expect("cannot get header"), v);
         }
     }
 }

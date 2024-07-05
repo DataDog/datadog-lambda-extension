@@ -159,7 +159,7 @@ mod tests {
         i64::try_from(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .expect("time went backwards")
                 .as_nanos(),
         )
         .expect("can't parse time")
@@ -252,6 +252,7 @@ mod tests {
         )
     }
     #[tokio::test]
+    #[allow(clippy::unwrap_used)]
     #[cfg_attr(miri, ignore)]
     async fn test_process_trace() {
         let (tx, mut rx): (
@@ -263,7 +264,7 @@ mod tests {
 
         let json_span = create_test_json_span(11, 222, 333, start);
 
-        let bytes = rmp_serde::to_vec(&vec![vec![json_span]]).unwrap();
+        let bytes = rmp_serde::to_vec(&vec![vec![json_span]]).expect("invalid json");
         let request = Request::builder()
             .header("datadog-meta-tracer-version", "4.0.0")
             .header("datadog-meta-lang", "nodejs")
@@ -272,7 +273,7 @@ mod tests {
             .header("datadog-container-id", "33")
             .header("content-length", "100")
             .body(hyper::body::Body::from(bytes))
-            .unwrap();
+            .expect("fail to build request");
 
         let trace_processor = trace_processor::ServerlessTraceProcessor {
             resolved_api_key: "foo".to_string(),
@@ -314,13 +315,17 @@ mod tests {
             app_version: String::new(),
         };
 
-        let received_payload =
-            if let TracerPayloadCollection::V07(payload) = tracer_payload.unwrap().get_payloads() {
-                Some(payload[0].clone())
-            } else {
-                None
-            };
+        let received_payload = if let TracerPayloadCollection::V07(payload) =
+            tracer_payload.expect("no payload").get_payloads()
+        {
+            Some(payload[0].clone())
+        } else {
+            None
+        };
 
-        assert_eq!(expected_tracer_payload, received_payload.unwrap());
+        assert_eq!(
+            expected_tracer_payload,
+            received_payload.expect("no payload received")
+        );
     }
 }

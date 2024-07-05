@@ -226,7 +226,7 @@ mod tests {
         function_with_json: (
             r#"{"time": "2024-04-24T12:34:56.789Z","type": "function", "record": {"hello": "world"}}"#,
             TelemetryRecord::Function(Value::Object(
-                serde_json::from_str(r#"{"hello": "world"}"#).unwrap()
+                serde_json::from_str(r#"{"hello": "world"}"#).expect("unable to deserialize")
             )),
         ),
 
