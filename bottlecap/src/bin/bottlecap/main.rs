@@ -61,7 +61,7 @@ use std::{
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::Mutex as TokioMutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
 use reqwest::Client;
