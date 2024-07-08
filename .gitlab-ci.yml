@@ -41,7 +41,7 @@ generator:
     - gomplate --config .gitlab/config.yaml
   artifacts:
     paths:
-      - .gitlab/pipeline-bottlecap.yaml
+      - .gitlab/pipeline-*
 
 bottlecap:
   stage: build

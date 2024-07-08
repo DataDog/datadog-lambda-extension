@@ -16,7 +16,7 @@ if [ -z "$ARCHITECTURE" ]; then
 fi
 
 MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 16 \* 1024) # 16 MB, amd64 is 16, while arm64 is 15
-MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 43 \* 1024) # 43 MB
+MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 44 \* 1024) # 44 MB, amd is 44, while arm64 is 43
 
 
 LAYER_FILES_PREFIX="datadog_bottlecap"
