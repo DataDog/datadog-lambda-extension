@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::Sender;
 
-use tracing::{error, debug};
+use tracing::{debug, error};
 
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
