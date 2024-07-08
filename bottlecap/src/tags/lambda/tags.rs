@@ -223,6 +223,9 @@ mod tests {
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
         assert_eq!(tags.tags_map.get(MEMORY_SIZE_KEY).unwrap(), "128");
-        assert_eq!(tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(), "arn:aws:lambda:us-west-2:123456789012:function:my-function");
+        assert_eq!(
+            tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function"
+        );
     }
 }
