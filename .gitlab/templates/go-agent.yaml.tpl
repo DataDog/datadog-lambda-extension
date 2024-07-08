@@ -26,7 +26,8 @@ build layer ({{ $architecture.name }}):
     paths:
       - .layers/datadog_extension-{{ $architecture.name }}.zip
   script:
-    - git clone --branch ${AGENT_BRANCH} --depth=1 https://github.com/DataDog/datadog-agent.git
+    - echo $AGENT_BRANCH
+    - git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git
     - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/build_layer.sh
 
 {{- end }} # architectures end
