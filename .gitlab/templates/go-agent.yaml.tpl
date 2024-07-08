@@ -28,6 +28,6 @@ build layer ({{ $architecture.name }}):
   script:
     - echo $AGENT_BRANCH
     - git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git
-    - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/build_layer.sh
+    - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/build_go_agent.sh
 
 {{- end }} # architectures end
