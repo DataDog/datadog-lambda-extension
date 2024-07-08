@@ -248,6 +248,64 @@ mod tests {
     }
 
     #[test]
+    fn test_disabled() {
+        let (metrics_aggr, no_config) = setup();
+        let my_config = Arc::new(config::Config {
+            enhanced_metrics: false,
+            ..no_config.as_ref().clone()
+        });
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        lambda.increment_invocation_metric().unwrap();
+        lambda.increment_errors_metric().unwrap();
+        lambda.increment_timeout_metric().unwrap();
+        lambda.set_init_duration_metric(100.0).unwrap();
+        lambda.set_runtime_duration_metric(100.0);
+        lambda.set_post_runtime_duration_metric(100.0);
+        lambda.set_report_log_metrics(&ReportMetrics {
+            duration_ms: 100.0,
+            billed_duration_ms: 100,
+            max_memory_used_mb: 128,
+            memory_size_mb: 256,
+            init_duration_ms: Some(50.0),
+            restore_duration_ms: None,
+        });
+        let mut aggr = metrics_aggr.lock().expect("lock poisoned");
+        assert!(aggr
+            .get_value_by_id(constants::INVOCATIONS_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::ERRORS_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::TIMEOUTS_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::INIT_DURATION_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::RUNTIME_DURATION_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::DURATION_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::BILLED_DURATION_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
+            .is_none());
+        assert!(aggr
+            .get_value_by_id(constants::ESTIMATED_COST_METRIC.into(), None)
+            .is_none());
+    }
+
+    #[test]
     fn test_set_report_log_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
