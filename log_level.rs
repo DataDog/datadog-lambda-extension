@@ -1,6 +1,7 @@
 use serde::Deserialize;
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     /// Designates very serious errors.
     Error,
