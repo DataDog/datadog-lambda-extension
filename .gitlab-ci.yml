@@ -58,7 +58,7 @@ go-agent:
   stage: build
   trigger:
     include:
-      - artifact: .gitlab/pipeline-bottlecap.yaml
+      - artifact: .gitlab/pipeline-go-agent.yaml
         job: generator
     strategy: depend
   rules:
