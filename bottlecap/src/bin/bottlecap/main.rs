@@ -313,7 +313,8 @@ async fn extension_loop_active(
             error!("Error starting trace agent: {e:?}");
         }
     });
-    let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
+    let lambda_enhanced_metrics =
+        enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
     let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
     let telemetry_listener_cancel_token =

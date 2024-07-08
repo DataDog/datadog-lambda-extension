@@ -8,12 +8,16 @@ use tracing::error;
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator<1024>>>,
+    pub config: Arc<crate::config::Config>,
 }
 
 impl Lambda {
     #[must_use]
-    pub fn new(aggregator: Arc<Mutex<Aggregator<1024>>>) -> Lambda {
-        Lambda { aggregator }
+    pub fn new(
+        aggregator: Arc<Mutex<Aggregator<1024>>>,
+        config: Arc<crate::config::Config>,
+    ) -> Lambda {
+        Lambda { aggregator, config }
     }
 
     pub fn increment_invocation_metric(&self) -> Result<(), errors::Insert> {
@@ -29,6 +33,9 @@ impl Lambda {
     }
 
     pub fn set_init_duration_metric(&self, init_duration_ms: f64) -> Result<(), errors::Insert> {
+        if !self.config.enhanced_metrics {
+            return Ok(());
+        }
         let metric = metric::Metric::new(
             constants::INIT_DURATION_METRIC.into(),
             metric::Type::Distribution,
@@ -42,6 +49,9 @@ impl Lambda {
     }
 
     fn increment_metric(&self, metric_name: &str) -> Result<(), errors::Insert> {
+        if !self.config.enhanced_metrics {
+            return Ok(());
+        }
         let metric = metric::Metric::new(
             metric_name.into(),
             metric::Type::Distribution,
@@ -55,6 +65,9 @@ impl Lambda {
     }
 
     pub fn set_runtime_duration_metric(&self, duration_ms: f64) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
         let metric = metric::Metric::new(
             constants::RUNTIME_DURATION_METRIC.into(),
             metric::Type::Distribution,
@@ -73,6 +86,9 @@ impl Lambda {
     }
 
     pub fn set_post_runtime_duration_metric(&self, duration_ms: f64) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
         let metric = metric::Metric::new(
             constants::POST_RUNTIME_DURATION_METRIC.into(),
             metric::Type::Distribution,
@@ -107,6 +123,9 @@ impl Lambda {
     }
 
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
         let mut aggr: std::sync::MutexGuard<Aggregator<1024>> =
             self.aggregator.lock().expect("lock poisoned");
         let metric = metric::Metric::new(
@@ -176,7 +195,7 @@ mod tests {
     use std::collections::hash_map::HashMap;
     use std::sync::MutexGuard;
 
-    fn setup() -> Arc<Mutex<Aggregator<1024>>> {
+    fn setup() -> (Arc<Mutex<Aggregator<1024>>>, Arc<config::Config>) {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tags".to_string()),
@@ -187,16 +206,20 @@ mod tests {
             LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::new(),
         ));
-        Arc::new(Mutex::new(
-            Aggregator::<1024>::new(tags_provider.clone()).expect("failed to create aggregator"),
-        ))
+        (
+            Arc::new(Mutex::new(
+                Aggregator::<1024>::new(tags_provider.clone())
+                    .expect("failed to create aggregator"),
+            )),
+            config,
+        )
     }
 
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_increment_invocation_metric() {
-        let metrics_aggr = setup();
-        let lambda = Lambda::new(metrics_aggr.clone());
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         lambda.increment_invocation_metric().unwrap();
         match metrics_aggr
             .lock()
@@ -211,8 +234,8 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_increment_errors_metric() {
-        let metrics_aggr = setup();
-        let lambda = Lambda::new(metrics_aggr.clone());
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         lambda.increment_errors_metric().unwrap();
         match metrics_aggr
             .lock()
@@ -226,8 +249,8 @@ mod tests {
 
     #[test]
     fn test_set_report_log_metrics() {
-        let metrics_aggr = setup();
-        let lambda = Lambda::new(metrics_aggr.clone());
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let report_metrics = ReportMetrics {
             duration_ms: 100.0,
             billed_duration_ms: 100,
