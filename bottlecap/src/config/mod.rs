@@ -113,7 +113,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 
     match config.extension_version.as_deref() {
         Some("next") => {}
-        Some(&_) | None => {
+        Some(_) | None => {
             log_failover_reason("extension_version");
             return Err(ConfigError::UnsupportedField(
                 "extension_version".to_string(),
