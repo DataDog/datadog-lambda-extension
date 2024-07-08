@@ -38,20 +38,37 @@ else
     BUILD_SUFFIX="-alpine"
 fi
 
-# Allow to override the build tags
+# Allow override build tags
 if [ -z "$BUILD_TAGS" ]; then
     BUILD_TAGS="serverless otlp"
 fi
 
-ROOT_DIR=$(pwd)
+# Allow override agent path
+if [ -z "$AGENT_PATH" ]; then
+    AGENT_PATH="../datadog-agent"
+fi
+
+MAIN_DIR=$(pwd) # datadog-lambda-extension
 
 EXTENSION_DIR=".layers"
-TARGET_DIR=$ROOT_DIR/$EXTENSION_DIR
+TARGET_DIR=$MAIN_DIR/$EXTENSION_DIR
 
 # Make sure the folder does not exist
 rm -rf $EXTENSION_DIR 2>/dev/null
 
 mkdir -p $EXTENSION_DIR
+
+# Prepare folder with only *mod and *sum files to enable Docker caching capabilities
+mkdir -p $MAIN_DIR/scripts/.src $MAIN_DIR/scripts/.cache
+echo "Copy mod files to build a cache"
+cp $AGENT_PATH/go.mod $MAIN_DIR/scripts/.cache
+cp $AGENT_PATH/go.sum $MAIN_DIR/scripts/.cache
+
+# Compress all files to speed up docker copy
+touch $MAIN_DIR/scripts/.src/datadog-agent.tgz
+cd $AGENT_PATH/..
+tar --exclude=.git -czf $MAIN_DIR/scripts/.src/datadog-agent.tgz datadog-agent
+cd $MAIN_DIR
 
 function docker_build {
     arch=$1

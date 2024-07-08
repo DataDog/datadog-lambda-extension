@@ -26,8 +26,7 @@ build layer ({{ $architecture.name }}):
     paths:
       - .layers/datadog_extension-{{ $architecture.name }}.zip
   script:
-    - echo $AGENT_BRANCH
-    - git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git
+    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
     - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/build_go_agent.sh
 
 {{- end }} # architectures end
