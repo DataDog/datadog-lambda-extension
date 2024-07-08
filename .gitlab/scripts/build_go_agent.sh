@@ -76,7 +76,7 @@ function docker_build {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/build-go-agent-${arch}:${VERSION} \
-        -f ${ROOT_DIR}/scripts/${file} \
+        -f ${MAIN_DIR}/scripts/${file} \
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
         --build-arg CMD_PATH="${CMD_PATH}" \
