@@ -95,7 +95,7 @@ fn tags_from_env(
         }
         tags_map.insert(
             FUNCTION_ARN_KEY.to_string(),
-            metadata[FUNCTION_ARN_KEY].clone(),
+            metadata[FUNCTION_ARN_KEY].clone().to_lowercase(),
         );
     }
     if let Some(version) = &config.version {
@@ -208,7 +208,7 @@ mod tests {
         let mut metadata = hash_map::HashMap::new();
         metadata.insert(
             FUNCTION_ARN_KEY.to_string(),
-            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+            "arn:aws:lambda:us-west-2:123456789012:function:My-function".to_string(),
         );
         let config = Arc::new(Config {
             service: Some("my-service".to_string()),
@@ -223,5 +223,6 @@ mod tests {
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
         assert_eq!(tags.tags_map.get(MEMORY_SIZE_KEY).unwrap(), "128");
+        assert_eq!(tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(), "arn:aws:lambda:us-west-2:123456789012:function:my-function");
     }
 }
