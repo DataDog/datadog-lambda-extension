@@ -58,7 +58,8 @@ go-agent:
   stage: build
   trigger:
     include:
-      - local: .gitlab/pipeline-go-agent.yaml
+      - artifact: .gitlab/pipeline-bottlecap.yaml
+        job: generator
     strategy: depend
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
