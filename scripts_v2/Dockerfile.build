@@ -14,8 +14,8 @@ RUN arch="$(uname -m)"; \
     if [ "${arch}" = 'x86_64' ]; then \
     arch='amd64'; \
     fi; \
-    wget -O go1.21.7.linux-${arch}.tar.gz https://go.dev/dl/go1.21.7.linux-${arch}.tar.gz; \
-    tar -C /usr/local -xzf go1.21.7.linux-${arch}.tar.gz
+    wget -O go1.22.5.linux-${arch}.tar.gz https://go.dev/dl/go1.22.5.linux-${arch}.tar.gz; \
+    tar -C /usr/local -xzf go1.22.5.linux-${arch}.tar.gz
 
 RUN mkdir -p /tmp/dd
 
@@ -26,7 +26,7 @@ WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 # add the current version number to the tags package before compilation
 
 RUN --mount=type=cache,target=/root/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \ 
+    --mount=type=cache,target=/root/.cache/go-build \
     if [ -z "$AGENT_VERSION" ]; then \
     /usr/local/go/bin/go build -ldflags="-w \
     -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
