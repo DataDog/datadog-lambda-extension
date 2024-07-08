@@ -1,6 +1,13 @@
 variables:
   DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   DOCKER_TARGET_VERSION: latest
+  # Manual trigger variables
+  AGENT_BRANCH:
+    description: "Branch of the datadog-agent repository to use."
+    value: main
+  LAYER_SUFFIX:
+    description: "Suffix to be appended to the layer name (default empty)."
+    value: ""
 
 stages:
   - generate
@@ -12,6 +19,8 @@ ci image:
   tags: ["arch:arm64"]
   rules:
     - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - .gitlab/Dockerfile
       when: on_success
   variables:
     DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
@@ -32,14 +41,26 @@ generator:
     - gomplate --config .gitlab/config.yaml
   artifacts:
     paths:
-      - .gitlab/pipeline.yaml
+      - .gitlab/pipeline-bottlecap.yaml
 
 bottlecap:
   stage: build
   trigger:
     include:
-      - artifact: .gitlab/pipeline.yaml
+      - artifact: .gitlab/pipeline-bottlecap.yaml
         job: generator
     strategy: depend
   rules:
     - when: on_success
+
+go-agent:
+  stage: build
+  trigger:
+    include:
+      - local: .gitlab/pipeline-go-agent.yaml
+    strategy: depend
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+  variables:
+    AGENT_BRANCH: $AGENT_BRANCH
+    LAYER_SUFFIX: $LAYER_SUFFIX
