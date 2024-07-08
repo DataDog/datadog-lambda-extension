@@ -61,7 +61,7 @@ use std::{
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::Mutex as TokioMutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
 use reqwest::Client;
@@ -233,7 +233,7 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    info!("logging subsystem enabled");
+    debug!("logging subsystem enabled");
 }
 
 async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
@@ -331,8 +331,8 @@ async fn extension_loop_active(
                 deadline_ms,
                 invoked_function_arn,
             }) => {
-                info!(
-                    "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
+                debug!(
+                    "[extension_next] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
                 if let Err(e) = lambda_enhanced_metrics.increment_invocation_metric() {

@@ -74,7 +74,7 @@ impl DdApi {
     pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
         let url = format!("https://api.{}/api/beta/sketches", &self.site);
         let mut buf = Vec::new();
-        log::info!("sending distributions: {:?}", &sketches);
+        debug!("sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
         // add sketch payloads to the buffer
         // something like this, but fix the utf-8 encoding issue
