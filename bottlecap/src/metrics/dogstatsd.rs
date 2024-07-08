@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::Sender;
 
-use tracing::{error, info};
+use tracing::{error, debug};
 
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
@@ -51,13 +51,13 @@ impl DogStatsD {
                 .expect("didn't receive data");
             let buf = &mut buf[..amt];
             let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
-            info!(
+            debug!(
                 "received message: {} from {}, sending it to the bus",
                 msg, src
             );
             let parsed_metric = match Metric::parse(msg) {
                 Ok(parsed_metric) => {
-                    info!("parsed metric: {:?}", parsed_metric);
+                    debug!("parsed metric: {:?}", parsed_metric);
                     parsed_metric
                 }
                 Err(e) => {

@@ -9,7 +9,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tracing::{error, info};
+use tracing::{error, debug};
 
 use crate::config;
 use crate::tags::provider;
@@ -45,7 +45,7 @@ pub enum ApiVersion {
 impl TraceAgent {
     pub async fn start_trace_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
-        info!(
+        debug!(
             "Time taken to fetch Trace Agent metadata: {} ms",
             now.elapsed().as_millis()
         );
@@ -112,8 +112,8 @@ impl TraceAgent {
 
         let server = server_builder.serve(make_svc);
 
-        info!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
-        info!(
+        debug!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
+        debug!(
             "Time taken start the Trace Agent: {} ms",
             now.elapsed().as_millis()
         );
