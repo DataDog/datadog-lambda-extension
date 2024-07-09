@@ -13,7 +13,7 @@ pub struct Flusher {
 
 #[must_use]
 pub fn build_fqdn_logs(site: String) -> String {
-    format!("https://http-intake.logs.{site}/api/v2/logs")
+    format!("https://http-intake.logs.{site}")
 }
 
 #[allow(clippy::await_holding_lock)]

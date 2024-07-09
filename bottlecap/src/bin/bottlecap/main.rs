@@ -277,7 +277,7 @@ async fn extension_loop_active(
     ));
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
-        metrics_aggr.clone(),
+        Arc::clone(&metrics_aggr),
         build_fqdn_metrics(config.site.clone()),
     );
 
@@ -505,7 +505,7 @@ fn start_logs_agent(
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
-        logs_agent.aggregator.clone(),
+        Arc::clone(&logs_agent.aggregator),
         build_fqdn_logs(config.site.clone()),
     );
     tokio::spawn(async move {
