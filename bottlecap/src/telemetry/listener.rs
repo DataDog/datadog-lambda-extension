@@ -2,11 +2,14 @@ use crate::telemetry::events::TelemetryEvent;
 use core::fmt::Display;
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::Sender;
 
-use tracing::error;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{Body, Request, Response, Server, StatusCode};
+use tracing::{debug, error};
 
 pub struct HttpRequestParser {
     headers: HashMap<String, String>,
@@ -189,7 +192,6 @@ impl HttpRequestParser {
 pub struct TelemetryListener {
     event_bus: Sender<Vec<TelemetryEvent>>,
     cancel_token: tokio_util::sync::CancellationToken,
-    listener: TcpListener,
 }
 
 pub struct TelemetryListenerConfig {
@@ -203,44 +205,89 @@ impl TelemetryListener {
     /// # Errors
     ///
     /// Function will error if the passed address cannot be bound.
-    pub async fn new(
+    // pub async fn new(
+    //     config: &TelemetryListenerConfig,
+    //     event_bus: Sender<Vec<TelemetryEvent>>,
+    //     cancel_token: tokio_util::sync::CancellationToken,
+    // ) -> Result<TelemetryListener, String> {
+    //     let addr = format!("{}:{}", &config.host, &config.port);
+    //     let listener = TcpListener::bind(addr).await.map_err(|e| e.to_string())?;
+
+    //     Ok(TelemetryListener {
+    //         event_bus,
+    //         cancel_token,
+    //         listener,
+    //     })
+    // }
+
+    pub async fn new_hyper(
         config: &TelemetryListenerConfig,
         event_bus: Sender<Vec<TelemetryEvent>>,
         cancel_token: tokio_util::sync::CancellationToken,
-    ) -> Result<TelemetryListener, String> {
-        let addr = format!("{}:{}", &config.host, &config.port);
-        let listener = TcpListener::bind(addr).await.map_err(|e| e.to_string())?;
+    ) {
+        // let addr = format!("{}:{}", &config.host, &config.port);
+        let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
-        Ok(TelemetryListener {
-            event_bus,
-            cancel_token,
-            listener,
-        })
-    }
+        let service =
+            make_service_fn(move |_| {
+                let event_bus = event_bus.clone();
+                async move {
+                    Ok::<_, hyper::Error>(service_fn(move |req| {
+                        Self::handle(req, event_bus.clone())
+                    }))
+                }
+            });
+        let listener = Server::bind(&addr);
 
-    pub async fn spin(self) {
-        loop {
-            tokio::select! {
-                biased;
-                stream = self.listener.accept() => {
-                    match stream {
-                        Ok((mut stream, _)) => {
-                            let cloned_event_bus = self.event_bus.clone();
-                            tokio::spawn(async move {
-                                let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
-                            });
-                        }
-                        Err(e) => {
-                            error!("Error accepting connection: {:?}", e);
-                        }
-                    }
-                }
-                () = self.cancel_token.cancelled() => {
-                    break;
-                }
-            }
+        let server = listener.serve(service);
+        debug!("[jordan] starting Telemetry API listener on {}", addr);
+        if let Err(e) = server.await {
+            error!("[jordan] Telemetry API listener error: {:?}", e);
         }
     }
+
+    pub async fn handle(req: Request<Body>, event_bus: Sender<Vec<TelemetryEvent>>) -> Result<Response<Body>, hyper::Error> {
+        debug!("[jordan] Received a Telemetry API connection, starting to wait for body",);
+
+        let whole_body = hyper::body::to_bytes(req.into_body()).await?;
+
+        let body = whole_body.to_vec();
+        let body = std::str::from_utf8(&body).expect("infallible");
+        debug!("[jordan] Body received is : {}", body);
+
+        let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(body).expect("infallible");
+        event_bus
+            .send(telemetry_events)
+            .await.expect("infallible"); 
+
+        let ack = Response::new(Body::from("OK"));
+        Ok(ack)
+    }
+
+    // pub async fn spin(self) {
+    //     loop {
+    //         tokio::select! {
+    //             biased;
+    //             stream = self.listener.accept() => {
+    //                 match stream {
+    //                     Ok((mut stream, _)) => {
+    //                         debug!("Received a Telemetry API connection");
+    //                         let cloned_event_bus = self.event_bus.clone();
+    //                         tokio::spawn(async move {
+    //                             let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
+    //                         });
+    //                     }
+    //                     Err(e) => {
+    //                         error!("Error accepting connection: {:?}", e);
+    //                     }
+    //                 }
+    //             }
+    //             () = self.cancel_token.cancelled() => {
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
 
     async fn handle_stream(
         stream: &mut TcpStream,
