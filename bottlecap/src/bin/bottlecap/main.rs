@@ -41,6 +41,7 @@ use bottlecap::{
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
+        hello_agent,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
@@ -313,6 +314,15 @@ async fn extension_loop_active(
             error!("Error starting trace agent: {e:?}");
         }
     });
+
+    // TODO(astuyve): deprioritize this task after the first request
+    tokio::spawn(async move {
+        let res = hello_agent::start_handler().await;
+        if let Err(e) = res {
+            error!("Error starting hello agent: {e:?}");
+        }
+    });
+
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
     let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
