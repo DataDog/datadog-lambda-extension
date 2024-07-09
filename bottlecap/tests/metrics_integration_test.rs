@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 mod common;
 
 #[tokio::test]
-async fn test_metrics_flow() {
+async fn test_enhanced_metrics() {
     let server = MockServer::start();
     let hello_mock = server.mock(|when, then| {
         when.method(POST).path("/api/beta/sketches");

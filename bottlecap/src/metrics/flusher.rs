@@ -21,7 +21,7 @@ impl Flusher {
         Flusher { dd_api, aggregator }
     }
 
-    pub async fn flush(&mut self) -> Vec<(usize, Option<ShipError>)> {
+    pub async fn flush(&mut self) -> Vec<(String, Option<ShipError>)> {
         let (all_series, all_distributions) = {
             let mut aggregator = self.aggregator.lock().expect("lock poisoned");
             (
@@ -29,25 +29,29 @@ impl Flusher {
                 aggregator.consume_distributions(),
             )
         };
-        for a_batch in all_series {
-            debug!("flushing {} series to datadog", a_batch.series.len());
-            match &self.dd_api.ship_series(&a_batch).await {
-                Ok(()) => {}
+        let mut res = Vec::new();
+        for (count, a_batch) in all_series.into_iter().enumerate() {
+            let req_id = format!("d{count}");
+            match self.dd_api.ship_series(&a_batch).await {
+                Ok(()) => {
+                    res.push((req_id, None));
+                }
                 Err(e) => {
                     debug!("failed to ship metrics to datadog: {:?}", e);
+                    res.push((req_id, Some(e)));
                 }
             }
             // TODO(astuyve) retry and do not panic
         }
-        let mut res = Vec::new();
-        for (counter, a_batch) in all_distributions.into_iter().enumerate() {
+        for (count, a_batch) in all_distributions.into_iter().enumerate() {
+            let req_id = format!("d{count}");
             match self.dd_api.ship_distributions(&a_batch).await {
                 Ok(()) => {
-                    res.push((counter, None));
+                    res.push((req_id, None));
                 }
                 Err(e) => {
                     debug!("failed to ship distributions to datadog: {:?}", e);
-                    res.push((counter, Some(e)));
+                    res.push((req_id, Some(e)));
                 }
             }
         }
