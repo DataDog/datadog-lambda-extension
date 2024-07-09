@@ -41,10 +41,13 @@ pub const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";
 
 // todo: make sure we can override those with environment variables
-pub const DOGSTATSD_PORT: u16 = 8185;
+pub const DOGSTATSD_PORT: u16 = 8125;
 
 pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
-pub const TELEMETRY_PORT: u16 = 8124;
+// todo(astuyve) should be 8124 on /lambda/logs but
+// telemetry is implemented on a raw socket now and
+// does not multiplex routes on the same port.
+pub const TELEMETRY_PORT: u16 = 8999;
 
 /// Return the base URL for the lambda runtime API
 ///
