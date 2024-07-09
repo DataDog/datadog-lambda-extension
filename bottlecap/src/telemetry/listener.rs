@@ -187,7 +187,7 @@ impl HttpRequestParser {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct TelemetryListener {
-    event_bus: Sender<Vec<TelemetryEvent>>,
+    event_bus: Sender<TelemetryEvent>,
     cancel_token: tokio_util::sync::CancellationToken,
     listener: TcpListener,
 }
@@ -205,7 +205,7 @@ impl TelemetryListener {
     /// Function will error if the passed address cannot be bound.
     pub async fn new(
         config: &TelemetryListenerConfig,
-        event_bus: Sender<Vec<TelemetryEvent>>,
+        event_bus: Sender<TelemetryEvent>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> Result<TelemetryListener, String> {
         let addr = format!("{}:{}", &config.host, &config.port);
@@ -244,17 +244,20 @@ impl TelemetryListener {
 
     async fn handle_stream(
         stream: &mut TcpStream,
-        event_bus: Sender<Vec<TelemetryEvent>>,
+        event_bus: Sender<TelemetryEvent>,
     ) -> Result<(), TcpError> {
         loop {
             match HttpRequestParser::from_stream(stream).await {
                 Ok(p) => {
-                    let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)
+                    let mut telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(&p.body)
                         .map_err(|e| TcpError::Parse(e.to_string()))?;
-                    event_bus
-                        .send(telemetry_events)
-                        .await
-                        .map_err(|e| TcpError::Write(e.to_string()))?; //todo
+                    for event in telemetry_events.drain(..) {
+                        event_bus
+                            .send(event)
+                            .await
+                            .map_err(|e| TcpError::Write(e.to_string()))?;
+                    }
+                     //todo
                                                                        //AJ this is cheeky but we should have include the SendError in the enum
                     if let Err(e) = Self::acknowledge_request(stream, Ok(())).await {
                         error!("Error acknowledging Telemetry request: {:?}", e);
@@ -399,8 +402,8 @@ mod tests {
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(3);
         let result = TelemetryListener::handle_stream(&mut stream, tx).await;
-        let events = rx.recv().await.expect("No events received");
-        let telemetry_event = events.first().expect("failed to get event");
+        let event = rx.recv().await.expect("No events received");
+        let telemetry_event = event;
 
         let expected_time =
             DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").expect("failed to parse time");

@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
 use tracing::error;
+use tracing::debug;
 
 use crate::config;
 use crate::events::Event;
@@ -224,33 +225,31 @@ impl LambdaProcessor {
 
     pub async fn process(
         &mut self,
-        events: Vec<TelemetryEvent>,
+        event: TelemetryEvent,
         aggregator: &Arc<Mutex<Aggregator>>,
     ) {
         let mut to_send = Vec::<String>::new();
 
-        for event in events {
-            if let Ok(mut log) = self.make_log(event).await {
-                let should_send_log =
-                    LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-                if should_send_log {
-                    if let Ok(serialized_log) = serde_json::to_string(&log) {
-                        // explicitly drop log so we don't accidentally re-use it and push
-                        // duplicate logs to the aggregator
-                        drop(log);
-                        to_send.push(serialized_log);
-                    }
+        if let Ok(mut log) = self.make_log(event).await {
+            let should_send_log =
+                LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
+            if should_send_log {
+                if let Ok(serialized_log) = serde_json::to_string(&log) {
+                    // explicitly drop log so we don't accidentally re-use it and push
+                    // duplicate logs to the aggregator
+                    drop(log);
+                    to_send.push(serialized_log);
                 }
+            }
 
-                // Process orphan logs, since we have a `request_id` now
-                for mut orphan_log in self.orphan_logs.drain(..) {
-                    orphan_log.message.lambda.request_id =
-                        Some(self.invocation_context.request_id.clone());
-                    if should_send_log {
-                        if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
-                            drop(orphan_log);
-                            to_send.push(serialized_log);
-                        }
+            // Process orphan logs, since we have a `request_id` now
+            for mut orphan_log in self.orphan_logs.drain(..) {
+                orphan_log.message.lambda.request_id =
+                    Some(self.invocation_context.request_id.clone());
+                if should_send_log {
+                    if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
+                        drop(orphan_log);
+                        to_send.push(serialized_log);
                     }
                 }
             }
