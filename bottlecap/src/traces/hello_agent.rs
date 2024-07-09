@@ -13,7 +13,7 @@ use std::net::SocketAddr;
 use tracing::error;
 
 const HELLO_PATH: &str = "/lambda/hello";
-const AGENT_PORT: usize = 8126;
+const AGENT_PORT: usize = 8124;
 
 pub async fn start_handler() -> Result<(), Box<dyn std::error::Error>> {
     let make_svc = make_service_fn(move |_| {
