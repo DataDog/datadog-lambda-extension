@@ -17,7 +17,7 @@ const AGENT_PORT: usize = 8126;
 
 pub async fn start_handler() -> Result<(), Box<dyn std::error::Error>> {
     let make_svc = make_service_fn(move |_| {
-        let service = service_fn(move |req| hello_handler(req));
+        let service = service_fn(hello_handler);
 
         async move { Ok::<_, Infallible>(service) }
     });
@@ -38,14 +38,13 @@ pub async fn start_handler() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn hello_handler(req: Request<Body>) -> http::Result<Response<Body>> {
-    match (req.method(), req.uri().path()) {
-        (&Method::GET, HELLO_PATH) => Response::builder()
+    if let (&Method::GET, HELLO_PATH) = (req.method(), req.uri().path()) {
+        Response::builder()
             .status(200)
-            .body(Body::from(json!({}).to_string())),
-        _ => {
-            let mut not_found = Response::default();
-            *not_found.status_mut() = StatusCode::NOT_FOUND;
-            Ok(not_found)
-        }
+            .body(Body::from(json!({}).to_string()))
+    } else {
+        let mut not_found = Response::default();
+        *not_found.status_mut() = StatusCode::NOT_FOUND;
+        Ok(not_found)
     }
 }
