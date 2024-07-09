@@ -65,7 +65,8 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
-use bottlecap::metrics::flusher::build_fqdn_site;
+use bottlecap::logs::flusher::build_fqdn_logs;
+use bottlecap::metrics::flusher::build_fqdn_metrics;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
@@ -277,7 +278,7 @@ async fn extension_loop_active(
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
         metrics_aggr.clone(),
-        build_fqdn_site(config.site.clone()),
+        build_fqdn_metrics(config.site.clone()),
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
@@ -504,8 +505,8 @@ fn start_logs_agent(
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
-        Arc::clone(&logs_agent.aggregator),
-        config.site.clone(),
+        logs_agent.aggregator.clone(),
+        build_fqdn_logs(config.site.clone()),
     );
     tokio::spawn(async move {
         logs_agent.spin().await;

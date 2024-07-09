@@ -10,7 +10,7 @@ pub struct Flusher {
 }
 
 #[must_use]
-pub fn build_fqdn_site(site: String) -> String {
+pub fn build_fqdn_metrics(site: String) -> String {
     format!("https://api.{site}")
 }
 
