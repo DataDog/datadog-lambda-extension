@@ -65,11 +65,11 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+use bottlecap::metrics::flusher::build_fqdn_site;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
-use bottlecap::metrics::flusher::build_fqdn_site;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
