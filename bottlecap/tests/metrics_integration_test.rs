@@ -16,8 +16,8 @@ async fn test_enhanced_metrics() {
 
     // payload looks like
     // aws.lambda.enhanced.invocations"_dd.compute_stats:1"architecture:x86_64"function_arn:test-arn:�൴      �?!      �?)      �?1      �?:�B
-    // using multiple regexp since
-    // error: look-around, including look-ahead and look-behind, is not supported
+    // protobuf is using hashmap, can't set a btreemap to have sorted keys. Using multiple regexp since
+    // Can't do look around since -> error: look-around, including look-ahead and look-behind, is not supported
     let regexp_metric_name = r#".*aws\.lambda\.enhanced\.invocations.*"#;
     let regexp_compute_state = r#".*_dd.compute_stats:1.*"#;
     let regexp_arch = r#".*architecture:x86_64.*"#;
@@ -36,8 +36,9 @@ async fn test_enhanced_metrics() {
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });
 
+    let arc_config = Arc::new(Config::default());
     let provider = Arc::new(Provider::new(
-        Arc::new(Config::default()),
+        Arc::clone(&arc_config),
         LAMBDA_RUNTIME_SLUG.to_string(),
         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
     ));
@@ -50,11 +51,10 @@ async fn test_enhanced_metrics() {
         metrics_aggr.clone(),
         server.base_url(),
     );
-    let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
+    let lambda_enhanced_metrics =
+        enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(&arc_config));
 
-    lambda_enhanced_metrics
-        .increment_invocation_metric()
-        .expect("failed to increment invocation metric");
+    lambda_enhanced_metrics.increment_invocation_metric();
 
     let res = metrics_flusher.flush().await;
 
