@@ -1,8 +1,8 @@
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::datadog;
 use crate::metrics::datadog::ShipError;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
 
 pub struct Flusher {
     dd_api: datadog::DdApi,
@@ -21,7 +21,7 @@ impl Flusher {
         Flusher { dd_api, aggregator }
     }
 
-    pub async fn flush(&mut self) -> Vec<(String, Option<ShipError>)> {
+    pub async fn flush(&mut self) -> HashMap<String, Result<(), ShipError>> {
         let (all_series, all_distributions) = {
             let mut aggregator = self.aggregator.lock().expect("lock poisoned");
             (
@@ -29,31 +29,16 @@ impl Flusher {
                 aggregator.consume_distributions(),
             )
         };
-        let mut res = Vec::new();
+        let mut res = HashMap::new();
         for (count, a_batch) in all_series.into_iter().enumerate() {
-            let req_id = format!("d{count}");
-            match self.dd_api.ship_series(&a_batch).await {
-                Ok(()) => {
-                    res.push((req_id, None));
-                }
-                Err(e) => {
-                    debug!("failed to ship metrics to datadog: {:?}", e);
-                    res.push((req_id, Some(e)));
-                }
-            }
+            res.insert(format!("s{count}"), self.dd_api.ship_series(&a_batch).await);
             // TODO(astuyve) retry and do not panic
         }
         for (count, a_batch) in all_distributions.into_iter().enumerate() {
-            let req_id = format!("d{count}");
-            match self.dd_api.ship_distributions(&a_batch).await {
-                Ok(()) => {
-                    res.push((req_id, None));
-                }
-                Err(e) => {
-                    debug!("failed to ship distributions to datadog: {:?}", e);
-                    res.push((req_id, Some(e)));
-                }
-            }
+            res.insert(
+                format!("d{count}"),
+                self.dd_api.ship_distributions(&a_batch).await,
+            );
         }
         res
     }

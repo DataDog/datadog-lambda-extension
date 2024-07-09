@@ -73,7 +73,6 @@ impl DdApi {
 
     pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
         let url = format!("{}/api/beta/sketches", &self.fqdn_site);
-        let mut buf = Vec::new();
         debug!("sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
         // add sketch payloads to the buffer
@@ -84,15 +83,12 @@ impl DdApi {
         //     let _ = output_stream.write_message_no_tag(&sketches);
         //     TODO not working, has utf-8 encoding issue in dist-intake
         //}
-        sketches
-            .write_to_vec(&mut buf)
-            .expect("can't write to buffer");
         let resp = self
             .client
             .post(&url)
             .header("DD-API-KEY", &self.api_key)
             .header("Content-Type", "application/x-protobuf")
-            .body(buf)
+            .body(sketches.write_to_bytes().expect("can't write to buffer"))
             .send()
             .await;
         match resp {

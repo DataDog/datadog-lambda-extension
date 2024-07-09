@@ -12,9 +12,27 @@ mod common;
 
 #[tokio::test]
 async fn test_enhanced_metrics() {
+    let dd_api_key = "my_test_key";
+
+    // payload looks like
+    // aws.lambda.enhanced.invocations"_dd.compute_stats:1"architecture:x86_64"function_arn:test-arn:�൴      �?!      �?)      �?1      �?:�B
+    // using multiple regexp since
+    // error: look-around, including look-ahead and look-behind, is not supported
+    let regexp_metric_name = r#".*aws\.lambda\.enhanced\.invocations.*"#;
+    let regexp_compute_state = r#".*_dd.compute_stats:1.*"#;
+    let regexp_arch = r#".*architecture:x86_64.*"#;
+    let regexp_function_arn = r#".*function_arn:test-arn.*"#;
+
     let server = MockServer::start();
     let hello_mock = server.mock(|when, then| {
-        when.method(POST).path("/api/beta/sketches");
+        when.method(POST)
+            .path("/api/beta/sketches")
+            .header("DD-API-KEY", dd_api_key)
+            .header("Content-Type", "application/x-protobuf")
+            .body_matches(Regex::new(regexp_metric_name).unwrap())
+            .body_matches(Regex::new(regexp_compute_state).unwrap())
+            .body_matches(Regex::new(regexp_arch).unwrap())
+            .body_matches(Regex::new(regexp_function_arn).unwrap());
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });
 
@@ -27,8 +45,11 @@ async fn test_enhanced_metrics() {
     let metrics_aggr = Arc::new(Mutex::new(
         MetricsAggregator::new(provider.clone(), 1024).expect("failed to create aggregator"),
     ));
-    let mut metrics_flusher =
-        MetricsFlusher::new("key".to_string(), metrics_aggr.clone(), server.base_url());
+    let mut metrics_flusher = MetricsFlusher::new(
+        dd_api_key.to_string(),
+        metrics_aggr.clone(),
+        server.base_url(),
+    );
     let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
 
     lambda_enhanced_metrics
@@ -36,9 +57,8 @@ async fn test_enhanced_metrics() {
         .expect("failed to increment invocation metric");
 
     let res = metrics_flusher.flush().await;
-    for r in res {
-        assert!(r.1.is_none());
-    }
+
+    assert!(res.contains_key("d0"));
 
     hello_mock.assert();
 }
