@@ -37,8 +37,10 @@ check layer size ({{ $architecture.name }}):
     - build layer ({{ $architecture.name }})
   dependencies:
     - build layer ({{ $architecture.name }})
+  variables:
+    LAYER_FILE: datadog_extension-{{ $architecture.name }}.zip
   script:
-    - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/check_layer_size.sh
+    - .gitlab/scripts/check_layer_size.sh
 
 {{ range $environment := (ds "environments").environments }}
 
@@ -58,10 +60,12 @@ sign layer {{ $environment.name }} ({{ $architecture.name }}):
     expire_in: 1 hr # Signed layers should expire after 1 day TODO: modify to 1 day
     paths:
       - .layers/datadog_extension-{{ $architecture.name }}.zip
+  variables:
+    LAYER_FILE: datadog_extension-{{ $architecture.name }}.zip
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
-    - LAYER_FILE=datadog_extension-{{ $architecture.name}}.zip .gitlab/scripts/sign_layers.sh {{ $environment.name }}
+    - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
 
 publish layer {{ $environment.name }} ({{ $architecture.name }}):
   stage: publish

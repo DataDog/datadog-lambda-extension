@@ -24,8 +24,10 @@ build layer ({{ $architecture.name }}):
     expire_in: 1 hr
     paths:
       - .layers/datadog_bottlecap-{{ $architecture.name }}.zip
+  variables:
+    ARCHITECTURE: {{ $architecture.name }}
   script:
-    - ARCHITECTURE={{ $architecture.name }} ./scripts/build_bottlecap_layer.sh
+    - ./scripts/build_bottlecap_layer.sh
 
 check layer size ({{ $architecture.name }}):
   stage: test
@@ -35,8 +37,10 @@ check layer size ({{ $architecture.name }}):
     - build layer ({{ $architecture.name }})
   dependencies:
     - build layer ({{ $architecture.name }})
+  variables:
+    LAYER_FILE: datadog_bottlecap-{{ $architecture.name }}.zip
   script:
-    - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/check_layer_size.sh
+    - .gitlab/scripts/check_layer_size.sh
 
 fmt ({{ $architecture.name }}):
   stage: test
@@ -84,10 +88,12 @@ sign layer ({{ $architecture.name }}):
     expire_in: 1 day # Signed layers should expire after 1 day
     paths:
       - .layers/datadog_bottlecap-{{ $architecture.name }}.zip
+  variables:
+    LAYER_FILE: datadog_bottlecap-{{ $architecture.name }}.zip
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
-    - LAYER_FILE=datadog_bottlecap-{{ $architecture.name}}.zip .gitlab/scripts/sign_layers.sh {{ $environment.name }}
+    - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
 {{ end }}
 
 publish layer {{ $environment.name }} ({{ $architecture.name }}):

@@ -9,20 +9,17 @@
 
 set -e
 
-if [ -z "$ARCHITECTURE" ]; then
-    echo "ARCHITECTURE not specified"
-    echo ""
+if [ -z "$LAYER_FILE" ]; then
+    echo "[ERROR]: LAYER_FILE not specified"
     exit 1
 fi
 
 MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 16 \* 1024) # 16 MB, amd64 is 16, while arm64 is 15
 MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 44 \* 1024) # 44 MB, amd is 44, while arm64 is 43
 
+LAYERS_DIR=".layers"
 
-LAYER_FILES_PREFIX="datadog_bottlecap"
-LAYER_DIR=".layers"
-
-FILE=$LAYER_DIR/${LAYER_FILES_PREFIX}-${ARCHITECTURE}.zip
+FILE=$LAYERS_DIR/$LAYER_FILE
 FILE_SIZE=$(stat --printf="%s" $FILE)
 FILE_SIZE_KB="$(( ${FILE_SIZE%% *} / 1024))"
 echo "Layer file ${FILE} has zipped size ${FILE_SIZE_KB} kb"
