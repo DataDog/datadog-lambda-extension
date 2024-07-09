@@ -6,3 +6,4 @@ pub mod stats_processor;
 pub mod trace_agent;
 pub mod trace_flusher;
 pub mod trace_processor;
+pub mod hello_agent;
