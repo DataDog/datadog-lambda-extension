@@ -6,7 +6,7 @@ use tracing::debug;
 
 pub struct Flusher {
     dd_api: datadog::DdApi,
-    aggregator: Arc<Mutex<Aggregator<1024>>>,
+    aggregator: Arc<Mutex<Aggregator>>,
 }
 
 #[must_use]
@@ -16,7 +16,7 @@ pub fn build_fqdn_site(site: String) -> String {
 
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator<1024>>>, site: String) -> Self {
+    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
         let dd_api = datadog::DdApi::new(api_key, site);
         Flusher { dd_api, aggregator }
     }

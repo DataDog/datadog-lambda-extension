@@ -271,7 +271,7 @@ async fn extension_loop_active(
     );
 
     let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::<{ CONTEXTS }>::new(tags_provider.clone())
+        MetricsAggregator::new(tags_provider.clone(), CONTEXTS)
             .expect("failed to create aggregator"),
     ));
     let mut metrics_flusher = MetricsFlusher::new(
@@ -515,7 +515,7 @@ fn start_logs_agent(
 
 async fn start_dogstatsd(
     event_bus: Sender<Event>,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator<1024>>>,
+    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
 ) -> CancellationToken {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),

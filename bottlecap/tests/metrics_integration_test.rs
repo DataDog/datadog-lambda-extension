@@ -25,7 +25,7 @@ async fn test_enhanced_metrics() {
     ));
 
     let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::<1024>::new(provider.clone()).expect("failed to create aggregator"),
+        MetricsAggregator::new(provider.clone(), 1024).expect("failed to create aggregator"),
     ));
     let mut metrics_flusher =
         MetricsFlusher::new("key".to_string(), metrics_aggr.clone(), server.base_url());

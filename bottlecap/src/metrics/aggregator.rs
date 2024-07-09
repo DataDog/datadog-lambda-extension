@@ -106,16 +106,17 @@ impl Entry {
 #[derive(Clone)]
 // NOTE by construction we know that intervals and contexts do not explore the
 // full space of usize but the type system limits how we can express this today.
-pub struct Aggregator<const CONTEXTS: usize> {
+pub struct Aggregator {
     tags_provider: Arc<provider::Provider>,
     map: hash_table::HashTable<Entry>,
     max_batch_entries_single_metric: usize,
     max_batch_bytes_single_metric: u64,
     max_batch_entries_sketch_metric: usize,
     max_batch_bytes_sketch_metric: u64,
+    max_context: usize,
 }
 
-impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
+impl Aggregator {
     /// Create a new instance of `Aggregator`
     ///
     /// # Errors
@@ -124,8 +125,11 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
     /// counterparts in `constants`. This would be better as a compile-time
     /// issue, although leaving this open allows for runtime configuration.
     #[allow(clippy::cast_precision_loss)]
-    pub fn new(tags_provider: Arc<provider::Provider>) -> Result<Self, errors::Creation> {
-        if CONTEXTS > constants::MAX_CONTEXTS {
+    pub fn new(
+        tags_provider: Arc<provider::Provider>,
+        max_context: usize,
+    ) -> Result<Self, errors::Creation> {
+        if max_context > constants::MAX_CONTEXTS {
             return Err(errors::Creation::Contexts);
         }
         Ok(Self {
@@ -135,6 +139,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             max_batch_bytes_single_metric: constants::MAX_SIZE_BYTES_SINGLE_METRIC,
             max_batch_entries_sketch_metric: constants::MAX_ENTRIES_SKETCH_METRIC,
             max_batch_bytes_sketch_metric: constants::MAX_SIZE_SKETCH_METRIC,
+            max_context,
         })
     }
 
@@ -153,7 +158,7 @@ impl<const CONTEXTS: usize> Aggregator<CONTEXTS> {
             .entry(id, |m| m.id == id, |m| metric::id(m.name, m.tags))
         {
             hash_table::Entry::Vacant(entry) => {
-                if len >= CONTEXTS {
+                if len >= self.max_context {
                     return Err(errors::Insert::Overflow);
                 }
                 let ent = Entry::new_from_metric(id, metric);
@@ -435,7 +440,7 @@ mod tests {
 
     #[test]
     fn insertion() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -449,7 +454,7 @@ mod tests {
 
     #[test]
     fn distribution_insertion() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
@@ -463,7 +468,7 @@ mod tests {
 
     #[test]
     fn overflow() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -492,7 +497,7 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp)]
     fn clear() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:3|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:5|c|k:v").expect("metric parse failed");
@@ -519,7 +524,7 @@ mod tests {
 
     #[test]
     fn to_series() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -540,7 +545,7 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf() {
-        let mut aggregator = Aggregator::<2>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
@@ -557,7 +562,7 @@ mod tests {
 
     #[test]
     fn consume_distributions_ignore_single_metrics() {
-        let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 1_000).unwrap();
         assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
 
         assert!(aggregator
@@ -577,13 +582,14 @@ mod tests {
     fn consume_distributions_batch_entries() {
         let max_batch = 5;
         let tot = 12;
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
             max_batch_entries_sketch_metric: max_batch,
             max_batch_bytes_sketch_metric: 1_500,
+            max_context: 1_000,
         };
 
         add_metrics(tot, &mut aggregator, "d".to_string());
@@ -601,13 +607,14 @@ mod tests {
         let single_proto_size = 104;
         let max_bytes = 250;
         let tot = 5;
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
             max_batch_entries_sketch_metric: 1_000,
             max_batch_bytes_sketch_metric: max_bytes,
+            max_context: 1_000,
         };
 
         add_metrics(tot, &mut aggregator, "d".to_string());
@@ -630,13 +637,14 @@ mod tests {
         let single_proto_size = 104;
         let max_bytes = 1;
         let tot = 5;
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
             max_batch_entries_sketch_metric: 1_000,
             max_batch_bytes_sketch_metric: max_bytes,
+            max_context: 1_000,
         };
 
         add_metrics(tot, &mut aggregator, "d".to_string());
@@ -648,7 +656,7 @@ mod tests {
         }
     }
 
-    fn add_metrics(tot: usize, aggregator: &mut Aggregator<1000>, counter_or_distro: String) {
+    fn add_metrics(tot: usize, aggregator: &mut Aggregator, counter_or_distro: String) {
         for i in 1..=tot {
             assert!(aggregator
                 .insert(
@@ -661,7 +669,7 @@ mod tests {
 
     #[test]
     fn consume_series_ignore_distribution() {
-        let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 1_000).unwrap();
 
         assert_eq!(aggregator.consume_metrics().len(), 0);
 
@@ -691,13 +699,14 @@ mod tests {
     fn consume_series_batch_entries() {
         let max_batch = 5;
         let tot = 13;
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: max_batch,
             max_batch_bytes_single_metric: 10_000,
             max_batch_entries_sketch_metric: 1_000,
             max_batch_bytes_sketch_metric: 1_500,
+            max_context: 1_000,
         };
 
         add_metrics(tot, &mut aggregator, "c".to_string());
@@ -717,13 +726,14 @@ mod tests {
         let two_metrics_size = 300;
         let max_bytes = 350;
         let tot = 5;
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: max_bytes,
             max_batch_entries_sketch_metric: 1_000,
             max_batch_bytes_sketch_metric: 1_000,
+            max_context: 1_000,
         };
 
         add_metrics(tot, &mut aggregator, "c".to_string());
@@ -749,13 +759,14 @@ mod tests {
         let single_metric_size = 156;
         let max_bytes = 1;
         let tot = 5;
-        let mut aggregator = Aggregator::<1_000> {
+        let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: max_bytes,
             max_batch_entries_sketch_metric: 1_000,
             max_batch_bytes_sketch_metric: 1_000,
+            max_context: 1_000,
         };
 
         add_metrics(tot, &mut aggregator, "c".to_string());
@@ -772,7 +783,7 @@ mod tests {
 
     #[test]
     fn distribution_serialized_deserialized() {
-        let mut aggregator = Aggregator::<1_000>::new(create_tags_provider()).unwrap();
+        let mut aggregator = Aggregator::new(create_tags_provider(), 1_000).unwrap();
 
         add_metrics(10, &mut aggregator, "d".to_string());
         let distribution = aggregator.distributions_to_protobuf();

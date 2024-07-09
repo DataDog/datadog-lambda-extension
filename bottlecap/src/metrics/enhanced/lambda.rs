@@ -341,11 +341,7 @@ mod tests {
         assert_value(&mut aggr, 256.0, vec![constants::MEMORY_SIZE_METRIC]);
     }
 
-    fn assert_value(
-        aggr: &mut MutexGuard<Aggregator<1024>>,
-        sketch_val: f64,
-        metric_names: Vec<&str>,
-    ) {
+    fn assert_value(aggr: &mut MutexGuard<Aggregator>, sketch_val: f64, metric_names: Vec<&str>) {
         let mut ms_sketch = DDSketch::default();
         ms_sketch.insert(sketch_val);
 
