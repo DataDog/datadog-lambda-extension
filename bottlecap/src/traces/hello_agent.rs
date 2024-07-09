@@ -7,21 +7,17 @@
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
+use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use tracing::error;
-use serde_json::json;
 
 const HELLO_PATH: &str = "/lambda/hello";
 const AGENT_PORT: usize = 8126;
 
 pub async fn start_handler() -> Result<(), Box<dyn std::error::Error>> {
     let make_svc = make_service_fn(move |_| {
-        let service = service_fn(move |req| {
-            hello_handler(
-                req,
-            )
-        });
+        let service = service_fn(move |req| hello_handler(req));
 
         async move { Ok::<_, Infallible>(service) }
     });
@@ -39,16 +35,13 @@ pub async fn start_handler() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
-
 }
 
 async fn hello_handler(req: Request<Body>) -> http::Result<Response<Body>> {
     match (req.method(), req.uri().path()) {
-        (&Method::GET, HELLO_PATH) => {
-            Response::builder()
-                .status(200)
-                .body(Body::from(json!({}).to_string()))
-        },
+        (&Method::GET, HELLO_PATH) => Response::builder()
+            .status(200)
+            .body(Body::from(json!({}).to_string())),
         _ => {
             let mut not_found = Response::default();
             *not_found.status_mut() = StatusCode::NOT_FOUND;

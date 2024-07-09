@@ -37,11 +37,11 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
+        hello_agent,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
-        hello_agent,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
