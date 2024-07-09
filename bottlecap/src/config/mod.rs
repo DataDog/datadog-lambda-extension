@@ -43,6 +43,7 @@ pub struct Config {
     pub merge_xray_traces: bool,
     pub serverless_appsec_enabled: bool,
     pub extension_version: Option<String>,
+    pub enhanced_metrics: bool,
 }
 
 impl Default for Config {
@@ -75,6 +76,7 @@ impl Default for Config {
             merge_xray_traces: false,
             serverless_appsec_enabled: false,
             extension_version: None,
+            enhanced_metrics: true,
         }
     }
 }
