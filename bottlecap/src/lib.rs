@@ -44,7 +44,7 @@ pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";
 pub const DOGSTATSD_PORT: u16 = 8125;
 
 pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
-// todo(astuyve) should be 8124 on /lambda/logs but 
+// todo(astuyve) should be 8124 on /lambda/logs but
 // telemetry is implemented on a raw socket now and
 // does not multiplex routes on the same port.
 pub const TELEMETRY_PORT: u16 = 8999;
