@@ -17,11 +17,11 @@ ci image:
   stage: build
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:arm64"]
-  # rules:
-  #   - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
-  #     changes:
-  #       - .gitlab/Dockerfile
-  #     when: on_success
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" && $CI_PIPELINE_SOURCE == "push"'
+      changes:
+        - .gitlab/Dockerfile
+      when: on_success
   variables:
     DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   script:
