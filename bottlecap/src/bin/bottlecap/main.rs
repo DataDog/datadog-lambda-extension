@@ -313,7 +313,8 @@ async fn extension_loop_active(
             error!("Error starting trace agent: {e:?}");
         }
     });
-    let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
+    let lambda_enhanced_metrics =
+        enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
     let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
     let telemetry_listener_cancel_token =
@@ -335,9 +336,7 @@ async fn extension_loop_active(
                     "[extension_next] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
-                if let Err(e) = lambda_enhanced_metrics.increment_invocation_metric() {
-                    error!("Failed to increment invocation metric: {e:?}");
-                }
+                lambda_enhanced_metrics.increment_invocation_metric();
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
@@ -375,11 +374,8 @@ async fn extension_loop_active(
                                 metrics,
                             } => {
                                 debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                if let Err(e) = lambda_enhanced_metrics
-                                    .set_init_duration_metric(metrics.duration_ms)
-                                {
-                                    error!("Failed to set init duration metric: {e:?}");
-                                }
+                                lambda_enhanced_metrics
+                                    .set_init_duration_metric(metrics.duration_ms);
                             }
                             TelemetryRecord::PlatformRuntimeDone {
                                 request_id,
@@ -395,17 +391,9 @@ async fn extension_loop_active(
                                 }
 
                                 if status != Status::Success {
-                                    if let Err(e) =
-                                        lambda_enhanced_metrics.increment_errors_metric()
-                                    {
-                                        error!("Failed to increment error metric: {e:?}");
-                                    }
+                                    lambda_enhanced_metrics.increment_errors_metric();
                                     if status == Status::Timeout {
-                                        if let Err(e) =
-                                            lambda_enhanced_metrics.increment_timeout_metric()
-                                        {
-                                            error!("Failed to increment timeout metric: {e:?}");
-                                        }
+                                        lambda_enhanced_metrics.increment_timeout_metric();
                                     }
                                 }
                                 debug!(
