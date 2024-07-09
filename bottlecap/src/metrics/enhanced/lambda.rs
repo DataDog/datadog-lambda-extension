@@ -21,15 +21,15 @@ impl Lambda {
     }
 
     pub fn increment_invocation_metric(&self) {
-        self.increment_metric(constants::INVOCATIONS_METRIC)
+        self.increment_metric(constants::INVOCATIONS_METRIC);
     }
 
     pub fn increment_errors_metric(&self) {
-        self.increment_metric(constants::ERRORS_METRIC)
+        self.increment_metric(constants::ERRORS_METRIC);
     }
 
     pub fn increment_timeout_metric(&self) {
-        self.increment_metric(constants::TIMEOUTS_METRIC)
+        self.increment_metric(constants::TIMEOUTS_METRIC);
     }
 
     pub fn set_init_duration_metric(&self, init_duration_ms: f64) {
