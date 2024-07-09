@@ -69,6 +69,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
+use bottlecap::metrics::flusher::build_fqdn_site;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -275,8 +276,8 @@ async fn extension_loop_active(
     ));
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
-        Arc::clone(&metrics_aggr),
-        config.site.clone(),
+        metrics_aggr.clone(),
+        build_fqdn_site(config.site.clone()),
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {

@@ -2,10 +2,15 @@ use crate::metrics::aggregator::Aggregator;
 use crate::metrics::datadog;
 use std::sync::{Arc, Mutex};
 use tracing::debug;
+use crate::metrics::datadog::ShipError;
 
 pub struct Flusher {
     dd_api: datadog::DdApi,
     aggregator: Arc<Mutex<Aggregator<1024>>>,
+}
+
+pub fn build_fqdn_site(site: String) -> String {
+    return format!("https://api.{}", site);
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -15,7 +20,7 @@ impl Flusher {
         Flusher { dd_api, aggregator }
     }
 
-    pub async fn flush(&mut self) {
+    pub async fn flush(&mut self) -> Vec<(i32, Option<ShipError>)> {
         let (all_series, all_distributions) = {
             let mut aggregator = self.aggregator.lock().expect("lock poisoned");
             (
@@ -33,13 +38,18 @@ impl Flusher {
             }
             // TODO(astuyve) retry and do not panic
         }
+        let mut res = Vec::new();
+        let mut counter = 0;
         for a_batch in all_distributions {
-            match &self.dd_api.ship_distributions(&a_batch).await {
-                Ok(()) => {}
+            match self.dd_api.ship_distributions(&a_batch).await {
+                Ok(()) => { res.push((counter, None)); }
                 Err(e) => {
                     debug!("failed to ship distributions to datadog: {:?}", e);
+                    res.push((counter, Some(e)));
                 }
             }
+            counter += 1;
         }
+        return res;
     }
 }

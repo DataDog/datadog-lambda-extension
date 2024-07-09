@@ -11,7 +11,7 @@ use tracing::{debug, error};
 #[derive(Debug)]
 pub struct DdApi {
     api_key: String,
-    site: String,
+    fqdn_site: String,
     client: reqwest::Client,
 }
 /// Error relating to `ship`
@@ -36,7 +36,7 @@ impl DdApi {
     pub fn new(api_key: String, site: String) -> Self {
         DdApi {
             api_key,
-            site,
+            fqdn_site: site,
             client: reqwest::Client::new(),
         }
     }
@@ -46,7 +46,7 @@ impl DdApi {
         let body = serde_json::to_vec(&series)?;
         debug!("sending body: {:?}", &series);
 
-        let url = format!("https://api.{}/api/v2/series", &self.site);
+        let url = format!("{}/api/v2/series", &self.fqdn_site);
         let resp = self
             .client
             .post(&url)
@@ -72,7 +72,7 @@ impl DdApi {
     }
 
     pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
-        let url = format!("https://api.{}/api/beta/sketches", &self.site);
+        let url = format!("{}/api/beta/sketches", &self.fqdn_site);
         let mut buf = Vec::new();
         debug!("sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
