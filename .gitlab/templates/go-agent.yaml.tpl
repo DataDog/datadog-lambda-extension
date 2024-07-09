@@ -29,4 +29,63 @@ build layer ({{ $architecture.name }}):
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
     - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/build_go_agent.sh
 
+check layer size ({{ $architecture.name }}):
+  stage: test
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  needs:
+    - build layer ({{ $architecture.name }})
+  dependencies:
+    - build layer ({{ $architecture.name }})
+  script:
+    - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/check_layer_size.sh
+
+{{ range $environment := (ds "environments").environments }}
+
+sign layer {{ $environment.name }} ({{ $architecture.name }}):
+  stage: sign
+  tags: ["arch:amd64"]
+  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  # rules:
+  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  #     when: manual
+  needs:
+    - build layer ({{ $architecture.name }})
+    - check layer size ({{ $architecture.name }})
+  dependencies:
+    - build layer ({{ $architecture.name }})
+  artifacts: # Re specify artifacts so the modified signed file is passed
+    expire_in: 1 hr # Signed layers should expire after 1 day TODO: modify to 1 day
+    paths:
+      - .layers/datadog_extension-{{ $architecture.name }}.zip
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - LAYER_FILE=datadog_extension-{{ $architecture.name}}.zip .gitlab/scripts/sign_layers.sh {{ $environment.name }}
+
+publish layer {{ $environment.name }} ({{ $architecture.name }}):
+  stage: publish
+  tags: ["arch:amd64"]
+  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  rules:
+    - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
+      when: manual
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    - sign layer {{ $environment.name }} ({{ $architecture.name }})
+  dependencies:
+    - sign layer {{ $environment.name }} ({{ $architecture.name }})
+  parallel:
+    matrix:
+      - REGION: {{ range (ds "regions").regions }}
+          - {{ .code }}
+        {{- end}}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - STAGE={{ $environment.name }} ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/publish_layers.sh
+
+{{- end }} # environments
+
 {{- end }} # architectures end

@@ -35,7 +35,7 @@ fi
 
 if [ "$1" = "sandbox" ]; then
     REGION="sa-east-1"
-    S3_BUCKET_NAME="dd-lambda-signing-bucket-sandbox"
+    S3_BUCKET_NAME="dd-lambda-signing-bucket-serverless-sandbox"
 fi
 if [ "$1" = "prod" ]; then
     REGION="us-east-1"
