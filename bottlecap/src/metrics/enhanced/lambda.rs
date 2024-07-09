@@ -1,6 +1,6 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
 use crate::metrics::aggregator::Aggregator;
-use crate::metrics::{errors, metric};
+use crate::metrics::metric;
 use crate::telemetry::events::ReportMetrics;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
@@ -20,21 +20,21 @@ impl Lambda {
         Lambda { aggregator, config }
     }
 
-    pub fn increment_invocation_metric(&self) -> Result<(), errors::Insert> {
+    pub fn increment_invocation_metric(&self) {
         self.increment_metric(constants::INVOCATIONS_METRIC)
     }
 
-    pub fn increment_errors_metric(&self) -> Result<(), errors::Insert> {
+    pub fn increment_errors_metric(&self) {
         self.increment_metric(constants::ERRORS_METRIC)
     }
 
-    pub fn increment_timeout_metric(&self) -> Result<(), errors::Insert> {
+    pub fn increment_timeout_metric(&self) {
         self.increment_metric(constants::TIMEOUTS_METRIC)
     }
 
-    pub fn set_init_duration_metric(&self, init_duration_ms: f64) -> Result<(), errors::Insert> {
+    pub fn set_init_duration_metric(&self, init_duration_ms: f64) {
         if !self.config.enhanced_metrics {
-            return Ok(());
+            return;
         }
         let metric = metric::Metric::new(
             constants::INIT_DURATION_METRIC.into(),
@@ -42,15 +42,19 @@ impl Lambda {
             (init_duration_ms * constants::MS_TO_SEC).to_string().into(),
             None,
         );
-        self.aggregator
+        if let Err(e) = self
+            .aggregator
             .lock()
             .expect("lock poisoned")
             .insert(&metric)
+        {
+            error!("failed to insert metric: {}", e);
+        }
     }
 
-    fn increment_metric(&self, metric_name: &str) -> Result<(), errors::Insert> {
+    fn increment_metric(&self, metric_name: &str) {
         if !self.config.enhanced_metrics {
-            return Ok(());
+            return;
         }
         let metric = metric::Metric::new(
             metric_name.into(),
@@ -58,10 +62,14 @@ impl Lambda {
             "1".into(),
             None,
         );
-        self.aggregator
+        if let Err(e) = self
+            .aggregator
             .lock()
             .expect("lock poisoned")
             .insert(&metric)
+        {
+            error!("failed to insert metric: {}", e);
+        }
     }
 
     pub fn set_runtime_duration_metric(&self, duration_ms: f64) {
@@ -220,7 +228,7 @@ mod tests {
     fn test_increment_invocation_metric() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        lambda.increment_invocation_metric().unwrap();
+        lambda.increment_invocation_metric();
         match metrics_aggr
             .lock()
             .expect("lock poisoned")
@@ -236,7 +244,7 @@ mod tests {
     fn test_increment_errors_metric() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        lambda.increment_errors_metric().unwrap();
+        lambda.increment_errors_metric();
         match metrics_aggr
             .lock()
             .expect("lock poisoned")
@@ -255,10 +263,10 @@ mod tests {
             ..no_config.as_ref().clone()
         });
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        lambda.increment_invocation_metric().unwrap();
-        lambda.increment_errors_metric().unwrap();
-        lambda.increment_timeout_metric().unwrap();
-        lambda.set_init_duration_metric(100.0).unwrap();
+        lambda.increment_invocation_metric();
+        lambda.increment_errors_metric();
+        lambda.increment_timeout_metric();
+        lambda.set_init_duration_metric(100.0);
         lambda.set_runtime_duration_metric(100.0);
         lambda.set_post_runtime_duration_metric(100.0);
         lambda.set_report_log_metrics(&ReportMetrics {
