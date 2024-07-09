@@ -126,10 +126,14 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
       - REGION: {{ range (ds "regions").regions }}
           - {{ .code }}
         {{- end}}
+  variables:
+    ARCHITECTURE: {{ $architecture.name }}
+    LAYER_FILE: datadog_bottlecap-{{ $architecture.name }}.zip
+    STAGE: {{ $environment.name }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
-    - STAGE={{ $environment.name }} ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/publish_layers.sh
+    - .gitlab/scripts/publish_layers.sh
 
 {{- end }} # environments end
 
