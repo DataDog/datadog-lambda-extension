@@ -85,7 +85,7 @@ sign layer ({{ $architecture.name }}):
     paths:
       - .layers/datadog_bottlecap-{{ $architecture.name }}.zip
   before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source ./ci/get_secrets.sh
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - LAYER_FILE=datadog_bottlecap-{{ $architecture.name}}.zip .gitlab/scripts/sign_layers.sh {{ $environment.name }}
 {{ end }}
@@ -121,7 +121,7 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
           - {{ .code }}
         {{- end}}
   before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source ./ci/get_secrets.sh
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - STAGE={{ $environment.name }} ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/publish_layers.sh
 
