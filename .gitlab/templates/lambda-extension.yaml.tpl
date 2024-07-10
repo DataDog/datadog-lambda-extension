@@ -27,6 +27,7 @@ build go agent ({{ $architecture.name }}):
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
+    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
     - .gitlab/scripts/build_go_agent.sh
 
 build bottlecap ({{ $architecture.name }}):
