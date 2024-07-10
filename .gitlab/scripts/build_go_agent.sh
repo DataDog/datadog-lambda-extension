@@ -11,8 +11,7 @@
 set -e
 
 if [ -z "$ARCHITECTURE" ]; then
-    echo "ARCHITECTURE not specified"
-    echo ""
+    printf "[ERROR]: ARCHITECTURE not specified\n"
     exit 1
 fi
 
@@ -84,7 +83,8 @@ function docker_build {
         . -o $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}
     
     cp $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}.zip
-    rm -rf $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}
+    unzip $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}
+    rm -rf $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}/datadog_extension.zip
 }
 
 docker_build $ARCHITECTURE $BUILD_FILE
