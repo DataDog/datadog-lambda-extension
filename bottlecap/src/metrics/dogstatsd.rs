@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::Sender;
 
-use tracing::{error, info};
+use tracing::{debug, error};
 
 use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
@@ -51,13 +51,13 @@ impl DogStatsD {
                 .expect("didn't receive data");
             let buf = &mut buf[..amt];
             let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
-            info!(
+            debug!(
                 "received message: {} from {}, sending it to the bus",
                 msg, src
             );
             let parsed_metric = match Metric::parse(msg) {
                 Ok(parsed_metric) => {
-                    info!("parsed metric: {:?}", parsed_metric);
+                    debug!("parsed metric: {:?}", parsed_metric);
                     parsed_metric
                 }
                 Err(e) => {
@@ -65,6 +65,10 @@ impl DogStatsD {
                     continue;
                 }
             };
+            if parsed_metric.name == "aws.lambda.enhanced.invocations" {
+                debug!("dropping invocation metric from layer, as it's set by agent");
+                continue;
+            }
             let first_value = match parsed_metric.first_value() {
                 Ok(val) => val,
                 Err(e) => {
@@ -85,6 +89,7 @@ impl DogStatsD {
             // Don't publish until after validation and adding metric_event to buff
             let _ = self.event_bus.send(Event::Metric(metric_event)).await; // todo check the result
             if self.cancel_token.is_cancelled() {
+                debug!("closing dogstatsd listener");
                 break;
             }
         }

@@ -37,6 +37,7 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
+        hello_agent,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
@@ -61,7 +62,7 @@ use std::{
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::Mutex as TokioMutex;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
 use reqwest::Client;
@@ -233,7 +234,7 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    info!("logging subsystem enabled");
+    debug!("logging subsystem enabled");
 }
 
 async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
@@ -313,7 +314,16 @@ async fn extension_loop_active(
             error!("Error starting trace agent: {e:?}");
         }
     });
-    let lambda_enhanced_metrics = enhanced_metrics::new(Arc::clone(&metrics_aggr));
+    // TODO(astuyve): deprioritize this task after the first request
+    tokio::spawn(async move {
+        let res = hello_agent::start_handler().await;
+        if let Err(e) = res {
+            error!("Error starting hello agent: {e:?}");
+        }
+    });
+
+    let lambda_enhanced_metrics =
+        enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
     let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
 
     let telemetry_listener_cancel_token =
@@ -331,13 +341,11 @@ async fn extension_loop_active(
                 deadline_ms,
                 invoked_function_arn,
             }) => {
-                info!(
-                    "[bottlecap] Invoke event {}; deadline: {}, invoked_function_arn: {}",
+                debug!(
+                    "[extension_next] Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
-                if let Err(e) = lambda_enhanced_metrics.increment_invocation_metric() {
-                    error!("Failed to increment invocation metric: {e:?}");
-                }
+                lambda_enhanced_metrics.increment_invocation_metric();
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
@@ -375,11 +383,8 @@ async fn extension_loop_active(
                                 metrics,
                             } => {
                                 debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                if let Err(e) = lambda_enhanced_metrics
-                                    .set_init_duration_metric(metrics.duration_ms)
-                                {
-                                    error!("Failed to set init duration metric: {e:?}");
-                                }
+                                lambda_enhanced_metrics
+                                    .set_init_duration_metric(metrics.duration_ms);
                             }
                             TelemetryRecord::PlatformRuntimeDone {
                                 request_id,
@@ -395,17 +400,9 @@ async fn extension_loop_active(
                                 }
 
                                 if status != Status::Success {
-                                    if let Err(e) =
-                                        lambda_enhanced_metrics.increment_errors_metric()
-                                    {
-                                        error!("Failed to increment error metric: {e:?}");
-                                    }
+                                    lambda_enhanced_metrics.increment_errors_metric();
                                     if status == Status::Timeout {
-                                        if let Err(e) =
-                                            lambda_enhanced_metrics.increment_timeout_metric()
-                                        {
-                                            error!("Failed to increment timeout metric: {e:?}");
-                                        }
+                                        lambda_enhanced_metrics.increment_timeout_metric();
                                     }
                                 }
                                 debug!(

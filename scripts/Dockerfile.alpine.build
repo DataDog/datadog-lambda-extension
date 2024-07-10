@@ -7,7 +7,7 @@ ARG CMD_PATH
 ARG BUILD_TAGS
 
 RUN apk add --no-cache git make musl-dev gcc
-COPY --from=golang:1.21-alpine /usr/local/go/ /usr/lib/go
+COPY --from=golang:1.22-alpine /usr/local/go/ /usr/lib/go
 
 ENV GOROOT /usr/lib/go
 ENV GOPATH /go
@@ -29,7 +29,7 @@ WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 # add the current version number to the tags package before compilation
 
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \ 
+    --mount=type=cache,target=/root/.cache/go-build \
     /usr/lib/go/bin/go build -ldflags="-w \
     -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
     -tags "${BUILD_TAGS}" -o datadog-agent;
