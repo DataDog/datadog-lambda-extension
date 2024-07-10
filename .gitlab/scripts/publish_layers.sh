@@ -36,7 +36,7 @@ publish_layer() {
 }
 
 
-if [ -z "$ARCHITECTURE "]; then
+if [ -z "$ARCHITECTURE" ]; then
     printf "[ERROR]: ARCHITECTURE not specified."
     exit 1
 fi

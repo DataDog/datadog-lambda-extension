@@ -44,13 +44,14 @@ check layer size ({{ $architecture.name }}):
 
 {{ range $environment := (ds "environments").environments }}
 
-sign layer {{ $environment.name }} ({{ $architecture.name }}):
+{{ if or (eq $environment.name "prod") }}
+sign layer ({{ $architecture.name }}):
   stage: sign
   tags: ["arch:amd64"]
   image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
-  #     when: manual
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: manual
   needs:
     - build layer ({{ $architecture.name }})
     - check layer size ({{ $architecture.name }})
@@ -66,6 +67,7 @@ sign layer {{ $environment.name }} ({{ $architecture.name }}):
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
+{{ end }}
 
 publish layer {{ $environment.name }} ({{ $architecture.name }}):
   stage: publish
@@ -77,9 +79,17 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
       allow_failure: true
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
-    - sign layer {{ $environment.name }} ({{ $architecture.name }})
+{{ if or (eq $environment.name "prod") }}
+      - sign layer ({{ $architecture.name }})
+{{ else }}
+      - build layer ({{ $architecture.name }})
+{{ end }}
   dependencies:
-    - sign layer {{ $environment.name }} ({{ $architecture.name }})
+{{ if or (eq $environment.name "prod") }}
+      - sign layer ({{ $architecture.name }})
+{{ else }}
+      - build layer ({{ $architecture.name }})
+{{ end }}
   parallel:
     matrix:
       - REGION: {{ range (ds "regions").regions }}
