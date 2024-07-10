@@ -49,7 +49,16 @@ impl TelemetryListener {
         let body = whole_body.to_vec();
         let body = std::str::from_utf8(&body).expect("infallible");
 
-        let mut telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(body).expect("infallible");
+        let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_str(body) {
+            Ok(events) => events,
+            Err(e) => {
+                error!("Failed to parse telemetry events: {:?}", e);
+                return Ok(Response::builder()
+                    .status(hyper::StatusCode::BAD_REQUEST)
+                    .body(Body::from("Failed to parse telemetry events"))
+                    .expect("infallible"));
+            }
+        };
         for event in telemetry_events.drain(..) {
             event_bus.send(event).await.expect("infallible");
         }
@@ -61,19 +70,31 @@ impl TelemetryListener {
 
 #[cfg(test)]
 mod tests {
+    use chrono::DateTime;
+
+    use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
+
     #[tokio::test]
     async fn test_handle() {
+        let event_body = hyper::Body::from(r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init","runtimeVersion":"nodejs:20.v22","runtimeVersionArn":"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72","functionName":"hello-world","functionVersion":"$LATEST"}}]"#);
         let req = hyper::Request::builder()
             .method("POST")
             .uri("http://localhost:8080")
-            .body(hyper::Body::from(r#"{"key": "value"}"#))
+            .body(event_body)
             .unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
         let _ = super::TelemetryListener::handle(req, tx).await;
 
-        let events = rx.recv().await.unwrap();
-        assert_eq!(events.len(), 1);
-        //assert_eq!(events[0].get("key").unwrap(), "value");
+        let telemetry_event = rx.recv().await.unwrap();
+        let expected_time =
+            DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").expect("failed to parse time");
+        assert_eq!(telemetry_event.time, expected_time);
+        assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
+            initialization_type: InitType::OnDemand,
+            phase: InitPhase::Init,
+            runtime_version: Some("nodejs:20.v22".to_string()),
+            runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
+        });
     }
 }
