@@ -39,6 +39,7 @@ pub async fn start_handler() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn hello_handler(req: Request<Body>) -> http::Result<Response<Body>> {
     if let (&Method::GET, HELLO_PATH) = (req.method(), req.uri().path()) {
+        error!("[DEPRECATED] Please upgrade your tracing library, the /hello route is deprecated");
         Response::builder()
             .status(200)
             .body(Body::from(json!({}).to_string()))
