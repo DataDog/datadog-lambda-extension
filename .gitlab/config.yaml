@@ -3,10 +3,12 @@
 inputFiles:
   - .gitlab/templates/bottlecap.yaml.tpl
   - .gitlab/templates/go-agent.yaml.tpl
+  - .gitlab/templates/lambda-extension.yaml.tpl
 
 outputFiles:
   - .gitlab/pipeline-bottlecap.yaml
   - .gitlab/pipeline-go-agent.yaml
+  - .gitlab/pipeline-lambda-extension.yaml.tpl
 
 datasources:
   architectures:
