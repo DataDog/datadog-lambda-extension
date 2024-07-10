@@ -230,9 +230,7 @@ impl TelemetryListener {
                     match stream {
                         Ok((mut stream, _)) => {
                             let cloned_event_bus = self.event_bus.clone();
-                            tokio::spawn(async move {
-                                let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
-                            });
+                            let _ = Self::handle_stream(&mut stream, cloned_event_bus).await;
                         }
                         Err(e) => {
                             error!("Error accepting connection: {:?}", e);
