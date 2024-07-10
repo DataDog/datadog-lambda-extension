@@ -83,6 +83,15 @@ if [ -z "$STAGE" ]; then
     exit 1
 fi
 
+printf "[$REGION] Starting publishing layers...\n"
+
+if [ -z "$LAYER_SUFFIX" ]; then
+    printf "[$REGION] Deploying layers without suffix\n"
+else
+    printf "[$REGION] Deploying layers with specified suffix: ${LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}"
+fi
+
 if [[ "$STAGE" =~ ^(staging|sandbox)$ ]]; then
     # Deploy latest version
     latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
@@ -107,20 +116,11 @@ else
     echo "Layer version parsed: $VERSION"
 fi
 
-printf "[$REGION] Starting publishing layers...\n"
-
 # Compatible Architectures
 if [ "$ARCHITECTURE" == "amd64" ]; then
     architectures="x86_64"
 else
     architectures="arm64"
-fi
-
-if [ -z "$LAYER_SUFFIX" ]; then
-    printf "[$REGION] Deploying layers without suffix\n"
-else
-    printf "[$REGION] Deploying layers with specified suffix: ${LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}"
 fi
 
 latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
