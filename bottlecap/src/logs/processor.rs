@@ -29,14 +29,10 @@ impl LogsProcessor {
         }
     }
 
-    pub async fn process(
-        &mut self,
-        events: Vec<TelemetryEvent>,
-        aggregator: &Arc<Mutex<Aggregator>>,
-    ) {
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => {
-                lambda_processor.process(events, aggregator).await;
+                lambda_processor.process(event, aggregator).await;
             }
         }
     }

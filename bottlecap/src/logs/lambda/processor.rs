@@ -222,35 +222,29 @@ impl LambdaProcessor {
         }
     }
 
-    pub async fn process(
-        &mut self,
-        events: Vec<TelemetryEvent>,
-        aggregator: &Arc<Mutex<Aggregator>>,
-    ) {
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
         let mut to_send = Vec::<String>::new();
 
-        for event in events {
-            if let Ok(mut log) = self.make_log(event).await {
-                let should_send_log =
-                    LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-                if should_send_log {
-                    if let Ok(serialized_log) = serde_json::to_string(&log) {
-                        // explicitly drop log so we don't accidentally re-use it and push
-                        // duplicate logs to the aggregator
-                        drop(log);
-                        to_send.push(serialized_log);
-                    }
+        if let Ok(mut log) = self.make_log(event).await {
+            let should_send_log =
+                LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
+            if should_send_log {
+                if let Ok(serialized_log) = serde_json::to_string(&log) {
+                    // explicitly drop log so we don't accidentally re-use it and push
+                    // duplicate logs to the aggregator
+                    drop(log);
+                    to_send.push(serialized_log);
                 }
+            }
 
-                // Process orphan logs, since we have a `request_id` now
-                for mut orphan_log in self.orphan_logs.drain(..) {
-                    orphan_log.message.lambda.request_id =
-                        Some(self.invocation_context.request_id.clone());
-                    if should_send_log {
-                        if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
-                            drop(orphan_log);
-                            to_send.push(serialized_log);
-                        }
+            // Process orphan logs, since we have a `request_id` now
+            for mut orphan_log in self.orphan_logs.drain(..) {
+                orphan_log.message.lambda.request_id =
+                    Some(self.invocation_context.request_id.clone());
+                if should_send_log {
+                    if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
+                        drop(orphan_log);
+                        to_send.push(serialized_log);
                     }
                 }
             }
@@ -628,7 +622,7 @@ mod tests {
             },
         };
 
-        processor.process(vec![event.clone()], &aggregator).await;
+        processor.process(event.clone(), &aggregator).await;
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
@@ -675,7 +669,7 @@ mod tests {
             record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
-        processor.process(vec![event.clone()], &aggregator).await;
+        processor.process(event.clone(), &aggregator).await;
         assert_eq!(processor.orphan_logs.len(), 1);
 
         let mut aggregator_lock = aggregator.lock().unwrap();
@@ -711,9 +705,7 @@ mod tests {
             },
         };
 
-        processor
-            .process(vec![start_event.clone()], &aggregator)
-            .await;
+        processor.process(start_event.clone(), &aggregator).await;
         assert_eq!(
             processor.invocation_context.request_id,
             "test-request-id".to_string()
@@ -725,7 +717,7 @@ mod tests {
             record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
-        processor.process(vec![event.clone()], &aggregator).await;
+        processor.process(event.clone(), &aggregator).await;
 
         // Verify aggregator logs
         let mut aggregator_lock = aggregator.lock().unwrap();
