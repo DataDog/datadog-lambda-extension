@@ -1,6 +1,6 @@
 use crate::telemetry::events::TelemetryEvent;
 use core::fmt::Display;
-
+use tracing::debug;
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -83,8 +83,11 @@ impl HttpRequestParser {
             .expect("infallible")
             .parse::<usize>()
             .map_err(|e| TcpError::Parse(e.to_string()))?;
+        assert!(body_start_index < headers_buf.len());
         let body_bytes_read = headers_buf.len() - body_start_index;
         let missing_body_length = content_length - body_bytes_read;
+        assert!(missing_body_length < usize::MAX);
+        assert!(missing_body_length > 0);
         let mut body_buf = vec![0u8; missing_body_length];
 
         stream
@@ -223,6 +226,7 @@ impl TelemetryListener {
             tokio::select! {
                 biased;
                 stream = self.listener.accept() => {
+                    debug!("astuyve received telemetry connection");
                     match stream {
                         Ok((mut stream, _)) => {
                             let cloned_event_bus = self.event_bus.clone();
@@ -272,6 +276,7 @@ impl TelemetryListener {
         }
     }
 
+    #[inline]
     async fn acknowledge_request(
         stream: &mut TcpStream,
         request: Result<(), String>,
