@@ -8,7 +8,7 @@ inputFiles:
 outputFiles:
   - .gitlab/pipeline-bottlecap.yaml
   - .gitlab/pipeline-go-agent.yaml
-  - .gitlab/pipeline-lambda-extension.yaml.tpl
+  - .gitlab/pipeline-lambda-extension.yaml
 
 datasources:
   architectures:
