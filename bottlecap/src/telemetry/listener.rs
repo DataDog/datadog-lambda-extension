@@ -17,7 +17,7 @@ pub struct TelemetryListenerConfig {
 }
 
 impl TelemetryListener {
-    pub async fn new(
+    pub async fn spin(
         config: &TelemetryListenerConfig,
         event_bus: Sender<TelemetryEvent>,
         _cancel_token: tokio_util::sync::CancellationToken,
