@@ -6,9 +6,9 @@ pub enum LogLevel {
     /// Designates very serious errors.
     Error,
     /// Designates hazardous situations.
+    #[default]
     Warn,
     /// Designates useful information.
-    #[default]
     Info,
     /// Designates lower priority information.
     Debug,
