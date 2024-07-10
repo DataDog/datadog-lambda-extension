@@ -247,13 +247,10 @@ impl TelemetryListener {
     }
 
     pub async fn handle(req: Request<Body>, event_bus: Sender<Vec<TelemetryEvent>>) -> Result<Response<Body>, hyper::Error> {
-        debug!("[jordan] Received a Telemetry API connection, starting to wait for body",);
-
         let whole_body = hyper::body::to_bytes(req.into_body()).await?;
 
         let body = whole_body.to_vec();
         let body = std::str::from_utf8(&body).expect("infallible");
-        debug!("[jordan] Body received is : {}", body);
 
         let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(body).expect("infallible");
         event_bus
