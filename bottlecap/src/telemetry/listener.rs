@@ -67,8 +67,7 @@ impl TelemetryListener {
             event_bus.send(event).await.expect("infallible");
         }
 
-        let ack = Response::new(Body::from("OK"));
-        Ok(ack)
+        Ok(Response::new(Body::from("OK")))
     }
 }
 
