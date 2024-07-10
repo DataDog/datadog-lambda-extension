@@ -1,5 +1,4 @@
 use crate::logs::aggregator::Aggregator;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinSet;
 use tracing::{debug, error};
@@ -27,42 +26,30 @@ impl Flusher {
             aggregator,
         }
     }
-    pub async fn flush(&self) -> HashMap<String, Result<(), String>> {
+    pub async fn flush(&self) {
         let mut guard = self.aggregator.lock().expect("lock poisoned");
         let mut set = JoinSet::new();
         // It could be an empty JSON array: []
         let mut logs = guard.get_batch();
-        let mut responses = HashMap::new();
-        let mut count = 0;
         while logs.len() > 2 {
             let api_key = self.api_key.clone();
             let site = self.fqdn_site.clone();
             let cloned_client = self.client.clone();
-            set.spawn(async move { (count, Self::send(cloned_client, api_key, site, logs).await) });
-            count += 1;
+            set.spawn(async move { Self::send(cloned_client, api_key, site, logs).await });
             logs = guard.get_batch();
         }
         drop(guard);
         while let Some(res) = set.join_next().await {
             match res {
-                Ok(res) => {
-                    responses.insert(format!("l{}", res.0), res.1);
-                }
+                Ok(()) => (),
                 Err(e) => {
-                    // TODO for join errors the error request is not mapped in the response
-                    error!("Failed to send logs to datadog: {}", e);
+                    error!("Failed to wait for request sending {}", e);
                 }
             }
         }
-        responses
     }
 
-    async fn send(
-        client: reqwest::Client,
-        api_key: String,
-        fqdn: String,
-        data: Vec<u8>,
-    ) -> Result<(), String> {
+    async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
 
         // It could be an empty JSON array: []
@@ -87,7 +74,5 @@ impl Flusher {
                 }
             }
         }
-
-        Ok(())
     }
 }

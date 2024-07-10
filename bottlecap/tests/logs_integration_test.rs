@@ -64,9 +64,7 @@ async fn test_logs() {
 
     logs_agent.sync_consume().await;
 
-    let res = logs_flusher.flush().await;
-
-    assert!(res.contains_key("l0"));
+    let _ = logs_flusher.flush().await;
 
     hello_mock.assert();
 }

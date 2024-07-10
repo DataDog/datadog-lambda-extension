@@ -42,8 +42,8 @@ impl DdApi {
     }
 
     /// Ship a serialized series to the API, blocking
-    pub async fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
-        let body = serde_json::to_vec(&series)?;
+    pub async fn ship_series(&self, series: &Series) {
+        let body = serde_json::to_vec(&series).expect("failed to serialize series");
         debug!("sending body: {:?}", &series);
 
         let url = format!("{}/api/v2/series", &self.fqdn_site);
@@ -58,20 +58,22 @@ impl DdApi {
 
         match resp {
             Ok(resp) => match resp.status() {
-                reqwest::StatusCode::ACCEPTED => Ok(()),
-                _ => Err(ShipError::Failure {
-                    status: resp.status().as_u16(),
-                    body: resp.text().await.unwrap_or_default(),
-                }),
+                reqwest::StatusCode::ACCEPTED => {}
+                unexpected_status_code => {
+                    debug!(
+                        "{}: Failed to push to API: {:?}",
+                        unexpected_status_code,
+                        resp.text().await.unwrap_or_default()
+                    );
+                }
             },
-            Err(e) => Err(ShipError::Failure {
-                status: 500,
-                body: e.to_string(),
-            }),
-        }
+            Err(e) => {
+                debug!("500: Failed to push to API: {:?}", e);
+            }
+        };
     }
 
-    pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
+    pub async fn ship_distributions(&self, sketches: &SketchPayload) {
         let url = format!("{}/api/beta/sketches", &self.fqdn_site);
         debug!("sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
@@ -93,17 +95,19 @@ impl DdApi {
             .await;
         match resp {
             Ok(resp) => match resp.status() {
-                reqwest::StatusCode::ACCEPTED => Ok(()),
-                _ => Err(ShipError::Failure {
-                    status: resp.status().as_u16(),
-                    body: resp.text().await.unwrap_or_default(),
-                }),
+                reqwest::StatusCode::ACCEPTED => {}
+                unexpected_status_code => {
+                    debug!(
+                        "{}: Failed to push to API: {:?}",
+                        unexpected_status_code,
+                        resp.text().await.unwrap_or_default()
+                    );
+                }
             },
-            Err(e) => Err(ShipError::Failure {
-                status: 500,
-                body: e.to_string(),
-            }),
-        }
+            Err(e) => {
+                debug!("500: Failed to push to API: {:?}", e);
+            }
+        };
     }
 }
 

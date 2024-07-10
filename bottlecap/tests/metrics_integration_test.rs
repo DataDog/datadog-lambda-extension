@@ -56,9 +56,7 @@ async fn test_enhanced_metrics() {
 
     lambda_enhanced_metrics.increment_invocation_metric();
 
-    let res = metrics_flusher.flush().await;
-
-    assert!(res.contains_key("d0"));
+    let _ = metrics_flusher.flush().await;
 
     hello_mock.assert();
 }
