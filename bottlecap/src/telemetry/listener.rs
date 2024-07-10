@@ -52,9 +52,13 @@ impl TelemetryListener {
         let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_str(body) {
             Ok(events) => events,
             Err(e) => {
-                error!("Failed to parse telemetry events: {:?}", e);
+                // If we can't parse the event, we will receive it again in a new batch
+                // causing an infinite loop and resource contention.
+                // Instead, log it as fatal and move on.
+                // This will result in a dropped payload.
+                error!("[FATAL] Failed to parse telemetry events: {:?}", e);
                 return Ok(Response::builder()
-                    .status(hyper::StatusCode::BAD_REQUEST)
+                    .status(hyper::StatusCode::OK)
                     .body(Body::from("Failed to parse telemetry events"))
                     .expect("infallible"));
             }
@@ -76,7 +80,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle() {
-        let event_body = hyper::Body::from(r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init","runtimeVersion":"nodejs:20.v22","runtimeVersionArn":"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72","functionName":"hello-world","functionVersion":"$LATEST"}}]"#);
+        let event_body = hyper::Body::from(
+            r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init","runtimeVersion":"nodejs:20.v22","runtimeVersionArn":"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72","functionName":"hello-world","functionVersion":"$LATEST"}}]"#,
+        );
         let req = hyper::Request::builder()
             .method("POST")
             .uri("http://localhost:8080")

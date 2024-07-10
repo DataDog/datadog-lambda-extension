@@ -222,11 +222,7 @@ impl LambdaProcessor {
         }
     }
 
-    pub async fn process(
-        &mut self,
-        event: TelemetryEvent,
-        aggregator: &Arc<Mutex<Aggregator>>,
-    ) {
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
         let mut to_send = Vec::<String>::new();
 
         if let Ok(mut log) = self.make_log(event).await {
@@ -709,9 +705,7 @@ mod tests {
             },
         };
 
-        processor
-            .process(start_event.clone(), &aggregator)
-            .await;
+        processor.process(start_event.clone(), &aggregator).await;
         assert_eq!(
             processor.invocation_context.request_id,
             "test-request-id".to_string()
