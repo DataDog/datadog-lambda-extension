@@ -2,19 +2,14 @@
 
 FROM public.ecr.aws/lambda/provided:al2 as bottlecap-builder
 ARG PLATFORM 
-RUN yum install -y curl gcc gcc-c++ make unzip
-
+RUN yum install -y curl gcc gcc-c++ make unzip openssl openssl-devel
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
 RUN chmod +x /install-protoc.sh && /install-protoc.sh
-
-# Install Rust Toolchain
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal --default-toolchain nightly-$PLATFORM-unknown-linux-gnu -y
 ENV PATH=/root/.cargo/bin:$PATH
 RUN rustup component add rust-src --toolchain nightly-$PLATFORM-unknown-linux-gnu
-
-# Build Bottlecap
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap/src /tmp/dd/bottlecap/src
 COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
@@ -24,17 +19,13 @@ WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +nightly build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --release --target $PLATFORM-unknown-linux-gnu
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
-# Zip Extension
+# zip the extension
 FROM ubuntu:latest as compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
-ARG GO_AGENT_PATH
 
 RUN apt-get update
 RUN apt-get install -y zip binutils
-
-COPY ./.layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
-RUN strip /datadog-agent-go # just in case
-
+COPY --from=public.ecr.aws/datadog/lambda-extension:57 /opt/extensions/datadog-agent  /datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 

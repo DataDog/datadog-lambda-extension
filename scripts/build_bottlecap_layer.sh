@@ -39,7 +39,7 @@ _docker_build_bottlecap_zip() {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/build-bottlecap-${arch} \
-        -f ./scripts/Dockerfile.bottlecap.build \
+        -f ./scripts/Dockerfile.bottlecap.dev \
         --build-arg PLATFORM=$PLATFORM \
         . -o $TARGET_DIR/datadog_bottlecap-${arch}
 
