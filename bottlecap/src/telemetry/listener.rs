@@ -37,9 +37,8 @@ impl TelemetryListener {
         tokio::select! {
             biased;
             _ = server => {}
-            _ = cancel_token.cancelled() => {
+            () = cancel_token.cancelled() => {
                 debug!("Telemetry API listener cancelled");
-                return;
             }
         }
     }
@@ -82,6 +81,7 @@ mod tests {
     use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
 
     #[tokio::test]
+    #[allow(clippy::unwrap_used)]
     async fn test_handle() {
         let event_body = hyper::Body::from(
             r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init","runtimeVersion":"nodejs:20.v22","runtimeVersionArn":"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72","functionName":"hello-world","functionVersion":"$LATEST"}}]"#,
