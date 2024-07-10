@@ -498,7 +498,7 @@ fn start_logs_agent(
     resolved_api_key: String,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
-) -> (Sender<Vec<TelemetryEvent>>, LogsFlusher) {
+) -> (Sender<TelemetryEvent>, LogsFlusher) {
     let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
@@ -538,7 +538,7 @@ async fn start_dogstatsd(
 
 async fn setup_telemetry_client(
     extension_id: &str,
-    logs_agent_channel: Sender<Vec<TelemetryEvent>>,
+    logs_agent_channel: Sender<TelemetryEvent>,
 ) -> Result<CancellationToken> {
     let telemetry_listener_config = TelemetryListenerConfig {
         host: EXTENSION_HOST.to_string(),
@@ -557,12 +557,9 @@ async fn setup_telemetry_client(
     // // });
     let ct_clone = telemetry_listener_cancel_token.clone();
     tokio::spawn(async move {
-        let _telemetry_listener = TelemetryListener::new_hyper(
-            &telemetry_listener_config,
-            logs_agent_channel,
-            ct_clone,
-        )
-        .await;
+        let _telemetry_listener =
+            TelemetryListener::new_hyper(&telemetry_listener_config, logs_agent_channel, ct_clone)
+                .await;
     });
 
     let telemetry_client = TelemetryApiClient::new(extension_id.to_string(), TELEMETRY_PORT);

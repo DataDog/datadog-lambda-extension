@@ -10,8 +10,8 @@ use crate::{config, LAMBDA_RUNTIME_SLUG};
 #[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {
     pub aggregator: Arc<Mutex<Aggregator>>,
-    tx: Sender<Vec<TelemetryEvent>>,
-    rx: mpsc::Receiver<Vec<TelemetryEvent>>,
+    tx: Sender<TelemetryEvent>,
+    rx: mpsc::Receiver<TelemetryEvent>,
     processor: LogsProcessor,
 }
 
@@ -30,7 +30,7 @@ impl LogsAgent {
             LAMBDA_RUNTIME_SLUG.to_string(),
         );
 
-        let (tx, rx) = mpsc::channel::<Vec<TelemetryEvent>>(1000);
+        let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);
 
         LogsAgent {
             aggregator,
@@ -41,13 +41,13 @@ impl LogsAgent {
     }
 
     pub async fn spin(&mut self) {
-        while let Some(events) = self.rx.recv().await {
-            self.processor.process(events, &self.aggregator).await;
+        while let Some(event) = self.rx.recv().await {
+            self.processor.process(event, &self.aggregator).await;
         }
     }
 
     #[must_use]
-    pub fn get_sender_copy(&self) -> Sender<Vec<TelemetryEvent>> {
+    pub fn get_sender_copy(&self) -> Sender<TelemetryEvent> {
         self.tx.clone()
     }
 }
