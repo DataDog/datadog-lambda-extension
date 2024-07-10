@@ -116,6 +116,13 @@ else
     architectures="arm64"
 fi
 
+if [ -z "$LAYER_SUFFIX" ]; then
+    printf "[$REGION] Deploying layers without suffix\n"
+else
+    printf "[$REGION] Deploying layers with specified suffix: ${LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}"
+fi
+
 latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
 if [ $latest_version -ge $VERSION ]; then
     printf "[$REGION] Layer $layer version $VERSION already exists in region $REGION, skipping...\n"
