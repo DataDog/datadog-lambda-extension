@@ -17,12 +17,11 @@ pub struct TelemetryListenerConfig {
 }
 
 impl TelemetryListener {
-    pub async fn new_hyper(
+    pub async fn new(
         config: &TelemetryListenerConfig,
         event_bus: Sender<TelemetryEvent>,
         _cancel_token: tokio_util::sync::CancellationToken,
     ) {
-        // let addr = format!("{}:{}", &config.host, &config.port);
         let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
         let service = make_service_fn(move |_| {

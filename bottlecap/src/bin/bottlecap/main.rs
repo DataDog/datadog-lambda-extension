@@ -545,20 +545,10 @@ async fn setup_telemetry_client(
         port: TELEMETRY_PORT,
     };
     let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
-    // let _telemetry_listener = TelemetryListener::new_hyper(
-    //     &telemetry_listener_config,
-    //     logs_agent_channel,
-    //     telemetry_listener_cancel_token.clone(),
-    // )
-    // .await;
-    // // .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    // // tokio::spawn(async move {
-    // //     telemetry_listener.spin().await;
-    // // });
     let ct_clone = telemetry_listener_cancel_token.clone();
     tokio::spawn(async move {
         let _telemetry_listener =
-            TelemetryListener::new_hyper(&telemetry_listener_config, logs_agent_channel, ct_clone)
+            TelemetryListener::new(&telemetry_listener_config, logs_agent_channel, ct_clone)
                 .await;
     });
 
