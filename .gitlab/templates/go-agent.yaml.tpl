@@ -25,9 +25,11 @@ build layer ({{ $architecture.name }}):
     expire_in: 1 hr
     paths:
       - .layers/datadog_extension-{{ $architecture.name }}.zip
+  variables:
+    ARCHITECTURE: {{ $architecture.name }}
   script:
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
-    - ARCHITECTURE={{ $architecture.name }} .gitlab/scripts/build_go_agent.sh
+    - .gitlab/scripts/build_go_agent.sh
 
 check layer size ({{ $architecture.name }}):
   stage: test
