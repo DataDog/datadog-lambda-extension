@@ -20,7 +20,7 @@ impl TelemetryListener {
     pub async fn spin(
         config: &TelemetryListenerConfig,
         event_bus: Sender<TelemetryEvent>,
-        _cancel_token: tokio_util::sync::CancellationToken,
+        cancel_token: tokio_util::sync::CancellationToken,
     ) {
         let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
@@ -34,8 +34,13 @@ impl TelemetryListener {
 
         let server = listener.serve(service);
         debug!("Starting Telemetry API listener on {}", addr);
-        if let Err(e) = server.await {
-            error!("Telemetry API listener error: {:?}", e);
+        tokio::select! {
+            biased;
+            _ = server => {}
+            _ = cancel_token.cancelled() => {
+                debug!("Telemetry API listener cancelled");
+                return;
+            }
         }
     }
 
