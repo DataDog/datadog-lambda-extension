@@ -24,13 +24,16 @@ publish_layer() {
         | jq -r '.Version'
     )
 
-    permission=$(aws lambda add-layer-version-permission --layer-name $layer \
-        --version-number $version_nbr \
-        --statement-id "release-$version_nbr" \
-        --action lambda:GetLayerVersion \
-        --principal "*" \
-        --region $region
-    )
+    # Add permissions only for prod
+    if [ "$STAGE" == "prod" ]; then
+        permission=$(aws lambda add-layer-version-permission --layer-name $layer \
+            --version-number $version_nbr \
+            --statement-id "release-$version_nbr" \
+            --action lambda:GetLayerVersion \
+            --principal "*" \
+            --region $region
+        )
+    fi
 
     echo $version_nbr
 }
