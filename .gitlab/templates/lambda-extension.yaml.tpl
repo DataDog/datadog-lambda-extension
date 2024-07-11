@@ -27,7 +27,6 @@ build go agent ({{ $architecture.name }}):
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
-    - echo "AGENT BRANCH should be main, right now it is ${AGENT_BRANCH}" 
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
     - .gitlab/scripts/build_go_agent.sh
 
