@@ -32,7 +32,7 @@ ARG GO_AGENT_PATH
 RUN apt-get update
 RUN apt-get install -y zip binutils
 
-COPY ./.layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
+COPY .layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
 RUN strip /datadog-agent-go # just in case
 
 RUN mkdir /extensions
