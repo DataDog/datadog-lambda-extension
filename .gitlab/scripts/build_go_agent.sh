@@ -15,9 +15,14 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-# If version is not set, then this is not a release build
-if [ -z "$VERSION" ]; then
+
+if [ -z "$CI_COMMIT_TAG" ]; then
+    # Running on dev
+    printf "Running on dev environment\n"
     VERSION="dev"
+else
+    printf "Found version tag in environment\n"
+    VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)
 fi
 
 if [ -z "$SERVERLESS_INIT" ]; then
