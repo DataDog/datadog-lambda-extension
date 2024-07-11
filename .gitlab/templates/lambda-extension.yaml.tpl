@@ -24,6 +24,7 @@ build go agent ({{ $architecture.name }}):
     expire_in: 1 hr
     paths:
       - .layers/datadog_extension-{{ $architecture.name }}.zip
+      - .layers/datadog_extension-{{ $architecture.name }}/*
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
@@ -45,7 +46,6 @@ build bottlecap ({{ $architecture.name }}):
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
-    - ls .layers
     - .gitlab/scripts/build_bottlecap.sh
 
 check layer size ({{ $architecture.name }}):
