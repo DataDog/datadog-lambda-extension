@@ -15,7 +15,7 @@ async fn test_enhanced_metrics() {
     let dd_api_key = "my_test_key";
 
     // payload looks like
-    // aws.lambda.enhanced.invocations"_dd.compute_stats:1"architecture:x86_64"function_arn:test-arn:�൴      �?!      �?)      �?1      �?:�B
+    // aws.lambda.enhanced.invocations"_dd.compute_stats:1"architecture:x86_64"function_arn:test-arn:�൴      �?!      �?)      �?1      �?:�B
     // protobuf is using hashmap, can't set a btreemap to have sorted keys. Using multiple regexp since
     // Can't do look around since -> error: look-around, including look-ahead and look-behind, is not supported
     let regexp_metric_name = r#".*aws\.lambda\.enhanced\.invocations.*"#;
