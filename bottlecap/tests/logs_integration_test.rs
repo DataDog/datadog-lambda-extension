@@ -18,9 +18,9 @@ async fn test_logs() {
     // protobuf is using hashmap, can't set a btreemap to have sorted keys. Using multiple regexp since
     // Can't do look around since -> error: look-around, including look-ahead and look-behind, is not supported
     let regexp_message = r#"[{"message":{"message":"START RequestId: 459921b5-681c-4a96-beb0-81e0aa586026 Version: $LATEST","lambda":{"arn":"test-arn","request_id":"459921b5-681c-4a96-beb0-81e0aa586026"},"timestamp":1666361103165,"status":"info"},"hostname":"test-arn","service":"","#;
-    let regexp_compute_state = r#".*_dd.compute_stats:1.*"#;
-    let regexp_arch = r#".*architecture:x86_64.*"#;
-    let regexp_function_arn = r#".*function_arn:test-arn.*"#;
+    let regexp_compute_state = r#"_dd.compute_stats:1"#;
+    let regexp_arch = r#"architecture:x86_64"#;
+    let regexp_function_arn = r#"function_arn:test-arn"#;
 
     let server = MockServer::start();
     let hello_mock = server.mock(|when, then| {
@@ -29,9 +29,9 @@ async fn test_logs() {
             .header("DD-API-KEY", dd_api_key)
             .header("Content-Type", "application/json")
             .body_contains(regexp_message)
-            .body_matches(Regex::new(regexp_compute_state).unwrap())
-            .body_matches(Regex::new(regexp_arch).unwrap())
-            .body_matches(Regex::new(regexp_function_arn).unwrap());
+            .body_contains(regexp_compute_state)
+            .body_contains(regexp_arch)
+            .body_contains(regexp_function_arn);
 
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });

@@ -18,10 +18,10 @@ async fn test_enhanced_metrics() {
     // aws.lambda.enhanced.invocations"_dd.compute_stats:1"architecture:x86_64"function_arn:test-arn:�൴      �?!      �?)      �?1      �?:�B
     // protobuf is using hashmap, can't set a btreemap to have sorted keys. Using multiple regexp since
     // Can't do look around since -> error: look-around, including look-ahead and look-behind, is not supported
-    let regexp_metric_name = r#".*aws\.lambda\.enhanced\.invocations.*"#;
-    let regexp_compute_state = r#".*_dd.compute_stats:1.*"#;
-    let regexp_arch = r#".*architecture:x86_64.*"#;
-    let regexp_function_arn = r#".*function_arn:test-arn.*"#;
+    let regexp_metric_name = r#"aws.lambda.enhanced.invocations"#;
+    let regexp_compute_state = r#"_dd.compute_stats:1"#;
+    let regexp_arch = r#"architecture:x86_64"#;
+    let regexp_function_arn = r#"function_arn:test-arn"#;
 
     let server = MockServer::start();
     let hello_mock = server.mock(|when, then| {
@@ -29,10 +29,10 @@ async fn test_enhanced_metrics() {
             .path("/api/beta/sketches")
             .header("DD-API-KEY", dd_api_key)
             .header("Content-Type", "application/x-protobuf")
-            .body_matches(Regex::new(regexp_metric_name).unwrap())
-            .body_matches(Regex::new(regexp_compute_state).unwrap())
-            .body_matches(Regex::new(regexp_arch).unwrap())
-            .body_matches(Regex::new(regexp_function_arn).unwrap());
+            .body_contains(regexp_metric_name)
+            .body_contains(regexp_compute_state)
+            .body_contains(regexp_arch)
+            .body_contains(regexp_function_arn);
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });
 
