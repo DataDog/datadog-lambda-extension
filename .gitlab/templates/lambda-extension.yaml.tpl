@@ -45,6 +45,7 @@ build bottlecap ({{ $architecture.name }}):
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
+    - ls .layers
     - .gitlab/scripts/build_bottlecap.sh
 
 check layer size ({{ $architecture.name }}):
