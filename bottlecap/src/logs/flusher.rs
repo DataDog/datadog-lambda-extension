@@ -10,6 +10,7 @@ pub struct Flusher {
     aggregator: Arc<Mutex<Aggregator>>,
 }
 
+#[inline]
 #[must_use]
 pub fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
