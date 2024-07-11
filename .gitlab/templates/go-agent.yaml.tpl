@@ -46,31 +46,6 @@ check layer size ({{ $architecture.name }}):
 
 {{ range $environment := (ds "environments").environments }}
 
-{{ if or (eq $environment.name "prod") }}
-sign layer ({{ $architecture.name }}):
-  stage: sign
-  tags: ["arch:amd64"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-      when: manual
-  needs:
-    - build layer ({{ $architecture.name }})
-    - check layer size ({{ $architecture.name }})
-  dependencies:
-    - build layer ({{ $architecture.name }})
-  artifacts: # Re specify artifacts so the modified signed file is passed
-    expire_in: 1 hr # Signed layers should expire after 1 day TODO: modify to 1 day
-    paths:
-      - .layers/datadog_extension-{{ $architecture.name }}.zip
-  variables:
-    LAYER_FILE: datadog_extension-{{ $architecture.name }}.zip
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  script:
-    - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
-{{ end }}
-
 publish layer {{ $environment.name }} ({{ $architecture.name }}):
   stage: publish
   tags: ["arch:amd64"]
@@ -79,19 +54,10 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
     - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
       when: manual
       allow_failure: true
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
-{{ if or (eq $environment.name "prod") }}
-      - sign layer ({{ $architecture.name }})
-{{ else }}
-      - build layer ({{ $architecture.name }})
-{{ end }}
+    - build layer ({{ $architecture.name }})
   dependencies:
-{{ if or (eq $environment.name "prod") }}
-      - sign layer ({{ $architecture.name }})
-{{ else }}
-      - build layer ({{ $architecture.name }})
-{{ end }}
+    - build layer ({{ $architecture.name }})
   parallel:
     matrix:
       - REGION: {{ range (ds "regions").regions }}

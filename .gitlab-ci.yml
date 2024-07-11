@@ -75,6 +75,8 @@ lambda-extension:
       - artifact: .gitlab/pipeline-lambda-extension.yaml
         job: generator
     strategy: depend
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
   variables:
     AGENT_BRANCH: $AGENT_BRANCH
     LAYER_SUFFIX: $LAYER_SUFFIX
