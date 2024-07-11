@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
     cancel_token: tokio_util::sync::CancellationToken,
-    aggregator: Arc<Mutex<Aggregator<1024>>>,
+    aggregator: Arc<Mutex<Aggregator>>,
     socket: tokio::net::UdpSocket,
     event_bus: Sender<events::Event>,
 }
@@ -23,7 +23,7 @@ impl DogStatsD {
     #[must_use]
     pub async fn new(
         config: &DogStatsDConfig,
-        aggregator: Arc<Mutex<Aggregator<1024>>>,
+        aggregator: Arc<Mutex<Aggregator>>,
         event_bus: Sender<events::Event>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> DogStatsD {

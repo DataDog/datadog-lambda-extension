@@ -65,6 +65,8 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+use bottlecap::logs::flusher::build_fqdn_logs;
+use bottlecap::metrics::flusher::build_fqdn_metrics;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
@@ -270,13 +272,13 @@ async fn extension_loop_active(
     );
 
     let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::<{ CONTEXTS }>::new(tags_provider.clone())
+        MetricsAggregator::new(tags_provider.clone(), CONTEXTS)
             .expect("failed to create aggregator"),
     ));
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
         Arc::clone(&metrics_aggr),
-        config.site.clone(),
+        build_fqdn_metrics(config.site.clone()),
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
@@ -504,7 +506,7 @@ fn start_logs_agent(
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
         Arc::clone(&logs_agent.aggregator),
-        config.site.clone(),
+        build_fqdn_logs(config.site.clone()),
     );
     tokio::spawn(async move {
         logs_agent.spin().await;
@@ -514,7 +516,7 @@ fn start_logs_agent(
 
 async fn start_dogstatsd(
     event_bus: Sender<Event>,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator<1024>>>,
+    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
 ) -> CancellationToken {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),

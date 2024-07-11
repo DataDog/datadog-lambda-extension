@@ -11,7 +11,7 @@ use tracing::{debug, error};
 #[derive(Debug)]
 pub struct DdApi {
     api_key: String,
-    site: String,
+    fqdn_site: String,
     client: reqwest::Client,
 }
 /// Error relating to `ship`
@@ -36,17 +36,17 @@ impl DdApi {
     pub fn new(api_key: String, site: String) -> Self {
         DdApi {
             api_key,
-            site,
+            fqdn_site: site,
             client: reqwest::Client::new(),
         }
     }
 
     /// Ship a serialized series to the API, blocking
-    pub async fn ship_series(&self, series: &Series) -> Result<(), ShipError> {
-        let body = serde_json::to_vec(&series)?;
+    pub async fn ship_series(&self, series: &Series) {
+        let body = serde_json::to_vec(&series).expect("failed to serialize series");
         debug!("sending body: {:?}", &series);
 
-        let url = format!("https://api.{}/api/v2/series", &self.site);
+        let url = format!("{}/api/v2/series", &self.fqdn_site);
         let resp = self
             .client
             .post(&url)
@@ -58,22 +58,23 @@ impl DdApi {
 
         match resp {
             Ok(resp) => match resp.status() {
-                reqwest::StatusCode::ACCEPTED => Ok(()),
-                _ => Err(ShipError::Failure {
-                    status: resp.status().as_u16(),
-                    body: resp.text().await.unwrap_or_default(),
-                }),
+                reqwest::StatusCode::ACCEPTED => {}
+                unexpected_status_code => {
+                    debug!(
+                        "{}: Failed to push to API: {:?}",
+                        unexpected_status_code,
+                        resp.text().await.unwrap_or_default()
+                    );
+                }
             },
-            Err(e) => Err(ShipError::Failure {
-                status: 500,
-                body: e.to_string(),
-            }),
-        }
+            Err(e) => {
+                debug!("500: Failed to push to API: {:?}", e);
+            }
+        };
     }
 
-    pub async fn ship_distributions(&self, sketches: &SketchPayload) -> Result<(), ShipError> {
-        let url = format!("https://api.{}/api/beta/sketches", &self.site);
-        let mut buf = Vec::new();
+    pub async fn ship_distributions(&self, sketches: &SketchPayload) {
+        let url = format!("{}/api/beta/sketches", &self.fqdn_site);
         debug!("sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
         // add sketch payloads to the buffer
@@ -84,30 +85,29 @@ impl DdApi {
         //     let _ = output_stream.write_message_no_tag(&sketches);
         //     TODO not working, has utf-8 encoding issue in dist-intake
         //}
-        sketches
-            .write_to_vec(&mut buf)
-            .expect("can't write to buffer");
         let resp = self
             .client
             .post(&url)
             .header("DD-API-KEY", &self.api_key)
             .header("Content-Type", "application/x-protobuf")
-            .body(buf)
+            .body(sketches.write_to_bytes().expect("can't write to buffer"))
             .send()
             .await;
         match resp {
             Ok(resp) => match resp.status() {
-                reqwest::StatusCode::ACCEPTED => Ok(()),
-                _ => Err(ShipError::Failure {
-                    status: resp.status().as_u16(),
-                    body: resp.text().await.unwrap_or_default(),
-                }),
+                reqwest::StatusCode::ACCEPTED => {}
+                unexpected_status_code => {
+                    debug!(
+                        "{}: Failed to push to API: {:?}",
+                        unexpected_status_code,
+                        resp.text().await.unwrap_or_default()
+                    );
+                }
             },
-            Err(e) => Err(ShipError::Failure {
-                status: 500,
-                body: e.to_string(),
-            }),
-        }
+            Err(e) => {
+                debug!("500: Failed to push to API: {:?}", e);
+            }
+        };
     }
 }
 
