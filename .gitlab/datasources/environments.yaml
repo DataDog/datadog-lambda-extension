@@ -1,0 +1,9 @@
+environments:
+  - name: sandbox
+    external_id: sandbox-publish-externalid
+    role_to_assume: sandbox-layer-deployer
+    account: 425362996713
+  - name: prod
+    external_id: prod-publish-externalid
+    role_to_assume: dd-serverless-layer-deployer-role
+    account: 464622532012
