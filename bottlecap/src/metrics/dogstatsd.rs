@@ -50,48 +50,65 @@ impl DogStatsD {
                 .await
                 .expect("didn't receive data");
             let buf = &mut buf[..amt];
-            let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
+            let msgs = std::str::from_utf8(buf).expect("couldn't parse as string");
             debug!(
                 "received message: {} from {}, sending it to the bus",
-                msg, src
+                msgs, src
             );
-            let parsed_metric = match Metric::parse(msg) {
-                Ok(parsed_metric) => {
-                    debug!("parsed metric: {:?}", parsed_metric);
-                    parsed_metric
-                }
-                Err(e) => {
-                    error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
+            let mut msg = msgs.split('\n');
+            for m in msg.by_ref() {
+                let parsed_metric = match Metric::parse(m) {
+                    Ok(parsed_metric) => {
+                        debug!("parsed metric: {:?}", parsed_metric);
+                        parsed_metric
+                    }
+                    Err(e) => {
+                        error!("failed to parse metric: {:?}\n message: {:?}", m, e);
+                        continue;
+                    }
+                };
+                if parsed_metric.name == "aws.lambda.enhanced.invocations" {
+                    debug!("dropping invocation metric from layer, as it's set by agent");
                     continue;
                 }
-            };
-            if parsed_metric.name == "aws.lambda.enhanced.invocations" {
-                debug!("dropping invocation metric from layer, as it's set by agent");
-                continue;
-            }
-            let first_value = match parsed_metric.first_value() {
-                Ok(val) => val,
-                Err(e) => {
-                    error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
-                    continue;
+                let first_value = match parsed_metric.first_value() {
+                    Ok(val) => val,
+                    Err(e) => {
+                        error!("failed to parse metric: {:?}\n message: {:?}", m, e);
+                        continue;
+                    }
+                };
+                let _ = self
+                    .aggregator
+                    .lock()
+                    .expect("lock poisoned")
+                    .insert(&parsed_metric);
+                // Don't publish until after validation and adding metric_event to buff
+                if self.cancel_token.is_cancelled() {
+                    debug!("closing dogstatsd listener");
+                    break;
                 }
-            };
-            let metric_event = MetricEvent::new(
-                parsed_metric.name.to_string(),
-                first_value,
-                parsed_metric.tags(),
-            );
-            let _ = self
-                .aggregator
-                .lock()
-                .expect("lock poisoned")
-                .insert(&parsed_metric);
-            // Don't publish until after validation and adding metric_event to buff
-            let _ = self.event_bus.send(Event::Metric(metric_event)).await; // todo check the result
-            if self.cancel_token.is_cancelled() {
-                debug!("closing dogstatsd listener");
-                break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::MetricEvent;
+    use crate::metrics::aggregator::Aggregator;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn test_dogstatsd() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(100);
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+        let metadata = hash_map::HashMap::new();
+        let tags_provider = crate::tags::provider::Provider.new(Arc::new(config::Config::default()), &metadata);
+        // TODO test
+        let aggregator = Arc::new(Mutex::new(Aggregator::new()));
+        let config = DogStatsDConfig { DogStatsDConfig::default() };
+
     }
 }
