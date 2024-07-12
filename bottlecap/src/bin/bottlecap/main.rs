@@ -69,7 +69,6 @@ use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
-
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
@@ -362,10 +361,19 @@ async fn extension_loop_active(
         }
         // Block until we get something from the telemetry API
         // Check if flush logic says we should block and flush or not
-        if flush_control.should_flush() || shutdown {
-            loop {
-                let received = event_bus.rx.recv().await;
-                if let Some(event) = received {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                    debug!("Flushing periodically");
+                    tokio::join!(
+                        logs_flusher.flush(),
+                        metrics_flusher.flush(),
+                        trace_flusher.manual_flush(),
+                        stats_flusher.manual_flush()
+                    );
+                    debug!("Periodic flush done");
+                }
+                Some(event) = event_bus.rx.recv() => {
                     match event {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
@@ -419,6 +427,7 @@ async fn extension_loop_active(
                                     trace_flusher.manual_flush(),
                                     stats_flusher.manual_flush()
                                 );
+                                debug!("[astuyve] end flush in runtime done, calling /next");
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -455,10 +464,9 @@ async fn extension_loop_active(
                             }
                         },
                     }
-                } else {
-                    error!("could not get the event");
                 }
             }
+
         }
 
         if shutdown {

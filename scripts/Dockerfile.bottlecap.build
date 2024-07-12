@@ -14,7 +14,7 @@ RUN mkdir -p /tmp/dd
 COPY ./bottlecap/src /tmp/dd/bottlecap/src
 COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
 COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
-ENV RUSTFLAGS="-C panic=abort -Zlocation-detail=none"
+ENV RUSTFLAGS="-C panic=abort -Zlocation-detail=none --cfg tokio_unstable"
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +nightly build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --release --target $PLATFORM-unknown-linux-gnu
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
