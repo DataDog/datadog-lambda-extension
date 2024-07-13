@@ -1,6 +1,7 @@
 variables:
   DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   DOCKER_TARGET_VERSION: latest
+  PARSED_VERSION: none
   # Manual trigger variables
   AGENT_BRANCH:
     description: "Branch of the datadog-agent repository to use."
@@ -91,5 +92,6 @@ lambda-extension:
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
   variables:
+    SOME_VERSION: $PARSED_VERSION
     AGENT_BRANCH: $AGENT_BRANCH
     LAYER_SUFFIX: $LAYER_SUFFIX

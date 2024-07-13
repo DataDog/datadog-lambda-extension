@@ -19,7 +19,7 @@ test:
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
   script:
-    - echo "The version parsed should be 123, and it is ${PARSED_VERSION}"
+    - echo "The version parsed should be 123, and it is ${SOME_VERSION}"
 
 {{ range $architecture := (ds "architectures").architectures }}
 
