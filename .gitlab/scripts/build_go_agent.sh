@@ -26,10 +26,10 @@ else
 fi
 
 if [ -z "$SERVERLESS_INIT" ]; then
-    echo "Building Datadog Lambda Extension"
+    printf "Building Datadog Lambda Extension\n"
     CMD_PATH="cmd/serverless"
 else
-    echo "Building Serverless Init"
+    printf "Building Serverless Init\n"
     CMD_PATH="cmd/serverless-init"
 fi
 
@@ -37,7 +37,7 @@ fi
 if [ -z "$ALPINE" ]; then
     BUILD_FILE=Dockerfile.build
 else
-    echo "Building for alpine"
+    printf "Building for alpine\n"
     BUILD_FILE=Dockerfile.alpine.build
     BUILD_SUFFIX="-alpine"
 fi
@@ -64,7 +64,7 @@ mkdir -p $EXTENSION_DIR
 
 # Prepare folder with only *mod and *sum files to enable Docker caching capabilities
 mkdir -p $MAIN_DIR/scripts/.src $MAIN_DIR/scripts/.cache
-echo "Copy mod files to build a cache"
+printf "Copy mod files to build a cache\n"
 cp $AGENT_PATH/go.mod $MAIN_DIR/scripts/.cache
 cp $AGENT_PATH/go.sum $MAIN_DIR/scripts/.cache
 
