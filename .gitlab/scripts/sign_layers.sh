@@ -7,9 +7,9 @@
 #
 # Usage
 #
-# LAYER_FILE=<file> ./scripts/sign_layers.sh <account>
+# LAYER_FILE=<file> .gitlab/scripts/sign_layers.sh <account>
 #
-# LAYER_FILE=datadog_extension-amd64.zip ./scripts/sign_layers.sh sandbox
+# LAYER_FILE=datadog_extension-amd64.zip .gitlab/scripts/sign_layers.sh sandbox
 
 set -e
 
