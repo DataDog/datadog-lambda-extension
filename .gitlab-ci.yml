@@ -56,7 +56,9 @@ bottlecap-only:
       - artifact: .gitlab/pipeline-bottlecap.yaml
         job: generator
     strategy: depend
-  dependencies: ["generator"]
+  needs:
+    - job: generator
+      artifacts: true
   rules:
     - when: on_success
 
@@ -67,7 +69,9 @@ go-agent-only:
       - artifact: .gitlab/pipeline-go-agent.yaml
         job: generator
     strategy: depend
-  dependencies: ["generator"]
+  needs:
+    - job: generator
+      artifacts: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
   variables:
@@ -81,7 +85,9 @@ lambda-extension:
       - artifact: .gitlab/pipeline-lambda-extension.yaml
         job: generator
     strategy: depend
-  dependencies: ["generator"]
+  needs:
+    - job: generator
+      artifacts: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
   variables:
