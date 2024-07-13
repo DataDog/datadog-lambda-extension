@@ -14,6 +14,13 @@ variables:
   DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   DOCKER_TARGET_VERSION: latest
 
+test:
+  stage: build
+  tags: ["arch:amd64"]
+  image: registry.ddbuild.io/images/docker:20.10
+  script:
+    - echo "The version parsed should be 123, and it is ${PARSED_VERSION}"
+
 {{ range $architecture := (ds "architectures").architectures }}
 
 build go agent ({{ $architecture.name }}):
@@ -47,6 +54,58 @@ build bottlecap ({{ $architecture.name }}):
     ARCHITECTURE: {{ $architecture.name }}
   script:
     - .gitlab/scripts/build_bottlecap.sh
+
+# Alpine
+build go agent ({{ $architecture.name }}, alpine):
+  stage: build
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  artifacts:
+    expire_in: 1 hr
+    paths:
+      - .layers/datadog_extension-{{ $architecture.name }}-alpine.zip
+      - .layers/datadog_extension-{{ $architecture.name }}-alpine/*
+  variables:
+    ARCHITECTURE: {{ $architecture.name }}
+    ALPINE: 1
+  script:
+    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
+    - .gitlab/scripts/build_go_agent.sh
+
+build bottlecap ({{ $architecture.name }}, alpine):
+  stage: build
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  needs:
+    - build go agent ({{ $architecture.name }}, alpine)
+  dependencies:
+    - build go agent ({{ $architecture.name }}, alpine)
+  artifacts:
+    expire_in: 1 hr
+    paths:
+      - .layers/datadog_bottlecap-{{ $architecture.name }}-alpine.zip
+      - .layers/datadog_bottlecap-{{ $architecture.name }}-alpine/*
+  variables:
+    ARCHITECTURE: {{ $architecture.name }}
+    ALPINE: 1
+  script:
+    - .gitlab/scripts/build_bottlecap.sh
+
+build image ({{ $architecture.name }}, alpine):
+  stage: build
+  tags: ["arch:amd64"]
+  image: registry.ddbuild.io/images/docker:20.10
+  when: manual
+  needs:
+    - build bottlecap ({{ $architecture.name }}, alpine)
+  dependencies:
+    - build bottlecap ({{ $architecture.name }}, alpine)
+  variables:
+    ARCHITECTURE: {{ $architecture.name }}
+    ALPINE: 1
+  script:
+    - .gitlab/scripts/build_image.sh
+# Alpine end
 
 check layer size ({{ $architecture.name }}):
   stage: test
@@ -157,3 +216,60 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
 {{- end }} # environments end
 
 {{- end }} # architectures end
+
+{{ range $environment := (ds "environments").environments }}
+  
+{{ if or (eq $environment.name "prod") }}
+build images:
+  stage: build
+  tags: ["arch:amd64"]
+  image: registry.ddbuild.io/images/docker:20.10
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    - build bottlecap (arm64)
+    - build bottlecap (amd64)
+  dependencies:
+    - build bottlecap (arm64)
+    - build bottlecap (amd64)
+  script:
+    - .gitlab/scripts/build_image.sh
+
+build images (alpine):
+  stage: build
+  tags: ["arch:amd64"]
+  image: registry.ddbuild.io/images/docker:20.10
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    - build bottlecap (arm64, alpine)
+    - build bottlecap (amd64, alpine)
+  dependencies:
+    - build bottlecap (arm64, alpine)
+    - build bottlecap (amd64, alpine)
+  variables:
+    ALPINE: 1
+  script:
+    - .gitlab/scripts/build_image.sh
+
+# publish images:
+#   stage: publish
+#   rules:
+#     - if: '$CI_COMMIT_TAG =~ /^v.*/'
+#   needs:
+#     - build images
+#   dependencies:
+#     - build images
+#   when: manual
+#   trigger:
+#     project: DataDog/public-images
+#     branch: main
+#     strategy: depend
+#   variables:
+#     IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
+#     IMG_DESTINATIONS: datadog/lambda-extension:${VERSION},datadog/lambda-extension:latest
+#     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+
+{{ end }}
+
+{{- end }}
