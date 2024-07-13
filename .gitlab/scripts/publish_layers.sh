@@ -3,7 +3,7 @@
 # Unless explicitly stated otherwise all files in this repository are licensed
 # under the Apache License Version 2.0.
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
-# Copyright 2021 Datadog, Inc.
+# Copyright 2024 Datadog, Inc.
 
 set -e
 
@@ -74,7 +74,7 @@ if [ -z "$REGION" ]; then
     printf "[ERROR]: REGION not specified."
     exit 1
 else
-    echo "Region specified: $REGION"
+    printf "Region specified: $REGION\n"
     if [[ ! "$AVAILABLE_REGIONS" == *"$REGION"* ]]; then
         printf "Could not find $REGION in available regions: $AVAILABLE_REGIONS"
         exit 1
@@ -102,7 +102,7 @@ if [[ "$STAGE" =~ ^(staging|sandbox)$ ]]; then
 else
     # Running on prod
     if [ -z "$CI_COMMIT_TAG" ]; then
-        printf "[Error] No CI_COMMIT_TAG found.\n"
+        printf "[ERROR]: No CI_COMMIT_TAG found.\n"
         printf "Exiting script...\n"
         exit 1
     else
@@ -116,7 +116,7 @@ if [ -z "$VERSION" ]; then
     printf "[ERROR]: Layer VERSION not specified"
     exit 1
 else
-    echo "Layer version parsed: $VERSION"
+    printf "Layer version parsed: $VERSION\n"
 fi
 
 # Compatible Architectures
