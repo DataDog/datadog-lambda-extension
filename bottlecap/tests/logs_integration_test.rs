@@ -64,7 +64,6 @@ async fn test_logs() {
             .expect("Failed sending telemetry events");
     }
 
-
     logs_agent.sync_consume().await;
 
     let _ = logs_flusher.flush().await;
