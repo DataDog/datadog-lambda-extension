@@ -196,15 +196,12 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
 
 {{- end }} # architectures end
 
-{{ range $environment := (ds "environments").environments }}
-  
-# {{ if or (eq $environment.name "prod") }}
 build images:
   stage: build
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build bottlecap (arm64)
     - build bottlecap (amd64)
@@ -218,8 +215,8 @@ build images (alpine):
   stage: build
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build bottlecap (arm64, alpine)
     - build bottlecap (amd64, alpine)
@@ -233,46 +230,32 @@ build images (alpine):
 
 publish images:
   stage: publish
-  tags: ["arch:amd64"] #todo: remove
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build images
   when: manual
-  # trigger:
-  #   project: DataDog/public-images
-  #   branch: main
-  #   strategy: depend
+  trigger:
+    project: DataDog/public-images
+    branch: main
+    strategy: depend
   variables:
     IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
     IMG_DESTINATIONS: datadog/lambda-extension:${VERSION},datadog/lambda-extension:latest
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
-  script:
-    - echo "sources are ${IMG_SOURCES}"
-    - echo "destinations are ${IMG_DESTINATIONS}"
-    - echo "registries are ${IMG_REGISTRIES}"
 
 publish images (alpine):
   stage: publish
-  tags: ["arch:amd64"] # todo: remove
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build images (alpine)
   when: manual
-  # trigger:
-  #   project: DataDog/public-images
-  #   branch: main
-  #   strategy: depend
+  trigger:
+    project: DataDog/public-images
+    branch: main
+    strategy: depend
   variables:
     IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
     IMG_DESTINATIONS: datadog/lambda-extension:${VERSION}-alpine,datadog/lambda-extension:latest-alpine
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
-  script:
-    - echo "sources are ${IMG_SOURCES}"
-    - echo "destinations are ${IMG_DESTINATIONS}"
-    - echo "registries are ${IMG_REGISTRIES}"
-
-# {{ end }}
-
-{{- end }}
