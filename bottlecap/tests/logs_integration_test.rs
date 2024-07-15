@@ -3,7 +3,6 @@ use bottlecap::event_bus::bus::EventBus;
 use bottlecap::logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher};
 use bottlecap::tags::provider::Provider;
 use bottlecap::telemetry::events::TelemetryEvent;
-use bottlecap::telemetry::listener::TcpError;
 use bottlecap::LAMBDA_RUNTIME_SLUG;
 use httpmock::prelude::*;
 use std::collections::HashMap;
@@ -54,13 +53,16 @@ async fn test_logs() {
 
     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(
         r#"[{"time":"2022-10-21T14:05:03.165Z","type":"platform.start","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","version":"$LATEST","tracing":{"spanId":"24cd7d670fa455f0","type":"X-Amzn-Trace-Id","value":"Root=1-6352a70e-1e2c502e358361800241fd45;Parent=35465b3a9e2f7c6a;Sampled=1"}}}]"#)
-        .map_err(|e| TcpError::Parse(e.to_string())).expect("Failed parsing telemetry events");
+        .map_err(|e| e.to_string()).expect("Failed parsing telemetry events");
 
-    logs_agent
-        .get_sender_copy()
-        .send(telemetry_events)
-        .await
-        .expect("Failed sending telemetry events");
+    let sender = logs_agent.get_sender_copy();
+
+    for an_event in telemetry_events {
+        sender
+            .send(an_event.clone())
+            .await
+            .expect("Failed sending telemetry events");
+    }
 
     logs_agent.sync_consume().await;
 
