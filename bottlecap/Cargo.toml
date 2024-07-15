@@ -46,7 +46,6 @@ rmp = { version = "0.8.14", default-features = false }
 figment = { version = "0.10.15", default-features = false, features = ["yaml", "env", "test"] }
 proptest = "1.4.0"
 httpmock = "0.7.0"
-cargo-bundle-licenses = "2.0.0"
 
 [[bin]]
 name = "bottlecap"

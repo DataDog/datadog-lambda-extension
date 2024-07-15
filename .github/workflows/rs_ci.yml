@@ -172,6 +172,7 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@v4
       - run: stat LICENSE-3rdparty.yml
+        working-directory: bottlecap
       - name: Cache
         uses: actions/cache@v4
         with:
@@ -187,8 +188,10 @@ jobs:
       # cargo-bundle-licenses v2.0 doesn't understand path differences due to
       # sparse vs git index, so force git.
       - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
+        working-directory: bottlecap
       - run: cargo install cargo-bundle-licenses
       - name: "Generate new LICENSE-3rdparty.yml and check against the previous"
+        working-directory: bottlecap
         env:
           CARGO_HOME: "/tmp/dd-cargo"
         run: |
