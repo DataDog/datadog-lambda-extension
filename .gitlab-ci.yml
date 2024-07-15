@@ -1,7 +1,9 @@
 variables:
   DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   DOCKER_TARGET_VERSION: latest
-  PARSED_VERSION: none
+  # Default version for development builds
+  # This will be overwritten by the tag version if it is a release.
+  VERSION: dev
   # Manual trigger variables
   AGENT_BRANCH:
     description: "Branch of the datadog-agent repository to use."
@@ -45,8 +47,7 @@ generator:
     reports:
       dotenv: .env
   script:
-    - if [ "$CI_COMMIT_TAG" =~ /^v.*/ ]; then echo "VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)" >> .env; fi
-    - echo "PARSED_VERSION=123" >> .env
+    - if [[ "$CI_COMMIT_TAG" =~ /^v.*/ ]]; then echo "VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)" >> .env; fi
     - apk add --no-cache gomplate
     - gomplate --config .gitlab/config.yaml
 
@@ -92,6 +93,6 @@ lambda-extension:
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
   variables:
-    SOME_VERSION: $PARSED_VERSION
+    VERSION: $VERSION
     AGENT_BRANCH: $AGENT_BRANCH
     LAYER_SUFFIX: $LAYER_SUFFIX
