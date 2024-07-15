@@ -247,8 +247,8 @@ build images (alpine):
 
 publish images:
   stage: publish
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  # rules:
+  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build images
   when: manual
@@ -267,8 +267,8 @@ publish images:
 
 publish images (alpine):
   stage: publish
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  # rules:
+  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build images (alpine)
   when: manual
