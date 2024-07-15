@@ -14,13 +14,6 @@ variables:
   DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   DOCKER_TARGET_VERSION: latest
 
-test:
-  stage: build
-  tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
-  script:
-    - echo "The version parsed should be 123, and it is ${SOME_VERSION}"
-
 {{ range $architecture := (ds "architectures").architectures }}
 
 build go agent ({{ $architecture.name }}):
@@ -219,7 +212,7 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
 
 {{ range $environment := (ds "environments").environments }}
   
-{{ if or (eq $environment.name "prod") }}
+# {{ if or (eq $environment.name "prod") }}
 build images:
   stage: build
   tags: ["arch:amd64"]
@@ -252,24 +245,46 @@ build images (alpine):
   script:
     - .gitlab/scripts/build_image.sh
 
-# publish images:
-#   stage: publish
-#   rules:
-#     - if: '$CI_COMMIT_TAG =~ /^v.*/'
-#   needs:
-#     - build images
-#   dependencies:
-#     - build images
-#   when: manual
-#   trigger:
-#     project: DataDog/public-images
-#     branch: main
-#     strategy: depend
-#   variables:
-#     IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
-#     IMG_DESTINATIONS: datadog/lambda-extension:${VERSION},datadog/lambda-extension:latest
-#     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+publish images:
+  stage: publish
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    - build images
+  when: manual
+  # trigger:
+  #   project: DataDog/public-images
+  #   branch: main
+  #   strategy: depend
+  variables:
+    IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
+    IMG_DESTINATIONS: datadog/lambda-extension:${VERSION},datadog/lambda-extension:latest
+    IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+  script:
+    - echo "sources are ${IMG_SOURCES}"
+    - echo "destinations are ${IMG_DESTINATIONS}"
+    - echo "registries are ${IMG_REGISTRIES}"
 
-{{ end }}
+publish images (alpine):
+  stage: publish
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    - build images (alpine)
+  when: manual
+  # trigger:
+  #   project: DataDog/public-images
+  #   branch: main
+  #   strategy: depend
+  variables:
+    IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
+    IMG_DESTINATIONS: datadog/lambda-extension:${VERSION}-alpine,datadog/lambda-extension:latest-alpine
+    IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+  script:
+    - echo "sources are ${IMG_SOURCES}"
+    - echo "destinations are ${IMG_DESTINATIONS}"
+    - echo "registries are ${IMG_REGISTRIES}"
+
+# {{ end }}
 
 {{- end }}

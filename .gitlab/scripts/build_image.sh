@@ -33,7 +33,7 @@ fi
 docker buildx build \
     --platform linux/amd64,linux/arm64 \
     -f ./scripts/${TARGET_IMAGE} \
-    --tag "$DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${BUILD_SUFFIX}" .
-    # --push .
+    --tag "$DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${BUILD_SUFFIX}" \
+    --push .
 
 printf "Image built and pushed to $DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${BUILD_SUFFIX} for arm64 and amd64\n"
