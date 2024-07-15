@@ -43,6 +43,7 @@ build bottlecap ({{ $architecture.name }}):
     expire_in: 1 hr
     paths:
       - .layers/datadog_bottlecap-{{ $architecture.name }}.zip
+      - .layers/datadog_bottlecap-{{ $architecture.name }}/*
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
@@ -83,21 +84,6 @@ build bottlecap ({{ $architecture.name }}, alpine):
     ALPINE: 1
   script:
     - .gitlab/scripts/build_bottlecap.sh
-
-build image ({{ $architecture.name }}, alpine):
-  stage: build
-  tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
-  when: manual
-  needs:
-    - build bottlecap ({{ $architecture.name }}, alpine)
-  dependencies:
-    - build bottlecap ({{ $architecture.name }}, alpine)
-  variables:
-    ARCHITECTURE: {{ $architecture.name }}
-    ALPINE: 1
-  script:
-    - .gitlab/scripts/build_image.sh
 # Alpine end
 
 check layer size ({{ $architecture.name }}):
