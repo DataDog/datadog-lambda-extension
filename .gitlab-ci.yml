@@ -47,7 +47,7 @@ generator:
     reports:
       dotenv: .env
   script:
-    - if [[ "$CI_COMMIT_TAG" =~ /^v.*/ ]]; then echo "VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)" >> .env; fi
+    - if [[ "$TEST_CI_COMMIT_TAG" =~ /^v.*/ ]]; then echo "VERSION=$(echo "${TEST_CI_COMMIT_TAG##*v}" | cut -d. -f2)" >> .env; fi
     - apk add --no-cache gomplate
     - gomplate --config .gitlab/config.yaml
 
