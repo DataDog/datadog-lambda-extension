@@ -137,6 +137,7 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.5
       - working-directory: bottlecap
         run: cargo nextest run --workspace
+      - run: cargo bundle-licenses --format yaml --output ci-license-check.yml --previous LICENSE-3rdparty.yml --check-previous
 
   format:
     name: Format
