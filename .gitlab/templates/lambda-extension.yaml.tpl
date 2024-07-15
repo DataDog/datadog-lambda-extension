@@ -233,6 +233,7 @@ build images (alpine):
 
 publish images:
   stage: publish
+  tags: ["arch:amd64"] #todo: remove
   # rules:
   #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
@@ -253,6 +254,7 @@ publish images:
 
 publish images (alpine):
   stage: publish
+  tags: ["arch:amd64"] # todo: remove
   # rules:
   #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
