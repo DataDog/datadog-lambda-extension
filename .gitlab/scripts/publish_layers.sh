@@ -110,6 +110,7 @@ else
     fi
 
     VERSION="${CI_COMMIT_TAG//[!0-9]/}"
+    printf "Version: ${VERSION}\n"
 fi
 
 if [ -z "$VERSION" ]; then

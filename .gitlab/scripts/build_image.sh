@@ -19,6 +19,7 @@ if [ -z "$CI_COMMIT_TAG" ]; then
 else
     printf "Found version tag in environment\n"
     VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)
+    echo "Version: $VERSION"
 fi
 
 if [ -z "$ALPINE" ]; then
