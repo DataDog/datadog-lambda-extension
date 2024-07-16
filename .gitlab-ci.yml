@@ -58,9 +58,6 @@ bottlecap-only:
       - artifact: .gitlab/pipeline-bottlecap.yaml
         job: generator
     strategy: depend
-  needs:
-    - job: generator
-      artifacts: true
   rules:
     - when: on_success
 
@@ -71,11 +68,9 @@ go-agent-only:
       - artifact: .gitlab/pipeline-go-agent.yaml
         job: generator
     strategy: depend
-  needs:
-    - job: generator
-      artifacts: true
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
   variables:
     AGENT_BRANCH: $AGENT_BRANCH
     LAYER_SUFFIX: $LAYER_SUFFIX
