@@ -1,19 +1,44 @@
+use std::net::SocketAddr;
 use std::str::Split;
+use std::sync::{Arc, Mutex};
+
 use tracing::{debug, error};
 
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::metric::Metric;
-use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
     cancel_token: tokio_util::sync::CancellationToken,
     aggregator: Arc<Mutex<Aggregator>>,
-    socket: tokio::net::UdpSocket,
+    buffer_reader: BufferReader,
 }
 
 pub struct DogStatsDConfig {
     pub host: String,
     pub port: u16,
+}
+
+enum BufferReader {
+    UdpSocketReader(tokio::net::UdpSocket),
+    #[allow(dead_code)]
+    MirrorReader(Vec<u8>, SocketAddr),
+}
+
+impl BufferReader {
+    async fn read(&self) -> std::io::Result<(Vec<u8>, SocketAddr)> {
+        match self {
+            BufferReader::UdpSocketReader(socket) => {
+                // TODO(astuyve) this should be dynamic
+                let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
+                let (amt, src) = socket
+                    .recv_from(&mut buf)
+                    .await
+                    .expect("didn't receive data");
+                Ok((buf[..amt].to_owned(), src))
+            }
+            BufferReader::MirrorReader(data, socket) => Ok((data.clone(), *socket)),
+        }
+    }
 }
 
 impl DogStatsD {
@@ -31,30 +56,31 @@ impl DogStatsD {
         DogStatsD {
             cancel_token,
             aggregator,
-            socket,
+            buffer_reader: BufferReader::UdpSocketReader(socket),
         }
     }
 
     pub async fn spin(self) {
         let mut spin_cancelled = false;
         while !spin_cancelled {
-            // TODO(astuyve) this should be dynamic
-            let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
-            let (amt, src) = self
-                .socket
-                .recv_from(&mut buf)
-                .await
-                .expect("didn't receive data");
-            let buf = &mut buf[..amt];
-            let msgs = std::str::from_utf8(buf).expect("couldn't parse as string");
-            debug!(
-                "received message: {} from {}, sending it to the bus",
-                msgs, src
-            );
-            let statsd_metric_strings = msgs.split('\n');
-            self.insert_metrics(statsd_metric_strings);
+            self.consume_statsd().await;
             spin_cancelled = self.cancel_token.is_cancelled();
         }
+    }
+
+    async fn consume_statsd(&self) {
+        let (buf, src) = self
+            .buffer_reader
+            .read()
+            .await
+            .expect("didn't receive data");
+        let msgs = std::str::from_utf8(&buf).expect("couldn't parse as string");
+        debug!(
+            "received message: {} from {}, sending it to the bus",
+            msgs, src
+        );
+        let statsd_metric_strings = msgs.split('\n');
+        self.insert_metrics(statsd_metric_strings);
     }
 
     fn insert_metrics(&self, msg: Split<char>) {
@@ -78,20 +104,67 @@ impl DogStatsD {
 
 #[cfg(test)]
 mod tests {
-    // use std::sync::{Arc, Mutex};
-    // use crate::metrics::aggregator::Aggregator;
-    // use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
-    // use crate::tags::provider::Provider;
+    use crate::config::Config;
+    use crate::metrics::aggregator::Aggregator;
+    use crate::metrics::aggregator::ValueVariant::Value;
+    use crate::metrics::dogstatsd::{BufferReader, DogStatsD};
+    use crate::tags::provider::Provider;
+    use crate::LAMBDA_RUNTIME_SLUG;
+    use std::collections::HashMap;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::{Arc, Mutex};
 
-    // #[tokio::test]
-    // async fn test_dogstatsd() {
-    //     let aggregator = Arc::new(Mutex::new(
-    //         Aggregator::new(Arc::new(Provider::new(
-    //             Arc::new(Default::default()), "".to_string(), &Default::default()), ), 1_024));
-    //     let cancel_token = tokio_util::sync::CancellationToken::new();
-    //     let dogstatsd = DogStatsD::new(&DogStatsDConfig {
-    //         host: "".to_string(),
-    //         port: 0,
-    //     }, aggregator, Default::default());
-    // }
+    #[tokio::test]
+    async fn test_dogstatsd() {
+        let precision = 0.000_000_01;
+        let tags_provider = Arc::new(Provider::new(
+            Arc::new(Config::default()),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::default(),
+        ));
+        let aggregator_arc = Arc::new(Mutex::new(
+            Aggregator::new(tags_provider, 1_024).expect("aggregator creation failed"),
+        ));
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+
+        let statsd_string =
+            "metric1:1|c\nmetric2:2|c|tag2:val2\nmetric3:3|c||tag3:val3,tag4:val4\n";
+
+        let dogstatsd = DogStatsD {
+            cancel_token,
+            aggregator: Arc::clone(&aggregator_arc),
+            buffer_reader: BufferReader::MirrorReader(
+                statsd_string.as_bytes().to_vec(),
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(111, 112, 113, 114)), 0),
+            ),
+        };
+        dogstatsd.consume_statsd().await;
+
+        let mut aggregator = aggregator_arc.lock().expect("lock poisoned");
+        let parsed_metrics = aggregator.to_series();
+
+        assert_eq!(parsed_metrics.len(), 3);
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
+
+        match aggregator.get_value_by_id("metric1".into(), None) {
+            Some(Value(metric)) => {
+                assert!((metric - 1.0).abs() < precision);
+            }
+            _ => panic!("metric1 not found"),
+        }
+
+        match aggregator.get_value_by_id("metric2".into(), None) {
+            Some(Value(metric)) => {
+                assert!((metric - 2.0).abs() < precision);
+            }
+            _ => panic!("metric2 not found"),
+        }
+
+        match aggregator.get_value_by_id("metric3".into(), None) {
+            Some(Value(metric)) => {
+                assert!((metric - 3.0).abs() < precision);
+            }
+            _ => panic!("metric3 not found"),
+        }
+    }
 }
