@@ -326,7 +326,7 @@ async fn extension_loop_active(
 
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
-    let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
+    let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
 
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
@@ -514,10 +514,7 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-async fn start_dogstatsd(
-    event_bus: Sender<Event>,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
-) -> CancellationToken {
+async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
@@ -526,7 +523,6 @@ async fn start_dogstatsd(
     let dogstatsd_client = DogStatsD::new(
         &dogstatsd_config,
         Arc::clone(metrics_aggr),
-        event_bus,
         dogstatsd_cancel_token.clone(),
     )
     .await;
