@@ -68,7 +68,7 @@ impl Metric {
     /// This function will return with an error if the input violates any of the
     /// limits in [`constants`]. Any non-viable input will be discarded.
     /// example aj-test.increment:1|c|#user:aj-test from 127.0.0.1:50983
-    pub fn parse(input: &str) -> Result<Metric, crate::metrics::errors::ParseError> {
+    pub fn parse(input: &str) -> Result<Metric, ParseError> {
         // TODO must enforce / exploit constraints given in `constants`.
         let mut sections = input.split('|');
 
@@ -131,7 +131,7 @@ impl Metric {
         })
     }
 
-    pub(crate) fn first_value(&self) -> Result<f64, crate::metrics::errors::ParseError> {
+    pub(crate) fn first_value(&self) -> Result<f64, ParseError> {
         match self.values().next() {
             Some(v) => match v {
                 Ok(v) => Ok(v),
@@ -141,6 +141,7 @@ impl Metric {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn tags(&self) -> Vec<String> {
         self.tags
             .unwrap_or_default()

@@ -1,8 +1,6 @@
-use tokio::sync::mpsc::Sender;
-
+use std::str::Split;
 use tracing::{debug, error};
 
-use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::metric::Metric;
 use std::sync::{Arc, Mutex};
@@ -11,7 +9,6 @@ pub struct DogStatsD {
     cancel_token: tokio_util::sync::CancellationToken,
     aggregator: Arc<Mutex<Aggregator>>,
     socket: tokio::net::UdpSocket,
-    event_bus: Sender<events::Event>,
 }
 
 pub struct DogStatsDConfig {
@@ -24,7 +21,6 @@ impl DogStatsD {
     pub async fn new(
         config: &DogStatsDConfig,
         aggregator: Arc<Mutex<Aggregator>>,
-        event_bus: Sender<events::Event>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> DogStatsD {
         let addr = format!("{}:{}", config.host, config.port);
@@ -36,12 +32,12 @@ impl DogStatsD {
             cancel_token,
             aggregator,
             socket,
-            event_bus,
         }
     }
 
     pub async fn spin(self) {
-        loop {
+        let mut spin_cancelled = false;
+        while !spin_cancelled {
             // TODO(astuyve) this should be dynamic
             let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
             let (amt, src) = self
@@ -55,39 +51,26 @@ impl DogStatsD {
                 "received message: {} from {}, sending it to the bus",
                 msgs, src
             );
-            let mut msg = msgs.split('\n');
-            for m in msg.by_ref() {
-                let parsed_metric = match Metric::parse(m) {
-                    Ok(parsed_metric) => {
-                        debug!("parsed metric: {:?}", parsed_metric);
-                        parsed_metric
-                    }
-                    Err(e) => {
-                        error!("failed to parse metric: {:?}\n message: {:?}", m, e);
-                        continue;
-                    }
-                };
-                if parsed_metric.name == "aws.lambda.enhanced.invocations" {
-                    debug!("dropping invocation metric from layer, as it's set by agent");
-                    continue;
+            let statsd_metric_strings = msgs.split('\n');
+            self.insert_metrics(statsd_metric_strings);
+            spin_cancelled = self.cancel_token.is_cancelled();
+        }
+    }
+
+    fn insert_metrics(&self, msg: Split<char>) {
+        let all_valid_metrics: Vec<Metric> = msg
+            .filter_map(|m| match Metric::parse(m) {
+                Ok(metric) => Some(metric),
+                Err(e) => {
+                    error!("failed to parse metric: {}", e);
+                    None
                 }
-                let first_value = match parsed_metric.first_value() {
-                    Ok(val) => val,
-                    Err(e) => {
-                        error!("failed to parse metric: {:?}\n message: {:?}", m, e);
-                        continue;
-                    }
-                };
-                let _ = self
-                    .aggregator
-                    .lock()
-                    .expect("lock poisoned")
-                    .insert(&parsed_metric);
-                // Don't publish until after validation and adding metric_event to buff
-                if self.cancel_token.is_cancelled() {
-                    debug!("closing dogstatsd listener");
-                    break;
-                }
+            })
+            .collect();
+        if !all_valid_metrics.is_empty() {
+            let mut guarded_aggregator = self.aggregator.lock().expect("lock poisoned");
+            for a_valid_value in all_valid_metrics {
+                let _ = guarded_aggregator.insert(&a_valid_value);
             }
         }
     }
@@ -95,20 +78,20 @@ impl DogStatsD {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::events::MetricEvent;
-    use crate::metrics::aggregator::Aggregator;
-    use std::sync::Arc;
+    // use std::sync::{Arc, Mutex};
+    // use crate::metrics::aggregator::Aggregator;
+    // use crate::metrics::dogstatsd::{DogStatsD, DogStatsDConfig};
+    // use crate::tags::provider::Provider;
 
-    #[tokio::test]
-    async fn test_dogstatsd() {
-        let (tx, _rx) = tokio::sync::mpsc::channel(100);
-        let cancel_token = tokio_util::sync::CancellationToken::new();
-        let metadata = hash_map::HashMap::new();
-        let tags_provider = crate::tags::provider::Provider.new(Arc::new(config::Config::default()), &metadata);
-        // TODO test
-        let aggregator = Arc::new(Mutex::new(Aggregator::new()));
-        let config = DogStatsDConfig { DogStatsDConfig::default() };
-
-    }
+    // #[tokio::test]
+    // async fn test_dogstatsd() {
+    //     let aggregator = Arc::new(Mutex::new(
+    //         Aggregator::new(Arc::new(Provider::new(
+    //             Arc::new(Default::default()), "".to_string(), &Default::default()), ), 1_024));
+    //     let cancel_token = tokio_util::sync::CancellationToken::new();
+    //     let dogstatsd = DogStatsD::new(&DogStatsDConfig {
+    //         host: "".to_string(),
+    //         port: 0,
+    //     }, aggregator, Default::default());
+    // }
 }
