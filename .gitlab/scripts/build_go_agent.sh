@@ -22,7 +22,7 @@ if [ -z "$CI_COMMIT_TAG" ]; then
     VERSION="dev"
 else
     printf "Found version tag in environment\n"
-    VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)
+    VERSION="${CI_COMMIT_TAG//[!0-9]/}"
 fi
 
 if [ -z "$SERVERLESS_INIT" ]; then

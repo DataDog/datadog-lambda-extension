@@ -109,7 +109,7 @@ else
         printf "Tag found in environment: $CI_COMMIT_TAG\n"
     fi
 
-    VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)
+    VERSION="${CI_COMMIT_TAG//[!0-9]/}"
 fi
 
 if [ -z "$VERSION" ]; then
