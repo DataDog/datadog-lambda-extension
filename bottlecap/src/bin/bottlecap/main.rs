@@ -65,6 +65,8 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+use bottlecap::logs::flusher::build_fqdn_logs;
+use bottlecap::metrics::flusher::build_fqdn_metrics;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
@@ -269,13 +271,13 @@ async fn extension_loop_active(
     );
 
     let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::<{ CONTEXTS }>::new(tags_provider.clone())
+        MetricsAggregator::new(tags_provider.clone(), CONTEXTS)
             .expect("failed to create aggregator"),
     ));
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
         Arc::clone(&metrics_aggr),
-        config.site.clone(),
+        build_fqdn_metrics(config.site.clone()),
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
@@ -323,7 +325,7 @@ async fn extension_loop_active(
 
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
-    let dogstatsd_cancel_token = start_dogstatsd(event_bus.get_sender_copy(), &metrics_aggr).await;
+    let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
 
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
@@ -512,7 +514,7 @@ fn start_logs_agent(
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
         Arc::clone(&logs_agent.aggregator),
-        config.site.clone(),
+        build_fqdn_logs(config.site.clone()),
     );
     tokio::spawn(async move {
         logs_agent.spin().await;
@@ -520,10 +522,7 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-async fn start_dogstatsd(
-    event_bus: Sender<Event>,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator<1024>>>,
-) -> CancellationToken {
+async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
@@ -532,7 +531,6 @@ async fn start_dogstatsd(
     let dogstatsd_client = DogStatsD::new(
         &dogstatsd_config,
         Arc::clone(metrics_aggr),
-        event_bus,
         dogstatsd_cancel_token.clone(),
     )
     .await;

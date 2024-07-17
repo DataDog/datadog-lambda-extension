@@ -46,6 +46,12 @@ impl LogsAgent {
         }
     }
 
+    pub async fn sync_consume(&mut self) {
+        if let Some(events) = self.rx.recv().await {
+            self.processor.process(events, &self.aggregator).await;
+        }
+    }
+
     #[must_use]
     pub fn get_sender_copy(&self) -> Sender<TelemetryEvent> {
         self.tx.clone()

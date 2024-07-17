@@ -7,16 +7,13 @@ use std::sync::{Arc, Mutex};
 use tracing::error;
 
 pub struct Lambda {
-    pub aggregator: Arc<Mutex<Aggregator<1024>>>,
+    pub aggregator: Arc<Mutex<Aggregator>>,
     pub config: Arc<crate::config::Config>,
 }
 
 impl Lambda {
     #[must_use]
-    pub fn new(
-        aggregator: Arc<Mutex<Aggregator<1024>>>,
-        config: Arc<crate::config::Config>,
-    ) -> Lambda {
+    pub fn new(aggregator: Arc<Mutex<Aggregator>>, config: Arc<crate::config::Config>) -> Lambda {
         Lambda { aggregator, config }
     }
 
@@ -134,7 +131,7 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let mut aggr: std::sync::MutexGuard<Aggregator<1024>> =
+        let mut aggr: std::sync::MutexGuard<Aggregator> =
             self.aggregator.lock().expect("lock poisoned");
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
@@ -203,7 +200,7 @@ mod tests {
     use std::collections::hash_map::HashMap;
     use std::sync::MutexGuard;
 
-    fn setup() -> (Arc<Mutex<Aggregator<1024>>>, Arc<config::Config>) {
+    fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tags".to_string()),
@@ -216,8 +213,7 @@ mod tests {
         ));
         (
             Arc::new(Mutex::new(
-                Aggregator::<1024>::new(tags_provider.clone())
-                    .expect("failed to create aggregator"),
+                Aggregator::new(tags_provider.clone(), 1024).expect("failed to create aggregator"),
             )),
             config,
         )
@@ -341,11 +337,7 @@ mod tests {
         assert_value(&mut aggr, 256.0, vec![constants::MEMORY_SIZE_METRIC]);
     }
 
-    fn assert_value(
-        aggr: &mut MutexGuard<Aggregator<1024>>,
-        sketch_val: f64,
-        metric_names: Vec<&str>,
-    ) {
+    fn assert_value(aggr: &mut MutexGuard<Aggregator>, sketch_val: f64, metric_names: Vec<&str>) {
         let mut ms_sketch = DDSketch::default();
         ms_sketch.insert(sketch_val);
 

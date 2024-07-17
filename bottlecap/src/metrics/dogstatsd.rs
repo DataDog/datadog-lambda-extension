@@ -1,17 +1,16 @@
-use tokio::sync::mpsc::Sender;
+use std::net::SocketAddr;
+use std::str::Split;
+use std::sync::{Arc, Mutex};
 
 use tracing::{debug, error};
 
-use crate::events::{self, Event, MetricEvent};
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::metric::Metric;
-use std::sync::{Arc, Mutex};
 
 pub struct DogStatsD {
     cancel_token: tokio_util::sync::CancellationToken,
-    aggregator: Arc<Mutex<Aggregator<1024>>>,
-    socket: tokio::net::UdpSocket,
-    event_bus: Sender<events::Event>,
+    aggregator: Arc<Mutex<Aggregator>>,
+    buffer_reader: BufferReader,
 }
 
 pub struct DogStatsDConfig {
@@ -19,12 +18,34 @@ pub struct DogStatsDConfig {
     pub port: u16,
 }
 
+enum BufferReader {
+    UdpSocketReader(tokio::net::UdpSocket),
+    #[allow(dead_code)]
+    MirrorReader(Vec<u8>, SocketAddr),
+}
+
+impl BufferReader {
+    async fn read(&self) -> std::io::Result<(Vec<u8>, SocketAddr)> {
+        match self {
+            BufferReader::UdpSocketReader(socket) => {
+                // TODO(astuyve) this should be dynamic
+                let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
+                let (amt, src) = socket
+                    .recv_from(&mut buf)
+                    .await
+                    .expect("didn't receive data");
+                Ok((buf[..amt].to_owned(), src))
+            }
+            BufferReader::MirrorReader(data, socket) => Ok((data.clone(), *socket)),
+        }
+    }
+}
+
 impl DogStatsD {
     #[must_use]
     pub async fn new(
         config: &DogStatsDConfig,
-        aggregator: Arc<Mutex<Aggregator<1024>>>,
-        event_bus: Sender<events::Event>,
+        aggregator: Arc<Mutex<Aggregator>>,
         cancel_token: tokio_util::sync::CancellationToken,
     ) -> DogStatsD {
         let addr = format!("{}:{}", config.host, config.port);
@@ -35,63 +56,136 @@ impl DogStatsD {
         DogStatsD {
             cancel_token,
             aggregator,
-            socket,
-            event_bus,
+            buffer_reader: BufferReader::UdpSocketReader(socket),
         }
     }
 
     pub async fn spin(self) {
-        loop {
-            // TODO(astuyve) this should be dynamic
-            let mut buf = [0; 1024]; // todo, do we want to make this dynamic? (not sure)
-            let (amt, src) = self
-                .socket
-                .recv_from(&mut buf)
-                .await
-                .expect("didn't receive data");
-            let buf = &mut buf[..amt];
-            let msg = std::str::from_utf8(buf).expect("couldn't parse as string");
-            debug!(
-                "received message: {} from {}, sending it to the bus",
-                msg, src
-            );
-            let parsed_metric = match Metric::parse(msg) {
-                Ok(parsed_metric) => {
-                    debug!("parsed metric: {:?}", parsed_metric);
-                    parsed_metric
-                }
+        let mut spin_cancelled = false;
+        while !spin_cancelled {
+            self.consume_statsd().await;
+            spin_cancelled = self.cancel_token.is_cancelled();
+        }
+    }
+
+    async fn consume_statsd(&self) {
+        let (buf, src) = self
+            .buffer_reader
+            .read()
+            .await
+            .expect("didn't receive data");
+        let msgs = std::str::from_utf8(&buf).expect("couldn't parse as string");
+        debug!("received message: {} from {}", msgs, src);
+        let statsd_metric_strings = msgs.split('\n');
+        self.insert_metrics(statsd_metric_strings);
+    }
+
+    fn insert_metrics(&self, msg: Split<char>) {
+        let all_valid_metrics: Vec<Metric> = msg
+            .filter_map(|m| match Metric::parse(m) {
+                Ok(metric) => Some(metric),
                 Err(e) => {
-                    error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
-                    continue;
+                    error!("failed to parse metric {}: {}", m, e);
+                    None
                 }
-            };
-            if parsed_metric.name == "aws.lambda.enhanced.invocations" {
-                debug!("dropping invocation metric from layer, as it's set by agent");
-                continue;
-            }
-            let first_value = match parsed_metric.first_value() {
-                Ok(val) => val,
-                Err(e) => {
-                    error!("failed to parse metric: {:?}\n message: {:?}", msg, e);
-                    continue;
-                }
-            };
-            let metric_event = MetricEvent::new(
-                parsed_metric.name.to_string(),
-                first_value,
-                parsed_metric.tags(),
-            );
-            let _ = self
-                .aggregator
-                .lock()
-                .expect("lock poisoned")
-                .insert(&parsed_metric);
-            // Don't publish until after validation and adding metric_event to buff
-            let _ = self.event_bus.send(Event::Metric(metric_event)).await; // todo check the result
-            if self.cancel_token.is_cancelled() {
-                debug!("closing dogstatsd listener");
-                break;
+            })
+            .collect();
+        if !all_valid_metrics.is_empty() {
+            let mut guarded_aggregator = self.aggregator.lock().expect("lock poisoned");
+            for a_valid_value in all_valid_metrics {
+                let _ = guarded_aggregator.insert(&a_valid_value);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::config::Config;
+    use crate::metrics::aggregator::Aggregator;
+    use crate::metrics::aggregator::ValueVariant::Value;
+    use crate::metrics::dogstatsd::{BufferReader, DogStatsD};
+    use crate::tags::provider::Provider;
+    use crate::LAMBDA_RUNTIME_SLUG;
+    use std::collections::HashMap;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn test_dogstatsd_multi_metric() {
+        let precision = 0.000_000_01;
+        let locked_aggregator = setup_dogstatsd(
+            "metric1:1|c\nmetric2:2|c|tag2:val2\nmetric3:3|c||tag3:val3,tag4:val4\n",
+        )
+        .await;
+        let mut aggregator = locked_aggregator.lock().expect("lock poisoned");
+
+        let parsed_metrics = aggregator.to_series();
+
+        assert_eq!(parsed_metrics.len(), 3);
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
+
+        match aggregator.get_value_by_id("metric1".into(), None) {
+            Some(Value(metric)) => {
+                assert!((metric - 1.0).abs() < precision);
+            }
+            _ => panic!("metric1 not found"),
+        }
+
+        match aggregator.get_value_by_id("metric2".into(), None) {
+            Some(Value(metric)) => {
+                assert!((metric - 2.0).abs() < precision);
+            }
+            _ => panic!("metric2 not found"),
+        }
+
+        match aggregator.get_value_by_id("metric3".into(), None) {
+            Some(Value(metric)) => {
+                assert!((metric - 3.0).abs() < precision);
+            }
+            _ => panic!("metric3 not found"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_dogstatsd_single_metric() {
+        let precision = 0.000_000_01;
+        let locked_aggregator = setup_dogstatsd("metric123:99123|c").await;
+        let mut aggregator = locked_aggregator.lock().expect("lock poisoned");
+        let parsed_metrics = aggregator.to_series();
+
+        assert_eq!(parsed_metrics.len(), 1);
+        assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
+
+        match aggregator.get_value_by_id("metric123".into(), None) {
+            Some(Value(metric)) => {
+                assert!((metric - 99_123.0).abs() < precision);
+            }
+            _ => panic!("metric1 not found"),
+        }
+    }
+
+    async fn setup_dogstatsd(statsd_string: &str) -> Arc<Mutex<Aggregator>> {
+        let tags_provider = Arc::new(Provider::new(
+            Arc::new(Config::default()),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::default(),
+        ));
+        let aggregator_arc = Arc::new(Mutex::new(
+            Aggregator::new(tags_provider, 1_024).expect("aggregator creation failed"),
+        ));
+        let cancel_token = tokio_util::sync::CancellationToken::new();
+
+        let dogstatsd = DogStatsD {
+            cancel_token,
+            aggregator: Arc::clone(&aggregator_arc),
+            buffer_reader: BufferReader::MirrorReader(
+                statsd_string.as_bytes().to_vec(),
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(111, 112, 113, 114)), 0),
+            ),
+        };
+        dogstatsd.consume_statsd().await;
+
+        aggregator_arc
     }
 }

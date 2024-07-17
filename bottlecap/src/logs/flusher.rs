@@ -5,9 +5,15 @@ use tracing::{debug, error};
 
 pub struct Flusher {
     api_key: String,
-    site: String,
+    fqdn_site: String,
     client: reqwest::Client,
     aggregator: Arc<Mutex<Aggregator>>,
+}
+
+#[inline]
+#[must_use]
+pub fn build_fqdn_logs(site: String) -> String {
+    format!("https://http-intake.logs.{site}")
 }
 
 #[allow(clippy::await_holding_lock)]
@@ -16,7 +22,7 @@ impl Flusher {
         let client = reqwest::Client::new();
         Flusher {
             api_key,
-            site,
+            fqdn_site: site,
             client,
             aggregator,
         }
@@ -28,26 +34,24 @@ impl Flusher {
         let mut logs = guard.get_batch();
         while logs.len() > 2 {
             let api_key = self.api_key.clone();
-            let site = self.site.clone();
+            let site = self.fqdn_site.clone();
             let cloned_client = self.client.clone();
             set.spawn(async move { Self::send(cloned_client, api_key, site, logs).await });
             logs = guard.get_batch();
         }
         drop(guard);
         while let Some(res) = set.join_next().await {
-            if let Err(e) = res {
-                debug!("Failed to send logs to datadog: {}", e);
+            match res {
+                Ok(()) => (),
+                Err(e) => {
+                    error!("Failed to wait for request sending {}", e);
+                }
             }
         }
     }
 
-    async fn send(
-        client: reqwest::Client,
-        api_key: String,
-        site: String,
-        data: Vec<u8>,
-    ) -> Result<(), String> {
-        let url = format!("https://http-intake.logs.{site}/api/v2/logs");
+    async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
+        let url = format!("{fqdn}/api/v2/logs");
 
         // It could be an empty JSON array: []
         if data.len() > 2 {
@@ -71,7 +75,5 @@ impl Flusher {
                 }
             }
         }
-
-        Ok(())
     }
 }

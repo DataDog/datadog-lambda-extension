@@ -37,15 +37,16 @@ _docker_build_bottlecap_zip() {
         PLATFORM="aarch64"
     fi
 
-    docker build --platform linux/${arch} \
+    docker buildx build --platform linux/${arch} \
         -t datadog/build-bottlecap-${arch} \
-        -f ./scripts/Dockerfile.bottlecap.build \
+        -f ./scripts/Dockerfile.bottlecap.dev \
         --build-arg PLATFORM=$PLATFORM \
-        . --load
-    local dockerId=$(docker create datadog/build-bottlecap-${arch})
-    docker cp $dockerId:/datadog_extension.zip $TARGET_DIR/datadog_bottlecap-${arch}.zip
-    docker rm $dockerId
-    unzip $TARGET_DIR/datadog_bottlecap-${arch}.zip -d $TARGET_DIR/datadog_bottlecap-${arch}
+        . -o $TARGET_DIR/datadog_bottlecap-${arch}
+
+    cp $TARGET_DIR/datadog_bottlecap-${arch}/datadog_extension.zip $TARGET_DIR/datadog_bottlecap-${arch}.zip
+
+    unzip $TARGET_DIR/datadog_bottlecap-${arch}/datadog_extension.zip -d $TARGET_DIR/datadog_bottlecap-${arch}
+    rm -rf $TARGET_DIR/datadog_bottlecap-${arch}/datadog_extension.zip
 }
 
 build_for_arch() {
