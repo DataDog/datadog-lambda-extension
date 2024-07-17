@@ -14,10 +14,7 @@ use bottlecap::{
     config::{self, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
-    lifecycle::{
-        flush_control::FlushControl,
-        invocation_context::{InvocationContext, InvocationContextBuffer},
-    },
+    lifecycle::invocation_context::{InvocationContext, InvocationContextBuffer},
     logger,
     logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     metrics::{
@@ -65,10 +62,12 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+use bottlecap::config::flush_strategy::FlushStrategy;
 use reqwest::Client;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
@@ -328,9 +327,16 @@ async fn extension_loop_active(
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
-    let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
+
+    let mut periodic_flush_timer = match config.serverless_flush_strategy {
+        FlushStrategy::Periodically(period) => {
+            tokio::time::interval(tokio::time::Duration::from_millis(period.interval))
+        }
+        _ => tokio::time::interval(tokio::time::Duration::MAX),
+    };
+    periodic_flush_timer.tick().await; //discard first tick, which is instantaneous
 
     loop {
         let evt = next_event(client, &r.extension_id).await;
@@ -363,7 +369,7 @@ async fn extension_loop_active(
         // Check if flush logic says we should block and flush or not
         loop {
             tokio::select! {
-                _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                _ = periodic_flush_timer.tick() => {
                     debug!("Flushing periodically");
                     tokio::join!(
                         logs_flusher.flush(),
@@ -466,7 +472,6 @@ async fn extension_loop_active(
                     }
                 }
             }
-
         }
 
         if shutdown {
