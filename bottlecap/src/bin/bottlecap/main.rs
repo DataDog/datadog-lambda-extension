@@ -337,7 +337,7 @@ async fn extension_loop_active(
             tokio::time::interval(tokio::time::Duration::from_millis(period.interval))
         }
         FlushStrategy::Default => tokio::time::interval(tokio::time::Duration::from_millis(1000)),
-        _ => tokio::time::interval(tokio::time::Duration::MAX),
+        FlushStrategy::End => tokio::time::interval(tokio::time::Duration::MAX),
     };
     periodic_flush_timer.tick().await; // discard first tick, which is instantaneous
 
