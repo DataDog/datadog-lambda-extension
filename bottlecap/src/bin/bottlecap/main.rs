@@ -11,18 +11,21 @@
 
 use bottlecap::{
     base_url,
-    config::{self, AwsConfig, Config, flush_strategy::FlushStrategy},
+    config::{self, flush_strategy::FlushStrategy, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::invocation_context::{InvocationContext, InvocationContextBuffer},
     logger,
-    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
+    logs::{
+        agent::LogsAgent,
+        flusher::{build_fqdn_logs, Flusher as LogsFlusher},
+    },
     metrics::{
         aggregator::Aggregator as MetricsAggregator,
         constants::CONTEXTS,
         dogstatsd::{DogStatsD, DogStatsDConfig},
         enhanced::lambda::Lambda as enhanced_metrics,
-        flusher::Flusher as MetricsFlusher,
+        flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
     },
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
@@ -46,6 +49,8 @@ use bottlecap::{
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
+use reqwest::Client;
+use serde::Deserialize;
 use std::{
     collections::hash_map,
     collections::HashMap,
@@ -58,16 +63,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 use telemetry::listener::TelemetryListenerConfig;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
-
-use bottlecap::logs::flusher::build_fqdn_logs;
-use bottlecap::metrics::flusher::build_fqdn_metrics;
-use reqwest::Client;
-use serde::Deserialize;
-use tokio::sync::mpsc::Sender;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
