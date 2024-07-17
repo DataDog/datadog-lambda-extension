@@ -331,13 +331,15 @@ async fn extension_loop_active(
     let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
 
+    // TODO(duncanista): move this into a separate module
     let mut periodic_flush_timer = match config.serverless_flush_strategy {
         FlushStrategy::Periodically(period) => {
             tokio::time::interval(tokio::time::Duration::from_millis(period.interval))
         }
+        FlushStrategy::Default => tokio::time::interval(tokio::time::Duration::from_millis(1000)),
         _ => tokio::time::interval(tokio::time::Duration::MAX),
     };
-    periodic_flush_timer.tick().await; //discard first tick, which is instantaneous
+    periodic_flush_timer.tick().await; // discard first tick, which is instantaneous
 
     loop {
         let evt = next_event(client, &r.extension_id).await;
