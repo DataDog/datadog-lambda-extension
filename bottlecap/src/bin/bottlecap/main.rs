@@ -436,7 +436,6 @@ async fn extension_loop_active(
                                     trace_flusher.manual_flush(),
                                     stats_flusher.manual_flush()
                                 );
-                                debug!("[astuyve] end flush in runtime done, calling /next");
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
