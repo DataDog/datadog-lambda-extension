@@ -45,7 +45,9 @@ const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // ComputeStatsValue is the tag value indicating trace stats should be computed
 const COMPUTE_STATS_VALUE: &str = "1";
 // TODO(astuyve) decide what to do with the version
-// const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
+const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
+// TODO(duncanista) figure out a better way to not hardcode this
+const EXTENSION_VERSION: &str = "v61-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -128,6 +130,7 @@ fn tags_from_env(
     }
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
+    tags_map.insert(EXTENSION_VERSION_KEY.to_string(), EXTENSION_VERSION.to_string());
 
     if let Some(tags) = &config.tags {
         for tag in tags.split(',') {
