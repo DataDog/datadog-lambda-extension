@@ -1,14 +1,11 @@
 use crate::config::flush_strategy::FlushStrategy;
-use crate::lifecycle::invocation_times::InvocationTimes;
-use ::std::time;
-use tracing::debug;
+use tokio::time::Interval;
 
-const TWENTY_SECONDS: u64 = 20 * 1000;
+const DEFAULT_FLUSH_INTERVAL: u64 = 1000; // 1s
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlushControl {
-    pub last_flush: u64,
     flush_strategy: FlushStrategy,
-    invocation_times: InvocationTimes,
 }
 
 // FlushControl is called at the end of every invocation and decides whether or not we should flush
@@ -26,49 +23,24 @@ pub struct FlushControl {
 impl FlushControl {
     #[must_use]
     pub fn new(flush_strategy: FlushStrategy) -> FlushControl {
-        FlushControl {
-            flush_strategy,
-            last_flush: 0,
-            invocation_times: InvocationTimes::new(),
-        }
+        FlushControl { flush_strategy }
     }
 
-    pub fn should_flush(&mut self) -> bool {
-        let now = match time::SystemTime::now().duration_since(time::UNIX_EPOCH) {
-            Ok(now) => now.as_secs(),
-            Err(e) => {
-                debug!("failed to get current time: {:?}", e);
-                return false;
-            }
-        };
-        self.invocation_times.add(now);
+    #[must_use]
+    pub fn should_flush_end(&self) -> bool {
+        !matches!(&self.flush_strategy, FlushStrategy::Periodically(_))
+    }
+
+    #[must_use]
+    pub fn get_flush_interval(&self) -> Interval {
         match &self.flush_strategy {
             FlushStrategy::Default => {
-                if self.invocation_times.should_adapt_to_periodic(now) {
-                    let should_periodic_flush = self.should_periodic_flush(now, TWENTY_SECONDS);
-                    debug!(
-                        "Adapting over to periodic flush strategy. should_periodic_flush: {}",
-                        should_periodic_flush
-                    );
-                    return should_periodic_flush;
-                }
-                debug!("Not enough invocations to adapt to periodic flush, flushing at the end of the invocation");
-                self.last_flush = now;
-                true
+                tokio::time::interval(tokio::time::Duration::from_millis(DEFAULT_FLUSH_INTERVAL))
             }
-            FlushStrategy::Periodically(periodic) => {
-                self.should_periodic_flush(now, periodic.interval)
+            FlushStrategy::Periodically(p) => {
+                tokio::time::interval(tokio::time::Duration::from_millis(p.interval))
             }
-            FlushStrategy::End => true,
-        }
-    }
-
-    fn should_periodic_flush(&mut self, now: u64, interval: u64) -> bool {
-        if now - self.last_flush > (interval / 1000) {
-            self.last_flush = now;
-            true
-        } else {
-            false
+            FlushStrategy::End => tokio::time::interval(tokio::time::Duration::MAX),
         }
     }
 }
@@ -79,31 +51,36 @@ mod tests {
     use crate::config::flush_strategy::PeriodicStrategy;
 
     #[test]
-    fn should_flush_default_end() {
-        let mut flush_control = super::FlushControl::new(FlushStrategy::Default);
-        assert!(flush_control.should_flush());
-    }
-    #[test]
-    fn should_flush_default_periodic() {
-        const LOOKBACK_COUNT: usize = 20;
-        let mut flush_control = super::FlushControl::new(FlushStrategy::Default);
-        for _ in 0..LOOKBACK_COUNT - 1 {
-            assert!(flush_control.should_flush());
-        }
-        assert!(!flush_control.should_flush());
-    }
-    #[test]
     fn should_flush_end() {
-        let mut flush_control = super::FlushControl::new(FlushStrategy::End);
-        assert!(flush_control.should_flush());
+        let flush_control = FlushControl::new(FlushStrategy::Default);
+        assert!(flush_control.should_flush_end());
+
+        let flush_control = FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
+            interval: 1,
+        }));
+        assert!(!flush_control.should_flush_end());
+
+        let flush_control = FlushControl::new(FlushStrategy::End);
+        assert!(flush_control.should_flush_end());
     }
-    #[test]
-    fn should_flush_periodically() {
-        let mut flush_control =
-            super::FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
-                interval: 1,
-            }));
-        assert!(flush_control.should_flush());
-        assert!(!flush_control.should_flush());
+
+    #[tokio::test]
+    async fn get_flush_interval() {
+        let flush_control = FlushControl::new(FlushStrategy::Default);
+        assert_eq!(
+            flush_control.get_flush_interval().period().as_millis(),
+            DEFAULT_FLUSH_INTERVAL as u128
+        );
+
+        let flush_control = FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
+            interval: 1,
+        }));
+        assert_eq!(flush_control.get_flush_interval().period().as_millis(), 1);
+
+        let flush_control = FlushControl::new(FlushStrategy::End);
+        assert_eq!(
+            flush_control.get_flush_interval().period().as_millis(),
+            tokio::time::Duration::MAX.as_millis()
+        );
     }
 }
