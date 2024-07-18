@@ -4,11 +4,9 @@ pub mod processing_rule;
 
 use std::path::Path;
 
-use figment::{
-    providers::{Env, Format, Yaml},
-    Figment,
-};
+use figment::{providers::Env, Figment};
 use serde::Deserialize;
+use tracing::debug;
 
 use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::LogLevel;
@@ -96,7 +94,7 @@ fn log_failover_reason(reason: &str) {
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
     let figment = Figment::new()
-        .merge(Yaml::file(path))
+        // .merge(Yaml::file(path))
         .merge(Env::prefixed("DATADOG_"))
         .merge(Env::prefixed("DD_"));
 
@@ -107,6 +105,12 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         }
         _ => ConfigError::ParseError(err.to_string()),
     })?;
+
+    if path.exists() {
+        log_failover_reason("datadog_yaml");
+        debug!("datadog.yaml is not supported, use environment variables instead");
+        return Err(ConfigError::UnsupportedField("datadog_yaml".to_string()));
+    }
 
     if config.serverless_appsec_enabled {
         log_failover_reason("appsec_enabled");
@@ -143,38 +147,35 @@ pub mod tests {
     use crate::config::processing_rule;
 
     #[test]
-    fn test_reject_unknown_fields_yaml() {
+    fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                unknown_field: true
-            ",
-            )?;
+            jail.set_env("DD_APPSEC_ENABLED", "true");
+
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
                 config,
-                ConfigError::UnsupportedField("unknown_field".to_string())
+                ConfigError::UnsupportedField("appsec_enabled".to_string())
             );
             Ok(())
         });
     }
 
     #[test]
-    fn test_allowed_but_disabled() {
+    fn test_reject_datadog_yaml() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
                 r"
-                appsec_enabled: true
+                apm_enabled: true
+                extension_version: next
             ",
             )?;
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            let config = get_config(Path::new("")).expect_err("should reject datadog.yaml file");
             assert_eq!(
                 config,
-                ConfigError::UnsupportedField("appsec_enabled".to_string())
+                ConfigError::UnsupportedField("datadog_yaml".to_string())
             );
             Ok(())
         });
@@ -202,54 +203,6 @@ pub mod tests {
             assert_eq!(
                 config,
                 ConfigError::UnsupportedField("extension_version".to_string())
-            );
-            Ok(())
-        });
-    }
-    #[test]
-    fn test_precedence() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                apm_enabled: true,
-                extension_version: next
-            ",
-            )?;
-            jail.set_env("DD_APM_ENABLED", "false");
-            let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    apm_enabled: false,
-                    extension_version: Some("next".to_string()),
-                    ..Config::default()
-                }
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_parse_config_file() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                apm_enabled: true
-                extension_version: next
-            ",
-            )?;
-            let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    apm_enabled: true,
-                    extension_version: Some("next".to_string()),
-                    ..Config::default()
-                }
             );
             Ok(())
         });
@@ -389,60 +342,6 @@ pub mod tests {
                         pattern: "exclude".to_string(),
                         replace_placeholder: None
                     }]),
-                    extension_version: Some("next".to_string()),
-                    ..Config::default()
-                }
-            );
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_parse_logs_config_processing_rules_from_yaml() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            // TODO(duncanista): Update to use YAML configuration field `logs_config`: `processing_rules`: - ...
-            jail.create_file(
-                "datadog.yaml",
-                r#"
-                extension_version: next
-                logs_config_processing_rules:
-                   - type: exclude_at_match
-                     name: "exclude"
-                     pattern: "exclude"
-                   - type: include_at_match
-                     name: "include"
-                     pattern: "include"
-                   - type: mask_sequences
-                     name: "mask"
-                     pattern: "mask"
-                     replace_placeholder: "REPLACED"
-            "#,
-            )?;
-            let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    logs_config_processing_rules: Some(vec![
-                        ProcessingRule {
-                            kind: processing_rule::Kind::ExcludeAtMatch,
-                            name: "exclude".to_string(),
-                            pattern: "exclude".to_string(),
-                            replace_placeholder: None
-                        },
-                        ProcessingRule {
-                            kind: processing_rule::Kind::IncludeAtMatch,
-                            name: "include".to_string(),
-                            pattern: "include".to_string(),
-                            replace_placeholder: None
-                        },
-                        ProcessingRule {
-                            kind: processing_rule::Kind::MaskSequences,
-                            name: "mask".to_string(),
-                            pattern: "mask".to_string(),
-                            replace_placeholder: Some("REPLACED".to_string())
-                        }
-                    ]),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
