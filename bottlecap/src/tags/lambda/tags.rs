@@ -1,3 +1,5 @@
+use crate::config;
+use log::warn;
 use std::collections::hash_map;
 use std::env::consts::ARCH;
 use std::fs::File;
@@ -5,8 +7,6 @@ use std::io;
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::Arc;
-use log::warn;
-use crate::config;
 
 // Environment variables for the Lambda execution environment info
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
@@ -116,12 +116,15 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
-    if let Ok(exex_runtime_env) = std::env::var(RUNTIME_VAR) {
+    if let Ok(exec_runtime_env) = std::env::var(RUNTIME_VAR) {
         // AWS_Lambda_java8
-        let runtime = exex_runtime_env.split("_").last().unwrap_or_else(|| "unknown");
+        let runtime = exec_runtime_env.split('_').last().unwrap_or("unknown");
         tags_map.insert(RUNTIME_KEY.to_string(), runtime.to_string());
     } else {
-        tags_map.insert(RUNTIME_KEY.to_string(), resolve_provided_runtime("/etc/os-release"));
+        tags_map.insert(
+            RUNTIME_KEY.to_string(),
+            resolve_provided_runtime("/etc/os-release"),
+        );
     }
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
@@ -144,33 +147,37 @@ fn tags_from_env(
 
 fn resolve_provided_runtime(path: &str) -> String {
     let path = Path::new(path);
-    let display = path.display();
 
-    let file = match File::open(&path) {
+    let file = match File::open(path) {
         Err(why) => {
-            warn!("Couldn't read provided runtime. Cannot read {}: {}. Returning unknown", display, why);
+            warn!(
+                "Couldn't read provided runtime. Cannot read: {}. Returning unknown",
+                why
+            );
             return "unknown".to_string();
         }
         Ok(file) => file,
     };
     let reader = io::BufReader::new(file);
-    for line in reader.lines() {
-        if let Ok(os_str) = line {
-            // print!("{}", os_str);
-            if os_str.starts_with("PRETTY_NAME=") {
-                let parts: Vec<&str> = os_str.split('=').collect();
-                if parts.len() > 1 {
-                    match parts[1].split(" ").last().unwrap_or_else(|| "")
-                        .replace("\"", "").as_str() {
-                        "2" => return "provided.al2".to_string(),
-                        s if s.starts_with("2023") => return "provided.al2023".to_string(),
-                        _ => break
-                    }
+    for line in reader.lines().map_while(Result::ok) {
+        if line.starts_with("PRETTY_NAME=") {
+            let parts: Vec<&str> = line.split('=').collect();
+            if parts.len() > 1 {
+                match parts[1]
+                    .split(' ')
+                    .last()
+                    .unwrap_or("")
+                    .replace('\"', "")
+                    .as_str()
+                {
+                    "2" => return "provided.al2".to_string(),
+                    s if s.starts_with("2023") => return "provided.al2023".to_string(),
+                    _ => break,
                 }
             }
         }
     }
-    return "unknown".to_string();
+    "unknown".to_string()
 }
 
 impl Lambda {
@@ -206,10 +213,10 @@ impl Lambda {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use std::io::Write;
-    use serial_test::serial;
     use super::*;
     use crate::config::Config;
+    use serial_test::serial;
+    use std::io::Write;
 
     #[test]
     // #[serial]
@@ -272,7 +279,10 @@ mod tests {
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
         assert_eq!(tags.tags_map.get(MEMORY_SIZE_KEY).unwrap(), "128");
-        assert_eq!(tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(), "arn:aws:lambda:us-west-2:123456789012:function:my-function");
+        assert_eq!(
+            tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function"
+        );
     }
 
     #[test]
@@ -290,7 +300,8 @@ mod tests {
     #[test]
     fn test_resolve_provided_al2023() {
         let path = "/tmp/test-os-release2";
-        let content = "NAME=\"Amazon Linux\"\nVERSION=\"2\nPRETTY_NAME=\"Amazon Linux 2023.4.20240429\"";
+        let content =
+            "NAME=\"Amazon Linux\"\nVERSION=\"2\nPRETTY_NAME=\"Amazon Linux 2023.4.20240429\"";
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
