@@ -11,10 +11,13 @@
 
 use bottlecap::{
     base_url,
-    config::{self, flush_strategy::FlushStrategy, AwsConfig, Config},
+    config::{self, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
-    lifecycle::invocation_context::{InvocationContext, InvocationContextBuffer},
+    lifecycle::{
+        flush_control::FlushControl,
+        invocation_context::{InvocationContext, InvocationContextBuffer},
+    },
     logger,
     logs::{
         agent::LogsAgent,
@@ -32,8 +35,7 @@ use bottlecap::{
     telemetry::{
         self,
         client::TelemetryApiClient,
-        events::TelemetryEvent,
-        events::{Status, TelemetryRecord},
+        events::{Status, TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
     },
     traces::{
@@ -219,8 +221,11 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
 
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_new(config.log_level)
-                .expect("could not parse log level in configuration"),
+            EnvFilter::try_new(format!(
+                "{:?},hyper=warn,reqwest=warn,rustls=warn,datadog-trace-mini-agent=warn",
+                config.log_level
+            ))
+            .expect("could not parse log level in configuration"),
         )
         .with_level(true)
         .with_thread_names(false)
@@ -328,18 +333,12 @@ async fn extension_loop_active(
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
+    let flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
 
-    // TODO(duncanista): move this into a separate module
-    let mut periodic_flush_timer = match config.serverless_flush_strategy {
-        FlushStrategy::Periodically(period) => {
-            tokio::time::interval(tokio::time::Duration::from_millis(period.interval))
-        }
-        FlushStrategy::Default => tokio::time::interval(tokio::time::Duration::from_millis(1000)),
-        FlushStrategy::End => tokio::time::interval(tokio::time::Duration::MAX),
-    };
-    periodic_flush_timer.tick().await; // discard first tick, which is instantaneous
+    let mut flush_interval = flush_control.get_flush_interval();
+    flush_interval.tick().await; // discard first tick, which is instantaneous
 
     loop {
         let evt = next_event(client, &r.extension_id).await;
@@ -372,7 +371,7 @@ async fn extension_loop_active(
         // Check if flush logic says we should block and flush or not
         loop {
             tokio::select! {
-                _ = periodic_flush_timer.tick() => {
+                _ = flush_interval.tick() => {
                     debug!("Flushing periodically");
                     tokio::join!(
                         logs_flusher.flush(),
@@ -430,12 +429,14 @@ async fn extension_loop_active(
                                 // pass the invocation deadline to
                                 // flush tasks here, so they can
                                 // retry if we have more time
-                                tokio::join!(
-                                    logs_flusher.flush(),
-                                    metrics_flusher.flush(),
-                                    trace_flusher.manual_flush(),
-                                    stats_flusher.manual_flush()
-                                );
+                                if flush_control.should_flush_end() {
+                                    tokio::join!(
+                                        logs_flusher.flush(),
+                                        metrics_flusher.flush(),
+                                        trace_flusher.manual_flush(),
+                                        stats_flusher.manual_flush()
+                                    );
+                                }
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
