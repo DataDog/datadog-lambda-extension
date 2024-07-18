@@ -106,6 +106,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         _ => ConfigError::ParseError(err.to_string()),
     })?;
 
+    // TODO(duncanista): revert to using datadog.yaml when we have a proper serializer
     if path.exists() {
         log_failover_reason("datadog_yaml");
         debug!("datadog.yaml is not supported, use environment variables instead");
