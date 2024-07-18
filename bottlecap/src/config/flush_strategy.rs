@@ -10,11 +10,12 @@ pub struct PeriodicStrategy {
 pub enum FlushStrategy {
     Default,
     End,
+    EndPeriodically(PeriodicStrategy),
     Periodically(PeriodicStrategy),
 }
 
 // Deserialize for FlushStrategy
-// Flush Strategy can be either "end" or "periodically,<ms>"
+// Flush Strategy can be either "end", "end,<ms>", or "periodically,<ms>"
 impl<'de> Deserialize<'de> for FlushStrategy {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -26,28 +27,39 @@ impl<'de> Deserialize<'de> for FlushStrategy {
         } else {
             let mut split_value = value.as_str().split(',');
             // "periodically,60000"
-            match split_value.next() {
-                Some(first_value) if first_value.starts_with("periodically") => {
-                    let interval = split_value.next();
-                    // "60000"
-                    if let Some(interval) = interval {
-                        if let Ok(parsed_interval) = interval.parse() {
-                            return Ok(FlushStrategy::Periodically(PeriodicStrategy {
-                                interval: parsed_interval,
-                            }));
-                        }
-                        debug!("invalid flush interval: {}, using default", interval);
-                        Ok(FlushStrategy::Default)
-                    } else {
+            // "end,1000"
+            //
+            // "periodically|end"
+            if let Some(strategy) = split_value.next() {
+                // "60000"
+                let mut interval = 0;
+                if let Some(v) = split_value.next() {
+                    if let Ok(parsed_interval) = v.parse() {
+                        interval = parsed_interval;
+                    }
+                }
+
+                if interval == 0 {
+                    debug!("invalid flush interval: {}, using default", value);
+                    return Ok(FlushStrategy::Default);
+                }
+
+                return match strategy {
+                    "periodically" => {
+                        Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
+                    }
+                    "end" => Ok(FlushStrategy::EndPeriodically(PeriodicStrategy {
+                        interval,
+                    })),
+                    _ => {
                         debug!("invalid flush strategy: {}, using default", value);
                         Ok(FlushStrategy::Default)
                     }
-                }
-                _ => {
-                    debug!("invalid flush strategy: {}, using default", value);
-                    Ok(FlushStrategy::Default)
-                }
+                };
             }
+
+            debug!("invalid flush strategy: {}, using default", value);
+            Ok(FlushStrategy::Default)
         }
     }
 }

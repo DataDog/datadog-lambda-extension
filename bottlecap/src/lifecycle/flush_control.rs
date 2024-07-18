@@ -37,7 +37,7 @@ impl FlushControl {
             FlushStrategy::Default => {
                 tokio::time::interval(tokio::time::Duration::from_millis(DEFAULT_FLUSH_INTERVAL))
             }
-            FlushStrategy::Periodically(p) => {
+            FlushStrategy::Periodically(p) | FlushStrategy::EndPeriodically(p) => {
                 tokio::time::interval(tokio::time::Duration::from_millis(p.interval))
             }
             FlushStrategy::End => tokio::time::interval(tokio::time::Duration::MAX),
@@ -55,13 +55,18 @@ mod tests {
         let flush_control = FlushControl::new(FlushStrategy::Default);
         assert!(flush_control.should_flush_end());
 
+        let flush_control = FlushControl::new(FlushStrategy::EndPeriodically(PeriodicStrategy {
+            interval: 1,
+        }));
+        assert!(flush_control.should_flush_end());
+
+        let flush_control = FlushControl::new(FlushStrategy::End);
+        assert!(flush_control.should_flush_end());
+
         let flush_control = FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
             interval: 1,
         }));
         assert!(!flush_control.should_flush_end());
-
-        let flush_control = FlushControl::new(FlushStrategy::End);
-        assert!(flush_control.should_flush_end());
     }
 
     #[tokio::test]
@@ -73,6 +78,11 @@ mod tests {
         );
 
         let flush_control = FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
+            interval: 1,
+        }));
+        assert_eq!(flush_control.get_flush_interval().period().as_millis(), 1);
+
+        let flush_control = FlushControl::new(FlushStrategy::EndPeriodically(PeriodicStrategy {
             interval: 1,
         }));
         assert_eq!(flush_control.get_flush_interval().period().as_millis(), 1);
