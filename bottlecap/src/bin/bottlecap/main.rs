@@ -372,14 +372,13 @@ async fn extension_loop_active(
         loop {
             tokio::select! {
                 _ = flush_interval.tick() => {
-                    debug!("Flushing periodically");
+                    debug!("Periodic interval tick, flushing");
                     tokio::join!(
                         logs_flusher.flush(),
                         metrics_flusher.flush(),
                         trace_flusher.manual_flush(),
                         stats_flusher.manual_flush()
                     );
-                    debug!("Periodic flush done");
                 }
                 Some(event) = event_bus.rx.recv() => {
                     match event {
