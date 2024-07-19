@@ -96,14 +96,13 @@ all(){
   time build_dockerized
   version_nbr=$(publish)
   update "$version_nbr"
-  invoke
+  # invoke
 }
 
 format () {
   cd ../bottlecap
     cargo fmt --all
-    cargo clippy --workspace --all-features
-    cargo clippy --fix
+    cargo clippy --workspace --all-features --fix
   cd -
 }
 
