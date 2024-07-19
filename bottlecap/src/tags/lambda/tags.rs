@@ -160,7 +160,7 @@ fn resolve_runtime(process_environ: &str, fallback_provided_al_path: &str) -> St
             });
 
     if let Some(runtime_from_environ) = search_environ_runtime {
-        return runtime_from_environ;
+        return runtime_from_environ.replace('\"', "");
     };
 
     fs::read_to_string(fallback_provided_al_path)
@@ -290,6 +290,19 @@ mod tests {
             tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function"
         );
+    }
+
+    #[test]
+    fn test_resolve_runtime() {
+        let path = "/tmp/test-runtime_resolve";
+        let content =
+            "NAME =\"Amazon Linux\"\nVERSION=\"2\nAWS_EXECUTION_ENV=\"AWS_Lambda_java123\"";
+        let mut file = File::create(path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let runtime = resolve_runtime(path, path);
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(runtime, "java123");
     }
 
     #[test]
