@@ -1,5 +1,4 @@
 use crate::config;
-use log::warn;
 use std::collections::hash_map;
 use std::env::consts::ARCH;
 use std::fs::File;
@@ -7,6 +6,7 @@ use std::io;
 use std::io::BufRead;
 use std::path::Path;
 use std::sync::Arc;
+use tracing::debug;
 
 // Environment variables for the Lambda execution environment info
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
@@ -150,7 +150,7 @@ fn resolve_provided_runtime(path: &str) -> String {
 
     let file = match File::open(path) {
         Err(why) => {
-            warn!(
+            debug!(
                 "Couldn't read provided runtime. Cannot read: {}. Returning unknown",
                 why
             );
@@ -219,7 +219,6 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    // #[serial]
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
