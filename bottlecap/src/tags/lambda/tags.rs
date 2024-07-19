@@ -130,7 +130,10 @@ fn tags_from_env(
     }
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
-    tags_map.insert(EXTENSION_VERSION_KEY.to_string(), EXTENSION_VERSION.to_string());
+    tags_map.insert(
+        EXTENSION_VERSION_KEY.to_string(),
+        EXTENSION_VERSION.to_string(),
+    );
 
     if let Some(tags) = &config.tags {
         for tag in tags.split(',') {
@@ -236,6 +239,11 @@ mod tests {
             &arch.to_string()
         );
         assert_eq!(tags.tags_map.get(RUNTIME_KEY).unwrap(), "unknown");
+
+        assert_eq!(
+            tags.tags_map.get(EXTENSION_VERSION_KEY).unwrap(),
+            EXTENSION_VERSION
+        );
     }
 
     #[test]
