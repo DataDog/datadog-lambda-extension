@@ -20,6 +20,7 @@ async fn test_logs() {
     let regexp_compute_state = r#"_dd.compute_stats:1"#;
     let regexp_arch = r#"architecture:x86_64"#;
     let regexp_function_arn = r#"function_arn:test-arn"#;
+    let regexp_extension_version = r#"dd_extension_version"#;
 
     let server = MockServer::start();
     let hello_mock = server.mock(|when, then| {
@@ -30,7 +31,8 @@ async fn test_logs() {
             .body_contains(regexp_message)
             .body_contains(regexp_compute_state)
             .body_contains(regexp_arch)
-            .body_contains(regexp_function_arn);
+            .body_contains(regexp_function_arn)
+            .body_contains(regexp_extension_version);
 
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });

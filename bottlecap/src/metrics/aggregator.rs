@@ -429,6 +429,9 @@ mod tests {
     use std::collections::hash_map;
     use std::sync::Arc;
 
+    const SINGLE_METRIC_SIZE: usize = 205;
+    const SINGLE_DISTRIBUTION_SIZE: u64 = 152;
+
     fn create_tags_provider() -> Arc<provider::Provider> {
         let config = Arc::new(config::Config::default());
         Arc::new(provider::Provider::new(
@@ -604,37 +607,46 @@ mod tests {
 
     #[test]
     fn consume_distributions_batch_bytes() {
-        let single_proto_size = 121;
-        let max_bytes = 250;
-        let tot = 5;
+        let expected_distribution_per_batch = 2;
+        let total_number_of_distributions = 5;
+        let max_bytes = SINGLE_METRIC_SIZE * expected_distribution_per_batch + 11;
         let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
             max_batch_entries_sketch_metric: 1_000,
-            max_batch_bytes_sketch_metric: max_bytes,
+            max_batch_bytes_sketch_metric: max_bytes as u64,
             max_context: 1_000,
         };
 
-        add_metrics(tot, &mut aggregator, "d".to_string());
+        add_metrics(
+            total_number_of_distributions,
+            &mut aggregator,
+            "d".to_string(),
+        );
         let batched = aggregator.consume_distributions();
 
-        assert_eq!(batched.len(), tot / 2 + 1);
+        assert_eq!(
+            batched.len(),
+            total_number_of_distributions / expected_distribution_per_batch + 1
+        );
         assert_eq!(
             batched.first().unwrap().compute_size(),
-            single_proto_size * 2
+            SINGLE_DISTRIBUTION_SIZE * expected_distribution_per_batch as u64
         );
         assert_eq!(
             batched.get(1).unwrap().compute_size(),
-            single_proto_size * 2
+            SINGLE_DISTRIBUTION_SIZE * expected_distribution_per_batch as u64
         );
-        assert_eq!(batched.get(2).unwrap().compute_size(), single_proto_size);
+        assert_eq!(
+            batched.get(2).unwrap().compute_size(),
+            SINGLE_DISTRIBUTION_SIZE
+        );
     }
 
     #[test]
     fn consume_distribution_one_element_bigger_than_max_size() {
-        let single_proto_size = 121;
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
@@ -652,7 +664,7 @@ mod tests {
 
         assert_eq!(batched.len(), tot);
         for a_batch in batched {
-            assert_eq!(a_batch.compute_size(), single_proto_size);
+            assert_eq!(a_batch.compute_size(), SINGLE_DISTRIBUTION_SIZE);
         }
     }
 
@@ -722,24 +734,27 @@ mod tests {
 
     #[test]
     fn consume_metrics_batch_bytes() {
-        let single_metric_size = 174;
-        let two_metrics_size = 336;
-        let max_bytes = 350;
-        let tot = 5;
+        let expected_metrics_per_batch = 2;
+        let total_number_of_metrics = 5;
+        let two_metrics_size = 398;
+        let max_bytes = SINGLE_METRIC_SIZE * expected_metrics_per_batch + 13;
         let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
-            max_batch_bytes_single_metric: max_bytes,
+            max_batch_bytes_single_metric: max_bytes as u64,
             max_batch_entries_sketch_metric: 1_000,
             max_batch_bytes_sketch_metric: 1_000,
             max_context: 1_000,
         };
 
-        add_metrics(tot, &mut aggregator, "c".to_string());
+        add_metrics(total_number_of_metrics, &mut aggregator, "c".to_string());
         let batched = aggregator.consume_metrics();
 
-        assert_eq!(batched.len(), tot / 2 + 1);
+        assert_eq!(
+            batched.len(),
+            total_number_of_metrics / expected_metrics_per_batch + 1
+        );
         assert_eq!(
             serde_json::to_vec(batched.first().unwrap()).unwrap().len(),
             two_metrics_size
@@ -750,13 +765,12 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_vec(batched.get(2).unwrap()).unwrap().len(),
-            single_metric_size
+            SINGLE_METRIC_SIZE
         );
     }
 
     #[test]
     fn consume_series_one_element_bigger_than_max_size() {
-        let single_metric_size = 174;
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
@@ -776,7 +790,7 @@ mod tests {
         for a_batch in batched {
             assert_eq!(
                 serde_json::to_vec(&a_batch).unwrap().len(),
-                single_metric_size
+                SINGLE_METRIC_SIZE
             );
         }
     }

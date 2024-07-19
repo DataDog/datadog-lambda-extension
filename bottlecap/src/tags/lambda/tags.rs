@@ -45,7 +45,9 @@ const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // ComputeStatsValue is the tag value indicating trace stats should be computed
 const COMPUTE_STATS_VALUE: &str = "1";
 // TODO(astuyve) decide what to do with the version
-// const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
+const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
+// TODO(duncanista) figure out a better way to not hardcode this
+const EXTENSION_VERSION: &str = "61-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -128,6 +130,10 @@ fn tags_from_env(
     }
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
+    tags_map.insert(
+        EXTENSION_VERSION_KEY.to_string(),
+        EXTENSION_VERSION.to_string(),
+    );
 
     if let Some(tags) = &config.tags {
         for tag in tags.split(',') {
@@ -222,7 +228,7 @@ mod tests {
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 3);
+        assert_eq!(tags.tags_map.len(), 4);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
             COMPUTE_STATS_VALUE
@@ -233,6 +239,11 @@ mod tests {
             &arch.to_string()
         );
         assert_eq!(tags.tags_map.get(RUNTIME_KEY).unwrap(), "unknown");
+
+        assert_eq!(
+            tags.tags_map.get(EXTENSION_VERSION_KEY).unwrap(),
+            EXTENSION_VERSION
+        );
     }
 
     #[test]
