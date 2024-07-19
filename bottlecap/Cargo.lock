@@ -421,7 +421,6 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-core",
- "tracing-log",
  "tracing-subscriber",
  "ustr",
 ]
@@ -2894,6 +2893,7 @@ dependencies = [
  "thread_local",
  "tracing",
  "tracing-core",
+ "tracing-log",
 ]
 
 [[package]]

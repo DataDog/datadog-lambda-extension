@@ -36,7 +36,7 @@ impl StatsProcessor for ServerlessStatsProcessor {
         req: Request<Body>,
         tx: Sender<pb::ClientStatsPayload>,
     ) -> http::Result<Response<Body>> {
-        debug!("Recieved trace stats to process");
+        debug!("Received trace stats to process");
         let (parts, body) = req.into_parts();
 
         if let Some(response) = http_utils::verify_request_content_length(
