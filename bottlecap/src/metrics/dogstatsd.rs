@@ -75,7 +75,7 @@ impl DogStatsD {
             .await
             .expect("didn't receive data");
         let msgs = std::str::from_utf8(&buf).expect("couldn't parse as string");
-        debug!("received message: {} from {}", msgs, src);
+        debug!("Received message: {} from {}", msgs, src);
         let statsd_metric_strings = msgs.split('\n');
         self.insert_metrics(statsd_metric_strings);
     }
@@ -85,7 +85,7 @@ impl DogStatsD {
             .filter_map(|m| match Metric::parse(m) {
                 Ok(metric) => Some(metric),
                 Err(e) => {
-                    error!("failed to parse metric {}: {}", m, e);
+                    error!("Failed to parse metric {}: {}", m, e);
                     None
                 }
             })

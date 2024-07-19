@@ -1,13 +1,16 @@
+use crate::config;
 use std::collections::hash_map;
 use std::env::consts::ARCH;
+use std::fs::File;
+use std::io;
+use std::io::BufRead;
+use std::path::Path;
 use std::sync::Arc;
-
-use crate::config;
+use tracing::debug;
 
 // Environment variables for the Lambda execution environment info
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
-// TODO(astuyve): set runtime
-// const RUNTIME_VAR: &str = "AWS_EXECUTION_ENV";
+const RUNTIME_VAR: &str = "AWS_EXECUTION_ENV";
 const MEMORY_SIZE_VAR: &str = "AWS_LAMBDA_FUNCTION_MEMORY_SIZE";
 const INIT_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
 const INIT_TYPE_KEY: &str = "init_type";
@@ -19,7 +22,7 @@ const FUNCTION_NAME_KEY: &str = "functionname";
 // ExecutedVersionKey is the tag key for a function's executed version
 const EXECUTED_VERSION_KEY: &str = "executedversion";
 // RuntimeKey is the tag key for a function's runtime (e.g node, python)
-// const RUNTIME_KEY: &str = "runtime";
+const RUNTIME_KEY: &str = "runtime";
 // MemorySizeKey is the tag key for a function's allocated memory size
 const MEMORY_SIZE_KEY: &str = "memorysize";
 // TODO(astuyve): fetch architecture from the runtime
@@ -42,7 +45,9 @@ const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // ComputeStatsValue is the tag value indicating trace stats should be computed
 const COMPUTE_STATS_VALUE: &str = "1";
 // TODO(astuyve) decide what to do with the version
-// const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
+const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
+// TODO(duncanista) figure out a better way to not hardcode this
+const EXTENSION_VERSION: &str = "61-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -113,8 +118,22 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
+    if let Ok(exec_runtime_env) = std::env::var(RUNTIME_VAR) {
+        // AWS_Lambda_java8
+        let runtime = exec_runtime_env.split('_').last().unwrap_or("unknown");
+        tags_map.insert(RUNTIME_KEY.to_string(), runtime.to_string());
+    } else {
+        tags_map.insert(
+            RUNTIME_KEY.to_string(),
+            resolve_provided_runtime("/etc/os-release"),
+        );
+    }
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
+    tags_map.insert(
+        EXTENSION_VERSION_KEY.to_string(),
+        EXTENSION_VERSION.to_string(),
+    );
 
     if let Some(tags) = &config.tags {
         for tag in tags.split(',') {
@@ -130,6 +149,41 @@ fn tags_from_env(
         COMPUTE_STATS_VALUE.to_string(),
     );
     tags_map
+}
+
+fn resolve_provided_runtime(path: &str) -> String {
+    let path = Path::new(path);
+
+    let file = match File::open(path) {
+        Err(why) => {
+            debug!(
+                "Couldn't read provided runtime. Cannot read: {}. Returning unknown",
+                why
+            );
+            return "unknown".to_string();
+        }
+        Ok(file) => file,
+    };
+    let reader = io::BufReader::new(file);
+    for line in reader.lines().map_while(Result::ok) {
+        if line.starts_with("PRETTY_NAME=") {
+            let parts: Vec<&str> = line.split('=').collect();
+            if parts.len() > 1 {
+                match parts[1]
+                    .split(' ')
+                    .last()
+                    .unwrap_or("")
+                    .replace('\"', "")
+                    .as_str()
+                {
+                    "2" => return "provided.al2".to_string(),
+                    s if s.starts_with("2023") => return "provided.al2023".to_string(),
+                    _ => break,
+                }
+            }
+        }
+    }
+    "unknown".to_string()
 }
 
 impl Lambda {
@@ -167,12 +221,14 @@ impl Lambda {
 mod tests {
     use super::*;
     use crate::config::Config;
+    use serial_test::serial;
+    use std::io::Write;
 
     #[test]
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 2);
+        assert_eq!(tags.tags_map.len(), 4);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
             COMPUTE_STATS_VALUE
@@ -181,6 +237,12 @@ mod tests {
         assert_eq!(
             tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),
             &arch.to_string()
+        );
+        assert_eq!(tags.tags_map.get(RUNTIME_KEY).unwrap(), "unknown");
+
+        assert_eq!(
+            tags.tags_map.get(EXTENSION_VERSION_KEY).unwrap(),
+            EXTENSION_VERSION
         );
     }
 
@@ -204,6 +266,7 @@ mod tests {
     }
 
     #[test]
+    #[serial] //run test serially since it sets and unsets env vars
     fn test_with_lambda_env_vars() {
         let mut metadata = hash_map::HashMap::new();
         metadata.insert(
@@ -215,10 +278,13 @@ mod tests {
             tags: Some("test:tag,env:test".to_string()),
             env: Some("test".to_string()),
             version: Some("1.0.0".to_string()),
-            ..config::Config::default()
+            ..Config::default()
         });
         std::env::set_var(MEMORY_SIZE_VAR, "128");
+        std::env::set_var(RUNTIME_VAR, "AWS_Lambda_java8");
         let tags = Lambda::new_from_config(config, &metadata);
+        std::env::remove_var(MEMORY_SIZE_VAR);
+        std::env::remove_var(RUNTIME_VAR);
         assert_eq!(tags.tags_map.get(ENV_KEY).unwrap(), "test");
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");
@@ -227,5 +293,30 @@ mod tests {
             tags.tags_map.get(FUNCTION_ARN_KEY).unwrap(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function"
         );
+    }
+
+    #[test]
+    fn test_resolve_provided_al2() {
+        let path = "/tmp/test-os-release1";
+        let content = "NAME =\"Amazon Linux\"\nVERSION=\"2\nPRETTY_NAME=\"Amazon Linux 2\"";
+        let mut file = File::create(path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let runtime = resolve_provided_runtime(path);
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(runtime, "provided.al2");
+    }
+
+    #[test]
+    fn test_resolve_provided_al2023() {
+        let path = "/tmp/test-os-release2";
+        let content =
+            "NAME=\"Amazon Linux\"\nVERSION=\"2\nPRETTY_NAME=\"Amazon Linux 2023.4.20240429\"";
+        let mut file = File::create(path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let runtime = resolve_provided_runtime(path);
+        std::fs::remove_file(path).unwrap();
+        assert_eq!(runtime, "provided.al2023");
     }
 }

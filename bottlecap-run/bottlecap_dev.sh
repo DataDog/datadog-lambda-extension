@@ -101,7 +101,7 @@ all(){
 
 format () {
   cd ../bottlecap
-    cargo fmt --all -- --check
+    cargo fmt --all
     cargo clippy --workspace --all-features
     cargo clippy --fix
   cd -

@@ -212,20 +212,13 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
-    // Bridge any `log` logs into the tracing subsystem. Note this is a global
-    // registration.
-    tracing_log::LogTracer::builder()
-        .with_max_level(config.log_level.as_level_filter())
-        .init()
-        .expect("failed to set up log bridge");
-
+    let env_filter = format!(
+        "h2=off,hyper=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
+        config.log_level
+    );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_new(format!(
-                "{:?},hyper=warn,reqwest=warn,rustls=warn,datadog-trace-mini-agent=warn",
-                config.log_level
-            ))
-            .expect("could not parse log level in configuration"),
+            EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
         )
         .with_level(true)
         .with_thread_names(false)
@@ -238,7 +231,7 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    debug!("logging subsystem enabled");
+    debug!("Logging subsystem enabled");
 }
 
 async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
@@ -349,7 +342,7 @@ async fn extension_loop_active(
                 invoked_function_arn,
             }) => {
                 debug!(
-                    "[extension_next] Invoke event {}; deadline: {}, invoked_function_arn: {}",
+                    "Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();

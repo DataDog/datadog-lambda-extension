@@ -52,7 +52,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
     ) -> http::Result<Response<Body>> {
-        debug!("Recieved traces to process");
+        debug!("Received traces to process");
         let (parts, body) = req.into_parts();
 
         if let Some(response) = http_utils::verify_request_content_length(
