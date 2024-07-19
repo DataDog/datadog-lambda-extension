@@ -38,7 +38,7 @@ impl TelemetryApiClient {
             .send()
             .await;
 
-        debug!("subscribed to telemetry: {:?}", resp);
+        debug!("Subscribed to telemetry: {:?}", resp);
         Ok(resp?)
     }
 }

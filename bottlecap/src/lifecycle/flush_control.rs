@@ -37,7 +37,7 @@ impl FlushControl {
         let now = match time::SystemTime::now().duration_since(time::UNIX_EPOCH) {
             Ok(now) => now.as_secs(),
             Err(e) => {
-                debug!("failed to get current time: {:?}", e);
+                debug!("Failed to get current time: {:?}", e);
                 return false;
             }
         };

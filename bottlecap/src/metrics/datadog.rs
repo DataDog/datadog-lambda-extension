@@ -44,7 +44,7 @@ impl DdApi {
     /// Ship a serialized series to the API, blocking
     pub async fn ship_series(&self, series: &Series) {
         let body = serde_json::to_vec(&series).expect("failed to serialize series");
-        debug!("sending body: {:?}", &series);
+        debug!("Sending body: {:?}", &series);
 
         let url = format!("{}/api/v2/series", &self.fqdn_site);
         let resp = self
@@ -75,7 +75,7 @@ impl DdApi {
 
     pub async fn ship_distributions(&self, sketches: &SketchPayload) {
         let url = format!("{}/api/beta/sketches", &self.fqdn_site);
-        debug!("sending distributions: {:?}", &sketches);
+        debug!("Sending distributions: {:?}", &sketches);
         // TODO maybe go to coded output stream if we incrementally
         // add sketch payloads to the buffer
         // something like this, but fix the utf-8 encoding issue
