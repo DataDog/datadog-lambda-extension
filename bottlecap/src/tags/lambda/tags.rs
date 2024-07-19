@@ -47,7 +47,7 @@ const COMPUTE_STATS_VALUE: &str = "1";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-const EXTENSION_VERSION: &str = "v61-next";
+const EXTENSION_VERSION: &str = "61-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
