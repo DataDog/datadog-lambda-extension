@@ -429,6 +429,8 @@ mod tests {
     use std::collections::hash_map;
     use std::sync::Arc;
 
+    const SINGLE_METRIC_SIZE: usize = 205;
+
     fn create_tags_provider() -> Arc<provider::Provider> {
         let config = Arc::new(config::Config::default());
         Arc::new(provider::Provider::new(
@@ -604,8 +606,8 @@ mod tests {
 
     #[test]
     fn consume_distributions_batch_bytes() {
-        let single_proto_size = 121;
-        let max_bytes = 250;
+        let single_proto_size = 152;
+        let max_bytes = 310;
         let tot = 5;
         let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
@@ -634,7 +636,7 @@ mod tests {
 
     #[test]
     fn consume_distribution_one_element_bigger_than_max_size() {
-        let single_proto_size = 121;
+        let single_proto_size = 152;
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
@@ -722,9 +724,8 @@ mod tests {
 
     #[test]
     fn consume_metrics_batch_bytes() {
-        let single_metric_size = 174;
-        let two_metrics_size = 336;
-        let max_bytes = 350;
+        let two_metrics_size = 398;
+        let max_bytes = 413; //use a size that is not multiple or round, just in case
         let tot = 5;
         let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
@@ -750,13 +751,12 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_vec(batched.get(2).unwrap()).unwrap().len(),
-            single_metric_size
+            SINGLE_METRIC_SIZE
         );
     }
 
     #[test]
     fn consume_series_one_element_bigger_than_max_size() {
-        let single_metric_size = 174;
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
@@ -776,7 +776,7 @@ mod tests {
         for a_batch in batched {
             assert_eq!(
                 serde_json::to_vec(&a_batch).unwrap().len(),
-                single_metric_size
+                SINGLE_METRIC_SIZE
             );
         }
     }
