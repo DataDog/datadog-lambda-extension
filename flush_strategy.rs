@@ -36,15 +36,15 @@ impl<'de> Deserialize<'de> for FlushStrategy {
                                 interval: parsed_interval,
                             }));
                         }
-                        debug!("invalid flush interval: {}, using default", interval);
+                        debug!("Invalid flush interval: {}, using default", interval);
                         Ok(FlushStrategy::Default)
                     } else {
-                        debug!("invalid flush strategy: {}, using default", value);
+                        debug!("Invalid flush strategy: {}, using default", value);
                         Ok(FlushStrategy::Default)
                     }
                 }
                 _ => {
-                    debug!("invalid flush strategy: {}, using default", value);
+                    debug!("Invalid flush strategy: {}, using default", value);
                     Ok(FlushStrategy::Default)
                 }
             }
