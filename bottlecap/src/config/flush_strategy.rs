@@ -28,34 +28,24 @@ impl<'de> Deserialize<'de> for FlushStrategy {
             let mut split_value = value.as_str().split(',');
             // "periodically,60000"
             // "end,1000"
-            //
-            // "periodically|end"
             if let Some(strategy) = split_value.next() {
                 // "60000"
-                let mut interval = 0;
                 if let Some(v) = split_value.next() {
-                    if let Ok(parsed_interval) = v.parse() {
-                        interval = parsed_interval;
+                    if let Ok(interval) = v.parse() {
+                        return match strategy {
+                            "periodically" => {
+                                Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
+                            }
+                            "end" => Ok(FlushStrategy::EndPeriodically(PeriodicStrategy {
+                                interval,
+                            })),
+                            _ => {
+                                debug!("Invalid flush strategy: {}, using default", strategy);
+                                Ok(FlushStrategy::Default)
+                            }
+                        };
                     }
                 }
-
-                if interval == 0 {
-                    debug!("invalid flush interval: {}, using default", value);
-                    return Ok(FlushStrategy::Default);
-                }
-
-                return match strategy {
-                    "periodically" => {
-                        Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
-                    }
-                    "end" => Ok(FlushStrategy::EndPeriodically(PeriodicStrategy {
-                        interval,
-                    })),
-                    _ => {
-                        debug!("invalid flush strategy: {}, using default", value);
-                        Ok(FlushStrategy::Default)
-                    }
-                };
             }
 
             debug!("invalid flush strategy: {}, using default", value);
