@@ -1,12 +1,8 @@
 use crate::config;
 use std::collections::hash_map;
 use std::env::consts::ARCH;
-use std::fs::File;
-use std::io;
-use std::io::BufRead;
-use std::path::Path;
+use std::fs;
 use std::sync::Arc;
-use tracing::debug;
 
 // Environment variables for the Lambda execution environment info
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
@@ -118,16 +114,14 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
-    if let Ok(exec_runtime_env) = std::env::var(RUNTIME_VAR) {
-        // AWS_Lambda_java8
-        let runtime = exec_runtime_env.split('_').last().unwrap_or("unknown");
-        tags_map.insert(RUNTIME_KEY.to_string(), runtime.to_string());
-    } else {
-        tags_map.insert(
-            RUNTIME_KEY.to_string(),
-            resolve_provided_runtime("/etc/os-release"),
-        );
-    }
+
+    tags_map.insert(
+        RUNTIME_KEY.to_string(),
+        resolve_runtime(
+            format!("/proc/{}/environ", std::process::id()).as_str(),
+            "/etc/os-release",
+        ),
+    );
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
     tags_map.insert(
@@ -151,39 +145,41 @@ fn tags_from_env(
     tags_map
 }
 
-fn resolve_provided_runtime(path: &str) -> String {
-    let path = Path::new(path);
+fn resolve_runtime(process_environ: &str, fallback_provided_al_path: &str) -> String {
+    let search_environ_runtime =
+        fs::read_to_string(process_environ)
+            .ok()
+            .and_then(|environ_content| {
+                environ_content
+                    .lines()
+                    .find(|line| line.starts_with(RUNTIME_VAR))
+                    // AWS_EXECUTION_ENV=AWS_Lambda_java8
+                    .and_then(|runtime_var_line| {
+                        runtime_var_line.split('_').last().map(String::from)
+                    })
+            });
 
-    let file = match File::open(path) {
-        Err(why) => {
-            debug!(
-                "Couldn't read provided runtime. Cannot read: {}. Returning unknown",
-                why
-            );
-            return "unknown".to_string();
-        }
-        Ok(file) => file,
+    if let Some(runtime_from_environ) = search_environ_runtime {
+        return runtime_from_environ;
     };
-    let reader = io::BufReader::new(file);
-    for line in reader.lines().map_while(Result::ok) {
-        if line.starts_with("PRETTY_NAME=") {
-            let parts: Vec<&str> = line.split('=').collect();
-            if parts.len() > 1 {
-                match parts[1]
-                    .split(' ')
-                    .last()
-                    .unwrap_or("")
-                    .replace('\"', "")
-                    .as_str()
-                {
-                    "2" => return "provided.al2".to_string(),
-                    s if s.starts_with("2023") => return "provided.al2023".to_string(),
-                    _ => break,
-                }
-            }
-        }
-    }
-    "unknown".to_string()
+
+    fs::read_to_string(fallback_provided_al_path)
+        .ok()
+        .and_then(|fallback_provided_al_content| {
+            fallback_provided_al_content
+                .lines()
+                .find(|line| line.starts_with("PRETTY_NAME="))
+                .and_then(
+                    |pretty_name_line| match pretty_name_line.replace('\"', "").as_str() {
+                        "PRETTY_NAME=Amazon Linux 2" => Some("provided.al2".to_string()),
+                        s if s.starts_with("PRETTY_NAME=Amazon Linux 2023") => {
+                            Some("provided.al2023".to_string())
+                        }
+                        _ => None,
+                    },
+                )
+        })
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 impl Lambda {
@@ -222,6 +218,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use serial_test::serial;
+    use std::fs::File;
     use std::io::Write;
 
     #[test]
@@ -302,7 +299,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_provided_runtime(path);
+        let runtime = resolve_runtime(path, path);
         std::fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2");
     }
@@ -315,7 +312,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_provided_runtime(path);
+        let runtime = resolve_runtime(path, path);
         std::fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }
