@@ -22,7 +22,6 @@ async fn test_enhanced_metrics() {
     let regexp_compute_state = r#"_dd.compute_stats:1"#;
     let regexp_arch = r#"architecture:x86_64"#;
     let regexp_function_arn = r#"function_arn:test-arn"#;
-    let regexp_runtime = r#"runtime:unknown"#;
 
     let server = MockServer::start();
     let hello_mock = server.mock(|when, then| {
@@ -33,8 +32,7 @@ async fn test_enhanced_metrics() {
             .body_contains(regexp_metric_name)
             .body_contains(regexp_compute_state)
             .body_contains(regexp_arch)
-            .body_contains(regexp_function_arn)
-            .body_contains(regexp_runtime);
+            .body_contains(regexp_function_arn);
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });
 

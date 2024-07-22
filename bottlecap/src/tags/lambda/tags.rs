@@ -1,11 +1,9 @@
 use crate::config;
 use std::collections::hash_map;
 use std::env::consts::ARCH;
-use std::fs::File;
-use std::io;
-use std::io::BufRead;
-use std::path::Path;
+use std::fs;
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::debug;
 
 // Environment variables for the Lambda execution environment info
@@ -21,8 +19,8 @@ pub const FUNCTION_ARN_KEY: &str = "function_arn";
 const FUNCTION_NAME_KEY: &str = "functionname";
 // ExecutedVersionKey is the tag key for a function's executed version
 const EXECUTED_VERSION_KEY: &str = "executedversion";
-// RuntimeKey is the tag key for a function's runtime (e.g node, python)
-const RUNTIME_KEY: &str = "runtime";
+// RuntimeKey is the tag key for a function's runtime (e.g. node, python)
+// const RUNTIME_KEY: &str = "runtime";
 // MemorySizeKey is the tag key for a function's allocated memory size
 const MEMORY_SIZE_KEY: &str = "memorysize";
 // TODO(astuyve): fetch architecture from the runtime
@@ -118,16 +116,11 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
-    if let Ok(exec_runtime_env) = std::env::var(RUNTIME_VAR) {
-        // AWS_Lambda_java8
-        let runtime = exec_runtime_env.split('_').last().unwrap_or("unknown");
-        tags_map.insert(RUNTIME_KEY.to_string(), runtime.to_string());
-    } else {
-        tags_map.insert(
-            RUNTIME_KEY.to_string(),
-            resolve_provided_runtime("/etc/os-release"),
-        );
-    }
+
+    let runtime = resolve_runtime("/proc", "/etc/os-release");
+    // TODO runtime resolution is too fast, need to change approach. Resolving it anyway to get debug info and performance of resolution
+    debug!("Resolved runtime: {runtime}. Not adding to tags yet");
+    // tags_map.insert(RUNTIME_KEY.to_string(), runtime);
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
     tags_map.insert(
@@ -151,39 +144,76 @@ fn tags_from_env(
     tags_map
 }
 
-fn resolve_provided_runtime(path: &str) -> String {
-    let path = Path::new(path);
+fn resolve_runtime(proc_path: &str, fallback_provided_al_path: &str) -> String {
+    let start = Instant::now();
+    match fs::read_dir(proc_path) {
+        Ok(proc_dir) => {
+            let search_environ_runtime = proc_dir
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.path().is_dir()
+                        && entry
+                            .file_name()
+                            .into_string()
+                            .ok()
+                            .is_some_and(|pid_folder| pid_folder.chars().all(char::is_numeric))
+                })
+                .filter(|pid_folder| pid_folder.file_name().ne("1"))
+                .filter_map(|pid_folder| fs::read(pid_folder.path().join("environ")).ok())
+                .find(|environ_bytes| {
+                    String::from_utf8(environ_bytes.clone())
+                        .map(|s| s.contains(RUNTIME_VAR))
+                        .unwrap_or(false)
+                })
+                .and_then(|runtime_byte_strings| {
+                    runtime_byte_strings
+                        .split(|byte| *byte == b'\0')
+                        .filter_map(|s| String::from_utf8(s.to_vec()).ok())
+                        .find(|line| line.contains(RUNTIME_VAR))
+                        .and_then(|runtime_var_line| {
+                            // AWS_EXECUTION_ENV=AWS_Lambda_java8
+                            runtime_var_line.split('_').last().map(String::from)
+                        })
+                });
 
-    let file = match File::open(path) {
-        Err(why) => {
-            debug!(
-                "Couldn't read provided runtime. Cannot read: {}. Returning unknown",
-                why
-            );
-            return "unknown".to_string();
+            let search_time = start.elapsed().as_micros().to_string();
+            if let Some(runtime_from_environ) = search_environ_runtime {
+                debug!("Proc runtime search successful in {search_time}us: {runtime_from_environ}");
+                return runtime_from_environ.replace('\"', "");
+            };
+            debug!("Proc runtime search unsuccessful after {search_time}us");
         }
-        Ok(file) => file,
-    };
-    let reader = io::BufReader::new(file);
-    for line in reader.lines().map_while(Result::ok) {
-        if line.starts_with("PRETTY_NAME=") {
-            let parts: Vec<&str> = line.split('=').collect();
-            if parts.len() > 1 {
-                match parts[1]
-                    .split(' ')
-                    .last()
-                    .unwrap_or("")
-                    .replace('\"', "")
-                    .as_str()
-                {
-                    "2" => return "provided.al2".to_string(),
-                    s if s.starts_with("2023") => return "provided.al2023".to_string(),
-                    _ => break,
-                }
-            }
+        Err(e) => {
+            debug!("Could not resolve runtime {e}");
         }
     }
-    "unknown".to_string()
+
+    debug!("Checking '{fallback_provided_al_path}' for provided_al");
+    let start = Instant::now();
+
+    let provided_al = fs::read_to_string(fallback_provided_al_path)
+        .ok()
+        .and_then(|fallback_provided_al_content| {
+            fallback_provided_al_content
+                .lines()
+                .find(|line| line.starts_with("PRETTY_NAME="))
+                .and_then(
+                    |pretty_name_line| match pretty_name_line.replace('\"', "").as_str() {
+                        "PRETTY_NAME=Amazon Linux 2" => Some("provided.al2".to_string()),
+                        s if s.starts_with("PRETTY_NAME=Amazon Linux 2023") => {
+                            Some("provided.al2023".to_string())
+                        }
+                        _ => None,
+                    },
+                )
+        })
+        .unwrap_or_else(|| "unknown".to_string());
+
+    debug!(
+        "Provided runtime {provided_al}, it took: {:?}",
+        start.elapsed()
+    );
+    provided_al
 }
 
 impl Lambda {
@@ -222,13 +252,15 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use serial_test::serial;
+    use std::fs::File;
     use std::io::Write;
+    use std::path::Path;
 
     #[test]
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
-        let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 4);
+        let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
+        assert_eq!(tags.tags_map.len(), 3);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
             COMPUTE_STATS_VALUE
@@ -238,7 +270,6 @@ mod tests {
             tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),
             &arch.to_string()
         );
-        assert_eq!(tags.tags_map.get(RUNTIME_KEY).unwrap(), "unknown");
 
         assert_eq!(
             tags.tags_map.get(EXTENSION_VERSION_KEY).unwrap(),
@@ -253,7 +284,7 @@ mod tests {
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
         );
-        let tags = Lambda::new_from_config(Arc::new(config::Config::default()), &metadata);
+        let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
         assert_eq!(tags.tags_map.get(REGION_KEY).unwrap(), "us-west-2");
         assert_eq!(tags.tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
         assert_eq!(tags.tags_map.get(AWS_ACCOUNT_KEY).unwrap(), "123456789012");
@@ -296,14 +327,29 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_runtime() {
+        let proc_id_folder = Path::new("/tmp/test-bottlecap/proc_root/123");
+        fs::create_dir_all(proc_id_folder).unwrap();
+        let path = proc_id_folder.join("environ");
+        let content = "\0NAME =\"AmazonLinux\"\0V=\"2\0AWS_EXECUTION_ENV=\"AWS_Lambda_java123\"\0somethingelse=\"abd\0\"";
+
+        let mut file = File::create(&path).unwrap();
+        file.write_all(content.as_bytes()).unwrap();
+
+        let runtime = resolve_runtime(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
+        fs::remove_file(path).unwrap();
+        assert_eq!(runtime, "java123");
+    }
+
+    #[test]
     fn test_resolve_provided_al2() {
         let path = "/tmp/test-os-release1";
         let content = "NAME =\"Amazon Linux\"\nVERSION=\"2\nPRETTY_NAME=\"Amazon Linux 2\"";
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_provided_runtime(path);
-        std::fs::remove_file(path).unwrap();
+        let runtime = resolve_runtime("", path);
+        fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2");
     }
 
@@ -315,8 +361,8 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_provided_runtime(path);
-        std::fs::remove_file(path).unwrap();
+        let runtime = resolve_runtime("", path);
+        fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }
 }
