@@ -156,8 +156,7 @@ fn resolve_runtime(proc_path: &str, fallback_provided_al_path: &str) -> String {
                             .file_name()
                             .into_string()
                             .ok()
-                            .map(|pid_folder| pid_folder.chars().all(char::is_numeric))
-                            .unwrap_or(false)
+                            .is_some_and(|pid_folder| pid_folder.chars().all(char::is_numeric))
                 })
                 .filter(|pid_folder| pid_folder.file_name().ne("1"))
                 .filter_map(|pid_folder| fs::read(pid_folder.path().join("environ")).ok())
@@ -214,7 +213,7 @@ fn resolve_runtime(proc_path: &str, fallback_provided_al_path: &str) -> String {
         "Provided runtime {provided_al}, it took: {:?}",
         start.elapsed()
     );
-    return provided_al;
+    provided_al
 }
 
 impl Lambda {
