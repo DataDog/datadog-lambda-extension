@@ -429,8 +429,8 @@ mod tests {
     use std::collections::hash_map;
     use std::sync::Arc;
 
-    const SINGLE_METRIC_SIZE: usize = 205;
-    const SINGLE_DISTRIBUTION_SIZE: u64 = 152;
+    const SINGLE_METRIC_SIZE: usize = 187;
+    const SINGLE_DISTRIBUTION_SIZE: u64 = 135;
 
     fn create_tags_provider() -> Arc<provider::Provider> {
         let config = Arc::new(config::Config::default());
@@ -736,7 +736,7 @@ mod tests {
     fn consume_metrics_batch_bytes() {
         let expected_metrics_per_batch = 2;
         let total_number_of_metrics = 5;
-        let two_metrics_size = 398;
+        let two_metrics_size = 362;
         let max_bytes = SINGLE_METRIC_SIZE * expected_metrics_per_batch + 13;
         let mut aggregator = Aggregator {
             tags_provider: create_tags_provider(),
