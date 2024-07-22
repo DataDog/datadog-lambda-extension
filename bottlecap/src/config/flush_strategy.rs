@@ -10,11 +10,12 @@ pub struct PeriodicStrategy {
 pub enum FlushStrategy {
     Default,
     End,
+    EndPeriodically(PeriodicStrategy),
     Periodically(PeriodicStrategy),
 }
 
 // Deserialize for FlushStrategy
-// Flush Strategy can be either "end" or "periodically,<ms>"
+// Flush Strategy can be either "end", "end,<ms>", or "periodically,<ms>"
 impl<'de> Deserialize<'de> for FlushStrategy {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -26,22 +27,22 @@ impl<'de> Deserialize<'de> for FlushStrategy {
         } else {
             let mut split_value = value.as_str().split(',');
             // "periodically,60000"
-            match split_value.next() {
-                Some(first_value) if first_value.starts_with("periodically") => {
-                    let interval = split_value.next();
-                    // "60000"
-                    if let Some(interval) = interval {
-                        if let Ok(parsed_interval) = interval.parse() {
-                            return Ok(FlushStrategy::Periodically(PeriodicStrategy {
-                                interval: parsed_interval,
-                            }));
-                        }
-                        debug!("Invalid flush interval: {}, using default", interval);
-                        Ok(FlushStrategy::Default)
-                    } else {
-                        debug!("Invalid flush strategy: {}, using default", value);
-                        Ok(FlushStrategy::Default)
-                    }
+            // "end,1000"
+            let strategy = split_value.next();
+            let interval: Option<u64> = split_value.next().and_then(|v| v.parse().ok());
+
+            match (strategy, interval) {
+                (Some("periodically"), Some(interval)) => {
+                    Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
+                }
+                (Some("end"), Some(interval)) => {
+                    Ok(FlushStrategy::EndPeriodically(PeriodicStrategy {
+                        interval,
+                    }))
+                }
+                (Some(strategy), _) => {
+                    debug!("Invalid flush interval: {}, using default", strategy);
+                    Ok(FlushStrategy::Default)
                 }
                 _ => {
                     debug!("Invalid flush strategy: {}, using default", value);
@@ -49,5 +50,53 @@ impl<'de> Deserialize<'de> for FlushStrategy {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_end() {
+        let flush_strategy: FlushStrategy = serde_json::from_str("\"end\"").unwrap();
+        assert_eq!(flush_strategy, FlushStrategy::End);
+    }
+
+    #[test]
+    fn deserialize_periodically() {
+        let flush_strategy: FlushStrategy = serde_json::from_str("\"periodically,60000\"").unwrap();
+        assert_eq!(
+            flush_strategy,
+            FlushStrategy::Periodically(PeriodicStrategy { interval: 60000 })
+        );
+    }
+
+    #[test]
+    fn deserialize_end_periodically() {
+        let flush_strategy: FlushStrategy = serde_json::from_str("\"end,1000\"").unwrap();
+        assert_eq!(
+            flush_strategy,
+            FlushStrategy::EndPeriodically(PeriodicStrategy { interval: 1000 })
+        );
+    }
+
+    #[test]
+    fn deserialize_invalid() {
+        let flush_strategy: FlushStrategy = serde_json::from_str("\"invalid\"").unwrap();
+        assert_eq!(flush_strategy, FlushStrategy::Default);
+    }
+
+    #[test]
+    fn deserialize_invalid_interval() {
+        let flush_strategy: FlushStrategy =
+            serde_json::from_str("\"periodically,invalid\"").unwrap();
+        assert_eq!(flush_strategy, FlushStrategy::Default);
+    }
+
+    #[test]
+    fn deserialize_invalid_end_interval() {
+        let flush_strategy: FlushStrategy = serde_json::from_str("\"end,invalid\"").unwrap();
+        assert_eq!(flush_strategy, FlushStrategy::Default);
     }
 }

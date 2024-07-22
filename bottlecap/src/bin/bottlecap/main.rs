@@ -19,21 +19,23 @@ use bottlecap::{
         invocation_context::{InvocationContext, InvocationContextBuffer},
     },
     logger,
-    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
+    logs::{
+        agent::LogsAgent,
+        flusher::{build_fqdn_logs, Flusher as LogsFlusher},
+    },
     metrics::{
         aggregator::Aggregator as MetricsAggregator,
         constants::CONTEXTS,
         dogstatsd::{DogStatsD, DogStatsDConfig},
         enhanced::lambda::Lambda as enhanced_metrics,
-        flusher::Flusher as MetricsFlusher,
+        flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
     },
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
     telemetry::{
         self,
         client::TelemetryApiClient,
-        events::TelemetryEvent,
-        events::{Status, TelemetryRecord},
+        events::{Status, TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
     },
     traces::{
@@ -49,6 +51,8 @@ use bottlecap::{
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
+use reqwest::Client;
+use serde::Deserialize;
 use std::{
     collections::hash_map,
     collections::HashMap,
@@ -61,16 +65,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 use telemetry::listener::TelemetryListenerConfig;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
-
-use bottlecap::logs::flusher::build_fqdn_logs;
-use bottlecap::metrics::flusher::build_fqdn_metrics;
-use reqwest::Client;
-use serde::Deserialize;
-use tokio::sync::mpsc::Sender;
-use tokio_util::sync::CancellationToken;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -327,9 +326,12 @@ async fn extension_loop_active(
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
-    let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
+    let flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
+
+    let mut flush_interval = flush_control.get_flush_interval();
+    flush_interval.tick().await; // discard first tick, which is instantaneous
 
     loop {
         let evt = next_event(client, &r.extension_id).await;
@@ -360,10 +362,17 @@ async fn extension_loop_active(
         }
         // Block until we get something from the telemetry API
         // Check if flush logic says we should block and flush or not
-        if flush_control.should_flush() || shutdown {
-            loop {
-                let received = event_bus.rx.recv().await;
-                if let Some(event) = received {
+        loop {
+            tokio::select! {
+                _ = flush_interval.tick() => {
+                    tokio::join!(
+                        logs_flusher.flush(),
+                        metrics_flusher.flush(),
+                        trace_flusher.manual_flush(),
+                        stats_flusher.manual_flush()
+                    );
+                }
+                Some(event) = event_bus.rx.recv() => {
                     match event {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
@@ -411,12 +420,14 @@ async fn extension_loop_active(
                                 // pass the invocation deadline to
                                 // flush tasks here, so they can
                                 // retry if we have more time
-                                tokio::join!(
-                                    logs_flusher.flush(),
-                                    metrics_flusher.flush(),
-                                    trace_flusher.manual_flush(),
-                                    stats_flusher.manual_flush()
-                                );
+                                if flush_control.should_flush_end() {
+                                    tokio::join!(
+                                        logs_flusher.flush(),
+                                        metrics_flusher.flush(),
+                                        trace_flusher.manual_flush(),
+                                        stats_flusher.manual_flush()
+                                    );
+                                }
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -453,8 +464,6 @@ async fn extension_loop_active(
                             }
                         },
                     }
-                } else {
-                    error!("could not get the event");
                 }
             }
         }
