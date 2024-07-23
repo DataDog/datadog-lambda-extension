@@ -239,6 +239,8 @@ publish images:
     project: DataDog/public-images
     branch: main
     strategy: depend
+    forward:
+      yaml_variables: false
   variables:
     IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
     IMG_DESTINATIONS: datadog/lambda-extension:${VERSION},datadog/lambda-extension:latest
@@ -255,6 +257,8 @@ publish images (alpine):
     project: DataDog/public-images
     branch: main
     strategy: depend
+    forward:
+      yaml_variables: false
   variables:
     IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
     IMG_DESTINATIONS: datadog/lambda-extension:${VERSION}-alpine,datadog/lambda-extension:latest-alpine
