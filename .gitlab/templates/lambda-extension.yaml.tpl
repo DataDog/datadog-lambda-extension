@@ -11,8 +11,8 @@ default:
       - runner_system_failure
 
 variables:
-  DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
-  DOCKER_TARGET_VERSION: latest
+  CI_DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
+  CI_DOCKER_TARGET_VERSION: latest
 
 {{ range $architecture := (ds "architectures").architectures }}
 
@@ -102,7 +102,7 @@ check layer size ({{ $architecture.name }}):
 fmt ({{ $architecture.name }}):
   stage: test
   tags: ["arch:{{ $architecture.name }}"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo fmt
@@ -110,7 +110,7 @@ fmt ({{ $architecture.name }}):
 check ({{ $architecture.name }}):
   stage: test
   tags: ["arch:{{ $architecture.name }}"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo check
@@ -118,7 +118,7 @@ check ({{ $architecture.name }}):
 clippy ({{ $architecture.name }}):
   stage: test
   tags: ["arch:{{ $architecture.name }}"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo clippy --all-features
@@ -129,7 +129,7 @@ clippy ({{ $architecture.name }}):
 sign layer ({{ $architecture.name }}):
   stage: sign
   tags: ["arch:amd64"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: manual
@@ -156,7 +156,7 @@ sign layer ({{ $architecture.name }}):
 publish layer {{ $environment.name }} ({{ $architecture.name }}):
   stage: publish
   tags: ["arch:amd64"]
-  image: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
     - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
       when: manual
@@ -240,9 +240,10 @@ publish images:
     branch: main
     strategy: depend
   variables:
-    IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
-    IMG_DESTINATIONS: datadog/lambda-extension:${VERSION},datadog/lambda-extension:latest
+    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
+    IMG_DESTINATIONS: lambda-extension:${VERSION},lambda-extension:latest
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+    IMG_SIGNING: false
 
 publish images (alpine):
   stage: publish
@@ -256,6 +257,7 @@ publish images (alpine):
     branch: main
     strategy: depend
   variables:
-    IMG_SOURCES: ${DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
-    IMG_DESTINATIONS: datadog/lambda-extension:${VERSION}-alpine,datadog/lambda-extension:latest-alpine
+    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
+    IMG_DESTINATIONS: lambda-extension:${VERSION}-alpine,lambda-extension:latest-alpine
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+    IMG_SIGNING: false

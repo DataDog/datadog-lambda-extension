@@ -26,6 +26,7 @@ else
     printf "Version: ${VERSION}\n"
 fi
 
+
 if [ -z "$SERVERLESS_INIT" ]; then
     printf "Building Datadog Lambda Extension\n"
     CMD_PATH="cmd/serverless"
