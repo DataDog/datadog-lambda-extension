@@ -201,9 +201,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
-        Err(e) => {
-            // NOTE we must print here as the logging subsystem is not enabled yet.
-            println!("Error loading configuration: {e:?}");
+        Err(_e) => {
             let err = Command::new("/opt/datadog-agent-go").exec();
             panic!("Error starting the extension: {err:?}");
         }
