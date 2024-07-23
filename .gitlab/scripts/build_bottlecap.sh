@@ -14,8 +14,10 @@ fi
 
 if [ -z "$ALPINE" ]; then
     printf "Building bottlecap"
+    BUILD_FILE=Dockerfile.bottlecap.build
 else
     echo "Building bottlecap for alpine"
+    BUILD_FILE=Dockerfile.bottlecap.alpine.build
     BUILD_SUFFIX="-alpine"
 fi
 
@@ -39,6 +41,7 @@ prepare_folders() {
 
 docker_build() {
     local arch=$1
+    local file=$2
     if [ "$arch" == "amd64" ]; then
         PLATFORM="x86_64"
     else
@@ -47,7 +50,7 @@ docker_build() {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/build-bottlecap-${arch} \
-        -f ./scripts/Dockerfile.bottlecap.build \
+        -f ./scripts/${file} \
         --build-arg PLATFORM=$PLATFORM \
         --build-arg GO_AGENT_PATH="datadog_extension-${arch}${BUILD_SUFFIX}" \
         . -o $TARGET_DIR/datadog_bottlecap-${arch}${BUILD_SUFFIX}
@@ -61,4 +64,4 @@ docker_build() {
 }
 
 prepare_folders
-docker_build $ARCHITECTURE
+docker_build $ARCHITECTURE $BUILD_FILE
