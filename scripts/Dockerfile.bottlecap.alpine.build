@@ -1,0 +1,52 @@
+# syntax = docker/dockerfile:experimental
+
+FROM alpine:3.16 as bottlecap-builder
+ARG PLATFORM 
+RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++
+
+SHELL ["/bin/bash", "-c"]
+
+# Install Protocol Buffers, from package instead of manually
+RUN apk add --no-cache protoc
+
+# Install Rust Toolchain
+RUN curl https://sh.rustup.rs -sSf | \
+    sh -s -- --profile minimal --default-toolchain nightly-$PLATFORM-unknown-linux-musl -y
+ENV PATH=/root/.cargo/bin:$PATH
+RUN rustup component add rust-src --toolchain nightly-$PLATFORM-unknown-linux-musl
+
+# Build Bottlecap
+RUN mkdir -p /tmp/dd
+COPY ./bottlecap/src /tmp/dd/bottlecap/src
+COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
+COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
+# Added `-C link-arg=-lgcc` for alpine.
+ENV RUSTFLAGS="-C panic=abort -C link-arg=-lgcc -Zlocation-detail=none"
+WORKDIR /tmp/dd/bottlecap
+RUN --mount=type=cache,target=/root/.cargo/registry cargo +nightly build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --release --target $PLATFORM-unknown-linux-musl
+RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-musl/release/bottlecap /tmp/dd/bottlecap/bottlecap
+
+# Zip Extension
+FROM ubuntu:latest as compresser
+ARG DATADOG_WRAPPER=datadog_wrapper
+ARG GO_AGENT_PATH
+
+RUN apt-get update
+RUN apt-get install -y zip binutils
+
+COPY .layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
+RUN strip /datadog-agent-go # just in case
+
+RUN mkdir /extensions
+WORKDIR /extensions
+
+COPY --from=bottlecap-builder /tmp/dd/bottlecap/bottlecap /extensions/datadog-agent
+
+COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
+RUN chmod +x /$DATADOG_WRAPPER
+RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent-go
+
+# keep the smallest possible docker image
+FROM scratch
+COPY --from=compresser /extensions/datadog_extension.zip /
+ENTRYPOINT ["/datadog_extension.zip"]
