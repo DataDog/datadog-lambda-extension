@@ -12,15 +12,18 @@ set -e
 DOCKER_TARGET_IMAGE="registry.ddbuild.io/ci/datadog-lambda-extension"
 EXTENSION_DIR=".layers"
 
-if [ -z "$CI_COMMIT_TAG" ]; then
-    # Running on dev
-    printf "Running on dev environment\n"
-    VERSION="dev"
-else
-    printf "Found version tag in environment\n"
-    VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)
-    echo "Version: $VERSION"
-fi
+# if [ -z "$CI_COMMIT_TAG" ]; then
+#     # Running on dev
+#     printf "Running on dev environment\n"
+#     VERSION="dev"
+# else
+#     printf "Found version tag in environment\n"
+#     VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)
+#     echo "Version: $VERSION"
+# fi
+
+printf "Version: $VERSION\n"
+
 
 if [ -z "$ALPINE" ]; then
     printf "Building image\n"

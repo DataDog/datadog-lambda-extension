@@ -16,15 +16,17 @@ if [ -z "$ARCHITECTURE" ]; then
 fi
 
 
-if [ -z "$CI_COMMIT_TAG" ]; then
-    # Running on dev
-    printf "Running on dev environment\n"
-    VERSION="dev"
-else
-    printf "Found version tag in environment\n"
-    VERSION="${CI_COMMIT_TAG//[!0-9]/}"
-    printf "Version: ${VERSION}\n"
-fi
+# if [ -z "$CI_COMMIT_TAG" ]; then
+#     # Running on dev
+#     printf "Running on dev environment\n"
+#     VERSION="dev"
+# else
+#     printf "Found version tag in environment\n"
+#     VERSION="${CI_COMMIT_TAG//[!0-9]/}"
+#     printf "Version: ${VERSION}\n"
+# fi
+
+printf "Version: ${VERSION}\n"
 
 if [ -z "$SERVERLESS_INIT" ]; then
     printf "Building Datadog Lambda Extension\n"
