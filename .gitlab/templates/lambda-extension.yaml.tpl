@@ -242,7 +242,7 @@ publish images:
     strategy: depend
   variables:
     IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
-    IMG_DESTINATIONS: datadog/lambda-extension:${VERSION},datadog/lambda-extension:latest
+    IMG_DESTINATIONS: lambda-extension:${VERSION},lambda-extension:latest
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
 
 publish images (alpine):
@@ -258,5 +258,5 @@ publish images (alpine):
     strategy: depend
   variables:
     IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
-    IMG_DESTINATIONS: datadog/lambda-extension:${VERSION}-alpine,datadog/lambda-extension:latest-alpine
+    IMG_DESTINATIONS: lambda-extension:${VERSION}-alpine,lambda-extension:latest-alpine
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
