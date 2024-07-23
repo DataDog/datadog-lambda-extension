@@ -13,7 +13,6 @@ default:
 variables:
   CI_DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   CI_DOCKER_TARGET_VERSION: latest
-  VERSION: 61
 
 {{ range $architecture := (ds "architectures").architectures }}
 
@@ -201,8 +200,8 @@ build images:
   stage: build
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build bottlecap (arm64)
     - build bottlecap (amd64)
@@ -216,8 +215,8 @@ build images (alpine):
   stage: build
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build bottlecap (arm64, alpine)
     - build bottlecap (amd64, alpine)
@@ -231,8 +230,8 @@ build images (alpine):
 
 publish images:
   stage: publish
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build images
   when: manual
@@ -244,11 +243,12 @@ publish images:
     IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
     IMG_DESTINATIONS: lambda-extension:${VERSION},lambda-extension:latest
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+    IMG_SIGNING: false
 
 publish images (alpine):
   stage: publish
-  # rules:
-  #   - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build images (alpine)
   when: manual
@@ -260,3 +260,4 @@ publish images (alpine):
     IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
     IMG_DESTINATIONS: lambda-extension:${VERSION}-alpine,lambda-extension:latest-alpine
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+    IMG_SIGNING: false
