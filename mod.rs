@@ -6,7 +6,6 @@ use std::path::Path;
 
 use figment::{providers::Env, Figment};
 use serde::Deserialize;
-use tracing::debug;
 
 use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::LogLevel;
@@ -109,7 +108,6 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     // TODO(duncanista): revert to using datadog.yaml when we have a proper serializer
     if path.exists() {
         log_failover_reason("datadog_yaml");
-        debug!("datadog.yaml is not supported, use environment variables instead");
         return Err(ConfigError::UnsupportedField("datadog_yaml".to_string()));
     }
 
