@@ -77,6 +77,7 @@ go-agent-only:
   variables:
     AGENT_BRANCH: $AGENT_BRANCH
     LAYER_SUFFIX: $LAYER_SUFFIX
+    AGENT_VERSION: $AGENT_VERSION
 
 lambda-extension:
   stage: build
