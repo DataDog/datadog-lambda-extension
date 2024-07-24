@@ -8,6 +8,9 @@ variables:
   AGENT_BRANCH:
     description: "Branch of the datadog-agent repository to use."
     value: main
+  AGENT_VERSION:
+    description: "Latest release version of the datadog-agent to tag the build with."
+    value: "7.55.1"
   LAYER_SUFFIX:
     description: "Suffix to be appended to the layer name (default empty)."
     value: ""
@@ -91,3 +94,4 @@ lambda-extension:
     VERSION: $VERSION
     AGENT_BRANCH: $AGENT_BRANCH
     LAYER_SUFFIX: $LAYER_SUFFIX
+    AGENT_VERSION: $AGENT_VERSION
