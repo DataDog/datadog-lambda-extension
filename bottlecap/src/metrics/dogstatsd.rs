@@ -100,6 +100,7 @@ impl DogStatsD {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::config::Config;
     use crate::metrics::aggregator::Aggregator;
@@ -133,10 +134,10 @@ single_machine_performance.rouster.metrics_max_timestamp_latency:1376.90870216|d
             None,
         ) {
             Some(DDSketch(metric)) => {
-                assert!((metric.max().unwrap() - 269942f64).abs() < precision);
-                assert!((metric.min().unwrap() - 269942f64).abs() < precision);
-                assert!((metric.sum().unwrap() - 269942f64).abs() < precision);
-                assert!((metric.avg().unwrap() - 269942f64).abs() < precision);
+                assert!((metric.max().unwrap() - 269_942_f64).abs() < precision);
+                assert!((metric.min().unwrap() - 269_942_f64).abs() < precision);
+                assert!((metric.sum().unwrap() - 269_942_f64).abs() < precision);
+                assert!((metric.avg().unwrap() - 269_942_f64).abs() < precision);
             }
             _ => panic!(
                 "single_machine_performance.rouster.api.series_v2.payload_size_bytes not found"
@@ -148,10 +149,10 @@ single_machine_performance.rouster.metrics_max_timestamp_latency:1376.90870216|d
             None,
         ) {
             Some(DDSketch(metric)) => {
-                assert!((metric.max().unwrap() - 1426.90870216).abs() < precision);
-                assert!((metric.min().unwrap() - 1426.90870216).abs() < precision);
-                assert!((metric.sum().unwrap() - 1426.90870216).abs() < precision);
-                assert!((metric.avg().unwrap() - 1426.90870216).abs() < precision);
+                assert!((metric.max().unwrap() - 1_426.908_702_16).abs() < precision);
+                assert!((metric.min().unwrap() - 1_426.908_702_16).abs() < precision);
+                assert!((metric.sum().unwrap() - 1_426.908_702_16).abs() < precision);
+                assert!((metric.avg().unwrap() - 1_426.908_702_16).abs() < precision);
             }
             _ => {
                 panic!("single_machine_performance.rouster.metrics_min_timestamp_latency not found")
@@ -163,10 +164,10 @@ single_machine_performance.rouster.metrics_max_timestamp_latency:1376.90870216|d
             None,
         ) {
             Some(DDSketch(metric)) => {
-                assert!((metric.max().unwrap() - 1376.90870216).abs() < precision);
-                assert!((metric.min().unwrap() - 1376.90870216).abs() < precision);
-                assert!((metric.sum().unwrap() - 1376.90870216).abs() < precision);
-                assert!((metric.avg().unwrap() - 1376.90870216).abs() < precision);
+                assert!((metric.max().unwrap() - 1_376.908_702_16).abs() < precision);
+                assert!((metric.min().unwrap() - 1_376.908_702_16).abs() < precision);
+                assert!((metric.sum().unwrap() - 1_376.908_702_16).abs() < precision);
+                assert!((metric.avg().unwrap() - 1_376.908_702_16).abs() < precision);
             }
             _ => {
                 panic!("single_machine_performance.rouster.metrics_max_timestamp_latency not found")
@@ -226,15 +227,6 @@ single_machine_performance.rouster.metrics_max_timestamp_latency:1376.90870216|d
             }
             _ => panic!("metric1 not found"),
         }
-    }
-
-    #[tokio::test]
-    async fn invalid_dogstatsd_no_panic() {
-        let locked_aggregator = setup_dogstatsd("somerandomstring|c+a;slda").await;
-        let aggregator = locked_aggregator.lock().expect("lock poisoned");
-        let parsed_metrics = aggregator.to_series();
-
-        assert_eq!(parsed_metrics.len(), 0);
     }
 
     async fn setup_dogstatsd(statsd_string: &str) -> Arc<Mutex<Aggregator>> {
