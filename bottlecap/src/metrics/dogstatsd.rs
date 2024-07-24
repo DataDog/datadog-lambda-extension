@@ -82,7 +82,9 @@ impl DogStatsD {
 
     fn insert_metrics(&self, msg: Split<char>) {
         let all_valid_metrics: Vec<Metric> = msg
-            .filter_map(|m| match Metric::parse(m) {
+            .filter(|m| !m.is_empty())
+            .map(|m| m.replace('\n', ""))
+            .filter_map(|m| match Metric::parse(m.as_str()) {
                 Ok(metric) => Some(metric),
                 Err(e) => {
                     error!("Failed to parse metric {}: {}", m, e);
