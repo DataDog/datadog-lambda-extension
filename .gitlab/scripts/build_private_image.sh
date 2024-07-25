@@ -11,15 +11,10 @@ DOCKER_TARGET_IMAGE="425362996713.dkr.ecr.us-east-1.amazonaws.com/self-monitorin
 EXTENSION_DIR=".layers"
 IMAGE_TAG="latest"
 
-if [ -z "$CI_COMMIT_TAG" ]; then
-    # Running on dev
-    printf "Running on dev environment\n"
-    VERSION="dev"
-else
-    printf "Found version tag in environment\n"
-    VERSION=$(echo "${CI_COMMIT_TAG##*v}" | cut -d. -f2)
-    printf "Version: $VERSION\n"
-fi
+# Increment latest version
+latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
+VERSION=$(($latest_version + 1))
+printf "Will publish container image with version: $VERSION\n"
 
 printf "Authenticating Docker to ECR...\n"
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 425362996713.dkr.ecr.us-east-1.amazonaws.com
@@ -37,6 +32,7 @@ docker buildx build \
     --platform linux/amd64,linux/arm64 \
     -f ./scripts/${TARGET_IMAGE} \
     --tag "$DOCKER_TARGET_IMAGE:${IMAGE_TAG}${BUILD_SUFFIX}" \
+    --tag "$DOCKER_TARGET_IMAGE:${VERSION}${BUILD_SUFFIX}" \
     --push .
 
 printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${BUILD_SUFFIX} for arm64 and amd64\n"
