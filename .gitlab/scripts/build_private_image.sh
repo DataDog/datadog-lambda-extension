@@ -7,12 +7,12 @@
 
 set -e
 
-DOCKER_TARGET_IMAGE="425362996713.dkr.ecr.$REGION.amazonaws.com/self-monitoring-lambda-extension"
+DOCKER_TARGET_IMAGE="425362996713.dkr.ecr.us-east-1.amazonaws.com/self-monitoring-lambda-extension"
 EXTENSION_DIR=".layers"
 IMAGE_TAG="latest"
 
 printf "Authenticating Docker to ECR...\n"
-aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin 425362996713.dkr.ecr.$REGION.amazonaws.com
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 425362996713.dkr.ecr.us-east-1.amazonaws.com
 
 if [ -z "$ALPINE" ]; then
     printf "Building image\n"
@@ -32,7 +32,7 @@ else
 fi
 
 # Increment last version
-latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
+latest_version=$(aws lambda list-layer-versions --region us-east-1 --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
 VERSION=$(($latest_version + 1))
 printf "Tagging container image with version: $VERSION and latest\n"
 

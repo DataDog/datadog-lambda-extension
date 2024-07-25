@@ -204,11 +204,6 @@ publish private images:
   dependencies:
     - build bottlecap (arm64)
     - build bottlecap (amd64)
-  parallel:
-    matrix:
-      - REGION: {{ range (ds "regions").img_regions }}
-          - {{ .code }}
-        {{- end}}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
@@ -225,11 +220,6 @@ publish private images (alpine):
   dependencies:
     - build bottlecap (arm64, alpine)
     - build bottlecap (amd64, alpine)
-  parallel:
-    matrix:
-      - REGION: {{ range (ds "regions").img_regions }}
-          - {{ .code }}
-        {{- end}}
   variables:
     ALPINE: 1
   before_script:
