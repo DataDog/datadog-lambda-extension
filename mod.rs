@@ -41,6 +41,9 @@ pub struct Config {
     pub serverless_appsec_enabled: bool,
     pub extension_version: Option<String>,
     pub enhanced_metrics: bool,
+    pub cold_start_tracing: bool,
+    pub min_cold_start_duration: String,
+    pub cold_start_trace_skip_lib: String,
 }
 
 impl Default for Config {
@@ -67,11 +70,16 @@ impl Default for Config {
             lambda_handler: String::default(),
             serverless_trace_enabled: true,
             trace_enabled: true,
+            // Ignored by the extension for now
             capture_lambda_payload: false,
             flush_to_log: false,
             logs_injection: false,
             merge_xray_traces: false,
             serverless_appsec_enabled: false,
+            cold_start_tracing: true,
+            min_cold_start_duration: String::default(),
+            cold_start_trace_skip_lib: String::default(),
+            // Failover
             extension_version: None,
             enhanced_metrics: true,
         }
