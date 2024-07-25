@@ -82,7 +82,9 @@ impl DogStatsD {
 
     fn insert_metrics(&self, msg: Split<char>) {
         let all_valid_metrics: Vec<Metric> = msg
-            .filter_map(|m| match Metric::parse(m) {
+            .filter(|m| !m.is_empty())
+            .map(|m| m.replace('\n', ""))
+            .filter_map(|m| match Metric::parse(m.as_str()) {
                 Ok(metric) => Some(metric),
                 Err(e) => {
                     error!("Failed to parse metric {}: {}", m, e);
@@ -100,16 +102,80 @@ impl DogStatsD {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::config::Config;
     use crate::metrics::aggregator::Aggregator;
-    use crate::metrics::aggregator::ValueVariant::Value;
+    use crate::metrics::aggregator::ValueVariant::{DDSketch, Value};
     use crate::metrics::dogstatsd::{BufferReader, DogStatsD};
     use crate::tags::provider::Provider;
     use crate::LAMBDA_RUNTIME_SLUG;
     use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn test_dogstatsd_multi_distribution() {
+        let precision = 0.000_000_01;
+        let locked_aggregator = setup_dogstatsd(
+            "single_machine_performance.rouster.api.series_v2.payload_size_bytes:269942|d
+single_machine_performance.rouster.metrics_min_timestamp_latency:1426.90870216|d
+single_machine_performance.rouster.metrics_max_timestamp_latency:1376.90870216|d
+",
+        )
+        .await;
+        let mut aggregator = locked_aggregator.lock().expect("lock poisoned");
+
+        let parsed_metrics = aggregator.distributions_to_protobuf();
+
+        assert_eq!(parsed_metrics.sketches.len(), 3);
+        assert_eq!(aggregator.to_series().len(), 0);
+
+        match aggregator.get_value_by_id(
+            "single_machine_performance.rouster.api.series_v2.payload_size_bytes".into(),
+            None,
+        ) {
+            Some(DDSketch(metric)) => {
+                assert!((metric.max().unwrap() - 269_942_f64).abs() < precision);
+                assert!((metric.min().unwrap() - 269_942_f64).abs() < precision);
+                assert!((metric.sum().unwrap() - 269_942_f64).abs() < precision);
+                assert!((metric.avg().unwrap() - 269_942_f64).abs() < precision);
+            }
+            _ => panic!(
+                "single_machine_performance.rouster.api.series_v2.payload_size_bytes not found"
+            ),
+        }
+
+        match aggregator.get_value_by_id(
+            "single_machine_performance.rouster.metrics_min_timestamp_latency".into(),
+            None,
+        ) {
+            Some(DDSketch(metric)) => {
+                assert!((metric.max().unwrap() - 1_426.908_702_16).abs() < precision);
+                assert!((metric.min().unwrap() - 1_426.908_702_16).abs() < precision);
+                assert!((metric.sum().unwrap() - 1_426.908_702_16).abs() < precision);
+                assert!((metric.avg().unwrap() - 1_426.908_702_16).abs() < precision);
+            }
+            _ => {
+                panic!("single_machine_performance.rouster.metrics_min_timestamp_latency not found")
+            }
+        }
+
+        match aggregator.get_value_by_id(
+            "single_machine_performance.rouster.metrics_max_timestamp_latency".into(),
+            None,
+        ) {
+            Some(DDSketch(metric)) => {
+                assert!((metric.max().unwrap() - 1_376.908_702_16).abs() < precision);
+                assert!((metric.min().unwrap() - 1_376.908_702_16).abs() < precision);
+                assert!((metric.sum().unwrap() - 1_376.908_702_16).abs() < precision);
+                assert!((metric.avg().unwrap() - 1_376.908_702_16).abs() < precision);
+            }
+            _ => {
+                panic!("single_machine_performance.rouster.metrics_max_timestamp_latency not found")
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_dogstatsd_multi_metric() {

@@ -381,4 +381,9 @@ mod tests {
         // 30
         assert!(Metric::parse("foo:1|g|#a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3,a:1,b:2,c:3").is_ok());
     }
+
+    #[test]
+    fn invalid_dogstatsd_no_panic() {
+        assert!(Metric::parse("somerandomstring|c+a;slda").is_err());
+    }
 }

@@ -74,7 +74,7 @@ mod tests {
         let flush_control = FlushControl::new(FlushStrategy::Default);
         assert_eq!(
             flush_control.get_flush_interval().period().as_millis(),
-            DEFAULT_FLUSH_INTERVAL as u128
+            u128::from(DEFAULT_FLUSH_INTERVAL)
         );
 
         let flush_control = FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
