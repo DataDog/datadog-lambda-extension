@@ -15,6 +15,13 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
+if [ -z "$AGENT_VERSION" ]; then
+    printf "[ERROR]: AGENT_VERSION not specified\n"
+    exit 1
+else
+    printf "Building agent with version: ${AGENT_VERSION}\n"
+
+fi
 
 if [ -z "$CI_COMMIT_TAG" ]; then
     # Running on dev
