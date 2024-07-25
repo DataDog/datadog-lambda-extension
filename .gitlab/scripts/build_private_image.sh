@@ -20,6 +20,8 @@ else
     printf "Version: $VERSION\n"
 fi
 
+print "Authenticating Docker to ECR...\n"
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 425362996713.dkr.ecr.us-east-1.amazonaws.com
 
 if [ -z "$ALPINE" ]; then
     printf "Building image\n"
