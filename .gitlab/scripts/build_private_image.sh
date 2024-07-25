@@ -11,11 +11,6 @@ DOCKER_TARGET_IMAGE="425362996713.dkr.ecr.$REGION.amazonaws.com/self-monitoring-
 EXTENSION_DIR=".layers"
 IMAGE_TAG="latest"
 
-# Increment latest version
-latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
-VERSION=$(($latest_version + 1))
-printf "Will publish container image with version: $VERSION\n"
-
 printf "Authenticating Docker to ECR...\n"
 aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin 425362996713.dkr.ecr.$REGION.amazonaws.com
 
@@ -27,6 +22,11 @@ else
     TARGET_IMAGE="Dockerfile.alpine"
     BUILD_SUFFIX="-alpine"
 fi
+
+# Increment last version
+latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name Datadog-Extension$BUILD_SUFFIX --query 'LayerVersions[0].Version || `0`')
+VERSION=$(($latest_version + 1))
+printf "Tagging container image with version: $VERSION and latest\n"
 
 docker buildx build \
     --platform linux/amd64,linux/arm64 \
