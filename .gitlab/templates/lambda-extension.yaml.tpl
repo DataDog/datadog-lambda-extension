@@ -196,7 +196,7 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
 publish private images:
   stage: publish
   tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs:
     - build bottlecap (arm64)
     - build bottlecap (amd64)
@@ -212,7 +212,7 @@ publish private images:
 publish private images (alpine):
   stage: publish
   tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs:
     - build bottlecap (arm64, alpine)
     - build bottlecap (amd64, alpine)
