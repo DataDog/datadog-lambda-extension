@@ -86,7 +86,7 @@ lambda-extension:
     - job: generator
       artifacts: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "web" || $CI_PIPELINE_SOURCE == "push"
   variables:
     VERSION: $VERSION
     AGENT_BRANCH: $AGENT_BRANCH
