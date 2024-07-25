@@ -9,6 +9,7 @@ set -e
 
 DOCKER_TARGET_IMAGE="425362996713.dkr.ecr.us-east-1.amazonaws.com/self-monitoring-lambda-extension"
 EXTENSION_DIR=".layers"
+IMAGE_TAG="latest"
 
 if [ -z "$CI_COMMIT_TAG" ]; then
     # Running on dev
@@ -35,7 +36,7 @@ fi
 docker buildx build \
     --platform linux/amd64,linux/arm64 \
     -f ./scripts/${TARGET_IMAGE} \
-    --tag "$DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${BUILD_SUFFIX}" \
+    --tag "$DOCKER_TARGET_IMAGE:${IMAGE_TAG}${BUILD_SUFFIX}" \
     --push .
 
-printf "Image built and pushed to $DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${BUILD_SUFFIX} for arm64 and amd64\n"
+printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${BUILD_SUFFIX} for arm64 and amd64\n"
