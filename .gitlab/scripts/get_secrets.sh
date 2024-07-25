@@ -23,7 +23,7 @@ printf "Getting AWS External ID...\n"
 
 EXTERNAL_ID=$(aws ssm get-parameter \
     --region us-east-1 \
-    --name "dylandog.ext.id" \
+    --name "ci.datadog-lambda-extension.$EXTERNAL_ID_NAME" \
     --with-decryption \
     --query "Parameter.Value" \
     --out text)
@@ -32,7 +32,7 @@ printf "Getting DD API KEY...\n"
 
 export DD_API_KEY=$(aws ssm get-parameter \
     --region us-east-1 \
-    --name dylandog.api.key \
+    --name ci.datadog-lambda-extension.dd-api-key \
     --with-decryption \
     --query "Parameter.Value" \
     --out text)
