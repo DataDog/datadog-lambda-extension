@@ -197,8 +197,6 @@ build private images:
   stage: build
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     - build bottlecap (arm64)
     - build bottlecap (amd64)
