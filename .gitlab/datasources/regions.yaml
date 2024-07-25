@@ -28,3 +28,8 @@ regions:
   - code: "me-south-1"
   - code: "me-central-1"
   - code: "sa-east-1"
+
+img_regions:
+  - code: "us-east-1"
+  - code: "sa-east-1"
+  - code: "eu-west-1"
