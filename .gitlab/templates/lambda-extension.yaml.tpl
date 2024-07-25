@@ -193,16 +193,35 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
     - .gitlab/scripts/publish_layers.sh
 
 {{ if or (eq $environment.name "sandbox") }}
-build private images:
-  stage: build
+publish private images:
+  stage: publish
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
   needs:
     - build bottlecap (arm64)
     - build bottlecap (amd64)
+  when: manual
   dependencies:
     - build bottlecap (arm64)
     - build bottlecap (amd64)
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/build_private_image.sh  
+
+publish private images (alpine):
+  stage: publish
+  tags: ["arch:amd64"]
+  image: registry.ddbuild.io/images/docker:20.10
+  needs:
+    - build bottlecap (arm64, alpine)
+    - build bottlecap (amd64, alpine)
+  when: manual
+  dependencies:
+    - build bottlecap (arm64, alpine)
+    - build bottlecap (amd64, alpine)
+  variables:
+    ALPINE: 1
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
