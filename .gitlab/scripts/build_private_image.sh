@@ -23,8 +23,16 @@ else
     BUILD_SUFFIX="-alpine"
 fi
 
+LAYER_NAME="Datadog-Extension$BUILD_SUFFIX"
+if [ -z "$LAYER_SUFFIX" ]; then
+    printf "Building container images tagged without suffix\n"
+else
+    printf "Building container images tagged with suffix: ${LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}${BUILD_SUFFIX}"
+fi
+
 # Increment last version
-latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name Datadog-Extension$BUILD_SUFFIX --query 'LayerVersions[0].Version || `0`')
+latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
 VERSION=$(($latest_version + 1))
 printf "Tagging container image with version: $VERSION and latest\n"
 
