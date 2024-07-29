@@ -362,14 +362,7 @@ async fn extension_loop_active(
         // Check if flush logic says we should block and flush or not
         loop {
             tokio::select! {
-                _ = flush_interval.tick() => {
-                    tokio::join!(
-                        logs_flusher.flush(),
-                        metrics_flusher.flush(),
-                        trace_flusher.manual_flush(),
-                        stats_flusher.manual_flush()
-                    );
-                }
+            biased;
                 Some(event) = event_bus.rx.recv() => {
                     match event {
                         Event::Metric(event) => {
@@ -462,6 +455,14 @@ async fn extension_loop_active(
                             }
                         },
                     }
+                }
+                _ = flush_interval.tick() => {
+                    tokio::join!(
+                        logs_flusher.flush(),
+                        metrics_flusher.flush(),
+                        trace_flusher.manual_flush(),
+                        stats_flusher.manual_flush()
+                    );
                 }
             }
         }
