@@ -15,10 +15,6 @@ RUN curl https://sh.rustup.rs -sSf | \
 ENV PATH=/root/.cargo/bin:$PATH
 RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-musl
 
-RUN echo "$(cargo --version)" && \
-    echo "$(rustc --version)" && \
-    echo "$(protoc --version)"
-
 # Build Bottlecap
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap/src /tmp/dd/bottlecap/src
