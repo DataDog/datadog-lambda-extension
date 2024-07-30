@@ -13,11 +13,11 @@ RUN chmod +x /install-protoc.sh && /install-protoc.sh
 
 # Install Rust
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-  sh -s -- --profile minimal --default-toolchain nightly -y
+  sh -s -- --profile minimal --default-toolchain stable -y
 
 RUN source $HOME/.cargo/env
 ENV PATH /root/.cargo/bin/:$PATH
 
-RUN rustup component add rust-src --toolchain nightly
+RUN rustup component add rust-src --toolchain stable
 
 
