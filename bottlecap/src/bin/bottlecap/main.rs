@@ -254,7 +254,11 @@ async fn extension_loop_active(
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
-    let tags_provider = setup_tag_provider(aws_config, config, &r.account_id.as_ref().unwrap_or(&"none".to_string()));
+    let tags_provider = setup_tag_provider(
+        aws_config,
+        config,
+        &r.account_id.as_ref().unwrap_or(&"none".to_string()),
+    );
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
         resolved_api_key.clone(),
