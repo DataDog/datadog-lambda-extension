@@ -191,10 +191,10 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
     // First load the configuration
     let aws_config = AwsConfig {
         region: env::var("AWS_DEFAULT_REGION").unwrap_or("us-east-1".to_string()),
-        aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").unwrap_or("".to_string()),
-        aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").unwrap_or("".to_string()),
-        aws_session_token: env::var("AWS_SESSION_TOKEN").unwrap_or("".to_string()),
-        function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or("".to_string()),
+        aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").unwrap_or_default(),
+        aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_default(),
+        aws_session_token: env::var("AWS_SESSION_TOKEN").unwrap_or_default(),
+        function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
@@ -257,7 +257,7 @@ async fn extension_loop_active(
     let tags_provider = setup_tag_provider(
         aws_config,
         config,
-        &r.account_id.as_ref().unwrap_or(&"none".to_string()),
+        r.account_id.as_ref().unwrap_or(&"none".to_string()),
     );
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
