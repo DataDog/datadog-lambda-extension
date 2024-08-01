@@ -29,6 +29,7 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_processing_rules")]
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub apm_enabled: bool,
+    pub apm_replace_tags: Option<String>,
     pub lambda_handler: String,
     pub serverless_flush_strategy: FlushStrategy,
     pub trace_enabled: bool,
@@ -44,6 +45,8 @@ pub struct Config {
     pub cold_start_tracing: bool,
     pub min_cold_start_duration: String,
     pub cold_start_trace_skip_lib: String,
+    pub service_mapping: Option<String>,
+    pub data_streams_enabled: bool,
 }
 
 impl Default for Config {
@@ -67,6 +70,7 @@ impl Default for Config {
             logs_config_processing_rules: None,
             // APM
             apm_enabled: false,
+            apm_replace_tags: None,
             lambda_handler: String::default(),
             serverless_trace_enabled: true,
             trace_enabled: true,
@@ -82,6 +86,8 @@ impl Default for Config {
             // Failover
             extension_version: None,
             enhanced_metrics: true,
+            service_mapping: None,
+            data_streams_enabled: false,
         }
     }
 }
