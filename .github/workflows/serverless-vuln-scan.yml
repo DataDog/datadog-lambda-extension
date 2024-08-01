@@ -48,6 +48,22 @@ jobs:
           exit-code: 1
           format: table
 
+      - name: Scan latest released image with trivy
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
+        with:
+          image-ref: "public.ecr.aws/datadog/lambda-extension:latest"
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
+      - name: Scan latest-alpoine released image with trivy
+        uses: aquasecurity/trivy-action@6e7b7d1fd3e4fef0c5fa8cce1229c54b2c9bd0d8 # v0.24.0
+        with:
+          image-ref: "public.ecr.aws/datadog/lambda-extension:latest-alpine"
+          ignore-unfixed: true
+          exit-code: 1
+          format: table
+
       - name: Scan amd64 image with grype
         uses: anchore/scan-action@d43cc1dfea6a99ed123bf8f3133f1797c9b44492 # v4.1.0
         with:
@@ -61,6 +77,24 @@ jobs:
         uses: anchore/scan-action@d43cc1dfea6a99ed123bf8f3133f1797c9b44492 # v4.1.0
         with:
           image: "datadog/build-lambda-extension-arm64:${{ env.VERSION }}"
+          only-fixed: true
+          fail-build: true
+          severity-cutoff: low
+          output-format: table
+
+      - name: Scan latest release image with grype
+        uses: anchore/scan-action@d43cc1dfea6a99ed123bf8f3133f1797c9b44492 # v4.1.0
+        with:
+          image: "public.ecr.aws/datadog/lambda-extension:latest"
+          only-fixed: true
+          fail-build: true
+          severity-cutoff: low
+          output-format: table
+
+      - name: Scan latest-alpine release image with grype
+        uses: anchore/scan-action@d43cc1dfea6a99ed123bf8f3133f1797c9b44492 # v4.1.0
+        with:
+          image: "public.ecr.aws/datadog/lambda-extension:latest-alpine"
           only-fixed: true
           fail-build: true
           severity-cutoff: low
