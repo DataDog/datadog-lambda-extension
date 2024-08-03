@@ -27,6 +27,8 @@ pub struct LambdaProcessor {
     invocation_context: InvocationContext,
     // Logs which don't have a `request_id`
     orphan_logs: Vec<IntakeLog>,
+    // Logs which are ready to be aggregated
+    ready_logs: Vec<String>,
     // Main event bus
     event_bus: Sender<Event>,
 }
@@ -56,6 +58,7 @@ impl LambdaProcessor {
                 runtime_duration_ms: 0.0,
             },
             orphan_logs: Vec::new(),
+            ready_logs: Vec::new(),
             event_bus,
         }
     }
@@ -223,8 +226,6 @@ impl LambdaProcessor {
     }
 
     pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
-        let mut to_send = Vec::<String>::new();
-
         if let Ok(mut log) = self.make_log(event).await {
             let should_send_log =
                 LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
@@ -233,7 +234,7 @@ impl LambdaProcessor {
                     // explicitly drop log so we don't accidentally re-use it and push
                     // duplicate logs to the aggregator
                     drop(log);
-                    to_send.push(serialized_log);
+                    self.ready_logs.push(serialized_log);
                 }
             }
 
@@ -244,17 +245,17 @@ impl LambdaProcessor {
                 if should_send_log {
                     if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
                         drop(orphan_log);
-                        to_send.push(serialized_log);
+                        self.ready_logs.push(serialized_log);
                     }
                 }
             }
         }
 
-        if to_send.is_empty() {
+        if self.ready_logs.is_empty() {
             return;
         }
         let mut aggregator = aggregator.lock().expect("lock poisoned");
-        aggregator.add_batch(to_send);
+        aggregator.add_batch(std::mem::take(&mut self.ready_logs));
     }
 }
 
@@ -674,7 +675,7 @@ mod tests {
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
-        assert_eq!(batch, "[]".as_bytes());
+        assert!(batch.is_empty())
     }
 
     #[tokio::test]
