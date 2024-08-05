@@ -70,7 +70,7 @@ echo "Checking that you have access to the GovCloud AWS account"
 aws-vault exec sso-govcloud-us1-fed-engineering -- aws sts get-caller-identity
 
 echo "Answer 'n' if already downloaded artifacts from GitLab"
-read -p "Ready to build binaries and layers? (y/n)" CONT
+read -p "Ready to build, and sign, binaries and layers? (y/n)" CONT
 if [ "$CONT" == "y" ]; then
     VERSION=$VERSION AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
 
