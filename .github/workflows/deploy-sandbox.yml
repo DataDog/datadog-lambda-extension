@@ -100,7 +100,7 @@ jobs:
          --layer-path ./tmp/datadog_extension.zip \
          --destination-path ./tmp/datadog_extension_signed.zip \
          --key ${{ secrets.GH_ACTION_PUBLISHER_AEM_KEY }}
-      - uses: actions/upload-artifact@v4.3.4
+      - uses: actions/upload-artifact@v4.3.5
         with:
           name: datadog-extension
           path: ./tmp/datadog_extension_signed.zip
