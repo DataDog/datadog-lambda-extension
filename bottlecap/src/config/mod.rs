@@ -47,6 +47,8 @@ pub struct Config {
     pub cold_start_trace_skip_lib: String,
     pub service_mapping: Option<String>,
     pub data_streams_enabled: bool,
+    pub trace_disabled_plugins: Option<String>,
+    pub trace_debug: bool,
 }
 
 impl Default for Config {
@@ -71,6 +73,7 @@ impl Default for Config {
             // APM
             apm_enabled: false,
             apm_replace_tags: None,
+            trace_disabled_plugins: None,
             lambda_handler: String::default(),
             serverless_trace_enabled: true,
             trace_enabled: true,
@@ -88,6 +91,7 @@ impl Default for Config {
             enhanced_metrics: true,
             service_mapping: None,
             data_streams_enabled: false,
+            trace_debug: false,
         }
     }
 }
