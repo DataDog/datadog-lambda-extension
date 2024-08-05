@@ -69,22 +69,42 @@ aws-vault exec sso-prod-engineering -- aws sts get-caller-identity
 echo "Checking that you have access to the GovCloud AWS account"
 aws-vault exec sso-govcloud-us1-fed-engineering -- aws sts get-caller-identity
 
-VERSION=$VERSION AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
+echo "Answer 'n' if already downloaded artifacts from GitLab"
+read -p "Ready to build, and sign, binaries and layers? (y/n)" CONT
+if [ "$CONT" == "y" ]; then
+    VERSION=$VERSION AGENT_VERSION=$AGENT_VERSION ./scripts/build_binary_and_layer_dockerized.sh
 
-echo "Signing the layer"
-aws-vault exec sso-prod-engineering -- ./scripts/sign_layers.sh prod
+    echo "Signing the layer"
+    aws-vault exec sso-prod-engineering -- ./scripts/sign_layers.sh prod
+fi
 
-echo "Publishing layers to commercial AWS regions"
-aws-vault exec sso-prod-engineering --no-session -- ./scripts/publish_layers.sh
+echo "Answer 'n' if already done by GitLab"
+read -p "Deploy layers to commercial AWS (y/n)?" CONT
+if [ "$CONT" == "y" ]; then
+    echo "Publishing layers to commercial AWS regions"
+    aws-vault exec sso-prod-engineering --no-session -- ./scripts/publish_layers.sh
+fi
 
-echo "Publishing layers to GovCloud AWS regions"
-aws-vault exec sso-govcloud-us1-fed-engineering -- ./scripts/publish_layers.sh
+read -p "Deploy layers to GovCloud AWS (y/n)?" CONT
+if [ "$CONT" == "y" ]; then
+    echo "Publishing layers to GovCloud AWS regions"
+    aws-vault exec sso-govcloud-us1-fed-engineering -- ./scripts/publish_layers.sh
+fi
 
-./scripts/build_and_push_docker_image.sh
+echo "Answer 'n' if already done by GitLab"
+read -p "Deploy docker images to DockerHub? (y/n)?" CONT
+if [ "$CONT" == "y" ]; then
+    echo "Publishing images to DockerHub"
+    ./scripts/build_and_push_docker_image.sh
+fi
 
-echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
-git tag "v$VERSION"
-git push origin "refs/tags/v$VERSION"
+echo "Answer 'n' if already done for GitLab"
+read -p "Ready to tag v${VERSION}? (y/n)" CONT
+if [ "$CONT" == "y" ]; then
+    echo "Creating tag in the datadog-lambda-extension repository for release on GitHub"
+    git tag "v$VERSION"
+    git push origin "refs/tags/v$VERSION"
+fi
 
 echo "New extension version published to AWS and Dockerhub!"
 echo
