@@ -48,6 +48,7 @@ pub struct Config {
     pub service_mapping: Option<String>,
     pub data_streams_enabled: bool,
     pub trace_disabled_plugins: Option<String>,
+    pub trace_debug: bool,
 }
 
 impl Default for Config {
@@ -90,6 +91,7 @@ impl Default for Config {
             enhanced_metrics: true,
             service_mapping: None,
             data_streams_enabled: false,
+            trace_debug: false,
         }
     }
 }
