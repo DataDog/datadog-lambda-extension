@@ -85,9 +85,11 @@ if [ "$CONT" == "y" ]; then
     aws-vault exec sso-prod-engineering --no-session -- ./scripts/publish_layers.sh
 fi
 
-echo "Publishing layers to GovCloud AWS regions"
-aws-vault exec sso-govcloud-us1-fed-engineering -- ./scripts/publish_layers.sh
-
+read -p "Deploy layers to GovCloud AWS (y/n)?" CONT
+if [ "$CONT" == "y" ]; then
+    echo "Publishing layers to GovCloud AWS regions"
+    aws-vault exec sso-govcloud-us1-fed-engineering -- ./scripts/publish_layers.sh
+fi
 
 echo "Answer 'n' if already done by GitLab"
 read -p "Deploy docker images to DockerHub? (y/n)?" CONT
