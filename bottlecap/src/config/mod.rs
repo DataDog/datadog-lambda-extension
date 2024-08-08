@@ -154,7 +154,9 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 
     if config.profiling_enabled {
         log_failover_reason("profiling_enabled");
-        return Err(ConfigError::UnsupportedField("profiling_enabled".to_string()));
+        return Err(ConfigError::UnsupportedField(
+            "profiling_enabled".to_string(),
+        ));
     }
 
     match config.extension_version.as_deref() {
