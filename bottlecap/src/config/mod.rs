@@ -58,6 +58,7 @@ pub struct Config {
     pub dotnet_tracer_home: Option<String>,
     pub trace_managed_services: bool,
     pub runtime_metrics_enabled: bool,
+    pub git_repository_url: Option<String>,
 }
 
 impl Default for Config {
@@ -110,6 +111,7 @@ impl Default for Config {
             dotnet_tracer_home: None,
             trace_managed_services: true,
             runtime_metrics_enabled: false,
+            git_repository_url: None,
         }
     }
 }
