@@ -10,6 +10,25 @@ The Datadog Lambda Extension is an AWS Lambda Extension that supports submitting
 
 Follow the [installation instructions](https://docs.datadoghq.com/serverless/installation), and view your function's enhanced metrics, traces and logs in Datadog.
 
+## Next-generation Lambda Extension
+
+We're excited to share that our next-generation, low-overhead Lambda Extension is available for Beta testers. This new extension is packaged alongside our existing extension, yet offers substantially faster cold starts as well as lower resource consumption.
+
+You can opt in to the Beta by setting the the environment variable `DD_LAMBDA_EXTENSION_VERSION: next` and using extension version `v63` or later.
+
+### Supported Configurations
+Today, all workloads using Logs and Metrics are supported.
+
+APM Tracing is supported for Python and NodeJS. Go, Java, and .NET support is coming soon. Profiling and ASM are not yet supported.
+
+### Beta Limitations
+The next-generation Lambda Extension only supports [certain environment variables](https://github.com/DataDog/datadog-lambda-extension/blob/main/bottlecap/src/config/mod.rs#L19-L51) today. It does not yet support yaml-based configuration files.
+
+If an unknown configuration option is detected, the next-generation extension will fail-over into the existing mainline extension.
+
+### Feedback
+We'd love to hear your feedback on the next-generation Lambda Extension. You can open a GitHub issue here using the `version/next` tag, find us on the [Datadog Community Slack](https://chat.datadoghq.com/) in the #serverless channel, or reach out to me directly at aj@datadoghq.com.
+
 ## Upgrading
 To upgrade, update the Datadog Extension version in your Lambda layer configurations or Dockerfile (for Lambda functions deployed as container images). View the latest [releases](https://github.com/DataDog/datadog-lambda-extension/releases) and corresponding changelogs before upgrading.
 
