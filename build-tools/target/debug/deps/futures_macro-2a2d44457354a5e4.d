@@ -1,9 +1,0 @@
-/Users/jordan.gonzalez/go/src/github.com/DataDog/datadog-lambda-extension/build-tools/target/debug/deps/libfutures_macro-2a2d44457354a5e4.dylib: /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/lib.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/executor.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/join.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/select.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/stream_select.rs
-
-/Users/jordan.gonzalez/go/src/github.com/DataDog/datadog-lambda-extension/build-tools/target/debug/deps/futures_macro-2a2d44457354a5e4.d: /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/lib.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/executor.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/join.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/select.rs /Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/stream_select.rs
-
-/Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/lib.rs:
-/Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/executor.rs:
-/Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/join.rs:
-/Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/select.rs:
-/Users/jordan.gonzalez/.cargo/registry/src/index.crates.io-6f17d22bba15001f/futures-macro-0.3.25/src/stream_select.rs:

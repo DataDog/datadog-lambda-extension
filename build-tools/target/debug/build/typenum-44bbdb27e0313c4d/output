@@ -1,2 +1,0 @@
-cargo:rustc-env=TYPENUM_BUILD_CONSTS=/Users/jordan.gonzalez/go/src/github.com/DataDog/datadog-lambda-extension/build-tools/target/debug/build/typenum-44bbdb27e0313c4d/out/consts.rs
-cargo:rustc-env=TYPENUM_BUILD_OP=/Users/jordan.gonzalez/go/src/github.com/DataDog/datadog-lambda-extension/build-tools/target/debug/build/typenum-44bbdb27e0313c4d/out/op.rs
