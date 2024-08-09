@@ -35,7 +35,8 @@ pub struct Config {
     pub trace_enabled: bool,
     pub serverless_trace_enabled: bool,
     pub capture_lambda_payload: bool,
-    // Deprecated or ignored, just here so we don't failover
+    // ALL ENV VARS below are deprecated or not used by the extension
+    // just here so we don't failover
     pub flush_to_log: bool,
     pub logs_injection: bool,
     pub merge_xray_traces: bool,
@@ -49,6 +50,15 @@ pub struct Config {
     pub data_streams_enabled: bool,
     pub trace_disabled_plugins: Option<String>,
     pub trace_debug: bool,
+    pub profiling_enabled: bool,
+    pub git_commit_sha: Option<String>,
+    pub logs_enabled: bool,
+    pub app_key: Option<String>,
+    pub trace_sample_rate: Option<f64>,
+    pub dotnet_tracer_home: Option<String>,
+    pub trace_managed_services: bool,
+    pub runtime_metrics_enabled: bool,
+    pub git_repository_url: Option<String>,
 }
 
 impl Default for Config {
@@ -67,6 +77,8 @@ impl Default for Config {
             tags: None,
             // Logs
             log_level: LogLevel::default(),
+            logs_enabled: false, // IGNORED, this is the main agent config, but never used in
+            // severless
             serverless_logs_enabled: true,
             // TODO(duncanista): Add serializer for YAML
             logs_config_processing_rules: None,
@@ -92,6 +104,14 @@ impl Default for Config {
             service_mapping: None,
             data_streams_enabled: false,
             trace_debug: false,
+            profiling_enabled: false,
+            git_commit_sha: None,
+            app_key: None,
+            trace_sample_rate: None,
+            dotnet_tracer_home: None,
+            trace_managed_services: true,
+            runtime_metrics_enabled: false,
+            git_repository_url: None,
         }
     }
 }
@@ -132,6 +152,13 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     if config.serverless_appsec_enabled {
         log_failover_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
+    }
+
+    if config.profiling_enabled {
+        log_failover_reason("profiling_enabled");
+        return Err(ConfigError::UnsupportedField(
+            "profiling_enabled".to_string(),
+        ));
     }
 
     match config.extension_version.as_deref() {
