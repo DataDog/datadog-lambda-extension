@@ -8,6 +8,7 @@ pub struct Aggregator {
     max_batch_entries_size: usize,
     max_content_size_bytes: usize,
     max_log_size_bytes: usize,
+    buffer: Vec<u8>,
 }
 
 impl Default for Aggregator {
@@ -17,6 +18,7 @@ impl Default for Aggregator {
             max_batch_entries_size: constants::MAX_BATCH_ENTRIES_SIZE,
             max_content_size_bytes: constants::MAX_CONTENT_SIZE_BYTES,
             max_log_size_bytes: constants::MAX_LOG_SIZE_BYTES,
+            buffer: Vec::with_capacity(constants::MAX_CONTENT_SIZE_BYTES),
         }
     }
 }
@@ -34,6 +36,7 @@ impl Aggregator {
             max_batch_entries_size,
             max_content_size_bytes,
             max_log_size_bytes,
+            buffer: Vec::with_capacity(max_batch_entries_size),
         }
     }
 
@@ -44,14 +47,13 @@ impl Aggregator {
     }
 
     pub fn get_batch(&mut self) -> Vec<u8> {
-        let mut buffer: Vec<u8> = Vec::with_capacity(self.max_content_size_bytes);
-        buffer.extend(b"[");
+        self.buffer.extend(b"[");
 
         // Fill the batch with logs from the messages
         for _ in 0..self.max_batch_entries_size {
             if let Some(log) = self.messages.pop_front() {
                 // Check if the buffer will be full after adding the log
-                if buffer.len() + log.len() > self.max_content_size_bytes {
+                if self.buffer.len() + log.len() > self.max_content_size_bytes {
                     // Put the log back in the queue
                     self.messages.push_front(log);
                     break;
@@ -64,21 +66,23 @@ impl Aggregator {
                     );
                 }
 
-                buffer.extend(log.as_bytes());
-                buffer.extend(b",");
+                self.buffer.extend(log.as_bytes());
+                self.buffer.extend(b",");
             } else {
                 break;
             }
         }
         // Make sure we added at least one element
-        if buffer.len() > 1 {
-            // Remove the last comma
-            buffer.pop();
+        if self.buffer.len() > 1 {
+            // Remove the last comma and close bracket
+            self.buffer.pop();
+            self.buffer.extend(b"]");
+        } else {
+            // No elements, remove opening bracket
+            self.buffer.pop();
         }
 
-        buffer.extend(b"]");
-
-        buffer
+        std::mem::take(&mut self.buffer)
     }
 }
 

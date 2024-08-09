@@ -30,9 +30,9 @@ impl Flusher {
     pub async fn flush(&self) {
         let mut guard = self.aggregator.lock().expect("lock poisoned");
         let mut set = JoinSet::new();
-        // It could be an empty JSON array: []
+
         let mut logs = guard.get_batch();
-        while logs.len() > 2 {
+        while !logs.is_empty() {
             let api_key = self.api_key.clone();
             let site = self.fqdn_site.clone();
             let cloned_client = self.client.clone();
@@ -53,8 +53,7 @@ impl Flusher {
     async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
 
-        // It could be an empty JSON array: []
-        if data.len() > 2 {
+        if !data.is_empty() {
             let resp: Result<reqwest::Response, reqwest::Error> = client
                 .post(&url)
                 .header("DD-API-KEY", api_key)
