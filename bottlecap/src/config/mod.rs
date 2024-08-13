@@ -395,4 +395,26 @@ pub mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn test_ignore_apm_replace_tags() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_APM_REPLACE_TAGS",
+                r#"[{"name":"resource.name","pattern":"(.*)/(foo[:%].+)","repl":"$1/{foo}"}]"#,
+            );
+            jail.set_env("DD_EXTENSION_VERSION", "next");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    apm_replace_tags: Some(ObjectIgnore::Ignore),
+                    extension_version: Some("next".to_string()),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
 }
