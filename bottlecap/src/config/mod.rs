@@ -1,5 +1,6 @@
 pub mod flush_strategy;
 pub mod log_level;
+pub mod object_ignore;
 pub mod processing_rule;
 
 use std::path::Path;
@@ -9,6 +10,7 @@ use serde::Deserialize;
 
 use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::LogLevel;
+use crate::config::object_ignore::ObjectIgnore;
 use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 
 #[derive(Debug, PartialEq, Deserialize, Clone)]
@@ -29,7 +31,7 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_processing_rules")]
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub apm_enabled: bool,
-    pub apm_replace_tags: Option<String>,
+    pub apm_replace_tags: Option<ObjectIgnore>,
     pub lambda_handler: String,
     pub serverless_flush_strategy: FlushStrategy,
     pub trace_enabled: bool,
