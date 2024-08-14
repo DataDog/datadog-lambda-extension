@@ -18,20 +18,6 @@ use protobuf::Message;
 use tracing::{error, warn};
 use ustr::Ustr;
 
-/// Error for the `aggregate` function
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// Metric insertion failed, possibly with recovery
-    #[error(transparent)]
-    Insert(#[from] errors::Insert),
-    /// Creation failed, unable to recover
-    #[error(transparent)]
-    Creation(#[from] errors::Creation),
-    /// IO error
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-}
-
 #[derive(Debug, Clone)]
 struct Entry {
     id: u64,
