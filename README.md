@@ -14,7 +14,7 @@ Follow the [installation instructions](https://docs.datadoghq.com/serverless/ins
 
 We're excited to share that our next-generation, low-overhead Lambda Extension is available for Beta testers. This new extension is packaged alongside our existing extension, yet offers substantially faster cold starts as well as lower resource consumption.
 
-You can opt in to the Beta by setting the the environment variable `DD_LAMBDA_EXTENSION_VERSION: next` and using extension version `v63` or later.
+You can opt in to the Beta by setting the the environment variable `DD_EXTENSION_VERSION: next` and using extension version `v63` or later.
 
 ### Supported Configurations
 Today, all workloads using Logs and Metrics are supported.
