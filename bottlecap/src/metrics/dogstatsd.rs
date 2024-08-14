@@ -104,13 +104,9 @@ impl DogStatsD {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use crate::config::Config;
     use crate::metrics::aggregator::Aggregator;
     use crate::metrics::aggregator::ValueVariant::{DDSketch, Value};
     use crate::metrics::dogstatsd::{BufferReader, DogStatsD};
-    use crate::tags::provider::Provider;
-    use crate::LAMBDA_RUNTIME_SLUG;
-    use std::collections::HashMap;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
 
@@ -232,13 +228,8 @@ single_machine_performance.rouster.metrics_max_timestamp_latency:1376.90870216|d
     }
 
     async fn setup_dogstatsd(statsd_string: &str) -> Arc<Mutex<Aggregator>> {
-        let tags_provider = Arc::new(Provider::new(
-            Arc::new(Config::default()),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::default(),
-        ));
         let aggregator_arc = Arc::new(Mutex::new(
-            Aggregator::new(tags_provider, 1_024).expect("aggregator creation failed"),
+            Aggregator::new(Vec::new(), 1_024).expect("aggregator creation failed"),
         ));
         let cancel_token = tokio_util::sync::CancellationToken::new();
 

@@ -194,10 +194,7 @@ mod tests {
     use super::*;
     use crate::config;
     use crate::metrics::aggregator::ValueVariant;
-    use crate::tags::provider;
-    use crate::LAMBDA_RUNTIME_SLUG;
     use ddsketch_agent::DDSketch;
-    use std::collections::hash_map::HashMap;
     use std::sync::MutexGuard;
 
     fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
@@ -206,14 +203,10 @@ mod tests {
             tags: Some("test:tags".to_string()),
             ..config::Config::default()
         });
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
+
         (
             Arc::new(Mutex::new(
-                Aggregator::new(tags_provider.clone(), 1024).expect("failed to create aggregator"),
+                Aggregator::new(Vec::new(), 1024).expect("failed to create aggregator"),
             )),
             config,
         )

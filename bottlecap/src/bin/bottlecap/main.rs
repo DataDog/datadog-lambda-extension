@@ -267,7 +267,7 @@ async fn extension_loop_active(
     );
 
     let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::new(tags_provider.clone(), CONTEXTS)
+        MetricsAggregator::new(tags_provider.get_tags_vec(), CONTEXTS)
             .expect("failed to create aggregator"),
     ));
     let mut metrics_flusher = MetricsFlusher::new(
