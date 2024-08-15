@@ -359,7 +359,7 @@ fn build_metric(entry: &Entry, base_tag_vec: &[String]) -> Option<MetricToShip> 
     if let Some(tags) = entry.tags {
         final_tags = tags.split(',').map(ToString::to_string).collect();
     }
-    final_tags.append(&mut base_tag_vec.to_owned());
+    final_tags.extend(base_tag_vec.to_owned());
     Some(MetricToShip {
         metric: entry.name.as_str(),
         resources,
