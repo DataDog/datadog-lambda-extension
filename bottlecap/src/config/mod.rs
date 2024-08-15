@@ -390,6 +390,41 @@ pub mod tests {
     }
 
     #[test]
+    fn test_parse_logs_config_processing_rules_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                extension_version: next
+                site: datadoghq.com
+                logs_config:
+                  processing_rules:
+                    - type: exclude_at_match
+                      name: exclude
+                      pattern: exclude
+            ",
+            )?;
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    logs_config_processing_rules: Some(vec![ProcessingRule {
+                        kind: processing_rule::Kind::ExcludeAtMatch,
+                        name: "exclude".to_string(),
+                        pattern: "exclude".to_string(),
+                        replace_placeholder: None
+                    }]),
+                    site: "datadoghq.com".to_string(),
+                    extension_version: Some("next".to_string()),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_ignore_apm_replace_tags() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
