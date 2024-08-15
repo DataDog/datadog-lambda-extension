@@ -575,7 +575,11 @@ mod tests {
         let total_number_of_distributions = 5;
         let max_bytes = SINGLE_METRIC_SIZE * expected_distribution_per_batch + 11;
         let mut aggregator = Aggregator {
-            tags: DEFAULT_TAGS.to_vec().iter().map(ToString::to_string).collect(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
@@ -614,7 +618,11 @@ mod tests {
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
-            tags: DEFAULT_TAGS.to_vec().iter().map(ToString::to_string).collect(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
@@ -703,7 +711,11 @@ mod tests {
         let two_metrics_size = 362;
         let max_bytes = SINGLE_METRIC_SIZE * expected_metrics_per_batch + 13;
         let mut aggregator = Aggregator {
-            tags: DEFAULT_TAGS.to_vec().iter().map(ToString::to_string).collect(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: max_bytes as u64,
@@ -738,7 +750,11 @@ mod tests {
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
-            tags: DEFAULT_TAGS.to_vec().iter().map(ToString::to_string).collect(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: max_bytes,

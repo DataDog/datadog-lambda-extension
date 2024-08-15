@@ -675,7 +675,7 @@ mod tests {
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
-        assert!(batch.is_empty())
+        assert!(batch.is_empty());
     }
 
     #[tokio::test]
