@@ -16,7 +16,7 @@ use tracing::{error, warn};
 use ustr::Ustr;
 
 #[derive(Debug, Clone)]
-struct Entry {
+pub(crate) struct Entry {
     id: u64,
     name: Ustr,
     tags: Option<Ustr>,
@@ -287,29 +287,9 @@ impl Aggregator {
     }
 
     #[cfg(test)]
-    pub fn get_value_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<ValueVariant> {
+    pub(crate) fn get_entry_by_id(&self, name: Ustr, tags: Option<Ustr>) -> Option<&Entry> {
         let id = metric::id(name, tags);
-
-        match self
-            .map
-            .entry(id, |m| m.id == id, |m| metric::id(m.name, m.tags))
-        {
-            hash_table::Entry::Vacant(_) => None,
-            hash_table::Entry::Occupied(entry) => match entry.get() {
-                Entry {
-                    metric_value: MetricValue::Count(count),
-                    ..
-                } => Some(ValueVariant::Value(*count)),
-                Entry {
-                    metric_value: MetricValue::Gauge(gauge),
-                    ..
-                } => Some(ValueVariant::Value(*gauge)),
-                Entry {
-                    metric_value: MetricValue::Distribution(distribution),
-                    ..
-                } => Some(ValueVariant::DDSketch(distribution.clone())),
-            },
-        }
+        self.map.find(id, |m| m.id == id)
     }
 }
 
@@ -369,13 +349,6 @@ fn build_metric(entry: &Entry, base_tag_vec: &[String]) -> Option<MetricToShip> 
     })
 }
 
-#[cfg(test)]
-#[derive(Debug, Clone)]
-pub enum ValueVariant {
-    DDSketch(DDSketch),
-    Value(f64),
-}
-
 fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
     if tags.is_none() {
         return Vec::new();
@@ -388,14 +361,17 @@ fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod tests {
+pub(crate) mod tests {
     use crate::metrics::aggregator::{
         metric::{self, Metric},
-        Aggregator, ValueVariant,
+        Aggregator,
     };
     use datadog_protos::metrics::SketchPayload;
     use hashbrown::hash_table;
     use protobuf::Message;
+    use std::sync::Mutex;
+
+    const PRECISION: f64 = 0.000_000_01;
 
     const SINGLE_METRIC_SIZE: usize = 187;
     const SINGLE_DISTRIBUTION_SIZE: u64 = 135;
@@ -404,6 +380,29 @@ mod tests {
         "architecture:x86_64",
         "_dd.compute_stats:1",
     ];
+
+    pub(crate) fn assert_value(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64) {
+        let aggregator = aggregator_mutex.lock().unwrap();
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), None) {
+            let metric = e.metric_value.get_value().unwrap();
+            assert!((metric - value).abs() < PRECISION);
+        } else {
+            panic!("{}", format!("{metric_id} not found"));
+        }
+    }
+
+    pub(crate) fn assert_sketch(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64) {
+        let aggregator = aggregator_mutex.lock().unwrap();
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), None) {
+            let metric = e.metric_value.get_sketch().unwrap();
+            assert!((metric.max().unwrap() - value).abs() < PRECISION);
+            assert!((metric.min().unwrap() - value).abs() < PRECISION);
+            assert!((metric.sum().unwrap() - value).abs() < PRECISION);
+            assert!((metric.avg().unwrap() - value).abs() < PRECISION);
+        } else {
+            panic!("{}", format!("{metric_id} not found"));
+        }
+    }
 
     #[test]
     fn insertion() {
@@ -473,14 +472,14 @@ mod tests {
         assert!(aggregator.insert(&metric2).is_ok());
 
         assert_eq!(aggregator.map.len(), 2);
-        if let Some(ValueVariant::Value(v)) = aggregator.get_value_by_id("foo".into(), None) {
-            assert_eq!(v, 5f64);
+        if let Some(v) = aggregator.get_entry_by_id("foo".into(), None) {
+            assert_eq!(v.metric_value.get_value().unwrap(), 5f64);
         } else {
             panic!("failed to get value by id");
         }
 
-        if let Some(ValueVariant::Value(v)) = aggregator.get_value_by_id("test".into(), None) {
-            assert_eq!(v, 3f64);
+        if let Some(v) = aggregator.get_entry_by_id("test".into(), None) {
+            assert_eq!(v.metric_value.get_value().unwrap(), 3f64);
         } else {
             panic!("failed to get value by id");
         }
