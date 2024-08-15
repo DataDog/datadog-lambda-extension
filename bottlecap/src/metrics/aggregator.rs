@@ -313,7 +313,7 @@ impl Aggregator {
     }
 }
 
-fn build_sketch(now: i64, entry: &Entry, base_tag_vec: &Vec<String>) -> Option<Sketch> {
+fn build_sketch(now: i64, entry: &Entry, base_tag_vec: &[String]) -> Option<Sketch> {
     let sketch = entry.metric_value.get_sketch()?;
     let mut dogsketch = Dogsketch::default();
     sketch.merge_to_dogsketch(&mut dogsketch);
@@ -324,12 +324,12 @@ fn build_sketch(now: i64, entry: &Entry, base_tag_vec: &Vec<String>) -> Option<S
     let name = entry.name.to_string();
     sketch.set_metric(name.clone().into());
     let mut tags = tags_string_to_vector(entry.tags);
-    tags.extend(base_tag_vec.clone()); // TODO split on comma
+    tags.extend(base_tag_vec.to_owned()); // TODO split on comma
     sketch.set_tags(tags.into_iter().map(std::convert::Into::into).collect());
     Some(sketch)
 }
 
-fn build_metric(entry: &Entry, base_tag_vec: &Vec<String>) -> Option<MetricToShip> {
+fn build_metric(entry: &Entry, base_tag_vec: &[String]) -> Option<MetricToShip> {
     let mut resources = Vec::with_capacity(constants::MAX_TAGS);
     for (name, kind) in entry.tag() {
         let resource = datadog::Resource {
@@ -359,7 +359,7 @@ fn build_metric(entry: &Entry, base_tag_vec: &Vec<String>) -> Option<MetricToShi
     if let Some(tags) = entry.tags {
         final_tags = tags.split(',').map(ToString::to_string).collect();
     }
-    final_tags.append(&mut base_tag_vec.clone());
+    final_tags.append(&mut base_tag_vec.to_owned());
     Some(MetricToShip {
         metric: entry.name.as_str(),
         resources,
