@@ -104,19 +104,16 @@ impl DogStatsD {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use crate::config::Config;
+    use crate::metrics::aggregator;
+    use crate::metrics::aggregator::tests::assert_value;
     use crate::metrics::aggregator::Aggregator;
-    use crate::metrics::aggregator::ValueVariant::{DDSketch, Value};
     use crate::metrics::dogstatsd::{BufferReader, DogStatsD};
-    use crate::tags::provider::Provider;
-    use crate::LAMBDA_RUNTIME_SLUG;
-    use std::collections::HashMap;
+    use aggregator::tests::assert_sketch;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::{Arc, Mutex};
 
     #[tokio::test]
     async fn test_dogstatsd_multi_distribution() {
-        let precision = 0.000_000_01;
         let locked_aggregator = setup_dogstatsd(
             "single_machine_performance.rouster.api.series_v2.payload_size_bytes:269942|d
 single_machine_performance.rouster.metrics_min_timestamp_latency:1426.90870216|d
@@ -124,121 +121,66 @@ single_machine_performance.rouster.metrics_max_timestamp_latency:1376.90870216|d
 ",
         )
         .await;
-        let mut aggregator = locked_aggregator.lock().expect("lock poisoned");
+        let aggregator = locked_aggregator.lock().expect("lock poisoned");
 
         let parsed_metrics = aggregator.distributions_to_protobuf();
 
         assert_eq!(parsed_metrics.sketches.len(), 3);
         assert_eq!(aggregator.to_series().len(), 0);
+        drop(aggregator);
 
-        match aggregator.get_value_by_id(
-            "single_machine_performance.rouster.api.series_v2.payload_size_bytes".into(),
-            None,
-        ) {
-            Some(DDSketch(metric)) => {
-                assert!((metric.max().unwrap() - 269_942_f64).abs() < precision);
-                assert!((metric.min().unwrap() - 269_942_f64).abs() < precision);
-                assert!((metric.sum().unwrap() - 269_942_f64).abs() < precision);
-                assert!((metric.avg().unwrap() - 269_942_f64).abs() < precision);
-            }
-            _ => panic!(
-                "single_machine_performance.rouster.api.series_v2.payload_size_bytes not found"
-            ),
-        }
-
-        match aggregator.get_value_by_id(
-            "single_machine_performance.rouster.metrics_min_timestamp_latency".into(),
-            None,
-        ) {
-            Some(DDSketch(metric)) => {
-                assert!((metric.max().unwrap() - 1_426.908_702_16).abs() < precision);
-                assert!((metric.min().unwrap() - 1_426.908_702_16).abs() < precision);
-                assert!((metric.sum().unwrap() - 1_426.908_702_16).abs() < precision);
-                assert!((metric.avg().unwrap() - 1_426.908_702_16).abs() < precision);
-            }
-            _ => {
-                panic!("single_machine_performance.rouster.metrics_min_timestamp_latency not found")
-            }
-        }
-
-        match aggregator.get_value_by_id(
-            "single_machine_performance.rouster.metrics_max_timestamp_latency".into(),
-            None,
-        ) {
-            Some(DDSketch(metric)) => {
-                assert!((metric.max().unwrap() - 1_376.908_702_16).abs() < precision);
-                assert!((metric.min().unwrap() - 1_376.908_702_16).abs() < precision);
-                assert!((metric.sum().unwrap() - 1_376.908_702_16).abs() < precision);
-                assert!((metric.avg().unwrap() - 1_376.908_702_16).abs() < precision);
-            }
-            _ => {
-                panic!("single_machine_performance.rouster.metrics_max_timestamp_latency not found")
-            }
-        }
+        assert_sketch(
+            &locked_aggregator,
+            "single_machine_performance.rouster.api.series_v2.payload_size_bytes",
+            269_942_f64,
+        );
+        assert_sketch(
+            &locked_aggregator,
+            "single_machine_performance.rouster.metrics_min_timestamp_latency",
+            1_426.908_702_16,
+        );
+        assert_sketch(
+            &locked_aggregator,
+            "single_machine_performance.rouster.metrics_max_timestamp_latency",
+            1_376.908_702_16,
+        );
     }
 
     #[tokio::test]
     async fn test_dogstatsd_multi_metric() {
-        let precision = 0.000_000_01;
         let locked_aggregator = setup_dogstatsd(
             "metric1:1|c\nmetric2:2|c|tag2:val2\nmetric3:3|c||tag3:val3,tag4:val4\n",
         )
         .await;
-        let mut aggregator = locked_aggregator.lock().expect("lock poisoned");
+        let aggregator = locked_aggregator.lock().expect("lock poisoned");
 
         let parsed_metrics = aggregator.to_series();
 
         assert_eq!(parsed_metrics.len(), 3);
         assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
+        drop(aggregator);
 
-        match aggregator.get_value_by_id("metric1".into(), None) {
-            Some(Value(metric)) => {
-                assert!((metric - 1.0).abs() < precision);
-            }
-            _ => panic!("metric1 not found"),
-        }
-
-        match aggregator.get_value_by_id("metric2".into(), None) {
-            Some(Value(metric)) => {
-                assert!((metric - 2.0).abs() < precision);
-            }
-            _ => panic!("metric2 not found"),
-        }
-
-        match aggregator.get_value_by_id("metric3".into(), None) {
-            Some(Value(metric)) => {
-                assert!((metric - 3.0).abs() < precision);
-            }
-            _ => panic!("metric3 not found"),
-        }
+        assert_value(&locked_aggregator, "metric1", 1.0);
+        assert_value(&locked_aggregator, "metric2", 2.0);
+        assert_value(&locked_aggregator, "metric3", 3.0);
     }
 
     #[tokio::test]
     async fn test_dogstatsd_single_metric() {
-        let precision = 0.000_000_01;
         let locked_aggregator = setup_dogstatsd("metric123:99123|c").await;
-        let mut aggregator = locked_aggregator.lock().expect("lock poisoned");
+        let aggregator = locked_aggregator.lock().expect("lock poisoned");
         let parsed_metrics = aggregator.to_series();
 
         assert_eq!(parsed_metrics.len(), 1);
         assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
+        drop(aggregator);
 
-        match aggregator.get_value_by_id("metric123".into(), None) {
-            Some(Value(metric)) => {
-                assert!((metric - 99_123.0).abs() < precision);
-            }
-            _ => panic!("metric1 not found"),
-        }
+        assert_value(&locked_aggregator, "metric123", 99_123.0);
     }
 
     async fn setup_dogstatsd(statsd_string: &str) -> Arc<Mutex<Aggregator>> {
-        let tags_provider = Arc::new(Provider::new(
-            Arc::new(Config::default()),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::default(),
-        ));
         let aggregator_arc = Arc::new(Mutex::new(
-            Aggregator::new(tags_provider, 1_024).expect("aggregator creation failed"),
+            Aggregator::new(Vec::new(), 1_024).expect("aggregator creation failed"),
         ));
         let cancel_token = tokio_util::sync::CancellationToken::new();
 

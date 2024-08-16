@@ -1,15 +1,12 @@
 //! The aggregation of metrics.
 
-use crate::{
-    metrics::{
-        constants,
-        datadog::{self, Metric as MetricToShip, Series},
-        errors,
-        metric::{self, Metric as DogstatsdMetric, Type},
-    },
-    tags::provider,
+use crate::metrics::{
+    constants,
+    datadog::{self, Metric as MetricToShip, Series},
+    errors,
+    metric::{self, Metric as DogstatsdMetric, Type},
 };
-use std::{sync::Arc, time};
+use std::time;
 
 use datadog_protos::metrics::{Dogsketch, Sketch, SketchPayload};
 use ddsketch_agent::DDSketch;
@@ -18,22 +15,8 @@ use protobuf::Message;
 use tracing::{error, warn};
 use ustr::Ustr;
 
-/// Error for the `aggregate` function
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    /// Metric insertion failed, possibly with recovery
-    #[error(transparent)]
-    Insert(#[from] errors::Insert),
-    /// Creation failed, unable to recover
-    #[error(transparent)]
-    Creation(#[from] errors::Creation),
-    /// IO error
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-}
-
 #[derive(Debug, Clone)]
-struct Entry {
+pub(crate) struct Entry {
     id: u64,
     name: Ustr,
     tags: Option<Ustr>,
@@ -107,7 +90,7 @@ impl Entry {
 // NOTE by construction we know that intervals and contexts do not explore the
 // full space of usize but the type system limits how we can express this today.
 pub struct Aggregator {
-    tags_provider: Arc<provider::Provider>,
+    tags: Vec<String>,
     map: hash_table::HashTable<Entry>,
     max_batch_entries_single_metric: usize,
     max_batch_bytes_single_metric: u64,
@@ -125,15 +108,12 @@ impl Aggregator {
     /// counterparts in `constants`. This would be better as a compile-time
     /// issue, although leaving this open allows for runtime configuration.
     #[allow(clippy::cast_precision_loss)]
-    pub fn new(
-        tags_provider: Arc<provider::Provider>,
-        max_context: usize,
-    ) -> Result<Self, errors::Creation> {
+    pub fn new(tags: Vec<String>, max_context: usize) -> Result<Self, errors::Creation> {
         if max_context > constants::MAX_CONTEXTS {
             return Err(errors::Creation::Contexts);
         }
         Ok(Self {
-            tags_provider,
+            tags,
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: constants::MAX_ENTRIES_SINGLE_METRIC,
             max_batch_bytes_single_metric: constants::MAX_SIZE_BYTES_SINGLE_METRIC,
@@ -184,12 +164,11 @@ impl Aggregator {
             .try_into()
             .unwrap_or_default();
         let mut sketch_payload = SketchPayload::new();
-        let base_tag_vec = self.tags_provider.get_tags_vec();
 
         self.map
             .iter()
             .filter_map(|entry| match entry.metric_value {
-                MetricValue::Distribution(_) => build_sketch(now, entry, base_tag_vec.clone()),
+                MetricValue::Distribution(_) => build_sketch(now, entry, &self.tags),
                 _ => None,
             })
             .for_each(|sketch| sketch_payload.sketches.push(sketch));
@@ -207,7 +186,6 @@ impl Aggregator {
         let mut batched_payloads = Vec::new();
         let mut sketch_payload = SketchPayload::new();
         let mut this_batch_size = 0u64;
-        let base_tag_vec = self.tags_provider.get_tags_vec();
         for sketch in self
             .map
             .extract_if(|entry| {
@@ -216,7 +194,7 @@ impl Aggregator {
                 }
                 false
             })
-            .filter_map(|entry| build_sketch(now, &entry, base_tag_vec.clone()))
+            .filter_map(|entry| build_sketch(now, &entry, &self.tags))
         {
             let next_chunk_size = sketch.compute_size();
 
@@ -250,7 +228,7 @@ impl Aggregator {
             .iter()
             .filter_map(|entry| match entry.metric_value {
                 MetricValue::Distribution(_) => None,
-                _ => build_metric(entry, self.tags_provider.get_tags_vec()),
+                _ => build_metric(entry, &self.tags),
             })
             .for_each(|metric| series_payload.series.push(metric));
         series_payload
@@ -271,7 +249,7 @@ impl Aggregator {
                 }
                 true
             })
-            .filter_map(|entry| build_metric(&entry, self.tags_provider.get_tags_vec()))
+            .filter_map(|entry| build_metric(&entry, &self.tags))
         {
             // TODO serialization is made twice for each point. If we return a Vec<u8> we can avoid that
             let serialized_metric_size = match serde_json::to_vec(&metric) {
@@ -309,33 +287,13 @@ impl Aggregator {
     }
 
     #[cfg(test)]
-    pub fn get_value_by_id(&mut self, name: Ustr, tags: Option<Ustr>) -> Option<ValueVariant> {
+    pub(crate) fn get_entry_by_id(&self, name: Ustr, tags: Option<Ustr>) -> Option<&Entry> {
         let id = metric::id(name, tags);
-
-        match self
-            .map
-            .entry(id, |m| m.id == id, |m| metric::id(m.name, m.tags))
-        {
-            hash_table::Entry::Vacant(_) => None,
-            hash_table::Entry::Occupied(entry) => match entry.get() {
-                Entry {
-                    metric_value: MetricValue::Count(count),
-                    ..
-                } => Some(ValueVariant::Value(*count)),
-                Entry {
-                    metric_value: MetricValue::Gauge(gauge),
-                    ..
-                } => Some(ValueVariant::Value(*gauge)),
-                Entry {
-                    metric_value: MetricValue::Distribution(distribution),
-                    ..
-                } => Some(ValueVariant::DDSketch(distribution.clone())),
-            },
-        }
+        self.map.find(id, |m| m.id == id)
     }
 }
 
-fn build_sketch(now: i64, entry: &Entry, mut base_tag_vec: Vec<String>) -> Option<Sketch> {
+fn build_sketch(now: i64, entry: &Entry, base_tag_vec: &[String]) -> Option<Sketch> {
     let sketch = entry.metric_value.get_sketch()?;
     let mut dogsketch = Dogsketch::default();
     sketch.merge_to_dogsketch(&mut dogsketch);
@@ -346,17 +304,12 @@ fn build_sketch(now: i64, entry: &Entry, mut base_tag_vec: Vec<String>) -> Optio
     let name = entry.name.to_string();
     sketch.set_metric(name.clone().into());
     let mut tags = tags_string_to_vector(entry.tags);
-    base_tag_vec.append(&mut tags); // TODO split on comma
-    sketch.set_tags(
-        base_tag_vec
-            .into_iter()
-            .map(std::convert::Into::into)
-            .collect(),
-    );
+    tags.extend(base_tag_vec.to_owned()); // TODO split on comma
+    sketch.set_tags(tags.into_iter().map(std::convert::Into::into).collect());
     Some(sketch)
 }
 
-fn build_metric(entry: &Entry, mut base_tag_vec: Vec<String>) -> Option<MetricToShip> {
+fn build_metric(entry: &Entry, base_tag_vec: &[String]) -> Option<MetricToShip> {
     let mut resources = Vec::with_capacity(constants::MAX_TAGS);
     for (name, kind) in entry.tag() {
         let resource = datadog::Resource {
@@ -386,7 +339,7 @@ fn build_metric(entry: &Entry, mut base_tag_vec: Vec<String>) -> Option<MetricTo
     if let Some(tags) = entry.tags {
         final_tags = tags.split(',').map(ToString::to_string).collect();
     }
-    final_tags.append(&mut base_tag_vec);
+    final_tags.extend(base_tag_vec.to_owned());
     Some(MetricToShip {
         metric: entry.name.as_str(),
         resources,
@@ -394,13 +347,6 @@ fn build_metric(entry: &Entry, mut base_tag_vec: Vec<String>) -> Option<MetricTo
         points: [point; 1],
         tags: final_tags,
     })
-}
-
-#[cfg(test)]
-#[derive(Debug, Clone)]
-pub enum ValueVariant {
-    DDSketch(DDSketch),
-    Value(f64),
 }
 
 fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
@@ -415,35 +361,52 @@ fn tags_string_to_vector(tags: Option<Ustr>) -> Vec<String> {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-mod tests {
-    use crate::config;
+pub(crate) mod tests {
     use crate::metrics::aggregator::{
         metric::{self, Metric},
-        Aggregator, ValueVariant,
+        Aggregator,
     };
-    use crate::tags::provider;
-    use crate::LAMBDA_RUNTIME_SLUG;
     use datadog_protos::metrics::SketchPayload;
     use hashbrown::hash_table;
     use protobuf::Message;
-    use std::collections::hash_map;
-    use std::sync::Arc;
+    use std::sync::Mutex;
+
+    const PRECISION: f64 = 0.000_000_01;
 
     const SINGLE_METRIC_SIZE: usize = 187;
     const SINGLE_DISTRIBUTION_SIZE: u64 = 135;
+    const DEFAULT_TAGS: &[&str] = &[
+        "dd_extension_version:63-next",
+        "architecture:x86_64",
+        "_dd.compute_stats:1",
+    ];
 
-    fn create_tags_provider() -> Arc<provider::Provider> {
-        let config = Arc::new(config::Config::default());
-        Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &hash_map::HashMap::new(),
-        ))
+    pub(crate) fn assert_value(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64) {
+        let aggregator = aggregator_mutex.lock().unwrap();
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), None) {
+            let metric = e.metric_value.get_value().unwrap();
+            assert!((metric - value).abs() < PRECISION);
+        } else {
+            panic!("{}", format!("{metric_id} not found"));
+        }
+    }
+
+    pub(crate) fn assert_sketch(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64) {
+        let aggregator = aggregator_mutex.lock().unwrap();
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), None) {
+            let metric = e.metric_value.get_sketch().unwrap();
+            assert!((metric.max().unwrap() - value).abs() < PRECISION);
+            assert!((metric.min().unwrap() - value).abs() < PRECISION);
+            assert!((metric.sum().unwrap() - value).abs() < PRECISION);
+            assert!((metric.avg().unwrap() - value).abs() < PRECISION);
+        } else {
+            panic!("{}", format!("{metric_id} not found"));
+        }
     }
 
     #[test]
     fn insertion() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -457,7 +420,7 @@ mod tests {
 
     #[test]
     fn distribution_insertion() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
@@ -471,7 +434,7 @@ mod tests {
 
     #[test]
     fn overflow() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -500,7 +463,7 @@ mod tests {
     #[test]
     #[allow(clippy::float_cmp)]
     fn clear() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 2).unwrap();
 
         let metric1 = Metric::parse("test:3|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:5|c|k:v").expect("metric parse failed");
@@ -509,14 +472,14 @@ mod tests {
         assert!(aggregator.insert(&metric2).is_ok());
 
         assert_eq!(aggregator.map.len(), 2);
-        if let Some(ValueVariant::Value(v)) = aggregator.get_value_by_id("foo".into(), None) {
-            assert_eq!(v, 5f64);
+        if let Some(v) = aggregator.get_entry_by_id("foo".into(), None) {
+            assert_eq!(v.metric_value.get_value().unwrap(), 5f64);
         } else {
             panic!("failed to get value by id");
         }
 
-        if let Some(ValueVariant::Value(v)) = aggregator.get_value_by_id("test".into(), None) {
-            assert_eq!(v, 3f64);
+        if let Some(v) = aggregator.get_entry_by_id("test".into(), None) {
+            assert_eq!(v.metric_value.get_value().unwrap(), 3f64);
         } else {
             panic!("failed to get value by id");
         }
@@ -527,7 +490,7 @@ mod tests {
 
     #[test]
     fn to_series() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|c|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|c|k:v").expect("metric parse failed");
@@ -548,7 +511,7 @@ mod tests {
 
     #[test]
     fn distributions_to_protobuf() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 2).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 2).unwrap();
 
         let metric1 = Metric::parse("test:1|d|k:v").expect("metric parse failed");
         let metric2 = Metric::parse("foo:1|d|k:v").expect("metric parse failed");
@@ -565,7 +528,7 @@ mod tests {
 
     #[test]
     fn consume_distributions_ignore_single_metrics() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 1_000).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 1_000).unwrap();
         assert_eq!(aggregator.distributions_to_protobuf().sketches.len(), 0);
 
         assert!(aggregator
@@ -586,7 +549,7 @@ mod tests {
         let max_batch = 5;
         let tot = 12;
         let mut aggregator = Aggregator {
-            tags_provider: create_tags_provider(),
+            tags: Vec::new(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
@@ -611,7 +574,11 @@ mod tests {
         let total_number_of_distributions = 5;
         let max_bytes = SINGLE_METRIC_SIZE * expected_distribution_per_batch + 11;
         let mut aggregator = Aggregator {
-            tags_provider: create_tags_provider(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
@@ -650,7 +617,11 @@ mod tests {
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
-            tags_provider: create_tags_provider(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: 1_000,
@@ -681,7 +652,7 @@ mod tests {
 
     #[test]
     fn consume_series_ignore_distribution() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 1_000).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 1_000).unwrap();
 
         assert_eq!(aggregator.consume_metrics().len(), 0);
 
@@ -712,7 +683,7 @@ mod tests {
         let max_batch = 5;
         let tot = 13;
         let mut aggregator = Aggregator {
-            tags_provider: create_tags_provider(),
+            tags: Vec::new(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: max_batch,
             max_batch_bytes_single_metric: 10_000,
@@ -739,7 +710,11 @@ mod tests {
         let two_metrics_size = 362;
         let max_bytes = SINGLE_METRIC_SIZE * expected_metrics_per_batch + 13;
         let mut aggregator = Aggregator {
-            tags_provider: create_tags_provider(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: max_bytes as u64,
@@ -774,7 +749,11 @@ mod tests {
         let max_bytes = 1;
         let tot = 5;
         let mut aggregator = Aggregator {
-            tags_provider: create_tags_provider(),
+            tags: DEFAULT_TAGS
+                .to_vec()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             map: hash_table::HashTable::new(),
             max_batch_entries_single_metric: 1_000,
             max_batch_bytes_single_metric: max_bytes,
@@ -797,7 +776,7 @@ mod tests {
 
     #[test]
     fn distribution_serialized_deserialized() {
-        let mut aggregator = Aggregator::new(create_tags_provider(), 1_000).unwrap();
+        let mut aggregator = Aggregator::new(Vec::new(), 1_000).unwrap();
 
         add_metrics(10, &mut aggregator, "d".to_string());
         let distribution = aggregator.distributions_to_protobuf();

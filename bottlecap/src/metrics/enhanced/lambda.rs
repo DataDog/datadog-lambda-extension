@@ -193,12 +193,7 @@ impl Lambda {
 mod tests {
     use super::*;
     use crate::config;
-    use crate::metrics::aggregator::ValueVariant;
-    use crate::tags::provider;
-    use crate::LAMBDA_RUNTIME_SLUG;
-    use ddsketch_agent::DDSketch;
-    use std::collections::hash_map::HashMap;
-    use std::sync::MutexGuard;
+    use crate::metrics::aggregator::tests::assert_sketch;
 
     fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
         let config = Arc::new(config::Config {
@@ -206,14 +201,10 @@ mod tests {
             tags: Some("test:tags".to_string()),
             ..config::Config::default()
         });
-        let tags_provider = Arc::new(provider::Provider::new(
-            Arc::clone(&config),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
+
         (
             Arc::new(Mutex::new(
-                Aggregator::new(tags_provider.clone(), 1024).expect("failed to create aggregator"),
+                Aggregator::new(Vec::new(), 1024).expect("failed to create aggregator"),
             )),
             config,
         )
@@ -225,14 +216,8 @@ mod tests {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         lambda.increment_invocation_metric();
-        match metrics_aggr
-            .lock()
-            .expect("lock poisoned")
-            .get_value_by_id(constants::INVOCATIONS_METRIC.into(), None)
-        {
-            Some(ValueVariant::DDSketch(pbuf)) => assert_eq!(1f64, pbuf.sum().unwrap()),
-            _ => panic!("failed to get value by id"),
-        };
+
+        assert_sketch(&metrics_aggr, constants::INVOCATIONS_METRIC, 1f64);
     }
 
     #[test]
@@ -241,14 +226,8 @@ mod tests {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         lambda.increment_errors_metric();
-        match metrics_aggr
-            .lock()
-            .expect("lock poisoned")
-            .get_value_by_id(constants::ERRORS_METRIC.into(), None)
-        {
-            Some(ValueVariant::DDSketch(pbuf)) => assert_eq!(1f64, pbuf.sum().unwrap()),
-            _ => panic!("failed to get value by id"),
-        };
+
+        assert_sketch(&metrics_aggr, constants::ERRORS_METRIC, 1f64);
     }
 
     #[test]
@@ -273,39 +252,39 @@ mod tests {
             init_duration_ms: Some(50.0),
             restore_duration_ms: None,
         });
-        let mut aggr = metrics_aggr.lock().expect("lock poisoned");
+        let aggr = metrics_aggr.lock().expect("lock poisoned");
         assert!(aggr
-            .get_value_by_id(constants::INVOCATIONS_METRIC.into(), None)
+            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::ERRORS_METRIC.into(), None)
+            .get_entry_by_id(constants::ERRORS_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::TIMEOUTS_METRIC.into(), None)
+            .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::INIT_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::RUNTIME_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::DURATION_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::BILLED_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None)
+            .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
+            .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
             .is_none());
         assert!(aggr
-            .get_value_by_id(constants::ESTIMATED_COST_METRIC.into(), None)
+            .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), None)
             .is_none());
     }
 
@@ -322,33 +301,11 @@ mod tests {
             restore_duration_ms: None,
         };
         lambda.set_report_log_metrics(&report_metrics);
-        let mut aggr = metrics_aggr.lock().expect("lock poisoned");
 
-        assert_value(
-            &mut aggr,
-            0.1,
-            vec![
-                constants::DURATION_METRIC,
-                constants::BILLED_DURATION_METRIC,
-            ],
-        );
+        assert_sketch(&metrics_aggr, constants::DURATION_METRIC, 0.1);
+        assert_sketch(&metrics_aggr, constants::BILLED_DURATION_METRIC, 0.1);
 
-        assert_value(&mut aggr, 128.0, vec![constants::MAX_MEMORY_USED_METRIC]);
-        assert_value(&mut aggr, 256.0, vec![constants::MEMORY_SIZE_METRIC]);
-    }
-
-    fn assert_value(aggr: &mut MutexGuard<Aggregator>, sketch_val: f64, metric_names: Vec<&str>) {
-        let mut ms_sketch = DDSketch::default();
-        ms_sketch.insert(sketch_val);
-
-        for a_metric_name in metric_names {
-            if let Some(ValueVariant::DDSketch(variant)) =
-                aggr.get_value_by_id(a_metric_name.into(), None)
-            {
-                assert_eq!(variant, ms_sketch);
-            } else {
-                panic!("failed to get {a_metric_name} by id");
-            }
-        }
+        assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0);
+        assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0);
     }
 }
