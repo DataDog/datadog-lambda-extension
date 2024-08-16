@@ -1,20 +1,36 @@
 pub mod flush_strategy;
 pub mod log_level;
-pub mod object_ignore;
 pub mod processing_rule;
 
 use std::path::Path;
 
+use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
 use serde::Deserialize;
 
 use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::LogLevel;
-use crate::config::object_ignore::ObjectIgnore;
 use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct YamlLogsConfig {
+    #[serde(deserialize_with = "deserialize_processing_rules")]
+    processing_rules: Option<Vec<ProcessingRule>>,
+}
+
+/// `YamlConfig` is a struct that represents some of the fields in the datadog.yaml file.
+///
+/// It is used to deserialize the datadog.yaml file into a struct that can be merged with the Config struct.
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct YamlConfig {
+    pub logs_config: YamlLogsConfig,
+}
+
 #[derive(Debug, PartialEq, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
 #[serde(default)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Config {
@@ -27,47 +43,22 @@ pub struct Config {
     pub version: Option<String>,
     pub tags: Option<String>,
     pub log_level: LogLevel,
-    pub serverless_logs_enabled: bool,
     #[serde(deserialize_with = "deserialize_processing_rules")]
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
-    pub apm_enabled: bool,
-    pub apm_replace_tags: Option<ObjectIgnore>,
-    pub lambda_handler: String,
     pub serverless_flush_strategy: FlushStrategy,
-    pub trace_enabled: bool,
-    pub serverless_trace_enabled: bool,
-    pub capture_lambda_payload: bool,
-    // ALL ENV VARS below are deprecated or not used by the extension
-    // just here so we don't failover
-    pub flush_to_log: bool,
-    pub logs_injection: bool,
-    pub merge_xray_traces: bool,
-    pub serverless_appsec_enabled: bool,
-    pub extension_version: Option<String>,
     pub enhanced_metrics: bool,
-    pub cold_start_tracing: bool,
-    pub min_cold_start_duration: String,
-    pub cold_start_trace_skip_lib: String,
-    pub service_mapping: Option<String>,
-    pub data_streams_enabled: bool,
-    pub trace_disabled_plugins: Option<String>,
-    pub trace_debug: bool,
+    // Failover
+    pub extension_version: Option<String>,
+    pub serverless_appsec_enabled: bool,
+    pub appsec_enabled: bool,
     pub profiling_enabled: bool,
-    pub git_commit_sha: Option<String>,
-    pub logs_enabled: bool,
-    pub app_key: Option<String>,
-    pub trace_sample_rate: Option<f64>,
-    pub dotnet_tracer_home: Option<String>,
-    pub trace_managed_services: bool,
-    pub runtime_metrics_enabled: bool,
-    pub git_repository_url: Option<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
             // General
-            site: "datadoghq.com".to_string(),
+            site: String::default(),
             api_key: String::default(),
             api_key_secret_arn: String::default(),
             kms_api_key: String::default(),
@@ -79,41 +70,14 @@ impl Default for Config {
             tags: None,
             // Logs
             log_level: LogLevel::default(),
-            logs_enabled: false, // IGNORED, this is the main agent config, but never used in
-            // severless
-            serverless_logs_enabled: true,
-            // TODO(duncanista): Add serializer for YAML
             logs_config_processing_rules: None,
-            // APM
-            apm_enabled: false,
-            apm_replace_tags: None,
-            trace_disabled_plugins: None,
-            lambda_handler: String::default(),
-            serverless_trace_enabled: true,
-            trace_enabled: true,
-            // Ignored by the extension for now
-            capture_lambda_payload: false,
-            flush_to_log: false,
-            logs_injection: false,
-            merge_xray_traces: false,
-            serverless_appsec_enabled: false,
-            cold_start_tracing: true,
-            min_cold_start_duration: String::default(),
-            cold_start_trace_skip_lib: String::default(),
+            // Metrics
+            enhanced_metrics: true,
             // Failover
             extension_version: None,
-            enhanced_metrics: true,
-            service_mapping: None,
-            data_streams_enabled: false,
-            trace_debug: false,
+            serverless_appsec_enabled: false,
+            appsec_enabled: false,
             profiling_enabled: false,
-            git_commit_sha: None,
-            app_key: None,
-            trace_sample_rate: None,
-            dotnet_tracer_home: None,
-            trace_managed_services: true,
-            runtime_metrics_enabled: false,
-            git_repository_url: None,
         }
     }
 }
@@ -132,26 +96,34 @@ fn log_failover_reason(reason: &str) {
 #[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path = config_directory.join("datadog.yaml");
+
+    // Get default config fields (and ENV specific ones)
     let figment = Figment::new()
-        // .merge(Yaml::file(path))
+        .merge(Yaml::file(&path))
         .merge(Env::prefixed("DATADOG_"))
         .merge(Env::prefixed("DD_"));
 
-    let config: Config = figment.extract().map_err(|err| match err.kind {
-        figment::error::Kind::UnknownField(field, _) => {
-            log_failover_reason(&field.clone());
-            ConfigError::UnsupportedField(field)
-        }
-        _ => ConfigError::ParseError(err.to_string()),
-    })?;
+    // Get YAML nested fields
+    let yaml_figment = Figment::new().merge(Yaml::file(&path));
 
-    // TODO(duncanista): revert to using datadog.yaml when we have a proper serializer
-    if path.exists() {
-        log_failover_reason("datadog_yaml");
-        return Err(ConfigError::UnsupportedField("datadog_yaml".to_string()));
+    let (mut config, yaml_config): (Config, YamlConfig) =
+        match (figment.extract(), yaml_figment.extract()) {
+            (Ok(env_config), Ok(yaml_config)) => (env_config, yaml_config),
+            (_, Err(err)) | (Err(err), _) => return Err(ConfigError::ParseError(err.to_string())),
+        };
+
+    // Set site if empty
+    if config.site.is_empty() {
+        config.site = "datadoghq.com".to_string();
     }
 
-    if config.serverless_appsec_enabled {
+    // Merge YAML nested fields
+    if let Some(processing_rules) = yaml_config.logs_config.processing_rules {
+        config.logs_config_processing_rules = Some(processing_rules);
+    }
+
+    // Failover
+    if config.serverless_appsec_enabled || config.appsec_enabled {
         log_failover_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
@@ -166,7 +138,6 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     match config.extension_version.as_deref() {
         Some("next") => {}
         Some(_) | None => {
-            log_failover_reason("extension_version");
             return Err(ConfigError::UnsupportedField(
                 "extension_version".to_string(),
             ));
@@ -196,7 +167,7 @@ pub mod tests {
     fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_APPSEC_ENABLED", "true");
+            jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
@@ -208,34 +179,48 @@ pub mod tests {
     }
 
     #[test]
-    fn test_reject_datadog_yaml() {
+    fn test_precedence() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
                 r"
-                apm_enabled: true
+                site: datadoghq.eu,
                 extension_version: next
             ",
             )?;
-            let config = get_config(Path::new("")).expect_err("should reject datadog.yaml file");
+            jail.set_env("DD_SITE", "datad0g.com");
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
-                ConfigError::UnsupportedField("datadog_yaml".to_string())
+                Config {
+                    site: "datad0g.com".to_string(),
+                    extension_version: Some("next".to_string()),
+                    ..Config::default()
+                }
             );
             Ok(())
         });
     }
 
     #[test]
-    fn test_reject_unknown_fields_env() {
+    fn test_parse_config_file() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_UNKNOWN_FIELD", "true");
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                extension_version: next
+            ",
+            )?;
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
-                ConfigError::UnsupportedField("unknown_field".to_string())
+                Config {
+                    extension_version: Some("next".to_string()),
+                    site: "datadoghq.com".to_string(),
+                    ..Config::default()
+                }
             );
             Ok(())
         });
@@ -258,13 +243,13 @@ pub mod tests {
     fn test_parse_env() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_APM_ENABLED", "true");
+            jail.set_env("DD_SITE", "datadoghq.eu");
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
-                    apm_enabled: true,
+                    site: "datadoghq.eu".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
@@ -282,6 +267,7 @@ pub mod tests {
             assert_eq!(
                 config,
                 Config {
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
@@ -301,6 +287,7 @@ pub mod tests {
                 config,
                 Config {
                     serverless_flush_strategy: FlushStrategy::End,
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
@@ -322,6 +309,7 @@ pub mod tests {
                     serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                         interval: 100_000
                     }),
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
@@ -340,6 +328,7 @@ pub mod tests {
             assert_eq!(
                 config,
                 Config {
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
@@ -361,6 +350,7 @@ pub mod tests {
             assert_eq!(
                 config,
                 Config {
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
@@ -388,6 +378,42 @@ pub mod tests {
                         pattern: "exclude".to_string(),
                         replace_placeholder: None
                     }]),
+                    site: "datadoghq.com".to_string(),
+                    extension_version: Some("next".to_string()),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_logs_config_processing_rules_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                extension_version: next
+                site: datadoghq.com
+                logs_config:
+                  processing_rules:
+                    - type: exclude_at_match
+                      name: exclude
+                      pattern: exclude
+            ",
+            )?;
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    logs_config_processing_rules: Some(vec![ProcessingRule {
+                        kind: processing_rule::Kind::ExcludeAtMatch,
+                        name: "exclude".to_string(),
+                        pattern: "exclude".to_string(),
+                        replace_placeholder: None
+                    }]),
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
@@ -409,7 +435,7 @@ pub mod tests {
             assert_eq!(
                 config,
                 Config {
-                    apm_replace_tags: Some(ObjectIgnore::Ignore),
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
