@@ -1,6 +1,5 @@
 pub mod flush_strategy;
 pub mod log_level;
-pub mod object_ignore;
 pub mod processing_rule;
 
 use std::path::Path;
