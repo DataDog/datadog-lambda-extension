@@ -56,7 +56,6 @@ RUN apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
-COPY ./scripts/serverless_init_dotnet.sh /extensions/dotnet.sh
 RUN strip /extensions/datadog-agent
 
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
