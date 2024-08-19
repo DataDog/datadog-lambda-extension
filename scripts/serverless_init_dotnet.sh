@@ -21,5 +21,5 @@ mkdir -p /dd_tracer/dotnet
 tar -xzf /tmp/datadog-dotnet-apm.tar.gz -C /dd_tracer/dotnet
 rm /tmp/datadog-dotnet-apm.tar.gz
 
-#Create Log path
+# Create Log path
 /dd_tracer/dotnet/createLogPath.sh
