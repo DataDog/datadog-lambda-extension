@@ -10,10 +10,10 @@ fi
 apt-get update && apt-get install -y curl
 
 # Get latest released version of dd-trace-dotnet
-TRACER_VERSION=$(curl -s https://api.github.com/repos/DataDog/dd-trace-dotnet/releases/latest | grep tag_name | cut -d '"' -f 4 | cut -c2-)
+TRACER_VERSION=$(curl -s https://api.github.com/repos/DataDog/dd-trace-dotnet/releases/latest | jq -r '.tag_name' | cut -d '"' -f 4 | cut -c2-)
 
 # Download the tracer to the dd_tracer folder
-echo Downloading version "${TRACER_VERSION}" of the .NET tracer into /tmp/datdog-dotnet-apm.tar.gz
+echo Downloading version "${TRACER_VERSION}" of the .NET tracer into /tmp/datadog-dotnet-apm.tar.gz
 curl -L "https://github.com/DataDog/dd-trace-dotnet/releases/download/v${TRACER_VERSION}/datadog-dotnet-apm-${TRACER_VERSION}.tar.gz" -o /tmp/datadog-dotnet-apm.tar.gz
 
 # Unarchive the tracer and remove the tmp
