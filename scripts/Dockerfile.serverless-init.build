@@ -3,6 +3,6 @@ COPY --from=busybox:1.35.0-uclibc /bin/sh /bin/sh
 ARG TARGETARCH
 
 COPY ./bin/datadog_extension-$TARGETARCH/extensions/datadog-agent /datadog-init
-COPY ./scripts/serverless_init_dotnet.sh /dotnet.sh
+COPY ./bin/serverless_init_dotnet.sh /dotnet.sh
 
 ENTRYPOINT ["/datadog-init"]
