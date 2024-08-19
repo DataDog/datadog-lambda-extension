@@ -2,3 +2,4 @@ FROM scratch
 ARG TARGETARCH
 
 COPY ./bin/datadog_extension-$TARGETARCH-alpine/extensions/datadog-agent /datadog-init
+COPY ./bin/datadog_extension-$TARGETARCH/extensions/dotnet.sh /datadog-init/dotnet.sh
