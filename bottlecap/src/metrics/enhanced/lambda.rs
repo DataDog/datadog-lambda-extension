@@ -1,7 +1,7 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
-use crate::metrics::aggregator::Aggregator;
-use crate::metrics::metric;
 use crate::telemetry::events::ReportMetrics;
+use dogstatsd::aggregator::Aggregator;
+use dogstatsd::metric;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use tracing::error;
@@ -193,7 +193,7 @@ impl Lambda {
 mod tests {
     use super::*;
     use crate::config;
-    use crate::metrics::aggregator::tests::assert_sketch;
+    use dogstatsd::aggregator::tests::assert_sketch;
 
     fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
         let config = Arc::new(config::Config {

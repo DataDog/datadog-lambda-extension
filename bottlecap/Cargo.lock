@@ -397,6 +397,7 @@ dependencies = [
  "datadog-trace-utils",
  "ddcommon",
  "ddsketch-agent",
+ "dogstatsd",
  "figment",
  "fnv",
  "hashbrown",
@@ -694,6 +695,26 @@ dependencies = [
  "libc",
  "redox_users",
  "winapi",
+]
+
+[[package]]
+name = "dogstatsd"
+version = "12.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=upstream-dogstatsd#3a47f8527bd72447b953aed5ed38a7e1b2a7147f"
+dependencies = [
+ "datadog-protos",
+ "ddsketch-agent",
+ "fnv",
+ "hashbrown",
+ "protobuf",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "ustr",
 ]
 
 [[package]]
