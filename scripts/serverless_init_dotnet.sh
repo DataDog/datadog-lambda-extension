@@ -10,7 +10,7 @@ fi
 apt-get update && apt-get install -y curl
 
 # Get latest released version of dd-trace-dotnet
-TRACER_VERSION=$(curl -s https://api.github.com/repos/DataDog/dd-trace-dotnet/releases/latest | jq -r '.tag_name')
+TRACER_VERSION=$(curl -s https://api.github.com/repos/DataDog/dd-trace-dotnet/releases/latest | grep 'tag_name' | cut -d '"' -f 4)
 TRACER_VERSION=${TRACER_VERSION#v} # remove the 'v' prefix
 
 # Download the tracer to the dd_tracer folder
