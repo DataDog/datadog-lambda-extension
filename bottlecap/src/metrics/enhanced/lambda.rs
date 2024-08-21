@@ -193,7 +193,7 @@ impl Lambda {
 mod tests {
     use super::*;
     use crate::config;
-    use dogstatsd::aggregator::tests::assert_sketch;
+    const PRECISION: f64 = 0.000_000_01;
 
     fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
         let config = Arc::new(config::Config {
@@ -208,6 +208,19 @@ mod tests {
             )),
             config,
         )
+    }
+
+    fn assert_sketch(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64) {
+        let aggregator = aggregator_mutex.lock().unwrap();
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), None) {
+            let metric = e.metric_value.get_sketch().unwrap();
+            assert!((metric.max().unwrap() - value).abs() < PRECISION);
+            assert!((metric.min().unwrap() - value).abs() < PRECISION);
+            assert!((metric.sum().unwrap() - value).abs() < PRECISION);
+            assert!((metric.avg().unwrap() - value).abs() < PRECISION);
+        } else {
+            panic!("{}", format!("{metric_id} not found"));
+        }
     }
 
     #[test]
