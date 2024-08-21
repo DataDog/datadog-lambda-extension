@@ -792,7 +792,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=upstream-dogstatsd#47531fde2272d3ae25ce854a7768e64ebd16f740"
+source = "git+https://github.com/DataDog/libdatadog?branch=upstream-dogstatsd#911f5de7fc7d7d857a53045c88e4a8400af7736d"
 dependencies = [
  "datadog-protos",
  "ddsketch-agent",
