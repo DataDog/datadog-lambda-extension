@@ -10,14 +10,7 @@ fi
 apt-get update && apt-get install -y curl
 
 # Get latest released version of dd-trace-dotnet
-TRACER_VERSION=$(curl -s https://api.github.com/repos/DataDog/dd-trace-dotnet/releases/latest | jq -r '.tag_name')
-if [ -z "$TRACER_VERSION" ] || [ "$TRACER_VERSION" = "null" ]; then
-    TRACER_VERSION="2.57.0"
-    echo "Failed to get the latest version of the .NET tracer. Falling back to default version $TRACER_VERSION."
-else
-    TRACER_VERSION=${TRACER_VERSION#v} # remove the 'v' prefix
-    echo "Latest version of the .NET tracer is ${TRACER_VERSION}."
-fi
+TRACER_VERSION=$(curl -s https://api.github.com/repos/DataDog/dd-trace-dotnet/releases/latest | jq -r '.tag_name' | cut -d '"' -f 4 | cut -c2-)
 
 # Download the tracer to the dd_tracer folder
 echo Downloading version "${TRACER_VERSION}" of the .NET tracer into /tmp/datadog-dotnet-apm.tar.gz
