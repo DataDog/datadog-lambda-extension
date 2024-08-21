@@ -18,12 +18,12 @@ use bottlecap::{
         flush_control::FlushControl,
         invocation_context::{InvocationContext, InvocationContextBuffer},
     },
-    metrics::enhanced::lambda::Lambda as enhanced_metrics,
     logger,
     logs::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
     },
+    metrics::enhanced::lambda::Lambda as enhanced_metrics,
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
     telemetry::{
@@ -43,14 +43,14 @@ use bottlecap::{
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
+use datadog_trace_obfuscation::obfuscation_config;
+use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
 };
-use datadog_trace_obfuscation::obfuscation_config;
-use decrypt::resolve_secrets;
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
