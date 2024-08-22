@@ -9,7 +9,7 @@ use figment::{providers::Env, Figment};
 use serde::Deserialize;
 
 use crate::config::flush_strategy::FlushStrategy;
-use crate::config::log_level::LogLevel;
+use crate::config::log_level::{deserialize_log_level, LogLevel};
 use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -42,6 +42,7 @@ pub struct Config {
     pub service: Option<String>,
     pub version: Option<String>,
     pub tags: Option<String>,
+    #[serde(deserialize_with = "deserialize_log_level")]
     pub log_level: LogLevel,
     #[serde(deserialize_with = "deserialize_processing_rules")]
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
@@ -250,6 +251,26 @@ pub mod tests {
                 config,
                 Config {
                     site: "datadoghq.eu".to_string(),
+                    extension_version: Some("next".to_string()),
+                    ..Config::default()
+                }
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_log_level() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_LOG_LEVEL", "TRACE");
+            jail.set_env("DD_EXTENSION_VERSION", "next");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(
+                config,
+                Config {
+                    log_level: LogLevel::Trace,
+                    site: "datadoghq.com".to_string(),
                     extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
