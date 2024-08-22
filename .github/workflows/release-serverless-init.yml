@@ -25,7 +25,7 @@ on:
         description: Datadog agent version
       agentBranch:
         type: string
-        description: Datadog agent branch name (default main)
+        description: Datadog agent branch or tag name (default main)
         default: "main"
 
 env:
