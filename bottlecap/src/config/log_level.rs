@@ -54,8 +54,8 @@ where
         "debug" => Ok(LogLevel::Debug),
         "trace" => Ok(LogLevel::Trace),
         _ => {
-            error!("Unknown log level: {}, using error", s);
-            Ok(LogLevel::Error)
+            error!("Unknown log level: {}, using warn", s);
+            Ok(LogLevel::Warn)
         }
     }
 }
