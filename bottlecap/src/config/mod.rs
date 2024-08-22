@@ -108,7 +108,7 @@ fn failsover(figment: &Figment) -> Result<(), ConfigError> {
 
     let opted_in = match failover_config.extension_version.as_deref() {
         Some("next") => true,
-        // Only log when the field is present but "next"
+        // Only log when the field is present but its not "next"
         Some(_) => {
             log_failover_reason("extension_version");
             false
