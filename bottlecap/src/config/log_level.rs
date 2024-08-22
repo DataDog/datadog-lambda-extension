@@ -42,6 +42,7 @@ impl LogLevel {
     }
 }
 
+#[allow(clippy::module_name_repetitions)]
 pub fn deserialize_log_level<'de, D>(deserializer: D) -> Result<LogLevel, D::Error>
 where
     D: Deserializer<'de>,
