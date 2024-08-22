@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: DataDog/datadog-agent
-          ref: refs/heads/${{ github.event.inputs.agentBranch }}
+          ref: ${{ github.event.inputs.agentBranch }}
           path: datadog-agent
 
       - name: Set up QEMU
