@@ -25,7 +25,7 @@ on:
         description: Datadog agent version
       agentBranch:
         type: string
-        description: Datadog agent branch name (default main)
+        description: Datadog agent branch or tag name (default main)
         default: "main"
 
 env:
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: DataDog/datadog-agent
-          ref: refs/heads/${{ github.event.inputs.agentBranch }}
+          ref: ${{ github.event.inputs.agentBranch }}
           path: datadog-agent
 
       - name: Set up QEMU
