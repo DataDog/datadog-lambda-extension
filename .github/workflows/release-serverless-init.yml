@@ -25,7 +25,7 @@ on:
         description: Datadog agent version
       agentBranch:
         type: string
-        description: Datadog agent branch name (default main)
+        description: Datadog agent branch or tag name (default main)
         default: "main"
 
 env:
@@ -74,33 +74,3 @@ jobs:
       - name: Set up tracer installation script
         run: |
           cp ./scripts/serverless_init_dotnet.sh ./scripts/bin/
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        id: docker_build
-        uses: docker/build-push-action@v6
-        with:
-          context: ./scripts
-          file: ./scripts/${{ matrix.arrays.dockerFile }}
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}${{ matrix.arrays.tagSuffix }}
-          provenance: false
-          platforms: linux/amd64,linux/arm64
-
-      - name: Build and push latest
-        id: docker_build_latest
-        uses: docker/build-push-action@v6
-        if: ${{ github.event.inputs.latestTag == 'yes' }}
-        with:
-          context: ./scripts
-          file: ./scripts/${{ matrix.arrays.dockerFile }}
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest${{ matrix.arrays.tagSuffix }}
-          provenance: false
-          platforms: linux/amd64,linux/arm64
