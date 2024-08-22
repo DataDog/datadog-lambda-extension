@@ -324,7 +324,6 @@ pub mod tests {
                 Config {
                     log_level: LogLevel::Trace,
                     site: "datadoghq.com".to_string(),
-                    extension_version: Some("next".to_string()),
                     ..Config::default()
                 }
             );
