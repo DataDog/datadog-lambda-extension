@@ -1,7 +1,7 @@
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
+use tracing::error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum LogLevel {
     /// Designates very serious errors.
     Error,
@@ -38,6 +38,25 @@ impl LogLevel {
             LogLevel::Info => log::LevelFilter::Info,
             LogLevel::Debug => log::LevelFilter::Debug,
             LogLevel::Trace => log::LevelFilter::Trace,
+        }
+    }
+}
+
+#[allow(clippy::module_name_repetitions)]
+pub fn deserialize_log_level<'de, D>(deserializer: D) -> Result<LogLevel, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    match s.to_lowercase().as_str() {
+        "error" => Ok(LogLevel::Error),
+        "warn" => Ok(LogLevel::Warn),
+        "info" => Ok(LogLevel::Info),
+        "debug" => Ok(LogLevel::Debug),
+        "trace" => Ok(LogLevel::Trace),
+        _ => {
+            error!("Unknown log level: {}, using warn", s);
+            Ok(LogLevel::Warn)
         }
     }
 }
