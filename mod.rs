@@ -125,6 +125,13 @@ fn failsover(figment: &Figment) -> Result<(), ConfigError> {
         ));
     }
 
+    let datadog_wrapper_set =
+        std::env::var("AWS_LAMBDA_EXEC_WRAPPER").unwrap_or_default() == "/opt/datadog_wrapper";
+    if datadog_wrapper_set {
+        log_failover_reason("datadog_wrapper");
+        return Err(ConfigError::UnsupportedField("datadog_wrapper".to_string()));
+    }
+
     if failover_config.serverless_appsec_enabled || failover_config.appsec_enabled {
         log_failover_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
@@ -212,6 +219,22 @@ pub mod tests {
             assert_eq!(
                 config,
                 ConfigError::UnsupportedField("extension_version".to_string())
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_reject_datadog_wrapper() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_EXTENSION_VERSION", "next");
+            jail.set_env("AWS_LAMBDA_EXEC_WRAPPER", "/opt/datadog_wrapper");
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("datadog_wrapper".to_string())
             );
             Ok(())
         });
