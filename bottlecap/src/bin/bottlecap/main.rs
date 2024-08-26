@@ -17,7 +17,7 @@ use bottlecap::{
     lifecycle::{
         flush_control::FlushControl,
         invocation_context::{InvocationContext, InvocationContextBuffer},
-        listener::Listener as LifecycleListener
+        listener::Listener as LifecycleListener,
     },
     logger,
     logs::{
