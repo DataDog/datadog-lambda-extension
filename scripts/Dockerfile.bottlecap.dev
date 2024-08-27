@@ -25,7 +25,7 @@ ARG DATADOG_WRAPPER=datadog_wrapper
 
 RUN apt-get update
 RUN apt-get install -y zip binutils
-COPY --from=public.ecr.aws/datadog/lambda-extension:57 /opt/extensions/datadog-agent  /datadog-agent-go
+COPY --from=public.ecr.aws/datadog/lambda-extension:64 /opt/datadog-agent-go  /datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 
