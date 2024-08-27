@@ -17,6 +17,7 @@ use bottlecap::{
     lifecycle::{
         flush_control::FlushControl,
         invocation_context::{InvocationContext, InvocationContextBuffer},
+        listener::Listener as LifecycleListener,
     },
     logger,
     logs::{
@@ -33,7 +34,6 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-        hello_agent,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
@@ -318,7 +318,7 @@ async fn extension_loop_active(
         trace_flusher: trace_flusher_clone,
         stats_processor,
         stats_flusher: stats_flusher_clone,
-        tags_provider,
+        tags_provider: Arc::clone(&tags_provider),
     });
     tokio::spawn(async move {
         let res = trace_agent.start_trace_agent().await;
@@ -326,9 +326,13 @@ async fn extension_loop_active(
             error!("Error starting trace agent: {e:?}");
         }
     });
+
+    let lifecycle_listener = LifecycleListener {
+        tags_provider: Arc::clone(&tags_provider),
+    };
     // TODO(astuyve): deprioritize this task after the first request
     tokio::spawn(async move {
-        let res = hello_agent::start_handler().await;
+        let res = lifecycle_listener.start().await;
         if let Err(e) = res {
             error!("Error starting hello agent: {e:?}");
         }
