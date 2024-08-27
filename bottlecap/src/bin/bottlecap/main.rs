@@ -465,6 +465,9 @@ async fn extension_loop_active(
                         trace_flusher.manual_flush(),
                         stats_flusher.manual_flush()
                     );
+                    if !flush_control.should_flush_end() {
+                        break;
+                    }
                 }
             }
         }

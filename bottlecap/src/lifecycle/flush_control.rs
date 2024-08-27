@@ -8,16 +8,10 @@ pub struct FlushControl {
     flush_strategy: FlushStrategy,
 }
 
-// FlushControl is called at the end of every invocation and decides whether or not we should flush
-// The flushing logic is complex and depends on the flush strategy
 // 1. Default Strategy
-//   - Flush at the end of the first 20 invocations
-//   - We keep track of the last 20 invocations and calculate the frequency.
-//     - If the duration from the last invocation to the 20th is less than 2 minutes, switch to
-//     periodic flush every 20s
-//     - else, flush at the end of the invocation
+//   - Flush every 1s and at the end of the invocation
 //  2. Periodic Strategy
-//      - User specifies the interval in milliseconds
+//      - User specifies the interval in milliseconds, will not block on the runtimeDone event
 //  3. End strategy
 //      - Always flush at the end of the invocation
 impl FlushControl {
