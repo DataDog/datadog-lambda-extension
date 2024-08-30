@@ -55,13 +55,11 @@ cd ./local_tests
 cp ../.layers/datadog_extension-$ARCHITECTURE/extensions/datadog-agent .
 
 # Build the recorder extension which will act as a man-in-a-middle to intercept payloads sent to Datadog
-cd ../../datadog-agent/test/integration/serverless/recorder-extension
+cd ../../datadog-agent/test/integration/serverless
 
-if [ `uname -o` == "GNU/Linux" ]; then
-      CGO_ENABLED=0 GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
-    else
-      GOOS=linux GOARCH=$ARCHITECTURE go build -o "$CURRENT_PATH/local_tests/recorder-extension" main.go
-fi
+ARCHITECTURE=$ARCHITECTURE ./build_recorder.sh
+echo "Extractung recordering-extension executable into $CURRENT_PATH/local_tests"
+unzip -j -o ./recorder-extension/ext.zip "extensions/recorder-extension" -d $CURRENT_PATH/local_tests
 
 cd "$CURRENT_PATH/local_tests"
 if [ -z "$LAYER_PATH" ] && [ -n "$LAYER_NAME" ]; then

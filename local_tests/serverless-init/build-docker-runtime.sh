@@ -19,7 +19,8 @@ fi
 
 DOCKERFILE=serverless-init-python.Dockerfile
 
-SCRIPTS_ROOT=../..
+CURRENT_PATH=$(pwd)
+SCRIPTS_ROOT=$(dirname "$(dirname "$CURRENT_PATH")")
 
 # Build the extension
 SERVERLESS_INIT=true ARCHITECTURE=$ARCHITECTURE VERSION=1 $SCRIPTS_ROOT/scripts/build_binary_and_layer_dockerized.sh
@@ -28,13 +29,11 @@ SERVERLESS_INIT=true ARCHITECTURE=$ARCHITECTURE VERSION=1 $SCRIPTS_ROOT/scripts/
 cp $SCRIPTS_ROOT/.layers/datadog_extension-$ARCHITECTURE/extensions/datadog-agent .
 
 # Build the recorder extension which will act as a man-in-a-middle to intercept payloads sent to Datadog
-cd $SCRIPTS_ROOT/../datadog-agent/test/integration/serverless/recorder-extension
+cd $SCRIPTS_ROOT/../datadog-agent/test/integration/serverless
 
-if [ $(uname -o) == "GNU/Linux" ]; then
-  CGO_ENABLED=0 GOOS=linux GOARCH=$ARCHITECTURE go build -o "$SCRIPTS_ROOT/local_tests/recorder-extension" main.go
-else
-  GOOS=linux GOARCH=$ARCHITECTURE go build -o "$SCRIPTS_ROOT/local_tests/recorder-extension" main.go
-fi
+ARCHITECTURE=$ARCHITECTURE ./build_recorder.sh
+echo "Extracting recordering-extension executable into $SCRIPTS_ROOT/local_tests"
+unzip -j -o ./recorder-extension/ext.zip "extensions/recorder-extension" -d $SCRIPTS_ROOT/local_tests
 
 cd -
 
