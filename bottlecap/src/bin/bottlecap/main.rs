@@ -19,10 +19,7 @@ use bottlecap::{
         invocation_context::{InvocationContext, InvocationContextBuffer},
     },
     logger,
-    logs::{
-        agent::LogsAgent,
-        flusher::Flusher as LogsFlusher,
-    },
+    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     metrics::{
         aggregator::Aggregator as MetricsAggregator,
         constants::CONTEXTS,
