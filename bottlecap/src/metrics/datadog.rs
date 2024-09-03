@@ -34,19 +34,13 @@ pub enum ShipError {
     Json(#[from] serde_json::Error),
 }
 
-#[inline]
-#[must_use]
-fn build_fqdn_metrics(site: String) -> String {
-    format!("https://api.{site}")
-}
-
 impl DdApi {
     #[must_use]
-    pub fn new(api_key: String, config: Arc<Config>) -> Self {
+    pub fn new(api_key: String, config: Arc<Config>, site: String) -> Self {
         let client = http_client::get_client(config.clone());
         DdApi {
             api_key,
-            fqdn_site: build_fqdn_metrics(config.site.clone()),
+            fqdn_site: site,
             client,
         }
     }

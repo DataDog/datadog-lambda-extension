@@ -14,7 +14,7 @@ pub struct Flusher {
 
 #[inline]
 #[must_use]
-fn build_fqdn_logs(site: String) -> String {
+pub fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
 }
 
@@ -24,11 +24,12 @@ impl Flusher {
         api_key: String,
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
+        site: String,
     ) -> Self {
         let client = http_client::get_client(config.clone());
         Flusher {
             api_key,
-            fqdn_site: build_fqdn_logs(config.site.clone()),
+            fqdn_site: site,
             client,
             aggregator,
         }

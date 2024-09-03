@@ -29,10 +29,7 @@ async fn test_enhanced_metrics() {
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });
 
-    let arc_config = Arc::new(Config {
-        site: server.base_url(),
-        ..Config::default()
-    });
+    let arc_config = Arc::new(Config::default());
 
     let metrics_aggr = Arc::new(Mutex::new(
         MetricsAggregator::new(vec!["aTagKey:aTagValue".to_string()], 1024)
@@ -41,7 +38,8 @@ async fn test_enhanced_metrics() {
     let mut metrics_flusher = MetricsFlusher::new(
         dd_api_key.to_string(),
         metrics_aggr.clone(),
-        arc_config.clone(),
+        Arc::clone(&arc_config),
+        server.base_url(),
     );
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(&arc_config));

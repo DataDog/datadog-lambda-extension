@@ -37,10 +37,7 @@ async fn test_logs() {
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });
 
-    let arc_conf = Arc::new(Config {
-        site: server.base_url(),
-        ..Config::default()
-    });
+    let arc_conf = Arc::new(Config::default());
     let tags_provider = Arc::new(Provider::new(
         Arc::clone(&arc_conf),
         LAMBDA_RUNTIME_SLUG.to_string(),
@@ -53,7 +50,8 @@ async fn test_logs() {
     let logs_flusher = LogsFlusher::new(
         dd_api_key.to_string(),
         Arc::clone(&logs_agent.aggregator),
-        arc_conf.clone(),
+        Arc::clone(&arc_conf),
+        server.base_url(),
     );
 
     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(
