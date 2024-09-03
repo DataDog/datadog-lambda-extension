@@ -21,14 +21,14 @@ use bottlecap::{
     logger,
     logs::{
         agent::LogsAgent,
-        flusher::{build_fqdn_logs, Flusher as LogsFlusher},
+        flusher::Flusher as LogsFlusher,
     },
     metrics::{
         aggregator::Aggregator as MetricsAggregator,
         constants::CONTEXTS,
         dogstatsd::{DogStatsD, DogStatsDConfig},
         enhanced::lambda::Lambda as enhanced_metrics,
-        flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
+        flusher::Flusher as MetricsFlusher,
     },
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
