@@ -1,10 +1,13 @@
 //!Types to serialize data into the Datadog API
 
+use crate::config::Config;
+use crate::http_client;
 use datadog_protos::metrics::SketchPayload;
 use protobuf::Message;
 use reqwest;
 use serde::{Serialize, Serializer};
 use serde_json;
+use std::sync::Arc;
 use tracing::{debug, error};
 
 /// Interface for the `DogStatsD` metrics intake API.
@@ -31,13 +34,20 @@ pub enum ShipError {
     Json(#[from] serde_json::Error),
 }
 
+#[inline]
+#[must_use]
+fn build_fqdn_metrics(site: String) -> String {
+    format!("https://api.{site}")
+}
+
 impl DdApi {
     #[must_use]
-    pub fn new(api_key: String, site: String) -> Self {
+    pub fn new(api_key: String, config: Arc<Config>) -> Self {
+        let client = http_client::get_client(config.clone());
         DdApi {
             api_key,
-            fqdn_site: site,
-            client: reqwest::Client::new(),
+            fqdn_site: build_fqdn_metrics(config.site.clone()),
+            client,
         }
     }
 

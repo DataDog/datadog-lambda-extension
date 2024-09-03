@@ -61,6 +61,8 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
+    pub http_proxy: Option<String>,
+    pub https_proxy: Option<String>,
 }
 
 impl Default for Config {
@@ -72,6 +74,8 @@ impl Default for Config {
             api_key_secret_arn: String::default(),
             kms_api_key: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
+            http_proxy: None,
+            https_proxy: None,
             // Unified Tagging
             env: None,
             service: None,

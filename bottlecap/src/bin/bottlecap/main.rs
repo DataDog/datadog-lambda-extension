@@ -273,7 +273,7 @@ async fn extension_loop_active(
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
         Arc::clone(&metrics_aggr),
-        build_fqdn_metrics(config.site.clone()),
+        config.clone(),
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
@@ -515,7 +515,7 @@ fn start_logs_agent(
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
         Arc::clone(&logs_agent.aggregator),
-        build_fqdn_logs(config.site.clone()),
+        config.clone(),
     );
     tokio::spawn(async move {
         logs_agent.spin().await;

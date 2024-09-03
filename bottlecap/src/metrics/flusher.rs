@@ -1,3 +1,4 @@
+use crate::config::Config;
 use crate::metrics::aggregator::Aggregator;
 use crate::metrics::datadog;
 use std::sync::{Arc, Mutex};
@@ -7,16 +8,10 @@ pub struct Flusher {
     aggregator: Arc<Mutex<Aggregator>>,
 }
 
-#[inline]
-#[must_use]
-pub fn build_fqdn_metrics(site: String) -> String {
-    format!("https://api.{site}")
-}
-
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
-        let dd_api = datadog::DdApi::new(api_key, site);
+    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, config: Arc<Config>) -> Self {
+        let dd_api = datadog::DdApi::new(api_key, config);
         Flusher { dd_api, aggregator }
     }
 
