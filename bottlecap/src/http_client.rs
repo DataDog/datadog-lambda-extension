@@ -16,13 +16,14 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
 }
 
 fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest::Error> {
+    let client = reqwest::Client::builder();
     if let Some(http_uri) = &config.http_proxy {
         let proxy = reqwest::Proxy::http(http_uri.clone())?;
-        reqwest::Client::builder().proxy(proxy).build()
+        client.proxy(proxy).build()
     } else if let Some(https_uri) = &config.https_proxy {
         let proxy = reqwest::Proxy::https(https_uri.clone())?;
-        reqwest::Client::builder().proxy(proxy).build()
+        client.proxy(proxy).build()
     } else {
-        Ok(reqwest::Client::new())
+        client.build()
     }
 }
