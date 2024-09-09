@@ -3,8 +3,9 @@
 
 use crate::tags::provider;
 use datadog_trace_obfuscation::obfuscation_config;
+use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
-use datadog_trace_utils::tracer_payload::TraceEncoding;
+use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TraceEncoding};
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -40,6 +41,30 @@ pub trait TraceProcessor {
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     pub resolved_api_key: String,
+}
+
+struct ChunkProcessor {
+    obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
+    tags_provider: Arc<provider::Provider>,
+}
+
+impl TraceChunkProcessor for ChunkProcessor {
+    fn process(&mut self, chunk: &mut pb::TraceChunk, _index: usize) {
+        chunk.spans.retain(|span| {
+            (span.resource != "127.0.0.1" || span.resource != "0.0.0.0")
+                && span.name != "dns.lookup"
+        });
+        for span in &mut chunk.spans {
+            self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
+                span.meta.insert(k.clone(), v.clone());
+            });
+            // TODO(astuyve) generalize this and delegate to an enum
+            span.meta.insert("origin".to_string(), "lambda".to_string());
+            span.meta
+                .insert("_dd.origin".to_string(), "lambda".to_string());
+            obfuscate_span(span, &self.obfuscation_config);
+        }
+    }
 }
 
 #[async_trait]
@@ -91,21 +116,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let payload = trace_utils::collect_trace_chunks(
             traces,
             &tracer_header_tags,
-            |chunk, _root_span_index| {
-                chunk.spans.retain(|span| {
-                    (span.resource != "127.0.0.1" || span.resource != "0.0.0.0")
-                        && span.name != "dns.lookup"
-                });
-                for span in &mut chunk.spans {
-                    tags_provider.get_tags_map().iter().for_each(|(k, v)| {
-                        span.meta.insert(k.clone(), v.clone());
-                    });
-                    // TODO(astuyve) generalize this and delegate to an enum
-                    span.meta.insert("origin".to_string(), "lambda".to_string());
-                    span.meta
-                        .insert("_dd.origin".to_string(), "lambda".to_string());
-                    obfuscate_span(span, &self.obfuscation_config);
-                }
+            &mut ChunkProcessor {
+                obfuscation_config: self.obfuscation_config.clone(),
+                tags_provider: tags_provider.clone(),
             },
             true,
             TraceEncoding::V07,
@@ -114,6 +127,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
+            timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            test_token: None,
         };
 
         let send_data = SendData::new(body_size, payload, tracer_header_tags, &endpoint);

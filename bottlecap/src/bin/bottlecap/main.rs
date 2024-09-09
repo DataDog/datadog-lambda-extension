@@ -23,13 +23,7 @@ use bottlecap::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
     },
-    metrics::{
-        aggregator::Aggregator as MetricsAggregator,
-        constants::CONTEXTS,
-        dogstatsd::{DogStatsD, DogStatsDConfig},
-        enhanced::lambda::Lambda as enhanced_metrics,
-        flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
-    },
+    metrics::enhanced::lambda::Lambda as enhanced_metrics,
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
     telemetry::{
@@ -51,6 +45,12 @@ use bottlecap::{
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
+use dogstatsd::{
+    aggregator::Aggregator as MetricsAggregator,
+    constants::CONTEXTS,
+    dogstatsd::{DogStatsD, DogStatsDConfig},
+    flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
+};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
