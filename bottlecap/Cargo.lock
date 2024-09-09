@@ -469,6 +469,7 @@ dependencies = [
  "rmp",
  "rmp-serde",
  "rmpv",
+ "rustls",
  "serde",
  "serde_json",
  "serial_test",
