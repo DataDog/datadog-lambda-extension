@@ -445,14 +445,14 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "chrono",
- "datadog-protos",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/)",
  "datadog-trace-mini-agent",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
  "datadog-trace-protobuf",
  "datadog-trace-utils",
  "ddcommon",
- "ddsketch-agent",
+ "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/)",
  "dogstatsd",
  "figment",
  "fnv",
@@ -641,6 +641,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "datadog-protos"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/saluki-backport/#a3e224b2da67f5e4a65e33703aaaa469a3bd3924"
+dependencies = [
+ "bytes",
+ "prost 0.13.1",
+ "protobuf",
+ "protobuf-codegen",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
 name = "datadog-trace-mini-agent"
 version = "12.0.0"
 source = "git+https://github.com/DataDog/libdatadog#df81898686ed76cba7f9b42a1f071a8620d9c552"
@@ -751,7 +764,18 @@ name = "ddsketch-agent"
 version = "0.1.0"
 source = "git+https://github.com/DataDog/saluki/#6a70c394a927a215f047c470d57b5d3f50c64ad6"
 dependencies = [
- "datadog-protos",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/)",
+ "float_eq",
+ "ordered-float",
+ "smallvec",
+]
+
+[[package]]
+name = "ddsketch-agent"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/saluki-backport/#a3e224b2da67f5e4a65e33703aaaa469a3bd3924"
+dependencies = [
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
  "float_eq",
  "ordered-float",
  "smallvec",
@@ -792,10 +816,10 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=upstream-dogstatsd#5ea7c412bfa7d72e414233b4705299e6eca0b269"
+source = "git+https://github.com/DataDog/libdatadog?branch=main#40ca981375583a59d8a83aeb3a8c3eb71177603e"
 dependencies = [
- "datadog-protos",
- "ddsketch-agent",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
+ "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
  "fnv",
  "hashbrown",
  "protobuf",
