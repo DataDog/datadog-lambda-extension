@@ -41,6 +41,7 @@ base64 = { version = "0.22.0", default-features = false }
 rmp-serde = { version = "1.3.0", default-features = false }
 rmpv = { version = "1.3.0", default-features = false }
 rmp = { version = "0.8.14", default-features = false }
+rustls = { version = "0.23.12", default-features = false, features = ["aws-lc-rs"] }
 
 [dev-dependencies]
 figment = { version = "0.10.15", default-features = false, features = ["yaml", "env", "test"] }
