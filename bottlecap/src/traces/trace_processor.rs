@@ -123,7 +123,7 @@ mod tests {
     fn create_test_config() -> Arc<Config> {
         Arc::new(Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tag,env:test".to_string()),
+            tags: Some("test:tag,env:test-env".to_string()),
             ..Config::default()
         })
     }
@@ -179,46 +179,16 @@ mod tests {
         span
     }
 
-    fn create_test_json_span(
-        trace_id: u64,
-        span_id: u64,
-        parent_id: u64,
-        start: i64,
-    ) -> serde_json::Value {
-        json!(
-            {
-                "trace_id": trace_id,
-                "span_id": span_id,
-                "service": "test-service",
-                "name": "test_name",
-                "resource": "test-resource",
-                "parent_id": parent_id,
-                "start": start,
-                "duration": 5,
-                "error": 0,
-                "meta": {
-                    "service": "test-service",
-                    "env": "test-env",
-                    "runtime-id": "test-runtime-id-value",
-                },
-                "metrics": {},
-                "meta_struct": {},
-            }
-        )
-    }
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
     #[cfg_attr(miri, ignore)]
     async fn test_process_trace() {
         let start = get_current_timestamp_nanos();
 
-        let json_span = create_test_json_span(11, 222, 333, start);
+        let tags_provider = create_tags_provider(create_test_config());
+        let span = create_test_span(11, 222, 333, start, true, tags_provider);
 
-        let json_bytes = serde_json::to_vec(&json_span).expect("invalid json span");
-        let span: pb::Span =
-            rmp_serde::from_slice(&json_bytes).expect("couldnt convert to proto span");
-
-        let traces: Vec<Vec<pb::Span>> = vec![vec![span]];
+        let traces: Vec<Vec<pb::Span>> = vec![vec![span.clone()]];
 
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "nodejs",
@@ -248,8 +218,8 @@ mod tests {
             runtime_id: "test-runtime-id-value".to_string(),
             chunks: vec![pb::TraceChunk {
                 priority: i32::from(i8::MIN),
-                origin: String::new(),
-                spans: vec![create_test_span(11, 222, 333, start, true, tags_provider)],
+                origin: "lambda".to_string(),
+                spans: vec![span.clone()],
                 tags: HashMap::new(),
                 dropped_trace: false,
             }],
