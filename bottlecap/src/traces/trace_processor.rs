@@ -96,7 +96,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
 #[cfg(test)]
 mod tests {
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-    use serde_json::json;
     use std::{
         collections::HashMap,
         sync::Arc,
