@@ -5,37 +5,19 @@ use crate::tags::provider;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
+use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TraceEncoding};
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use hyper::{http, Body, Request, Response, StatusCode};
-use tokio::sync::mpsc::Sender;
 use tracing::debug;
 
 use crate::config;
-use datadog_trace_mini_agent::http_utils::{self, log_and_create_http_response};
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
 
-use super::trace_agent::{ApiVersion, MAX_CONTENT_LENGTH};
-
-#[async_trait]
-pub trait TraceProcessor {
-    /// Deserializes traces from a hyper request body and sends them through the provided tokio mpsc
-    /// Sender.
-    async fn process_traces(
-        &self,
-        config: Arc<config::Config>,
-        req: Request<Body>,
-        tx: Sender<trace_utils::SendData>,
-        tags_provider: Arc<provider::Provider>,
-        version: ApiVersion,
-    ) -> http::Result<Response<Body>>;
-}
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
@@ -67,55 +49,31 @@ impl TraceChunkProcessor for ChunkProcessor {
     }
 }
 
-#[async_trait]
-impl TraceProcessor for ServerlessTraceProcessor {
-    async fn process_traces(
+#[allow(clippy::module_name_repetitions)]
+pub trait TraceProcessor {
+    fn process_traces(
         &self,
         config: Arc<config::Config>,
-        req: Request<Body>,
-        tx: Sender<trace_utils::SendData>,
         tags_provider: Arc<provider::Provider>,
-        version: ApiVersion,
-    ) -> http::Result<Response<Body>> {
+        header_tags: tracer_header_tags::TracerHeaderTags,
+        traces: Vec<Vec<pb::Span>>,
+        body_size: usize,
+    ) -> SendData;
+}
+
+impl TraceProcessor for ServerlessTraceProcessor {
+    fn process_traces(
+        &self,
+        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        header_tags: tracer_header_tags::TracerHeaderTags,
+        traces: Vec<Vec<pb::Span>>,
+        body_size: usize,
+    ) -> SendData {
         debug!("Received traces to process");
-        let (parts, body) = req.into_parts();
-
-        if let Some(response) = http_utils::verify_request_content_length(
-            &parts.headers,
-            MAX_CONTENT_LENGTH,
-            "Error processing traces",
-        ) {
-            return response;
-        }
-
-        let tracer_header_tags = (&parts.headers).into();
-
-        // deserialize traces from the request body, convert to protobuf structs (see trace-protobuf
-        // crate)
-        let (body_size, traces) = match version {
-            ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
-                Ok(result) => result,
-                Err(err) => {
-                    return log_and_create_http_response(
-                        &format!("Error deserializing trace from request body: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    );
-                }
-            },
-            ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(body).await {
-                Ok(result) => result,
-                Err(err) => {
-                    return log_and_create_http_response(
-                        &format!("Error deserializing trace from request body: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    );
-                }
-            },
-        };
-
         let payload = trace_utils::collect_trace_chunks(
             traces,
-            &tracer_header_tags,
+            &header_tags,
             &mut ChunkProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
@@ -131,44 +89,26 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        let send_data = SendData::new(body_size, payload, tracer_header_tags, &endpoint);
-
-        // send trace payload to our trace flusher
-        match tx.send(send_data).await {
-            Ok(()) => {
-                return log_and_create_http_response(
-                    "Successfully buffered traces to be flushed.",
-                    StatusCode::ACCEPTED,
-                );
-            }
-            Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error sending traces to the trace flusher: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        }
+        SendData::new(body_size, payload, header_tags, &endpoint)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-    use hyper::Request;
     use serde_json::json;
     use std::{
         collections::HashMap,
         sync::Arc,
         time::{SystemTime, UNIX_EPOCH},
     };
-    use tokio::sync::mpsc::{self, Receiver, Sender};
 
     use crate::config::Config;
     use crate::tags::provider::Provider;
     use crate::traces::trace_processor::{self, TraceProcessor};
     use crate::LAMBDA_RUNTIME_SLUG;
     use datadog_trace_protobuf::pb;
-    use datadog_trace_utils::{trace_utils, tracer_payload::TracerPayloadCollection};
+    use datadog_trace_utils::{tracer_header_tags, tracer_payload::TracerPayloadCollection};
 
     fn get_current_timestamp_nanos() -> i64 {
         i64::try_from(
@@ -270,25 +210,26 @@ mod tests {
     #[allow(clippy::unwrap_used)]
     #[cfg_attr(miri, ignore)]
     async fn test_process_trace() {
-        let (tx, mut rx): (
-            Sender<trace_utils::SendData>,
-            Receiver<trace_utils::SendData>,
-        ) = mpsc::channel(1);
-
         let start = get_current_timestamp_nanos();
 
         let json_span = create_test_json_span(11, 222, 333, start);
 
-        let bytes = rmp_serde::to_vec(&vec![vec![json_span]]).expect("invalid json");
-        let request = Request::builder()
-            .header("datadog-meta-tracer-version", "4.0.0")
-            .header("datadog-meta-lang", "nodejs")
-            .header("datadog-meta-lang-version", "v19.7.0")
-            .header("datadog-meta-lang-interpreter", "v8")
-            .header("datadog-container-id", "33")
-            .header("content-length", "100")
-            .body(hyper::body::Body::from(bytes))
-            .expect("fail to build request");
+        let json_bytes = serde_json::to_vec(&json_span).expect("invalid json span");
+        let span: pb::Span =
+            rmp_serde::from_slice(&json_bytes).expect("couldnt convert to proto span");
+
+        let traces: Vec<Vec<pb::Span>> = vec![vec![span]];
+
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "nodejs",
+            lang_version: "v19.7.0",
+            lang_interpreter: "v8",
+            lang_vendor: "vendor",
+            tracer_version: "4.0.0",
+            container_id: "33",
+            client_computed_top_level: false,
+            client_computed_stats: false,
+        };
 
         let trace_processor = trace_processor::ServerlessTraceProcessor {
             resolved_api_key: "foo".to_string(),
@@ -296,20 +237,8 @@ mod tests {
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
-        let res = trace_processor
-            .process_traces(
-                config,
-                request,
-                tx,
-                tags_provider.clone(),
-                crate::traces::trace_agent::ApiVersion::V04,
-            )
-            .await;
-        assert!(res.is_ok());
-
-        let tracer_payload = rx.recv().await;
-
-        assert!(tracer_payload.is_some());
+        let tracer_payload =
+            trace_processor.process_traces(config, tags_provider.clone(), header_tags, traces, 100);
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
@@ -330,13 +259,12 @@ mod tests {
             app_version: String::new(),
         };
 
-        let received_payload = if let TracerPayloadCollection::V07(payload) =
-            tracer_payload.expect("no payload").get_payloads()
-        {
-            Some(payload[0].clone())
-        } else {
-            None
-        };
+        let received_payload =
+            if let TracerPayloadCollection::V07(payload) = tracer_payload.get_payloads() {
+                Some(payload[0].clone())
+            } else {
+                None
+            };
 
         assert_eq!(
             expected_tracer_payload,
