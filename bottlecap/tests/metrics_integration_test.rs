@@ -1,7 +1,7 @@
 use bottlecap::config::Config;
-use bottlecap::metrics::aggregator::Aggregator as MetricsAggregator;
 use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
-use bottlecap::metrics::flusher::Flusher as MetricsFlusher;
+use dogstatsd::aggregator::Aggregator as MetricsAggregator;
+use dogstatsd::flusher::Flusher as MetricsFlusher;
 use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 

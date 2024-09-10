@@ -45,10 +45,6 @@ pub enum ApiVersion {
 impl TraceAgent {
     pub async fn start_trace_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
-        debug!(
-            "Time taken to fetch Trace Agent metadata: {} ms",
-            now.elapsed().as_millis()
-        );
 
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
