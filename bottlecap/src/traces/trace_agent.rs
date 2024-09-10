@@ -14,9 +14,9 @@ use tracing::{debug, error};
 use crate::config;
 use crate::tags::provider;
 use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
-use datadog_trace_mini_agent::http_utils::log_and_create_http_response;
+use datadog_trace_mini_agent::http_utils::{self, log_and_create_http_response};
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::trace_utils::SendData;
+use datadog_trace_utils::trace_utils::{self, SendData};
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -133,30 +133,38 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
-            (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => {
-                match trace_processor
-                    .process_traces(config, req, trace_tx, tags_provider, ApiVersion::V04)
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("Error processing traces: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
-            (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => {
-                match trace_processor
-                    .process_traces(config, req, trace_tx, tags_provider, ApiVersion::V05)
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("Error processing traces: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
+            (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
+                config,
+                req,
+                trace_processor.clone(),
+                trace_tx,
+                tags_provider,
+                ApiVersion::V04,
+            )
+            .await
+            {
+                Ok(result) => Ok(result),
+                Err(err) => log_and_create_http_response(
+                    &format!("Error processing traces: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ),
+            },
+            (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
+                config,
+                req,
+                trace_processor.clone(),
+                trace_tx,
+                tags_provider,
+                ApiVersion::V05,
+            )
+            .await
+            {
+                Ok(result) => Ok(result),
+                Err(err) => log_and_create_http_response(
+                    &format!("Error processing traces: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ),
+            },
             (&Method::PUT | &Method::POST, STATS_ENDPOINT_PATH) => {
                 match stats_processor.process_stats(req, stats_tx).await {
                     Ok(result) => Ok(result),
@@ -178,6 +186,69 @@ impl TraceAgent {
                 *not_found.status_mut() = StatusCode::NOT_FOUND;
                 Ok(not_found)
             }
+        }
+    }
+
+    async fn handle_traces(
+        config: Arc<config::Config>,
+        req: Request<Body>,
+        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+        trace_tx: Sender<SendData>,
+        tags_provider: Arc<provider::Provider>,
+        version: ApiVersion,
+    ) -> http::Result<Response<Body>> {
+        debug!("Received traces to process");
+        let (parts, body) = req.into_parts();
+
+        if let Some(response) = http_utils::verify_request_content_length(
+            &parts.headers,
+            MAX_CONTENT_LENGTH,
+            "Error processing traces",
+        ) {
+            return response;
+        }
+
+        let tracer_header_tags = (&parts.headers).into();
+
+        let (body_size, traces) = match version {
+            ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
+                Ok(result) => result,
+                Err(err) => {
+                    return log_and_create_http_response(
+                        &format!("Error deserializing trace from request body: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    );
+                }
+            },
+            ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(body).await {
+                Ok(result) => result,
+                Err(err) => {
+                    return log_and_create_http_response(
+                        &format!("Error deserializing trace from request body: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    );
+                }
+            },
+        };
+
+        let send_data = trace_processor.process_traces(
+            config,
+            tags_provider,
+            tracer_header_tags,
+            traces,
+            body_size,
+        );
+
+        // send trace payload to our trace flusher
+        match trace_tx.send(send_data).await {
+            Ok(()) => log_and_create_http_response(
+                "Successfully buffered traces to be flushed.",
+                StatusCode::ACCEPTED,
+            ),
+            Err(err) => log_and_create_http_response(
+                &format!("Error sending traces to the trace flusher: {err}"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
         }
     }
 
