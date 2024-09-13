@@ -52,6 +52,10 @@ build_dockerized(){
   cd -
 }
 
+license() {
+  cargo bundle-licenses --format yaml --output LICENSE-3rdparty.yml
+}
+
 publish() {
   _require_argument ARCH
   _require_argument LAYER_NAME
