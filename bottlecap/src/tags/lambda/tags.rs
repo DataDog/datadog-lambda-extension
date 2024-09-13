@@ -241,6 +241,11 @@ impl Lambda {
     }
 
     #[must_use]
+    pub fn get_function_name(&self) -> Option<&String> {
+        self.tags_map.get(FUNCTION_NAME_KEY)
+    }
+
+    #[must_use]
     pub fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
         &self.tags_map
     }
