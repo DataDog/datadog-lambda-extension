@@ -381,12 +381,11 @@ async fn extension_loop_active(
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
                         }
-                        Event::Telemetry(event) => {
-                            let event_time = event.time;
+                        Event::Telemetry(event) =>
                             match event.record {
                                 TelemetryRecord::PlatformStart { request_id, .. } => {
                                     let mut p = invocation_processor.lock().await;
-                                    p.on_platform_start(request_id, event_time);
+                                    p.on_platform_start(request_id, event.time);
                                     drop(p);
                                 }
                                 TelemetryRecord::PlatformInitReport {
@@ -471,7 +470,6 @@ async fn extension_loop_active(
                                     debug!("Unforwarded Telemetry event: {:?}", event);
                                 }
                             }
-                        }
                     }
                 }
                 _ = flush_interval.tick() => {
