@@ -302,15 +302,17 @@ async fn extension_loop_active(
     let trace_flusher_clone = trace_flusher.clone();
     let stats_flusher_clone = stats_flusher.clone();
 
-    let trace_agent = trace_agent::TraceAgent::new(
-        Arc::clone(config),
-        trace_processor.clone(),
-        trace_flusher_clone,
-        stats_processor,
-        stats_flusher_clone,
-        Arc::clone(&tags_provider),
-    )
-    .await;
+    let trace_agent = Box::new(
+        trace_agent::TraceAgent::new(
+            Arc::clone(config),
+            trace_processor.clone(),
+            trace_flusher_clone,
+            stats_processor,
+            stats_flusher_clone,
+            Arc::clone(&tags_provider),
+        )
+        .await,
+    );
     let trace_agent_tx = trace_agent.get_sender_copy();
 
     tokio::spawn(async move {
