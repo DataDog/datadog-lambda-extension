@@ -11,9 +11,10 @@ use tokio::sync::mpsc::Sender;
 use tracing::debug;
 
 use crate::{
-    config, lifecycle::invocation::context::ContextBuffer, metrics::enhanced::constants::MS_TO_NS,
-    tags::provider, traces::trace_processor,
+    config, lifecycle::invocation::context::ContextBuffer, tags::provider, traces::trace_processor,
 };
+
+pub const MS_TO_NS: f64 = 1_000_000.0;
 
 pub struct Processor {
     pub context_buffer: ContextBuffer,

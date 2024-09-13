@@ -3,7 +3,6 @@ pub const BASE_LAMBDA_INVOCATION_PRICE: f64 = 0.000_000_2;
 pub const X86_LAMBDA_PRICE_PER_GB_SECOND: f64 = 0.000_016_666_7;
 pub const ARM_LAMBDA_PRICE_PER_GB_SECOND: f64 = 0.000_013_333_4;
 pub const MS_TO_SEC: f64 = 0.001;
-pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const MB_TO_GB: f64 = 1_024.0;
 
 // Enhanced metrics
