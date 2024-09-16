@@ -117,11 +117,6 @@ fn tags_from_env(
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
 
-    let runtime = resolve_runtime("/proc", "/etc/os-release");
-    // TODO runtime resolution is too fast, need to change approach. Resolving it anyway to get debug info and performance of resolution
-    debug!("Resolved runtime: {runtime}. Not adding to tags yet");
-    // tags_map.insert(RUNTIME_KEY.to_string(), runtime);
-
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
     tags_map.insert(
         EXTENSION_VERSION_KEY.to_string(),
@@ -144,7 +139,15 @@ fn tags_from_env(
     tags_map
 }
 
-fn resolve_runtime(proc_path: &str, fallback_provided_al_path: &str) -> String {
+pub async fn resolve_runtime() -> String {
+    let start = Instant::now();
+    let runtime = read_runtime("/proc", "/etc/os-release");
+    let duration = start.elapsed().as_micros();
+    debug!("Resolved runtime in {duration}us");
+    runtime
+}
+
+fn read_runtime(proc_path: &str, fallback_provided_al_path: &str) -> String {
     let start = Instant::now();
     match fs::read_dir(proc_path) {
         Ok(proc_dir) => {
@@ -336,7 +339,7 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
+        let runtime = read_runtime(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "java123");
     }
@@ -348,7 +351,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime("", path);
+        let runtime = read_runtime("", path);
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2");
     }
@@ -361,7 +364,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime("", path);
+        let runtime = read_runtime("", path);
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }

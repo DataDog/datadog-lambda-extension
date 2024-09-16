@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::mpsc::Sender;
 
 use tracing::debug;
@@ -29,10 +29,10 @@ impl LogsProcessor {
         }
     }
 
-    pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub async fn process(&mut self, event: TelemetryEvent, runtime_resolution: Arc<OnceLock<String>>, aggregator: &Arc<Mutex<Aggregator>>) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => {
-                lambda_processor.process(event, aggregator).await;
+                lambda_processor.process(event, runtime_resolution, aggregator).await;
             }
         }
     }

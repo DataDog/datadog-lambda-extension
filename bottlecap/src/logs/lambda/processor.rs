@@ -1,5 +1,5 @@
 use std::error::Error;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::mpsc::Sender;
 
 use tracing::error;
@@ -189,7 +189,11 @@ impl LambdaProcessor {
         }
     }
 
-    fn get_intake_log(&mut self, mut lambda_message: Message) -> Result<IntakeLog, Box<dyn Error>> {
+    fn get_intake_log(
+        &mut self,
+        mut lambda_message: Message,
+        runtime_resolution: Arc<OnceLock<String>>,
+    ) -> Result<IntakeLog, Box<dyn Error>> {
         let request_id = match lambda_message.lambda.request_id {
             // Log already has a `request_id`
             Some(request_id) => Some(request_id.clone()),
@@ -200,11 +204,15 @@ impl LambdaProcessor {
 
         lambda_message.lambda.request_id = request_id;
 
+        let mut tags = self.tags.clone();
+        if let Some(runtime) = runtime_resolution.get() {
+            tags = format!("{tags},runtime:{runtime}");
+        }
         let log = IntakeLog {
             hostname: self.function_arn.clone(),
             source: LAMBDA_RUNTIME_SLUG.to_string(),
             service: self.service.clone(),
-            tags: self.tags.clone(),
+            tags,
             message: lambda_message,
         };
 
@@ -217,16 +225,25 @@ impl LambdaProcessor {
         }
     }
 
-    async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
+    async fn make_log(
+        &mut self,
+        event: TelemetryEvent,
+        runtime_resolution: Arc<OnceLock<String>>,
+    ) -> Result<IntakeLog, Box<dyn Error>> {
         match self.get_message(event).await {
-            Ok(lambda_message) => self.get_intake_log(lambda_message),
+            Ok(lambda_message) => self.get_intake_log(lambda_message, runtime_resolution),
             // TODO: Check what to do when we can't process the event
             Err(e) => Err(e),
         }
     }
 
-    pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
-        if let Ok(mut log) = self.make_log(event).await {
+    pub async fn process(
+        &mut self,
+        event: TelemetryEvent,
+        runtime_resolution: Arc<OnceLock<String>>,
+        aggregator: &Arc<Mutex<Aggregator>>,
+    ) {
+        if let Ok(mut log) = self.make_log(event, runtime_resolution).await {
             let should_send_log =
                 LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
             if should_send_log {
@@ -264,14 +281,13 @@ impl LambdaProcessor {
 mod tests {
     use super::*;
 
-    use chrono::{TimeZone, Utc};
-    use serde_json::{Number, Value};
-    use std::collections::hash_map::HashMap;
-
     use crate::logs::lambda::Lambda;
     use crate::telemetry::events::{
         InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
     };
+    use chrono::{TimeZone, Utc};
+    use serde_json::{Number, Value};
+    use std::collections::hash_map::HashMap;
 
     macro_rules! get_message_tests {
         ($($name:ident: $value:expr,)*) => {
@@ -499,7 +515,9 @@ mod tests {
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let intake_log = processor
+            .get_intake_log(lambda_message, Arc::new(OnceLock::new()))
+            .unwrap();
 
         assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
         assert_eq!(intake_log.hostname, "test-arn".to_string());
@@ -544,7 +562,9 @@ mod tests {
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
         assert_eq!(lambda_message.lambda.request_id, None);
 
-        let intake_log = processor.get_intake_log(lambda_message).unwrap_err();
+        let intake_log = processor
+            .get_intake_log(lambda_message, Arc::new(OnceLock::new()))
+            .unwrap_err();
         assert_eq!(
             intake_log.to_string(),
             "No request_id available, queueing for later"
@@ -578,7 +598,9 @@ mod tests {
         };
 
         let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
-        processor.get_intake_log(start_lambda_message).unwrap();
+        processor
+            .get_intake_log(start_lambda_message, Arc::new(OnceLock::new()))
+            .unwrap();
 
         // This could be any event that doesn't have a `request_id`
         let event = TelemetryEvent {
@@ -587,7 +609,9 @@ mod tests {
         };
 
         let lambda_message = processor.get_message(event.clone()).await.unwrap();
-        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let intake_log = processor
+            .get_intake_log(lambda_message, Arc::new(OnceLock::new()))
+            .unwrap();
         assert_eq!(
             intake_log.message.lambda.request_id,
             Some("test-request-id".to_string())
@@ -623,7 +647,9 @@ mod tests {
             },
         };
 
-        processor.process(event.clone(), &aggregator).await;
+        processor
+            .process(event.clone(), Arc::new(OnceLock::new()), &aggregator)
+            .await;
 
         let mut aggregator_lock = aggregator.lock().unwrap();
         let batch = aggregator_lock.get_batch();
@@ -670,7 +696,9 @@ mod tests {
             record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
-        processor.process(event.clone(), &aggregator).await;
+        processor
+            .process(event.clone(), Arc::new(OnceLock::new()), &aggregator)
+            .await;
         assert_eq!(processor.orphan_logs.len(), 1);
 
         let mut aggregator_lock = aggregator.lock().unwrap();
@@ -706,7 +734,9 @@ mod tests {
             },
         };
 
-        processor.process(start_event.clone(), &aggregator).await;
+        processor
+            .process(start_event.clone(), Arc::new(OnceLock::new()), &aggregator)
+            .await;
         assert_eq!(
             processor.invocation_context.request_id,
             "test-request-id".to_string()
@@ -718,7 +748,9 @@ mod tests {
             record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
-        processor.process(event.clone(), &aggregator).await;
+        processor
+            .process(event.clone(), Arc::new(OnceLock::new()), &aggregator)
+            .await;
 
         // Verify aggregator logs
         let mut aggregator_lock = aggregator.lock().unwrap();

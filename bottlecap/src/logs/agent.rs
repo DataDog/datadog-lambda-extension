@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::events::Event;
@@ -40,15 +40,19 @@ impl LogsAgent {
         }
     }
 
-    pub async fn spin(&mut self) {
+    pub async fn spin(&mut self, runtime_resolution: Arc<OnceLock<String>>) {
         while let Some(event) = self.rx.recv().await {
-            self.processor.process(event, &self.aggregator).await;
+            self.processor
+                .process(event, runtime_resolution.clone(), &self.aggregator)
+                .await;
         }
     }
 
-    pub async fn sync_consume(&mut self) {
+    pub async fn sync_consume(&mut self, runtime_resolution: Arc<OnceLock<String>>) {
         if let Some(events) = self.rx.recv().await {
-            self.processor.process(events, &self.aggregator).await;
+            self.processor
+                .process(events, runtime_resolution.clone(), &self.aggregator)
+                .await;
         }
     }
 

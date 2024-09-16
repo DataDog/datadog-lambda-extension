@@ -6,7 +6,7 @@ use bottlecap::telemetry::events::TelemetryEvent;
 use bottlecap::LAMBDA_RUNTIME_SLUG;
 use httpmock::prelude::*;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 mod common;
 
@@ -66,7 +66,7 @@ async fn test_logs() {
             .expect("Failed sending telemetry events");
     }
 
-    logs_agent.sync_consume().await;
+    logs_agent.sync_consume(Arc::new(OnceLock::new())).await;
 
     let _ = logs_flusher.flush().await;
 

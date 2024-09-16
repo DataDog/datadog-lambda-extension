@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::tags::lambda::tags::resolve_runtime;
 use bottlecap::{
     base_url,
     config::{self, AwsConfig, Config},
@@ -53,6 +54,7 @@ use dogstatsd::{
 };
 use reqwest::Client;
 use serde::Deserialize;
+use std::sync::OnceLock;
 use std::{
     collections::hash_map,
     collections::HashMap,
@@ -255,6 +257,11 @@ async fn extension_loop_active(
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
+    let runtime_resolution = Arc::new(OnceLock::new());
+
+    let runtime_resolver = Arc::clone(&runtime_resolution);
+    tokio::spawn(async move { runtime_resolver.set(resolve_runtime().await) });
+
     let tags_provider = setup_tag_provider(
         aws_config,
         config,
@@ -264,6 +271,7 @@ async fn extension_loop_active(
         config,
         resolved_api_key.clone(),
         &tags_provider,
+        Arc::clone(&runtime_resolution),
         event_bus.get_sender_copy(),
     );
 
@@ -509,6 +517,7 @@ fn start_logs_agent(
     config: &Arc<Config>,
     resolved_api_key: String,
     tags_provider: &Arc<TagProvider>,
+    runtime_resolution: Arc<OnceLock<String>>,
     event_bus: Sender<Event>,
 ) -> (Sender<TelemetryEvent>, LogsFlusher) {
     let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
@@ -519,7 +528,7 @@ fn start_logs_agent(
         build_fqdn_logs(config.site.clone()),
     );
     tokio::spawn(async move {
-        logs_agent.spin().await;
+        logs_agent.spin(runtime_resolution).await;
     });
     (logs_agent_channel, logs_flusher)
 }
