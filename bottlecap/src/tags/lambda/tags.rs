@@ -20,7 +20,7 @@ const FUNCTION_NAME_KEY: &str = "functionname";
 // ExecutedVersionKey is the tag key for a function's executed version
 const EXECUTED_VERSION_KEY: &str = "executedversion";
 // RuntimeKey is the tag key for a function's runtime (e.g. node, python)
-// const RUNTIME_KEY: &str = "runtime";
+const RUNTIME_KEY: &str = "runtime";
 // MemorySizeKey is the tag key for a function's allocated memory size
 const MEMORY_SIZE_KEY: &str = "memorysize";
 // TODO(astuyve): fetch architecture from the runtime
@@ -117,10 +117,7 @@ fn tags_from_env(
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
 
-    let runtime = resolve_runtime("/proc", "/etc/os-release");
-    // TODO runtime resolution is too fast, need to change approach. Resolving it anyway to get debug info and performance of resolution
-    debug!("Resolved runtime: {runtime}. Not adding to tags yet");
-    // tags_map.insert(RUNTIME_KEY.to_string(), runtime);
+    tags_map.insert(RUNTIME_KEY.to_string(), resolve_runtime());
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
     tags_map.insert(
@@ -144,7 +141,12 @@ fn tags_from_env(
     tags_map
 }
 
-fn resolve_runtime(proc_path: &str, fallback_provided_al_path: &str) -> String {
+fn resolve_runtime() -> String {
+    std::env::var("DD_RUNTIME")
+        .unwrap_or_else(|_| resolve_runtime_from_proc("/proc", "/etc/os-release"))
+}
+
+fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &str) -> String {
     let start = Instant::now();
     match fs::read_dir(proc_path) {
         Ok(proc_dir) => {
@@ -260,7 +262,7 @@ mod tests {
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 3);
+        assert_eq!(tags.tags_map.len(), 4);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
             COMPUTE_STATS_VALUE
@@ -275,6 +277,7 @@ mod tests {
             tags.tags_map.get(EXTENSION_VERSION_KEY).unwrap(),
             EXTENSION_VERSION
         );
+        assert_eq!(tags.tags_map.get(RUNTIME_KEY).unwrap(), "unknown");
     }
 
     #[test]
@@ -336,7 +339,8 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
+        let runtime =
+            resolve_runtime_from_proc(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "java123");
     }
@@ -348,7 +352,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime("", path);
+        let runtime = resolve_runtime_from_proc("", path);
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2");
     }
@@ -361,7 +365,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime("", path);
+        let runtime = resolve_runtime_from_proc("", path);
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }
