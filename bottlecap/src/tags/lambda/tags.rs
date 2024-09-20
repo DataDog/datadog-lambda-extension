@@ -20,7 +20,7 @@ const FUNCTION_NAME_KEY: &str = "functionname";
 // ExecutedVersionKey is the tag key for a function's executed version
 const EXECUTED_VERSION_KEY: &str = "executedversion";
 // RuntimeKey is the tag key for a function's runtime (e.g. node, python)
-// const RUNTIME_KEY: &str = "runtime";
+const RUNTIME_KEY: &str = "runtime";
 // MemorySizeKey is the tag key for a function's allocated memory size
 const MEMORY_SIZE_KEY: &str = "memorysize";
 // TODO(astuyve): fetch architecture from the runtime
@@ -116,11 +116,9 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
-
-    let runtime = resolve_runtime("/proc", "/etc/os-release");
-    // TODO runtime resolution is too fast, need to change approach. Resolving it anyway to get debug info and performance of resolution
-    debug!("Resolved runtime: {runtime}. Not adding to tags yet");
-    // tags_map.insert(RUNTIME_KEY.to_string(), runtime);
+    if let Ok(runtime) = std::env::var(RUNTIME_VAR) {
+        tags_map.insert(RUNTIME_KEY.to_string(), runtime);
+    }
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
     tags_map.insert(
@@ -144,7 +142,8 @@ fn tags_from_env(
     tags_map
 }
 
-fn resolve_runtime(proc_path: &str, fallback_provided_al_path: &str) -> String {
+#[allow(dead_code)] // keeping this logic for when async runtime resolution will be supported
+fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &str) -> String {
     let start = Instant::now();
     match fs::read_dir(proc_path) {
         Ok(proc_dir) => {
@@ -336,7 +335,8 @@ mod tests {
         let mut file = File::create(&path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
+        let runtime =
+            resolve_runtime_from_proc(proc_id_folder.parent().unwrap().to_str().unwrap(), "");
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "java123");
     }
@@ -348,7 +348,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime("", path);
+        let runtime = resolve_runtime_from_proc("", path);
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2");
     }
@@ -361,7 +361,7 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(content.as_bytes()).unwrap();
 
-        let runtime = resolve_runtime("", path);
+        let runtime = resolve_runtime_from_proc("", path);
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }
