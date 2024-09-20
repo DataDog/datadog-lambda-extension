@@ -116,8 +116,9 @@ fn tags_from_env(
     if let Ok(memory_size) = std::env::var(MEMORY_SIZE_VAR) {
         tags_map.insert(MEMORY_SIZE_KEY.to_string(), memory_size);
     }
-
-    tags_map.insert(RUNTIME_KEY.to_string(), resolve_runtime());
+    if let Ok(runtime) = std::env::var(RUNTIME_VAR) {
+        tags_map.insert(RUNTIME_KEY.to_string(), runtime);
+    }
 
     tags_map.insert(ARCHITECTURE_KEY.to_string(), arch_to_platform().to_string());
     tags_map.insert(
@@ -141,11 +142,7 @@ fn tags_from_env(
     tags_map
 }
 
-fn resolve_runtime() -> String {
-    std::env::var("DD_RUNTIME")
-        .unwrap_or_else(|_| resolve_runtime_from_proc("/proc", "/etc/os-release"))
-}
-
+#[allow(dead_code)] // keeping this logic for when async runtime resolution will be supported
 fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &str) -> String {
     let start = Instant::now();
     match fs::read_dir(proc_path) {
@@ -262,7 +259,7 @@ mod tests {
     fn test_new_from_config() {
         let metadata = hash_map::HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
-        assert_eq!(tags.tags_map.len(), 4);
+        assert_eq!(tags.tags_map.len(), 3);
         assert_eq!(
             tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
             COMPUTE_STATS_VALUE
@@ -277,7 +274,6 @@ mod tests {
             tags.tags_map.get(EXTENSION_VERSION_KEY).unwrap(),
             EXTENSION_VERSION
         );
-        assert_eq!(tags.tags_map.get(RUNTIME_KEY).unwrap(), "unknown");
     }
 
     #[test]
