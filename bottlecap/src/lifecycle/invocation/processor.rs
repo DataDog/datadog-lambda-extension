@@ -85,10 +85,23 @@ impl Processor {
             span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
             span.meta
                 .insert("request_id".to_string(), request_id.clone());
+
+            // todo(duncanista): add missing tags
+            // - cold start, proactive init
+            // - language
+            // - function.request - capture lambda payload
+            // - function.response
+            // - error.msg
+            // - error.type
+            // - error.stack
+            // - trigger tags (from inferred spans)
+            // - metrics tags (for asm)
         }
 
         if !self.lambda_library_detected {
             let span_size = std::mem::size_of_val(&self.span);
+
+            // todo: figure out what to do here
             let header_tags = tracer_header_tags::TracerHeaderTags {
                 lang: "",
                 lang_version: "",
