@@ -54,7 +54,9 @@ impl Listener {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
-            (&Method::POST, START_INVOCATION_PATH) => Self::start_invocation_handler(req),
+            (&Method::POST, START_INVOCATION_PATH) => {
+                Self::start_invocation_handler(req, invocation_processor).await
+            }
             (&Method::POST, END_INVOCATION_PATH) => {
                 match Self::end_invocation_handler(req, invocation_processor).await {
                     Ok(response) => Ok(response),
@@ -76,7 +78,14 @@ impl Listener {
         }
     }
 
-    fn start_invocation_handler(_: Request<Body>) -> http::Result<Response<Body>> {
+    async fn start_invocation_handler(
+        _: Request<Body>,
+        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    ) -> http::Result<Response<Body>> {
+        let mut processor = invocation_processor.lock().await;
+        processor.on_invocation_start();
+        drop(processor);
+
         Response::builder()
             .status(200)
             .body(Body::from(json!({}).to_string()))
