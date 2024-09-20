@@ -4,12 +4,13 @@ on:
   schedule:
     # daily at midnight
     - cron: "0 0 * * *"
+  workflow_dispatch:
 
 env:
   VERSION: 1  # env var required when building extension
 
 jobs:
-  run:
+  check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout datadog-agent repository
@@ -108,3 +109,26 @@ jobs:
           fail-build: true
           severity-cutoff: low
           output-format: table
+
+  notify:
+    needs: check
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify
+        env:
+          SLACK_CHANNEL: "#serverless-agent"
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          set -x
+
+          OPS_MESSAGE=":gh-check-failed: Serverless Vulnerability Scan failed! :radar-scan:
+
+          Whoever is on support, please fix the vulnerability, before a customer alerts us to it.
+
+          See ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} for the full info on the found vulnerability. :bufo-thanks:"
+
+          curl -H "Content-type: application/json" -X POST "$SLACK_WEBHOOK" -d '{
+            "channel": "'"$SLACK_CHANNEL"'",
+            "text": "'"$OPS_MESSAGE"'"
+          }'
