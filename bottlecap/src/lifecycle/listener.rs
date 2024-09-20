@@ -9,7 +9,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, StatusCode};
 use serde_json::json;
 use tokio::sync::Mutex;
-use tracing::{error, warn};
+use tracing::{error, warn, debug};
 
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 
@@ -82,6 +82,7 @@ impl Listener {
         _: Request<Body>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
+        debug!("Received start invocation request");
         let mut processor = invocation_processor.lock().await;
         processor.on_invocation_start();
         drop(processor);
@@ -95,6 +96,7 @@ impl Listener {
         req: Request<Body>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
+        debug!("Received end invocation request");
         let (parts, _) = req.into_parts();
         let headers = parts.headers;
 

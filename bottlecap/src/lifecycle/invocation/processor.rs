@@ -20,7 +20,7 @@ pub struct Processor {
     pub context_buffer: ContextBuffer,
     pub current_request_id: String,
     pub span: Span,
-    lambda_library_detected: bool,
+    tracer_detected: bool,
 }
 
 impl Processor {
@@ -50,7 +50,7 @@ impl Processor {
                 meta_struct: HashMap::new(),
                 span_links: Vec::new(),
             },
-            lambda_library_detected: true,
+            tracer_detected: false,
         }
     }
 
@@ -98,7 +98,7 @@ impl Processor {
             // - metrics tags (for asm)
         }
 
-        if !self.lambda_library_detected {
+        if self.tracer_detected {
             let span_size = std::mem::size_of_val(&self.span);
 
             // todo: figure out what to do here
@@ -142,13 +142,10 @@ impl Processor {
     }
 
     pub fn on_invocation_start(&mut self) {
-        debug!("[usm] on_invocation_start");
-        self.lambda_library_detected = false;
+        self.tracer_detected = true;
     }
 
     pub fn on_invocation_end(&mut self, trace_id: u64, span_id: u64, parent_id: u64) {
-        debug!("[usm] on_invocation_end");
-
         let span = &mut self.span;
         span.trace_id = trace_id;
         span.span_id = span_id;
