@@ -9,7 +9,7 @@ use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, StatusCode};
 use serde_json::json;
 use tokio::sync::Mutex;
-use tracing::{error, warn, debug};
+use tracing::{debug, error, warn};
 
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 
