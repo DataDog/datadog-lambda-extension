@@ -43,7 +43,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.9.0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.10.0
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.5
@@ -71,7 +71,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.9.0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.10.0
         with:
           components: clippy
           cache: false
@@ -100,7 +100,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.9.0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.10.0
         with:
           cache: false
       - uses: mozilla-actions/sccache-action@v0.0.5
@@ -128,7 +128,7 @@ jobs:
           unzip "protoc-${{ env.PB_VERSION }}-${{ env.PB_TARGET }}.zip" -d "$HOME/.local"
           export PATH="$PATH:$HOME/.local/bin"
 
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.9.0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.10.0
         with:
           cache: false
       - uses: taiki-e/install-action@v2
@@ -146,7 +146,7 @@ jobs:
         os: [ ubuntu-22.04, macos-latest ]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.9.0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.10.0
         with:
           components: rustfmt
           cache: false
