@@ -23,6 +23,8 @@ pub struct FailoverConfig {
     serverless_appsec_enabled: bool,
     appsec_enabled: bool,
     profiling_enabled: bool,
+    http_proxy: Option<String>,
+    https_proxy: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -144,6 +146,11 @@ fn failsover(figment: &Figment) -> Result<(), ConfigError> {
         return Err(ConfigError::UnsupportedField(
             "profiling_enabled".to_string(),
         ));
+    }
+
+    if failover_config.http_proxy.is_some() || failover_config.https_proxy.is_some() {
+        log_failover_reason("http_proxy");
+        return Err(ConfigError::UnsupportedField("http_proxy".to_string()));
     }
 
     Ok(())
