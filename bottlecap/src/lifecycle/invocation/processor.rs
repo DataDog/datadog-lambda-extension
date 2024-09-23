@@ -18,7 +18,6 @@ pub const MS_TO_NS: f64 = 1_000_000.0;
 
 pub struct Processor {
     pub context_buffer: ContextBuffer,
-    pub current_request_id: String,
     pub span: Span,
     tracer_detected: bool,
 }
@@ -33,7 +32,6 @@ impl Processor {
 
         Processor {
             context_buffer: ContextBuffer::default(),
-            current_request_id: String::new(),
             span: Span {
                 service,
                 name: "aws.lambda".to_string(),
@@ -55,7 +53,6 @@ impl Processor {
     }
 
     pub fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
-        self.current_request_id.clone_from(&request_id);
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -79,7 +76,7 @@ impl Processor {
         self.context_buffer
             .add_runtime_duration(request_id, duration_ms);
 
-        if let Some(context) = self.context_buffer.get(&self.current_request_id) {
+        if let Some(context) = self.context_buffer.get(request_id) {
             let span = &mut self.span;
             // `round` is intentionally meant to be a whole integer
             span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
@@ -121,15 +118,19 @@ impl Processor {
                 span_size,
             );
 
-            match trace_agent_tx.send(send_data).await {
-                Ok(()) => println!("[usm] Sent span to agent"),
-                Err(e) => println!("[usm] Failed to send span to agent: {e}"),
+            if let Err(e) = trace_agent_tx.send(send_data).await {
+                debug!("Failed to send invocation span to agent: {e}");
             }
         }
     }
 
+    /// Given a `request_id` and the duration in milliseconds of the platform report,
+    /// calculate the duration of the runtime if the `request_id` is found in the context buffer.
+    ///
+    /// If the `request_id` is not found in the context buffer, return `None`.
+    /// If the `runtime_duration_ms` hasn't been seen, return `None`.
+    ///
     pub fn on_platform_report(&mut self, request_id: &String, duration_ms: f64) -> Option<f64> {
-        debug!("[usm] on_platform_report");
         if let Some(context) = self.context_buffer.remove(request_id) {
             if context.runtime_duration_ms == 0.0 {
                 return None;
@@ -141,10 +142,15 @@ impl Processor {
         None
     }
 
+    /// If this method is called, it means that we are operating in a Universally Instrumented
+    /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
+    ///
     pub fn on_invocation_start(&mut self) {
         self.tracer_detected = true;
     }
 
+    /// Given trace context information, set it to the current span.
+    ///
     pub fn on_invocation_end(&mut self, trace_id: u64, span_id: u64, parent_id: u64) {
         let span = &mut self.span;
         span.trace_id = trace_id;
