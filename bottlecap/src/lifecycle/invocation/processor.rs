@@ -53,7 +53,7 @@ impl Processor {
     }
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
-    /// 
+    ///
     /// Also, set the start time of the current span.
     ///
     pub fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
