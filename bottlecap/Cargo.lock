@@ -374,7 +374,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -637,7 +637,7 @@ dependencies = [
 [[package]]
 name = "datadog-protos"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki-backport/#a3e224b2da67f5e4a65e33703aaaa469a3bd3924"
+source = "git+https://github.com/DataDog/saluki-backport/#6e9738383188b867dba59b37fae9e0b0de50e3ca"
 dependencies = [
  "bytes",
  "prost 0.13.1",
@@ -767,7 +767,7 @@ dependencies = [
 [[package]]
 name = "ddsketch-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki-backport/#a3e224b2da67f5e4a65e33703aaaa469a3bd3924"
+source = "git+https://github.com/DataDog/saluki-backport/#6e9738383188b867dba59b37fae9e0b0de50e3ca"
 dependencies = [
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
  "float_eq",
@@ -809,14 +809,15 @@ dependencies = [
 
 [[package]]
 name = "dogstatsd"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=main#40ca981375583a59d8a83aeb3a8c3eb71177603e"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?branch=fix-dogstatsd-aggregator#41260f4de349ae9328ba69333a1a15482a2d1882"
 dependencies = [
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
  "fnv",
  "hashbrown",
  "protobuf",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
@@ -1317,7 +1318,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1454,24 +1455,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
-dependencies = [
- "either",
-]
-
-[[package]]
 name = "itoa"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1566,7 +1549,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -1999,7 +1982,7 @@ checksum = "5bb182580f71dd070f88d01ce3de9f4da5021db7115d2e1c3605a754153b77c1"
 dependencies = [
  "bytes",
  "heck",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "multimap",
  "once_cell",
@@ -2032,7 +2015,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "18bec9b0adc4eba778b33684b7ba3e7137789434769ee3ce3930463ef904cfca"
 dependencies = [
  "anyhow",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "syn 2.0.75",
@@ -3336,7 +3319,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

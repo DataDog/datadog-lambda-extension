@@ -45,6 +45,7 @@ use bottlecap::{
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
+use dogstatsd::metric::{SortedTags, EMPTY_TAGS};
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
@@ -268,13 +269,18 @@ async fn extension_loop_active(
     );
 
     let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::new(tags_provider.get_tags_vec(), CONTEXTS)
-            .expect("failed to create aggregator"),
+        MetricsAggregator::new(
+            SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
+            CONTEXTS,
+        )
+        .expect("failed to create aggregator"),
     ));
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
         Arc::clone(&metrics_aggr),
         build_fqdn_metrics(config.site.clone()),
+        None,
+        None,
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
