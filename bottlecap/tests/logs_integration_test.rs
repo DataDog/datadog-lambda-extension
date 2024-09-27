@@ -50,7 +50,6 @@ async fn test_logs() {
     let logs_flusher = LogsFlusher::new(
         dd_api_key.to_string(),
         Arc::clone(&logs_agent.aggregator),
-        Arc::clone(&arc_conf),
         server.base_url(),
     );
 

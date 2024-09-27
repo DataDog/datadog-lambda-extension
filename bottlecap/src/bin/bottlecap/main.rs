@@ -133,7 +133,10 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    assert_eq!(resp.status(), 200, "Unable to register extension");
+    if resp.status() != 200 {
+        let err = resp.error_for_status_ref();
+        panic!("Can't register extension {:?}", err);
+    }
 
     let extension_id = resp
         .headers()
@@ -163,7 +166,7 @@ async fn main() -> Result<()> {
     let (aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
 
     let r = register(&client)
         .await
@@ -205,12 +208,14 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
             panic!("Error starting the extension: {err:?}");
         }
     };
+
+    println!("astuyve proxy config is {:?}", config.https_proxy);
     (aws_config, config)
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
     let env_filter = format!(
-        "h2=off,hyper=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
+        "datadog-trace-mini-agent=off,{:?}",
         config.log_level
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
@@ -274,8 +279,9 @@ async fn extension_loop_active(
     let mut metrics_flusher = MetricsFlusher::new(
         resolved_api_key.clone(),
         Arc::clone(&metrics_aggr),
-        config.clone(),
         build_fqdn_metrics(config.site.clone()),
+        None,
+        None
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
@@ -517,7 +523,6 @@ fn start_logs_agent(
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
         Arc::clone(&logs_agent.aggregator),
-        config.clone(),
         build_fqdn_logs(config.site.clone()),
     );
     tokio::spawn(async move {

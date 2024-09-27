@@ -1,5 +1,3 @@
-use crate::config;
-use crate::http_client;
 use crate::logs::aggregator::Aggregator;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinSet;
@@ -23,10 +21,9 @@ impl Flusher {
     pub fn new(
         api_key: String,
         aggregator: Arc<Mutex<Aggregator>>,
-        config: Arc<config::Config>,
         site: String,
     ) -> Self {
-        let client = http_client::get_client(config.clone());
+        let client = reqwest::Client::new();
         Flusher {
             api_key,
             fqdn_site: site,
@@ -47,6 +44,7 @@ impl Flusher {
             logs = guard.get_batch();
         }
         drop(guard);
+        println!("Sending logs");
         while let Some(res) = set.join_next().await {
             match res {
                 Ok(()) => (),
@@ -55,10 +53,12 @@ impl Flusher {
                 }
             }
         }
+        println!("Logs sent");
     }
 
     async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
+        println!("Sending logs to {}", url);
 
         if !data.is_empty() {
             let resp: Result<reqwest::Response, reqwest::Error> = client
