@@ -209,7 +209,6 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         }
     };
 
-    println!("astuyve proxy config is {:?}", config.https_proxy);
     (aws_config, config)
 }
 

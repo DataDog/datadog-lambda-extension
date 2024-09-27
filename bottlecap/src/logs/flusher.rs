@@ -44,7 +44,6 @@ impl Flusher {
             logs = guard.get_batch();
         }
         drop(guard);
-        println!("Sending logs");
         while let Some(res) = set.join_next().await {
             match res {
                 Ok(()) => (),
@@ -53,12 +52,10 @@ impl Flusher {
                 }
             }
         }
-        println!("Logs sent");
     }
 
     async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
-        println!("Sending logs to {}", url);
 
         if !data.is_empty() {
             let resp: Result<reqwest::Response, reqwest::Error> = client
