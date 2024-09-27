@@ -214,7 +214,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
     let env_filter = format!(
-        "datadog-trace-mini-agent=off,{:?}",
+        "h2=off,hyper=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
         config.log_level
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
