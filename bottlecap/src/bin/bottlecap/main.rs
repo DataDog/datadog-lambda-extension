@@ -15,8 +15,7 @@ use bottlecap::{
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
-        flush_control::FlushControl,
-        invocation_context::{InvocationContext, InvocationContextBuffer},
+        flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
     },
     logger,
@@ -280,6 +279,11 @@ async fn extension_loop_active(
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),
     });
+
+    let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+        Arc::clone(&tags_provider),
+        Arc::clone(config),
+    )));
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(
             obfuscation_config::ObfuscationConfig::new()
@@ -298,23 +302,28 @@ async fn extension_loop_active(
     let trace_flusher_clone = trace_flusher.clone();
     let stats_flusher_clone = stats_flusher.clone();
 
-    let trace_agent = Box::new(trace_agent::TraceAgent {
-        config: Arc::clone(config),
-        trace_processor,
-        trace_flusher: trace_flusher_clone,
-        stats_processor,
-        stats_flusher: stats_flusher_clone,
-        tags_provider: Arc::clone(&tags_provider),
-    });
+    let trace_agent = Box::new(
+        trace_agent::TraceAgent::new(
+            Arc::clone(config),
+            trace_processor.clone(),
+            trace_flusher_clone,
+            stats_processor,
+            stats_flusher_clone,
+            Arc::clone(&tags_provider),
+        )
+        .await,
+    );
+    let trace_agent_tx = trace_agent.get_sender_copy();
+
     tokio::spawn(async move {
-        let res = trace_agent.start_trace_agent().await;
+        let res = trace_agent.start().await;
         if let Err(e) = res {
             error!("Error starting trace agent: {e:?}");
         }
     });
 
     let lifecycle_listener = LifecycleListener {
-        tags_provider: Arc::clone(&tags_provider),
+        invocation_processor: Arc::clone(&invocation_processor),
     };
     // TODO(astuyve): deprioritize this task after the first request
     tokio::spawn(async move {
@@ -332,7 +341,6 @@ async fn extension_loop_active(
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
     let flush_control = FlushControl::new(config.serverless_flush_strategy);
-    let mut invocation_context_buffer = InvocationContextBuffer::default();
     let mut shutdown = false;
 
     let mut flush_interval = flush_control.get_flush_interval();
@@ -375,92 +383,95 @@ async fn extension_loop_active(
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
                         }
-                        Event::Telemetry(event) => match event.record {
-                            TelemetryRecord::PlatformStart { request_id, .. } => {
-                                invocation_context_buffer.insert(InvocationContext {
-                                    request_id,
-                                    runtime_duration_ms: 0.0,
-                                });
-                            }
-                            TelemetryRecord::PlatformInitReport {
-                                initialization_type,
-                                phase,
-                                metrics,
-                            } => {
-                                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                lambda_enhanced_metrics
-                                    .set_init_duration_metric(metrics.duration_ms);
-                            }
-                            TelemetryRecord::PlatformRuntimeDone {
-                                request_id,
-                                status,
-                                metrics,
-                                ..
-                            } => {
-                                if let Some(metrics) = metrics {
-                                    invocation_context_buffer
-                                        .add_runtime_duration(&request_id, metrics.duration_ms);
+                        Event::Telemetry(event) =>
+                            match event.record {
+                                TelemetryRecord::PlatformStart { request_id, .. } => {
+                                    let mut p = invocation_processor.lock().await;
+                                    p.on_platform_start(request_id, event.time);
+                                    drop(p);
+                                }
+                                TelemetryRecord::PlatformInitReport {
+                                    initialization_type,
+                                    phase,
+                                    metrics,
+                                } => {
+                                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
                                     lambda_enhanced_metrics
-                                        .set_runtime_duration_metric(metrics.duration_ms);
+                                        .set_init_duration_metric(metrics.duration_ms);
                                 }
-
-                                if status != Status::Success {
-                                    lambda_enhanced_metrics.increment_errors_metric();
-                                    if status == Status::Timeout {
-                                        lambda_enhanced_metrics.increment_timeout_metric();
+                                TelemetryRecord::PlatformRuntimeDone {
+                                    request_id,
+                                    status,
+                                    metrics,
+                                    ..
+                                } => {
+                                    let mut p = invocation_processor.lock().await;
+                                    if let Some(metrics) = metrics {
+                                        p.on_platform_runtime_done(
+                                            &request_id,
+                                            metrics.duration_ms,
+                                            config.clone(),
+                                            tags_provider.clone(),
+                                            trace_processor.clone(),
+                                            trace_agent_tx.clone()
+                                        ).await;
+                                        lambda_enhanced_metrics
+                                            .set_runtime_duration_metric(metrics.duration_ms);
                                     }
-                                }
-                                debug!(
-                                    "Runtime done for request_id: {:?} with status: {:?}",
-                                    request_id, status
-                                );
-                                // TODO(astuyve) it'll be easy to
-                                // pass the invocation deadline to
-                                // flush tasks here, so they can
-                                // retry if we have more time
-                                if flush_control.should_flush_end() {
-                                    tokio::join!(
-                                        logs_flusher.flush(),
-                                        metrics_flusher.flush(),
-                                        trace_flusher.manual_flush(),
-                                        stats_flusher.manual_flush()
+                                    drop(p);
+
+                                    if status != Status::Success {
+                                        lambda_enhanced_metrics.increment_errors_metric();
+                                        if status == Status::Timeout {
+                                            lambda_enhanced_metrics.increment_timeout_metric();
+                                        }
+                                    }
+                                    debug!(
+                                        "Runtime done for request_id: {:?} with status: {:?}",
+                                        request_id, status
                                     );
+
+                                    // TODO(astuyve) it'll be easy to
+                                    // pass the invocation deadline to
+                                    // flush tasks here, so they can
+                                    // retry if we have more time
+                                    if flush_control.should_flush_end() {
+                                        tokio::join!(
+                                            logs_flusher.flush(),
+                                            metrics_flusher.flush(),
+                                            trace_flusher.manual_flush(),
+                                            stats_flusher.manual_flush()
+                                        );
+                                    }
+                                    break;
                                 }
-                                break;
-                            }
-                            TelemetryRecord::PlatformReport {
-                                request_id,
-                                status,
-                                metrics,
-                                ..
-                            } => {
-                                debug!(
-                                    "Platform report for request_id: {:?} with status: {:?}",
-                                    request_id, status
-                                );
-                                lambda_enhanced_metrics.set_report_log_metrics(&metrics);
-                                if let Some(invocation_context) =
-                                    invocation_context_buffer.remove(&request_id)
-                                {
-                                    if invocation_context.runtime_duration_ms > 0.0 {
-                                        let post_runtime_duration_ms = metrics.duration_ms
-                                            - invocation_context.runtime_duration_ms;
+                                TelemetryRecord::PlatformReport {
+                                    request_id,
+                                    status,
+                                    metrics,
+                                    ..
+                                } => {
+                                    debug!(
+                                        "Platform report for request_id: {:?} with status: {:?}",
+                                        request_id, status
+                                    );
+                                    lambda_enhanced_metrics.set_report_log_metrics(&metrics);
+                                    let mut p = invocation_processor.lock().await;
+                                    if let Some(post_runtime_duration_ms) = p.on_platform_report(&request_id, metrics.duration_ms) {
                                         lambda_enhanced_metrics.set_post_runtime_duration_metric(
                                             post_runtime_duration_ms,
                                         );
-                                    } else {
-                                        debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
+                                    }
+                                    drop(p);
+
+                                    if shutdown {
+                                        break;
                                     }
                                 }
-
-                                if shutdown {
-                                    break;
+                                _ => {
+                                    debug!("Unforwarded Telemetry event: {:?}", event);
                                 }
                             }
-                            _ => {
-                                debug!("Unforwarded Telemetry event: {:?}", event);
-                            }
-                        },
                     }
                 }
                 _ = flush_interval.tick() => {
