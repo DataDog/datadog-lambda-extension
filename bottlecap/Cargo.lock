@@ -374,7 +374,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "lazy_static",
  "lazycell",
  "log",
@@ -649,8 +649,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-mini-agent"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog#df81898686ed76cba7f9b42a1f071a8620d9c552"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=105000853f86dd46c39914434907452d9ca05b60#105000853f86dd46c39914434907452d9ca05b60"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -668,8 +668,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-normalization"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog#df81898686ed76cba7f9b42a1f071a8620d9c552"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=105000853f86dd46c39914434907452d9ca05b60#105000853f86dd46c39914434907452d9ca05b60"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -677,8 +677,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-obfuscation"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog#df81898686ed76cba7f9b42a1f071a8620d9c552"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=105000853f86dd46c39914434907452d9ca05b60#105000853f86dd46c39914434907452d9ca05b60"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -694,8 +694,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-protobuf"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog#df81898686ed76cba7f9b42a1f071a8620d9c552"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=105000853f86dd46c39914434907452d9ca05b60#105000853f86dd46c39914434907452d9ca05b60"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -704,8 +704,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-utils"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog#df81898686ed76cba7f9b42a1f071a8620d9c552"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=105000853f86dd46c39914434907452d9ca05b60#105000853f86dd46c39914434907452d9ca05b60"
 dependencies = [
  "anyhow",
  "bytes",
@@ -724,13 +724,14 @@ dependencies = [
  "rmpv",
  "serde",
  "serde_json",
+ "tinybytes",
  "tokio",
 ]
 
 [[package]]
 name = "ddcommon"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog#df81898686ed76cba7f9b42a1f071a8620d9c552"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=105000853f86dd46c39914434907452d9ca05b60#105000853f86dd46c39914434907452d9ca05b60"
 dependencies = [
  "anyhow",
  "futures",
@@ -742,6 +743,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "lazy_static",
+ "libc",
  "log",
  "pin-project",
  "regex",
@@ -751,6 +753,7 @@ dependencies = [
  "static_assertions",
  "tokio",
  "tokio-rustls",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -809,8 +812,8 @@ dependencies = [
 
 [[package]]
 name = "dogstatsd"
-version = "12.0.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=main#40ca981375583a59d8a83aeb3a8c3eb71177603e"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=56358144d33232b0e19b013f7bd21ca591fdb079#56358144d33232b0e19b013f7bd21ca591fdb079"
 dependencies = [
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
@@ -1317,7 +1320,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1455,15 +1458,6 @@ dependencies = [
 
 [[package]]
 name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
@@ -1566,7 +1560,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4979f22fdb869068da03c9f7528f8297c6fd2606bc3a4affe42e6a823fdb8da4"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -2565,9 +2559,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.208"
+version = "1.0.210"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cff085d2cb684faa248efb494c39b68e522822ac0de72ccf08109abde717cfb2"
+checksum = "c8e3592472072e6e22e0a54d5904d9febf8508f65fb8552499a1abc7d1078c3a"
 dependencies = [
  "serde_derive",
 ]
@@ -2583,9 +2577,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.208"
+version = "1.0.210"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24008e81ff7613ed8e5ba0cfaf24e2c2f1e5b8a0495711e44fcd4882fca62bcf"
+checksum = "243902eda00fad750862fc144cea25caca5e20d615af0a81bee94ca738f1df1f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2869,6 +2863,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
 dependencies = [
  "crunchy",
+]
+
+[[package]]
+name = "tinybytes"
+version = "13.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=105000853f86dd46c39914434907452d9ca05b60#105000853f86dd46c39914434907452d9ca05b60"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
