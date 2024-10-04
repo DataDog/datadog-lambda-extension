@@ -167,7 +167,9 @@ async fn main() -> Result<()> {
     let (aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
-    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
+        Error::new(std::io::ErrorKind::InvalidData, format!("Failed to create client: {e:?}"))
+    })?;
 
     let r = register(&client)
         .await
