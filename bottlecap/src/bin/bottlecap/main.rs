@@ -283,8 +283,6 @@ async fn extension_loop_active(
         resolved_api_key.clone(),
         Arc::clone(&metrics_aggr),
         build_fqdn_metrics(config.site.clone()),
-        None,
-        None,
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
