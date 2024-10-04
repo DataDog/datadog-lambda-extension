@@ -6,7 +6,7 @@ use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
 use datadog_trace_utils::tracer_header_tags;
-use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TraceEncoding};
+use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TraceCollection::V07};
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -72,23 +72,23 @@ impl TraceProcessor for ServerlessTraceProcessor {
     ) -> SendData {
         debug!("Received traces to process");
         let payload = trace_utils::collect_trace_chunks(
-            traces,
+            V07(traces),
             &header_tags,
             &mut ChunkProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
             },
             true,
-            TraceEncoding::V07
         );
         let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
             timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            test_token: None,
         };
 
-        SendData::new(body_size, payload, header_tags, &endpoint)
+        SendData::new(body_size, payload, header_tags, &endpoint, config.https_proxy.clone())
     }
 }
 

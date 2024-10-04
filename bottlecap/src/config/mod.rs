@@ -61,6 +61,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
+    pub https_proxy: Option<String>,
 }
 
 impl Default for Config {
@@ -83,6 +84,7 @@ impl Default for Config {
             // Metrics
             enhanced_metrics: true,
             // Failover
+            https_proxy: None,
         }
     }
 }
@@ -153,7 +155,8 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let figment = Figment::new()
         .merge(Yaml::file(&path))
         .merge(Env::prefixed("DATADOG_"))
-        .merge(Env::prefixed("DD_"));
+        .merge(Env::prefixed("DD_"))
+        .merge(Env::raw().only(&["HTTPS_PROXY"]));
 
     // Get YAML nested fields
     let yaml_figment = Figment::from(Yaml::file(&path));

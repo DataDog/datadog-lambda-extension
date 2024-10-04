@@ -76,6 +76,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
             url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
             timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            test_token: None,
         };
 
         match stats_utils::send_stats_payload(
