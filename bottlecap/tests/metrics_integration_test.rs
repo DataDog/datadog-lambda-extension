@@ -39,7 +39,6 @@ async fn test_enhanced_metrics() {
     let mut metrics_flusher = MetricsFlusher::new(
         dd_api_key.to_string(),
         metrics_aggr.clone(),
-        Arc::clone(&arc_config),
         server.base_url(),
     );
     let lambda_enhanced_metrics =
