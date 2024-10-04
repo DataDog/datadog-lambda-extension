@@ -136,7 +136,7 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
 
     if resp.status() != 200 {
         let err = resp.error_for_status_ref();
-        panic!("Can't register extension {:?}", err);
+        panic!("Can't register extension {err:?}");
     }
 
     let extension_id = resp
@@ -284,7 +284,7 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
         build_fqdn_metrics(config.site.clone()),
         None,
-        None
+        None,
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {

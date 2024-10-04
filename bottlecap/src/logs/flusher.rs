@@ -18,11 +18,7 @@ pub fn build_fqdn_logs(site: String) -> String {
 
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(
-        api_key: String,
-        aggregator: Arc<Mutex<Aggregator>>,
-        site: String,
-    ) -> Self {
+    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
         let client = reqwest::Client::new();
         Flusher {
             api_key,

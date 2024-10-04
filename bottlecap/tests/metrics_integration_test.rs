@@ -41,8 +41,6 @@ async fn test_enhanced_metrics() {
         metrics_aggr.clone(),
         Arc::clone(&arc_config),
         server.base_url(),
-        None,
-        None,
     );
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(&arc_config));

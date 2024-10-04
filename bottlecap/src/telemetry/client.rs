@@ -19,7 +19,10 @@ impl TelemetryApiClient {
 
     pub async fn subscribe(&self) -> Result<Response, Box<dyn Error>> {
         let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE)?;
-        let resp = reqwest::Client::builder().no_proxy().build().unwrap()
+        let resp = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
             .put(&url)
             .header(EXTENSION_ID_HEADER, &self.extension_id)
             .json(&serde_json::json!({

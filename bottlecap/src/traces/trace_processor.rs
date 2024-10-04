@@ -88,7 +88,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        SendData::new(body_size, payload, header_tags, &endpoint, config.https_proxy.clone())
+        SendData::new(
+            body_size,
+            payload,
+            header_tags,
+            &endpoint,
+            config.https_proxy.clone(),
+        )
     }
 }
 
