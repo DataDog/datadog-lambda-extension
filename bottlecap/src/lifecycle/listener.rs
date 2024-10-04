@@ -79,17 +79,36 @@ impl Listener {
     }
 
     async fn start_invocation_handler(
-        _: Request<Body>,
+        req: Request<Body>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         debug!("Received start invocation request");
-        let mut processor = invocation_processor.lock().await;
-        processor.on_invocation_start();
-        drop(processor);
+        let (_, body) = req.into_parts();
+        match hyper::body::to_bytes(body).await {
+            Ok(b) => {
+                let body = b.to_vec();
+                let mut processor = invocation_processor.lock().await;
 
-        Response::builder()
-            .status(200)
-            .body(Body::from(json!({}).to_string()))
+                processor.on_invocation_start(body);
+
+                let mut response = Response::builder().status(200);
+                if processor.span.trace_id != 0 {
+                    response =
+                        response.header("x-datadog-trace-id", processor.span.trace_id.to_string());
+                }
+
+                drop(processor);
+
+                response.body(Body::from(json!({}).to_string()))
+            }
+            Err(e) => {
+                error!("Could not read start invocation request body {e}");
+
+                Response::builder()
+                    .status(400)
+                    .body(Body::from("Could not read start invocation request body"))
+            }
+        }
     }
 
     async fn end_invocation_handler(
