@@ -187,6 +187,7 @@ mod tests {
     #[allow(clippy::unwrap_used)]
     #[cfg_attr(miri, ignore)]
     async fn test_process_trace() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let start = get_current_timestamp_nanos();
 
         let tags_provider = create_tags_provider(create_test_config());
