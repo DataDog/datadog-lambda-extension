@@ -5,6 +5,7 @@ use dogstatsd::metric;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use tracing::error;
+use tracing::debug;
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
@@ -73,6 +74,7 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
+        debug!("=== entered set_runtime_duration_metric fn ===");
         let metric = metric::Metric::new(
             constants::RUNTIME_DURATION_METRIC.into(),
             metric::Type::Distribution,

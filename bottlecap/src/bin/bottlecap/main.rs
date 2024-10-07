@@ -10,38 +10,24 @@
 #![deny(missing_debug_implementations)]
 
 use bottlecap::{
-    base_url,
-    config::{self, AwsConfig, Config},
-    event_bus::bus::EventBus,
-    events::Event,
-    lifecycle::{
+    base_url, config::{self, AwsConfig, Config}, event_bus::bus::EventBus, events::Event, lifecycle::{
         flush_control::FlushControl,
         invocation_context::{InvocationContext, InvocationContextBuffer},
-    },
-    logger,
-    logs::{
+    }, logger, logs::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    },
-    metrics::enhanced::lambda::Lambda as enhanced_metrics,
-    secrets::decrypt,
-    tags::{lambda, provider::Provider as TagProvider},
-    telemetry::{
+    }, metrics::enhanced::lambda::Lambda as enhanced_metrics, proc::proc, secrets::decrypt, tags::{lambda, provider::Provider as TagProvider}, telemetry::{
         self,
         client::TelemetryApiClient,
         events::{Status, TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
-    },
-    traces::{
+    }, traces::{
         hello_agent,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
-    },
-    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
-    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
-    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    }, DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE, LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
@@ -54,15 +40,7 @@ use dogstatsd::{
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
-    collections::hash_map,
-    collections::HashMap,
-    env,
-    io::Error,
-    io::Result,
-    os::unix::process::CommandExt,
-    path::Path,
-    process::Command,
-    sync::{Arc, Mutex},
+    collections::{hash_map, HashMap}, env, io::{Error, Result}, os::unix::process::CommandExt, path::Path, process::Command, sync::{Arc, Mutex}
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;
@@ -347,6 +325,12 @@ async fn extension_loop_active(
                     request_id, deadline_ms, invoked_function_arn
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
+
+                // read start enhanced metric data
+                let network_data_result = proc::get_network_data();
+                if let Ok(network_data) = network_data_result {
+                    print!("=== network data at start - rx_bytes: {}, tx_bytes: {} ===", network_data.rx_bytes, network_data.tx_bytes);
+                }
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
@@ -467,6 +451,11 @@ async fn extension_loop_active(
                         stats_flusher.manual_flush()
                     );
                     if !flush_control.should_flush_end() {
+                        // read ending enhanced metric data
+                        let network_data_result = proc::get_network_data();
+                        if let Ok(network_data) = network_data_result {
+                            print!("=== network data at end - rx_bytes: {}, tx_bytes: {} ===", network_data.rx_bytes, network_data.tx_bytes);
+                        }
                         break;
                     }
                 }

@@ -28,6 +28,7 @@ pub mod secrets;
 pub mod tags;
 pub mod telemetry;
 pub mod traces;
+pub mod proc;
 
 use std::{env, io};
 
