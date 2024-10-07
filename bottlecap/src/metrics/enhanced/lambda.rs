@@ -1,4 +1,6 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
+use crate::metrics::enhanced::constants::{RX_BYTES_METRIC, TX_BYTES_METRIC};
+use crate::proc::proc::{self, NetworkData};
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
@@ -74,7 +76,6 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        debug!("=== entered set_runtime_duration_metric fn ===");
         let metric = metric::Metric::new(
             constants::RUNTIME_DURATION_METRIC.into(),
             metric::Type::Distribution,
@@ -186,6 +187,56 @@ impl Lambda {
         );
         if let Err(e) = aggr.insert(&metric) {
             error!("failed to insert estimated cost metric: {}", e);
+        }
+    }
+
+    pub fn set_network_enhanced_metrics(&self, network_offset_data: NetworkData) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let mut aggr: std::sync::MutexGuard<Aggregator> = self.aggregator.lock().expect("lock poisoned");
+
+        let network_data_result = proc::get_network_data();
+        if let Err(e) = &network_data_result {
+            debug!("could not emit network enhanced metrics: {}", e);
+            return; 
+        }
+
+        let network_data = network_data_result.unwrap();
+        print!("=== network data - rx_bytes: {}, tx_bytes: {} ===", network_data.rx_bytes, network_data.tx_bytes);
+
+        let adjusted_rx_bytes = network_data.rx_bytes - network_offset_data.rx_bytes;
+        let adjusted_tx_bytes = network_data.tx_bytes - network_offset_data.tx_bytes;
+
+        let metric = metric::Metric::new(
+            constants::RX_BYTES_METRIC.into(),
+            metric::Type::Distribution,
+            adjusted_rx_bytes.to_string().into(),
+            None,
+        );
+        if let Err(e) = aggr.insert(&metric) {
+            debug!("failed to insert rx_bytes metric: {}", e);
+        }
+
+        let metric = metric::Metric::new(
+            constants::TX_BYTES_METRIC.into(),
+            metric::Type::Distribution,
+            adjusted_tx_bytes.to_string().into(),
+            None,
+        );
+        if let Err(e) = aggr.insert(&metric) {
+            debug!("failed to insert tx_bytes metric: {}", e);
+        }
+
+        let metric = metric::Metric::new(
+            constants::TOTAL_NETWORK_METRIC.into(),
+            metric::Type::Distribution,
+            (adjusted_rx_bytes + adjusted_tx_bytes).to_string().into(),
+            None,
+        );
+        if let Err(e) = aggr.insert(&metric) {
+            debug!("failed to insert total_network metric: {}", e);
         }
     }
 }

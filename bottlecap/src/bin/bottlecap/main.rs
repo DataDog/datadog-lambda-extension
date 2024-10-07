@@ -326,7 +326,7 @@ async fn extension_loop_active(
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
 
-                // read start enhanced metric data
+                // read enhanced metric data at start
                 let network_data_result = proc::get_network_data();
                 if let Ok(network_data) = network_data_result {
                     print!("=== network data at start - rx_bytes: {}, tx_bytes: {} ===", network_data.rx_bytes, network_data.tx_bytes);
@@ -433,6 +433,12 @@ async fn extension_loop_active(
                                     }
                                 }
 
+                                // read enhanced metrics at end
+                                let network_data_result = proc::get_network_data();
+                                if let Ok(network_data) = network_data_result {
+                                    print!("=== network data after PlatformReport event - rx_bytes: {}, tx_bytes: {} ===", network_data.rx_bytes, network_data.tx_bytes);
+                                }
+
                                 if shutdown {
                                     break;
                                 }
@@ -451,11 +457,6 @@ async fn extension_loop_active(
                         stats_flusher.manual_flush()
                     );
                     if !flush_control.should_flush_end() {
-                        // read ending enhanced metric data
-                        let network_data_result = proc::get_network_data();
-                        if let Ok(network_data) = network_data_result {
-                            print!("=== network data at end - rx_bytes: {}, tx_bytes: {} ===", network_data.rx_bytes, network_data.tx_bytes);
-                        }
                         break;
                     }
                 }
