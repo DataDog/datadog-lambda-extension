@@ -9,13 +9,13 @@ async-trait = { version = "0.1", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { version = "12.0.0", git = "https://github.com/DataDog/libdatadog" }
-datadog-trace-protobuf = { version = "12.0.0", git = "https://github.com/DataDog/libdatadog" }
-datadog-trace-utils = { version = "12.0.0", git = "https://github.com/DataDog/libdatadog" }
-datadog-trace-mini-agent = { version = "12.0.0", git = "https://github.com/DataDog/libdatadog" }
-datadog-trace-normalization = { version = "12.0.0", git = "https://github.com/DataDog/libdatadog" }
-datadog-trace-obfuscation = { version = "12.0.0", git = "https://github.com/DataDog/libdatadog" }
-dogstatsd = { git = "https://github.com/DataDog/libdatadog", branch = "fix-dogstatsd-aggregator" }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", tag = "v13.1.0" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", tag = "v13.1.0" }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", tag = "v13.1.0" }
+datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", tag = "v13.1.0" }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", tag = "v13.1.0" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", tag = "v13.1.0" }
+dogstatsd = { git = "https://github.com/DataDog/libdatadog", branch = "main" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
 log = { version = "0.4", default-features = false }

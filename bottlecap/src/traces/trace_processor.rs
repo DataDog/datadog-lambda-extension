@@ -6,7 +6,7 @@ use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
 use datadog_trace_utils::tracer_header_tags;
-use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TraceEncoding};
+use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TraceCollection::V07};
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -31,7 +31,7 @@ struct ChunkProcessor {
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
-    fn process(&mut self, chunk: &mut pb::TraceChunk, _index: usize) {
+    fn process(&mut self, chunk: &mut datadog_trace_protobuf::pb::TraceChunk, _index: usize) {
         chunk.spans.retain(|span| {
             (span.resource != "127.0.0.1" || span.resource != "0.0.0.0")
                 && span.name != "dns.lookup"
@@ -72,14 +72,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
     ) -> SendData {
         debug!("Received traces to process");
         let payload = trace_utils::collect_trace_chunks(
-            traces,
+            V07(traces),
             &header_tags,
             &mut ChunkProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
             },
             true,
-            TraceEncoding::V07,
         );
         let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
@@ -89,7 +88,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        SendData::new(body_size, payload, header_tags, &endpoint)
+        SendData::new(
+            body_size,
+            payload,
+            header_tags,
+            &endpoint,
+            config.https_proxy.clone(),
+        )
     }
 }
 
@@ -182,6 +187,7 @@ mod tests {
     #[allow(clippy::unwrap_used)]
     #[cfg_attr(miri, ignore)]
     async fn test_process_trace() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let start = get_current_timestamp_nanos();
 
         let tags_provider = create_tags_provider(create_test_config());

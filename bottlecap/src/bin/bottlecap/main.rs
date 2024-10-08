@@ -134,7 +134,10 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    assert_eq!(resp.status(), 200, "Unable to register extension");
+    if resp.status() != 200 {
+        let err = resp.error_for_status_ref();
+        panic!("Can't register extension {err:?}");
+    }
 
     let extension_id = resp
         .headers()
@@ -164,7 +167,12 @@ async fn main() -> Result<()> {
     let (aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to create client: {e:?}"),
+        )
+    })?;
 
     let r = register(&client)
         .await
@@ -206,6 +214,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
             panic!("Error starting the extension: {err:?}");
         }
     };
+
     (aws_config, config)
 }
 
@@ -279,8 +288,6 @@ async fn extension_loop_active(
         resolved_api_key.clone(),
         Arc::clone(&metrics_aggr),
         build_fqdn_metrics(config.site.clone()),
-        None,
-        None,
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
