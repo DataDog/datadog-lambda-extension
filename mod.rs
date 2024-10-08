@@ -23,8 +23,6 @@ pub struct FailoverConfig {
     serverless_appsec_enabled: bool,
     appsec_enabled: bool,
     profiling_enabled: bool,
-    http_proxy: Option<String>,
-    https_proxy: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -63,6 +61,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
+    pub https_proxy: Option<String>,
 }
 
 impl Default for Config {
@@ -85,6 +84,7 @@ impl Default for Config {
             // Metrics
             enhanced_metrics: true,
             // Failover
+            https_proxy: None,
         }
     }
 }
@@ -144,11 +144,6 @@ fn failsover(figment: &Figment) -> Result<(), ConfigError> {
         ));
     }
 
-    if failover_config.http_proxy.is_some() || failover_config.https_proxy.is_some() {
-        log_failover_reason("http_proxy");
-        return Err(ConfigError::UnsupportedField("http_proxy".to_string()));
-    }
-
     Ok(())
 }
 
@@ -160,7 +155,8 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let figment = Figment::new()
         .merge(Yaml::file(&path))
         .merge(Env::prefixed("DATADOG_"))
-        .merge(Env::prefixed("DD_"));
+        .merge(Env::prefixed("DD_"))
+        .merge(Env::raw().only(&["HTTPS_PROXY"]));
 
     // Get YAML nested fields
     let yaml_figment = Figment::from(Yaml::file(&path));
