@@ -1,0 +1,508 @@
+use std::collections::HashMap;
+
+use lazy_static::lazy_static;
+use log::warn;
+use regex::Regex;
+use tracing::{debug, error};
+
+use super::{
+    carrier::{Extractor, Injector},
+    error::Error,
+};
+
+use crate::traces::context::{Sampling, SpanContext};
+
+// Datadog Keys
+const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
+const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
+const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
+const DATADOG_ORIGIN_KEY: &str = "x-datadog-origin";
+const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
+
+const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
+const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
+const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
+const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
+
+// Traceparent Keys
+const TRACEPARENT_KEY: &str = "traceparent";
+const TRACESTATE_KEY: &str = "tracestate";
+
+lazy_static! {
+    static ref TRACEPARENT_REGEX: Regex =
+        Regex::new(r"(?i)^([a-f0-9]{2})-([a-f0-9]{32})-([a-f0-9]{16})-([a-f0-9]{2})(-.*)?$")
+            .expect("failed creating regex");
+    static ref INVALID_SEGMENT_REGEX: Regex = Regex::new(r"^0+$").expect("failed creating regex");
+    static ref VALID_TAG_KEY_REGEX: Regex =
+        Regex::new(r"^_dd\.p\.[\x21-\x2b\x2d-\x7e]+$").expect("failed creating regex");
+    static ref VALID_TAG_VALUE_REGEX: Regex =
+        Regex::new(r"^[\x20-\x2b\x2d-\x7e]*$").expect("failed creating regex");
+    static ref INVALID_ASCII_CHARACTERS_REGEX: Regex =
+        Regex::new(r"[^\x20-\x7E]+").expect("failed creating regex");
+    static ref VALID_SAMPLING_DECISION_REGEX: Regex =
+        Regex::new(r"^-([0-9])$").expect("failed creating regex");
+}
+
+pub trait TextMapPropagator {
+    fn extract(&self, carrier: &dyn Extractor) -> SpanContext;
+    fn inject(&self, context: SpanContext, carrier: &mut dyn Injector);
+}
+
+#[derive(Clone, Copy)]
+pub struct DatadogPropagator;
+
+impl TextMapPropagator for DatadogPropagator {
+    fn extract(&self, carrier: &dyn Extractor) -> SpanContext {
+        Self::extract_context(carrier).unwrap_or_default()
+    }
+
+    fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
+        todo!();
+    }
+}
+
+impl DatadogPropagator {
+    fn extract_context(carrier: &dyn Extractor) -> Option<SpanContext> {
+        if let Some(trace_id) = Self::extract_trace_id(carrier) {
+            let parent_id = Self::extract_parent_id(carrier).unwrap_or(0);
+            let origin = Self::extract_origin(carrier);
+            let mut tags = Self::extract_tags(carrier);
+            let sampling_priority = Self::extract_sampling_priority(carrier).unwrap_or(2);
+
+            Self::validate_sampling_decision(&mut tags);
+
+            return Some(SpanContext {
+                trace_id,
+                span_id: parent_id,
+                sampling: Some(Sampling {
+                    priority: Some(sampling_priority),
+                    mechanism: None,
+                }),
+                origin,
+                tags,
+            });
+        }
+
+        None
+    }
+
+    fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
+        let should_remove =
+            tags.get(DATADOG_SAMPLING_DECISION_KEY)
+                .map_or(false, |sampling_decision| {
+                    let is_invalid = !VALID_SAMPLING_DECISION_REGEX.is_match(sampling_decision);
+                    if is_invalid {
+                        warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
+                    }
+                    is_invalid
+                });
+
+        if should_remove {
+            tags.remove(DATADOG_SAMPLING_DECISION_KEY);
+            tags.insert(
+                DATADOG_PROPAGATION_ERROR_KEY.to_string(),
+                "decoding_error".to_string(),
+            );
+        }
+
+        // todo: appsec standalone
+    }
+
+    fn extract_trace_id(carrier: &dyn Extractor) -> Option<u64> {
+        let trace_id = carrier.get(DATADOG_TRACE_ID_KEY)?;
+
+        if INVALID_SEGMENT_REGEX.is_match(trace_id) {
+            return None;
+        }
+
+        trace_id.parse::<u64>().ok()
+    }
+
+    fn extract_parent_id(carrier: &dyn Extractor) -> Option<u64> {
+        let parent_id = carrier.get(DATADOG_PARENT_ID_KEY)?;
+
+        parent_id.parse::<u64>().ok()
+    }
+
+    fn extract_sampling_priority(carrier: &dyn Extractor) -> Option<i8> {
+        let sampling_priority = carrier.get(DATADOG_SAMPLING_PRIORITY_KEY)?;
+
+        sampling_priority.parse::<i8>().ok()
+    }
+
+    fn extract_origin(carrier: &dyn Extractor) -> Option<String> {
+        let origin = carrier.get(DATADOG_ORIGIN_KEY)?;
+        Some(origin.to_string())
+    }
+
+    fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
+        let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
+        let mut tags: HashMap<String, String> = HashMap::new();
+
+        // todo:
+        // - trace propagation disabled
+        // - trace propagation max lenght
+
+        let pairs = carrier_tags.split(',');
+        for pair in pairs {
+            if let Some((k, v)) = pair.split_once('=') {
+                // todo: reject key on tags extract reject
+                if k.starts_with("_dd.p") {
+                    tags.insert(k.to_string(), v.to_string());
+                }
+            }
+        }
+
+        // Handle 128bit trace ID
+        if !tags.is_empty() {
+            if let Some(trace_id_higher_order_bits) =
+                carrier.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
+            {
+                if !Self::higher_order_bits_valid(trace_id_higher_order_bits) {
+                    warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
+                    tags.insert(
+                        DATADOG_PROPAGATION_ERROR_KEY.to_string(),
+                        format!("malformed tid {trace_id_higher_order_bits}"),
+                    );
+                    tags.remove(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY);
+                }
+            }
+        }
+
+        if !tags.contains_key(DATADOG_SAMPLING_DECISION_KEY) {
+            tags.insert(DATADOG_SAMPLING_DECISION_KEY.to_string(), "-3".to_string());
+        }
+
+        tags
+    }
+
+    fn higher_order_bits_valid(trace_id_higher_order_bits: &str) -> bool {
+        if trace_id_higher_order_bits.len() != 16 {
+            return false;
+        }
+
+        match u64::from_str_radix(trace_id_higher_order_bits, 16) {
+            Ok(_) => {}
+            Err(_) => return false,
+        }
+
+        true
+    }
+}
+
+struct Traceparent {
+    sampling_priority: i8,
+    trace_id: u128,
+    span_id: u64,
+}
+
+struct Tracestate {
+    sampling_priority: Option<i8>,
+    origin: Option<String>,
+    lower_order_trace_id: Option<String>,
+}
+
+#[derive(Clone, Copy)]
+pub struct TraceparentPropagator;
+
+impl TextMapPropagator for TraceparentPropagator {
+    fn extract(&self, carrier: &dyn Extractor) -> SpanContext {
+        Self::extract_context(carrier).unwrap_or_default()
+    }
+
+    fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
+        todo!()
+    }
+}
+
+impl TraceparentPropagator {
+    fn extract_context(carrier: &dyn Extractor) -> Option<SpanContext> {
+        let tp = carrier.get(TRACEPARENT_KEY)?.trim();
+
+        match Self::extract_traceparent(tp) {
+            Ok(traceparent) => {
+                let mut tags = HashMap::new();
+                tags.insert(TRACEPARENT_KEY.to_string(), tp.to_string());
+
+                let mut origin = None;
+                let mut sampling_priority = traceparent.sampling_priority;
+                if let Some(ts) = carrier.get(TRACESTATE_KEY) {
+                    if let Some(tracestate) = Self::extract_tracestate(ts, &mut tags) {
+                        if let Some(lpid) = tracestate.lower_order_trace_id {
+                            tags.insert(DATADOG_LAST_PARENT_ID_KEY.to_string(), lpid);
+                        }
+
+                        origin = tracestate.origin;
+
+                        sampling_priority = Self::define_sampling_priority(
+                            traceparent.sampling_priority,
+                            tracestate.sampling_priority,
+                        );
+                    }
+                } else {
+                    debug!("No `dd` value found in tracestate");
+                }
+
+                let (trace_id_higher_order_bits, trace_id_lower_order_bits) =
+                    Self::split_trace_id(traceparent.trace_id);
+                tags.insert(
+                    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                    trace_id_higher_order_bits.to_string(),
+                );
+
+                Some(SpanContext {
+                    trace_id: trace_id_lower_order_bits,
+                    span_id: traceparent.span_id,
+                    sampling: Some(Sampling {
+                        priority: Some(sampling_priority),
+                        mechanism: None,
+                    }),
+                    origin,
+                    tags,
+                })
+            }
+            Err(e) => {
+                error!("Failed to extract traceparent: {e}");
+                None
+            }
+        }
+    }
+
+    fn extract_tracestate(
+        tracestate: &str,
+        tags: &mut HashMap<String, String>,
+    ) -> Option<Tracestate> {
+        let ts_v = tracestate.split(',').map(str::trim);
+        let ts = ts_v.clone().collect::<Vec<&str>>().join(",");
+
+        if INVALID_ASCII_CHARACTERS_REGEX.is_match(&ts) {
+            debug!("Received invalid tracestate header {tracestate}");
+            return None;
+        }
+
+        tags.insert(TRACESTATE_KEY.to_string(), ts.to_string());
+
+        let mut dd: Option<HashMap<String, String>> = None;
+        for v in ts_v.clone() {
+            if let Some(stripped) = v.strip_prefix("dd=") {
+                dd = Some(
+                    stripped
+                        .split(';')
+                        .filter_map(|item| {
+                            let mut parts = item.splitn(2, ':');
+                            Some((parts.next()?.to_string(), parts.next()?.to_string()))
+                        })
+                        .collect(),
+                );
+            }
+        }
+
+        if let Some(dd) = dd {
+            let mut tracestate = Tracestate {
+                sampling_priority: None,
+                origin: None,
+                lower_order_trace_id: None,
+            };
+
+            if let Some(ts_sp) = dd.get("s") {
+                if let Ok(p_sp) = ts_sp.parse::<i8>() {
+                    tracestate.sampling_priority = Some(p_sp);
+                }
+            }
+
+            if let Some(o) = dd.get("o") {
+                tracestate.origin = Some(Self::decode_tag_value(o));
+            }
+
+            if let Some(lo_tid) = dd.get("p") {
+                tracestate.lower_order_trace_id = Some(lo_tid.to_string());
+            }
+
+            for (k, v) in &dd {
+                if k.starts_with("t.") {
+                    let nk = format!("_dd.p.{k}");
+                    tags.insert(nk, Self::decode_tag_value(v));
+                }
+            }
+
+            return Some(tracestate);
+        }
+
+        None
+    }
+
+    fn decode_tag_value(value: &str) -> String {
+        value.replace('~', "=")
+    }
+
+    fn define_sampling_priority(
+        traceparent_sampling_priority: i8,
+        tracestate_sampling_priority: Option<i8>,
+    ) -> i8 {
+        if let Some(ts_sp) = tracestate_sampling_priority {
+            if (traceparent_sampling_priority == 1 && ts_sp > 0)
+                || (traceparent_sampling_priority == 0 && ts_sp < 0)
+            {
+                return ts_sp;
+            }
+        }
+
+        traceparent_sampling_priority
+    }
+
+    fn extract_traceparent(traceparent: &str) -> Result<Traceparent, Error> {
+        let captures = TRACEPARENT_REGEX
+            .captures(traceparent)
+            .ok_or_else(|| Error::extract("invalid traceparent", "traceparent"))?;
+
+        let version = &captures[1];
+        let trace_id = &captures[2];
+        let span_id = &captures[3];
+        let flags = &captures[4];
+        let tail = captures.get(5).map_or("", |m| m.as_str());
+
+        Self::extract_version(version, tail)?;
+
+        let trace_id = Self::extract_trace_id(trace_id)?;
+        let span_id = Self::extract_span_id(span_id)?;
+
+        let trace_flags = Self::extract_trace_flags(flags)?;
+        let sampling_priority = i8::from(trace_flags & 0x1 != 0);
+
+        Ok(Traceparent {
+            sampling_priority,
+            trace_id,
+            span_id,
+        })
+    }
+
+    fn extract_version(version: &str, tail: &str) -> Result<(), Error> {
+        match version {
+            "ff" => {
+                return Err(Error::extract(
+                    "`ff` is an invalid traceparent version",
+                    "traceparent",
+                ))
+            }
+            "00" => {
+                if !tail.is_empty() {
+                    return Err(Error::extract("Traceparent with version `00` should contain only 4 values delimited by `-`", "traceparent"));
+                }
+            }
+            _ => {
+                warn!("Unsupported traceparent version {version}, still atempenting to parse");
+            }
+        }
+
+        Ok(())
+    }
+
+    fn extract_trace_id(trace_id: &str) -> Result<u128, Error> {
+        if INVALID_SEGMENT_REGEX.is_match(trace_id) {
+            return Err(Error::extract(
+                "`0` value for trace_id is invalid",
+                "traceparent",
+            ));
+        }
+
+        u128::from_str_radix(trace_id, 16)
+            .map_err(|_| Error::extract("Failed to decode trace_id", "traceparent"))
+    }
+
+    #[allow(clippy::cast_possible_truncation)]
+    fn split_trace_id(trace_id: u128) -> (u64, u64) {
+        let trace_id_lower_order_bits = trace_id as u64;
+        let trace_id_higher_order_bits = (trace_id >> 64) as u64;
+
+        (trace_id_higher_order_bits, trace_id_lower_order_bits)
+    }
+
+    fn extract_span_id(span_id: &str) -> Result<u64, Error> {
+        if INVALID_SEGMENT_REGEX.is_match(span_id) {
+            return Err(Error::extract(
+                "`0` value for span_id is invalid",
+                "traceparent",
+            ));
+        }
+
+        u64::from_str_radix(span_id, 16)
+            .map_err(|_| Error::extract("Failed to decode span_id", "traceparent"))
+    }
+
+    fn extract_trace_flags(flags: &str) -> Result<u8, Error> {
+        if flags.len() != 2 {
+            return Err(Error::extract("Invalid trace flags length", "traceparent"));
+        }
+
+        u8::from_str_radix(flags, 16)
+            .map_err(|_| Error::extract("Failed to decode trace_flags", "traceparent"))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_extract_datadog_propagator() {
+        let mut headers = HashMap::new();
+        headers.insert("x-datadog-trace-id".to_string(), "1234".to_string());
+        headers.insert("x-datadog-parent-id".to_string(), "5678".to_string());
+        headers.insert("x-datadog-sampling-priority".to_string(), "1".to_string());
+        headers.insert("x-datadog-origin".to_string(), "synthetics".to_string());
+        headers.insert(
+            "x-datadog-tags".to_string(),
+            "_dd.p.test=value,_dd.p.tid=4321,any=tag".to_string(),
+        );
+
+        let propagator = DatadogPropagator;
+
+        let context = propagator.extract(&headers);
+
+        assert_eq!(context.trace_id, 1234);
+        assert_eq!(context.span_id, 5678);
+        assert_eq!(context.sampling.unwrap().priority, Some(1));
+        assert_eq!(context.origin, Some("synthetics".to_string()));
+        println!("{:?}", context.tags);
+        assert_eq!(context.tags.get("_dd.p.test").unwrap(), "value");
+        assert_eq!(context.tags.get("_dd.p.tid").unwrap(), "4321");
+        assert_eq!(context.tags.get("_dd.p.dm").unwrap(), "-3");
+    }
+
+    #[test]
+    fn test_extract_traceparent_propagator() {
+        let mut headers = HashMap::new();
+        headers.insert(
+            "traceparent".to_string(),
+            "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
+        );
+        headers.insert(
+            "tracestate".to_string(),
+            "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
+        );
+
+        let propagator = TraceparentPropagator;
+        let context = propagator.extract(&headers);
+
+        assert_eq!(context.trace_id, 7277407061855694839);
+        assert_eq!(context.span_id, 67667974448284343);
+        assert_eq!(context.sampling.unwrap().priority, Some(2));
+        assert_eq!(context.origin, Some("rum".to_string()));
+        assert_eq!(
+            context.tags.get("traceparent").unwrap(),
+            "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01"
+        );
+        assert_eq!(
+            context.tags.get("tracestate").unwrap(),
+            "dd=p:00f067aa0ba902b7;s:2;o:rum"
+        );
+        assert_eq!(
+            context.tags.get("_dd.p.tid").unwrap(),
+            "9291375655657946024"
+        );
+        assert_eq!(
+            context.tags.get("_dd.parent_id").unwrap(),
+            "00f067aa0ba902b7"
+        );
+    }
+}

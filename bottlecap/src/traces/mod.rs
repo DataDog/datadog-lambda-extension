@@ -1,6 +1,8 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+pub mod context;
+pub mod propagation;
 pub mod stats_flusher;
 pub mod stats_processor;
 pub mod trace_agent;
