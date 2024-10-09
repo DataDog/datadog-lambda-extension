@@ -274,7 +274,11 @@ mod tests {
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
         let tags = event.get_tags();
-        let sorted_tags_array = tags.iter().map(|(k, v)| format!("{}:{}", k, v)).collect::<Vec<String>>().sort();
+        let sorted_tags_array = tags
+            .iter()
+            .map(|(k, v)| format!("{}:{}", k, v))
+            .collect::<Vec<String>>()
+            .sort();
 
         let expected = HashMap::from([
             (
@@ -290,7 +294,11 @@ mod tests {
             ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
             ("http.referer".to_string(), "".to_string()),
         ]);
-        let expected_sorted_array = expected.iter().map(|(k, v)| format!("{}:{}", k, v)).collect::<Vec<String>>().sort();
+        let expected_sorted_array = expected
+            .iter()
+            .map(|(k, v)| format!("{}:{}", k, v))
+            .collect::<Vec<String>>()
+            .sort();
 
         assert_eq!(sorted_tags_array, expected_sorted_array);
     }
