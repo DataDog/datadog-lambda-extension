@@ -189,6 +189,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 }
 
 #[allow(clippy::module_name_repetitions)]
+#[derive(Debug, Clone)]
 pub struct AwsConfig {
     pub region: String,
     pub aws_access_key_id: String,

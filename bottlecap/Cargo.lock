@@ -429,6 +429,7 @@ dependencies = [
  "log",
  "proptest",
  "protobuf",
+ "rand",
  "regex",
  "reqwest",
  "rmp-serde",
