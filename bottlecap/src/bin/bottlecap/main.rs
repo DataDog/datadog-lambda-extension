@@ -23,6 +23,7 @@ use bottlecap::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
     },
+    lwa::proxy::start_lwa_proxy,
     metrics::enhanced::lambda::Lambda as enhanced_metrics,
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
@@ -172,6 +173,8 @@ async fn main() -> Result<()> {
             format!("Failed to create client: {e:?}"),
         )
     })?;
+
+    let _lwa_proxy = start_lwa_proxy();
 
     let r = register(&client)
         .await
