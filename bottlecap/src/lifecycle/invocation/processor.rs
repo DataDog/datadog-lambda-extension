@@ -11,20 +11,29 @@ use tokio::sync::mpsc::Sender;
 use tracing::debug;
 
 use crate::{
-    config, lifecycle::invocation::context::ContextBuffer, tags::provider, traces::trace_processor,
+    config::{self, AwsConfig},
+    lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
+    tags::provider,
+    traces::trace_processor,
 };
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 
 pub struct Processor {
     pub context_buffer: ContextBuffer,
+    inferrer: SpanInferrer,
     pub span: Span,
+    aws_config: AwsConfig,
     tracer_detected: bool,
 }
 
 impl Processor {
     #[must_use]
-    pub fn new(tags_provider: Arc<provider::Provider>, config: Arc<config::Config>) -> Self {
+    pub fn new(
+        tags_provider: Arc<provider::Provider>,
+        config: Arc<config::Config>,
+        aws_config: &AwsConfig,
+    ) -> Self {
         let service = config.service.clone().unwrap_or("aws.lambda".to_string());
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -32,6 +41,7 @@ impl Processor {
 
         Processor {
             context_buffer: ContextBuffer::default(),
+            inferrer: SpanInferrer::default(),
             span: Span {
                 service,
                 name: "aws.lambda".to_string(),
@@ -48,6 +58,7 @@ impl Processor {
                 meta_struct: HashMap::new(),
                 span_links: Vec::new(),
             },
+            aws_config: aws_config.clone(),
             tracer_detected: false,
         }
     }
@@ -86,7 +97,6 @@ impl Processor {
             span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
             span.meta
                 .insert("request_id".to_string(), request_id.clone());
-
             // todo(duncanista): add missing tags
             // - cold start, proactive init
             // - language
@@ -99,8 +109,15 @@ impl Processor {
             // - metrics tags (for asm)
         }
 
+        self.inferrer.complete_inferred_span(&self.span);
+
         if self.tracer_detected {
-            let span_size = std::mem::size_of_val(&self.span);
+            let mut body_size = std::mem::size_of_val(&self.span);
+            let mut traces = vec![self.span.clone()];
+            if let Some(inferred_span) = self.inferrer.get_inferred_span() {
+                body_size += std::mem::size_of_val(inferred_span);
+                traces.push(inferred_span.clone());
+            }
 
             // todo: figure out what to do here
             let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -118,8 +135,8 @@ impl Processor {
                 config.clone(),
                 tags_provider.clone(),
                 header_tags,
-                vec![vec![self.span.clone()]],
-                span_size,
+                vec![traces],
+                body_size,
             );
 
             if let Err(e) = trace_agent_tx.send(send_data).await {
@@ -149,16 +166,31 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(&mut self) {
+    pub fn on_invocation_start(&mut self, payload: Vec<u8>) {
         self.tracer_detected = true;
+
+        // Reset trace context
+        self.span.trace_id = 0;
+        self.span.parent_id = 0;
+        self.span.span_id = 0;
+
+        self.inferrer.infer_span(&payload, &self.aws_config);
+
+        if let Some(inferred_span) = self.inferrer.get_inferred_span() {
+            self.span.parent_id = inferred_span.span_id;
+        }
     }
 
     /// Given trace context information, set it to the current span.
     ///
     pub fn on_invocation_end(&mut self, trace_id: u64, span_id: u64, parent_id: u64) {
-        let span = &mut self.span;
-        span.trace_id = trace_id;
-        span.span_id = span_id;
-        span.parent_id = parent_id;
+        self.span.trace_id = trace_id;
+        self.span.span_id = span_id;
+
+        if self.inferrer.get_inferred_span().is_some() {
+            self.inferrer.set_parent_id(parent_id);
+        } else {
+            self.span.parent_id = parent_id;
+        }
     }
 }
