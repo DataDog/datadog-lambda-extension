@@ -1,7 +1,7 @@
 use reqwest::Response;
 use serde_json;
 use std::error::Error;
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::{base_url, EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE};
 
@@ -19,7 +19,13 @@ impl TelemetryApiClient {
 
     pub async fn subscribe(&self) -> Result<Response, Box<dyn Error>> {
         let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE)?;
-        let resp = reqwest::Client::new()
+        let resp = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .map_err(|e| {
+                error!("Error building reqwest client: {:?}", e);
+                e
+            })?
             .put(&url)
             .header(EXTENSION_ID_HEADER, &self.extension_id)
             .json(&serde_json::json!({

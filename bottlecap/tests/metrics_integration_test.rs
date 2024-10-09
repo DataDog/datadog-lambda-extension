@@ -2,6 +2,7 @@ use bottlecap::config::Config;
 use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use dogstatsd::flusher::Flusher as MetricsFlusher;
+use dogstatsd::metric::SortedTags;
 use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
 
@@ -32,7 +33,7 @@ async fn test_enhanced_metrics() {
     let arc_config = Arc::new(Config::default());
 
     let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::new(vec!["aTagKey:aTagValue".to_string()], 1024)
+        MetricsAggregator::new(SortedTags::parse("aTagKey:aTagValue").unwrap(), 1024)
             .expect("failed to create aggregator"),
     ));
     let mut metrics_flusher = MetricsFlusher::new(
