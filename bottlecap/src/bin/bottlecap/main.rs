@@ -264,11 +264,13 @@ async fn extension_loop_active(
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
-    let tags_provider = setup_tag_provider(
-        aws_config,
-        config,
-        r.account_id.as_ref().unwrap_or(&"none".to_string()),
-    );
+    let account_id = r
+        .account_id
+        .as_ref()
+        .unwrap_or(&"none".to_string())
+        .to_string();
+    let tags_provider = setup_tag_provider(aws_config, config, &account_id);
+
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
         resolved_api_key.clone(),
@@ -297,6 +299,7 @@ async fn extension_loop_active(
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
         Arc::clone(config),
+        aws_config,
     )));
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(
