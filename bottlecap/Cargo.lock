@@ -425,6 +425,7 @@ dependencies = [
  "hmac",
  "httpmock",
  "hyper 0.14.30",
+ "hyper-proxy",
  "lazy_static",
  "log",
  "proptest",
