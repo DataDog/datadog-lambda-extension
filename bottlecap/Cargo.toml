@@ -18,6 +18,7 @@ datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", tag
 dogstatsd = { git = "https://github.com/DataDog/libdatadog", branch = "main" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
+hyper-proxy = { version = "0.9.1", default-features = false }
 lazy_static = { version = "1.5", default-features = false }
 log = { version = "0.4", default-features = false }
 protobuf = { version = "3.5", default-features = false }
