@@ -3,16 +3,16 @@ use std::{error::Error, fs::File, io::{self, BufRead}};
 use super::constants::{LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH};
 
 #[derive(Copy, Clone)]
-pub struct NetworkData {
+pub struct NetworkEnhancedMetricData {
     pub rx_bytes: f64,
     pub tx_bytes: f64,
 }
 
-pub fn get_network_data() -> Result<NetworkData, Box<dyn std::error::Error>> {
+pub fn get_network_data() -> Result<NetworkEnhancedMetricData, Box<dyn std::error::Error>> {
     get_network_data_helper(PROC_NET_DEV_PATH)
 }
 
-fn get_network_data_helper(path: &str) -> Result<NetworkData, Box<dyn std::error::Error>> {
+fn get_network_data_helper(path: &str) -> Result<NetworkEnhancedMetricData, Box<dyn std::error::Error>> {
     let file = File::open(path).map_err(|e| Box::new(e) as Box<dyn Error>)?;
     let reader = io::BufReader::new(file);
 
@@ -37,7 +37,7 @@ fn get_network_data_helper(path: &str) -> Result<NetworkData, Box<dyn std::error
             None => continue,
         };
 
-        return Ok(NetworkData { rx_bytes, tx_bytes });
+        return Ok(NetworkEnhancedMetricData { rx_bytes, tx_bytes });
     }
 
     Err("No matching network interface found".into())

@@ -1,6 +1,5 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
-use crate::metrics::enhanced::constants::{RX_BYTES_METRIC, TX_BYTES_METRIC};
-use crate::proc::proc::{self, NetworkData};
+use crate::proc::proc::{self, NetworkEnhancedMetricData};
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
@@ -11,13 +10,14 @@ use tracing::debug;
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
-    pub config: Arc<crate::config::Config>,
+    pub config: Arc<crate::config::Config>, 
+    // enhanced_metric_offset: Vec<Box<dyn EnhancedMetricData>>,
 }
 
 impl Lambda {
     #[must_use]
     pub fn new(aggregator: Arc<Mutex<Aggregator>>, config: Arc<crate::config::Config>) -> Lambda {
-        Lambda { aggregator, config }
+        Lambda { aggregator, config}
     }
 
     pub fn increment_invocation_metric(&self) {
@@ -131,6 +131,7 @@ impl Lambda {
     }
 
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
+        print!("=== set_report_log_metrics ===\n");
         if !self.config.enhanced_metrics {
             return;
         }
@@ -190,24 +191,37 @@ impl Lambda {
         }
     }
 
-    pub fn set_network_enhanced_metrics(&self, network_offset_data: NetworkData) {
+    // pub fn add_enhanced_metric_offset_data(&mut self, offset_data: EnhancedMetricData) {
+    //    self.enhanced_metric_offset.push(offset_data);
+    // }
+
+    pub fn set_network_enhanced_metrics(&self, network_offset_data: Option<NetworkEnhancedMetricData>) {
+        print!("=== set_network_enhanced_metrics ===\n");
+
         if !self.config.enhanced_metrics {
+            print!("enhanced metrics is disabled");
             return;
         }
 
-        let mut aggr: std::sync::MutexGuard<Aggregator> = self.aggregator.lock().expect("lock poisoned");
+        if network_offset_data.is_none() {
+            debug!("Could not emit network enhanced metrics");
+            return;
+        }
+        let network_offset = network_offset_data.unwrap();
 
         let network_data_result = proc::get_network_data();
-        if let Err(e) = &network_data_result {
-            debug!("could not emit network enhanced metrics: {}", e);
+        if network_data_result.is_err() {
+            debug!("Could not emit network enhanced metrics");
             return; 
         }
-
         let network_data = network_data_result.unwrap();
-        print!("=== network data - rx_bytes: {}, tx_bytes: {} ===", network_data.rx_bytes, network_data.tx_bytes);
 
-        let adjusted_rx_bytes = network_data.rx_bytes - network_offset_data.rx_bytes;
-        let adjusted_tx_bytes = network_data.tx_bytes - network_offset_data.tx_bytes;
+        let adjusted_rx_bytes = network_data.rx_bytes - network_offset.rx_bytes;
+        let adjusted_tx_bytes = network_data.tx_bytes - network_offset.tx_bytes;
+    
+        print!("=== network data - rx_bytes: {}, tx_bytes: {}, total_network: {}  ===\n\n", adjusted_rx_bytes, adjusted_tx_bytes, (adjusted_rx_bytes + adjusted_tx_bytes));
+
+        let mut aggr: std::sync::MutexGuard<Aggregator> = self.aggregator.lock().expect("lock poisoned");
 
         let metric = metric::Metric::new(
             constants::RX_BYTES_METRIC.into(),
