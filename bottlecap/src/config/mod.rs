@@ -175,7 +175,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
 
     // Prefer DD_PROXY_HTTPS over HTTPS_PROXY
     // No else needed as HTTPS_PROXY is handled by reqwest and built into trace client
-    if let Some(https_proxy) = std::env::var("DD_PROXY_HTTPS").ok() {
+    if let Ok(https_proxy) = std::env::var("DD_PROXY_HTTPS") {
         config.https_proxy = Some(https_proxy);
     }
     // Set site if empty
