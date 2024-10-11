@@ -51,6 +51,7 @@ async fn test_logs() {
         dd_api_key.to_string(),
         Arc::clone(&logs_agent.aggregator),
         server.base_url(),
+        arc_conf.clone(),
     );
 
     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(

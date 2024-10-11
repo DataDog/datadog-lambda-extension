@@ -1,4 +1,6 @@
 use crate::logs::aggregator::Aggregator;
+use crate::config;
+use crate::http_client;
 use std::sync::{Arc, Mutex};
 use tokio::task::JoinSet;
 use tracing::{debug, error};
@@ -18,8 +20,8 @@ pub fn build_fqdn_logs(site: String) -> String {
 
 #[allow(clippy::await_holding_lock)]
 impl Flusher {
-    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String) -> Self {
-        let client = reqwest::Client::new();
+    pub fn new(api_key: String, aggregator: Arc<Mutex<Aggregator>>, site: String, config: Arc<config::Config>) -> Self {
+        let client = http_client::get_client(config.clone());
         Flusher {
             api_key,
             fqdn_site: site,
