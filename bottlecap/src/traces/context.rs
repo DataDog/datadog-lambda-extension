@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use datadog_trace_protobuf::pb::SpanLink;
+
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Sampling {
     pub priority: Option<i8>,
@@ -14,4 +16,5 @@ pub struct SpanContext {
     pub sampling: Option<Sampling>,
     pub origin: Option<String>,
     pub tags: HashMap<String, String>,
+    pub links: Vec<SpanLink>,
 }
