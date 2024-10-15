@@ -1,12 +1,15 @@
 pub mod flush_strategy;
 pub mod log_level;
 pub mod processing_rule;
+pub mod trace_propagation_style;
 
 use std::path::Path;
+use std::vec;
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
 use serde::Deserialize;
+use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
 use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::{deserialize_log_level, LogLevel};
@@ -62,6 +65,13 @@ pub struct Config {
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
     pub https_proxy: Option<String>,
+    // Trace Propagation
+    #[serde(deserialize_with = "deserialize_trace_propagation_style")]
+    pub trace_propagation_style: Vec<TracePropagationStyle>,
+    #[serde(deserialize_with = "deserialize_trace_propagation_style")]
+    pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
+    pub trace_propagation_extract_first: bool,
+    pub trace_propagation_http_baggage_enabled: bool,
 }
 
 impl Default for Config {
@@ -85,6 +95,14 @@ impl Default for Config {
             enhanced_metrics: true,
             // Failover
             https_proxy: None,
+            // Trace Propagation
+            trace_propagation_style: vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ],
+            trace_propagation_style_extract: vec![],
+            trace_propagation_extract_first: false,
+            trace_propagation_http_baggage_enabled: false,
         }
     }
 }
@@ -180,6 +198,15 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         }
     }
 
+    // Trace Propagation
+    //
+    // If not set by the user, set defaults
+    if config.trace_propagation_style_extract.is_empty() {
+        config
+            .trace_propagation_style_extract
+            .clone_from(&config.trace_propagation_style);
+    }
+
     Ok(config)
 }
 
@@ -242,13 +269,7 @@ pub mod tests {
             )?;
             jail.set_env("DD_SITE", "datad0g.com");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    site: "datad0g.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.site, "datad0g.com");
             Ok(())
         });
     }
@@ -264,13 +285,7 @@ pub mod tests {
             ",
             )?;
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.site, "datadoghq.com");
             Ok(())
         });
     }
@@ -282,13 +297,7 @@ pub mod tests {
             jail.set_env("DD_SITE", "datadoghq.eu");
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    site: "datadoghq.eu".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.site, "datadoghq.eu");
             Ok(())
         });
     }
@@ -300,14 +309,7 @@ pub mod tests {
             jail.set_env("DD_LOG_LEVEL", "TRACE");
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    log_level: LogLevel::Trace,
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.log_level, LogLevel::Trace);
             Ok(())
         });
     }
@@ -322,6 +324,10 @@ pub mod tests {
                 config,
                 Config {
                     site: "datadoghq.com".to_string(),
+                    trace_propagation_style_extract: vec![
+                        TracePropagationStyle::Datadog,
+                        TracePropagationStyle::TraceContext
+                    ],
                     ..Config::default()
                 }
             );
@@ -336,14 +342,7 @@ pub mod tests {
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "end");
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    serverless_flush_strategy: FlushStrategy::End,
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.serverless_flush_strategy, FlushStrategy::End);
             Ok(())
         });
     }
@@ -355,16 +354,9 @@ pub mod tests {
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,100000");
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
-                        interval: 100_000
-                    }),
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.serverless_flush_strategy, FlushStrategy::Periodically(PeriodicStrategy {
+                interval: 100_000
+            }));
             Ok(())
         });
     }
@@ -376,13 +368,7 @@ pub mod tests {
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "invalid_strategy");
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
             Ok(())
         });
     }
@@ -397,13 +383,7 @@ pub mod tests {
             );
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
             Ok(())
         });
     }
@@ -430,17 +410,13 @@ pub mod tests {
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
-                config,
-                Config {
-                    logs_config_processing_rules: Some(vec![ProcessingRule {
-                        kind: processing_rule::Kind::ExcludeAtMatch,
-                        name: "exclude".to_string(),
-                        pattern: "exclude".to_string(),
-                        replace_placeholder: None
-                    }]),
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
+                config.logs_config_processing_rules,
+                Some(vec![ProcessingRule {
+                    kind: processing_rule::Kind::ExcludeAtMatch,
+                    name: "exclude".to_string(),
+                    pattern: "exclude".to_string(),
+                    replace_placeholder: None
+                }])
             );
             Ok(())
         });
@@ -464,17 +440,13 @@ pub mod tests {
             )?;
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
-                config,
-                Config {
-                    logs_config_processing_rules: Some(vec![ProcessingRule {
-                        kind: processing_rule::Kind::ExcludeAtMatch,
-                        name: "exclude".to_string(),
-                        pattern: "exclude".to_string(),
-                        replace_placeholder: None
-                    }]),
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
+                config.logs_config_processing_rules,
+                Some(vec![ProcessingRule {
+                    kind: processing_rule::Kind::ExcludeAtMatch,
+                    name: "exclude".to_string(),
+                    pattern: "exclude".to_string(),
+                    replace_placeholder: None
+                }]),
             );
             Ok(())
         });
@@ -489,14 +461,8 @@ pub mod tests {
                 r#"[{"name":"resource.name","pattern":"(.*)/(foo[:%].+)","repl":"$1/{foo}"}]"#,
             );
             jail.set_env("DD_EXTENSION_VERSION", "next");
-            let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(
-                config,
-                Config {
-                    site: "datadoghq.com".to_string(),
-                    ..Config::default()
-                }
-            );
+            let config = get_config(Path::new(""));
+            assert!(config.is_ok());
             Ok(())
         });
     }
