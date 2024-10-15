@@ -5,12 +5,12 @@ use log::warn;
 use regex::Regex;
 use tracing::{debug, error};
 
-use super::{
+use crate::traces::context::{Sampling, SpanContext};
+use crate::traces::propagation::{
     carrier::{Extractor, Injector},
     error::Error,
+    Propagator,
 };
-
-use crate::traces::context::{Sampling, SpanContext};
 
 // Datadog Keys
 const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
@@ -19,14 +19,16 @@ const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
 const DATADOG_ORIGIN_KEY: &str = "x-datadog-origin";
 const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
 
-const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
+pub const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
 const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
-const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
+pub const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
 const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
 
 // Traceparent Keys
 const TRACEPARENT_KEY: &str = "traceparent";
-const TRACESTATE_KEY: &str = "tracestate";
+pub const TRACESTATE_KEY: &str = "tracestate";
+
+pub const BAGGAGE_PREFIX: &str = "ot-baggage-";
 
 lazy_static! {
     static ref TRACEPARENT_REGEX: Regex =
@@ -43,17 +45,12 @@ lazy_static! {
         Regex::new(r"^-([0-9])$").expect("failed creating regex");
 }
 
-pub trait TextMapPropagator {
-    fn extract(&self, carrier: &dyn Extractor) -> SpanContext;
-    fn inject(&self, context: SpanContext, carrier: &mut dyn Injector);
-}
-
 #[derive(Clone, Copy)]
-pub struct DatadogPropagator;
+pub struct DatadogHeaderPropagator;
 
-impl TextMapPropagator for DatadogPropagator {
-    fn extract(&self, carrier: &dyn Extractor) -> SpanContext {
-        Self::extract_context(carrier).unwrap_or_default()
+impl Propagator for DatadogHeaderPropagator {
+    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        Self::extract_context(carrier)
     }
 
     fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
@@ -61,7 +58,7 @@ impl TextMapPropagator for DatadogPropagator {
     }
 }
 
-impl DatadogPropagator {
+impl DatadogHeaderPropagator {
     fn extract_context(carrier: &dyn Extractor) -> Option<SpanContext> {
         if let Some(trace_id) = Self::extract_trace_id(carrier) {
             let parent_id = Self::extract_parent_id(carrier).unwrap_or(0);
@@ -80,6 +77,7 @@ impl DatadogPropagator {
                 }),
                 origin,
                 tags,
+                links: Vec::new(),
             });
         }
 
@@ -203,11 +201,11 @@ struct Tracestate {
 }
 
 #[derive(Clone, Copy)]
-pub struct TraceparentPropagator;
+pub struct TraceContextPropagator;
 
-impl TextMapPropagator for TraceparentPropagator {
-    fn extract(&self, carrier: &dyn Extractor) -> SpanContext {
-        Self::extract_context(carrier).unwrap_or_default()
+impl Propagator for TraceContextPropagator {
+    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        Self::extract_context(carrier)
     }
 
     fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
@@ -215,7 +213,7 @@ impl TextMapPropagator for TraceparentPropagator {
     }
 }
 
-impl TraceparentPropagator {
+impl TraceContextPropagator {
     fn extract_context(carrier: &dyn Extractor) -> Option<SpanContext> {
         let tp = carrier.get(TRACEPARENT_KEY)?.trim();
 
@@ -259,6 +257,7 @@ impl TraceparentPropagator {
                     }),
                     origin,
                     tags,
+                    links: Vec::new(),
                 })
             }
             Err(e) => {
@@ -455,9 +454,11 @@ mod test {
             "_dd.p.test=value,_dd.p.tid=4321,any=tag".to_string(),
         );
 
-        let propagator = DatadogPropagator;
+        let propagator = DatadogHeaderPropagator;
 
-        let context = propagator.extract(&headers);
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
@@ -481,8 +482,10 @@ mod test {
             "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
         );
 
-        let propagator = TraceparentPropagator;
-        let context = propagator.extract(&headers);
+        let propagator = TraceContextPropagator;
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 7277407061855694839);
         assert_eq!(context.span_id, 67667974448284343);
