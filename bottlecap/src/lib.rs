@@ -24,6 +24,7 @@ pub mod http_client;
 pub mod lifecycle;
 pub mod logger;
 pub mod logs;
+pub mod lwa;
 pub mod metrics;
 pub mod proc;
 pub mod secrets;
