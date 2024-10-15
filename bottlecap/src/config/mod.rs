@@ -354,9 +354,10 @@ pub mod tests {
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,100000");
             jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(config.serverless_flush_strategy, FlushStrategy::Periodically(PeriodicStrategy {
-                interval: 100_000
-            }));
+            assert_eq!(
+                config.serverless_flush_strategy,
+                FlushStrategy::Periodically(PeriodicStrategy { interval: 100_000 })
+            );
             Ok(())
         });
     }
