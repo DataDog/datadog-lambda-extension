@@ -16,7 +16,7 @@ use bottlecap::{
     }, logger, logs::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    }, metrics::enhanced::lambda::Lambda as enhanced_metrics, proc::proc::{self, NetworkEnhancedMetricData}, secrets::decrypt, tags::{lambda, provider::Provider as TagProvider}, telemetry::{
+    }, metrics::enhanced::lambda::Lambda as enhanced_metrics, metrics::enhanced::metric_data, proc::proc, secrets::decrypt, tags::{lambda, provider::Provider as TagProvider}, telemetry::{
         self,
         client::TelemetryApiClient,
         events::{Status, TelemetryEvent, TelemetryRecord},
@@ -298,9 +298,8 @@ async fn extension_loop_active(
         }
     });
 
-    let lambda_enhanced_metrics =
+    let mut lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
-    let mut network_data_offset: Option<NetworkEnhancedMetricData> = None;
     
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
 
@@ -330,9 +329,8 @@ async fn extension_loop_active(
 
                 // read enhanced metric data at start
                 if let Ok(data) = proc::get_network_data() {
-                    // network_data_offset = Some(data);
-                    network_data_offset = Some(data);
-                    print!("=== network data at start - rx_bytes: {}, tx_bytes: {} ===", network_data_offset.unwrap().rx_bytes, network_data_offset.unwrap().tx_bytes);
+                    let network_data = metric_data::NetworkEnhancedMetricData { offset: data };
+                    lambda_enhanced_metrics.push_enhanced_metric_data(Box::new(network_data));
                 }
             }
             Ok(NextEventResponse::Shutdown {
@@ -410,10 +408,6 @@ async fn extension_loop_active(
                                     );
                                 }
 
-                                // ----- SENDING ENHANCED METRICS HERE FOR NOW ---
-                                // number does not exactly match lambda insights (it matches exactly if sending after PlatformReport?)
-                                lambda_enhanced_metrics.set_network_enhanced_metrics(network_data_offset);
-
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
@@ -440,6 +434,8 @@ async fn extension_loop_active(
                                         debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
                                     }
                                 }
+
+                                lambda_enhanced_metrics.send_enhanced_metrics();
 
                                 if shutdown {
                                     break;

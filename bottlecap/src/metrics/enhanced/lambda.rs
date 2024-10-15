@@ -1,5 +1,5 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
-use crate::proc::proc::{self, NetworkEnhancedMetricData};
+use super::metric_data;
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
@@ -11,13 +11,13 @@ use tracing::debug;
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
     pub config: Arc<crate::config::Config>, 
-    // enhanced_metric_offset: Vec<Box<dyn EnhancedMetricData>>,
+    pub enhanced_metric_data: Vec<Box<dyn metric_data::EnhancedMetricData>>,
 }
 
 impl Lambda {
     #[must_use]
     pub fn new(aggregator: Arc<Mutex<Aggregator>>, config: Arc<crate::config::Config>) -> Lambda {
-        Lambda { aggregator, config}
+        Lambda { aggregator, config, enhanced_metric_data: Vec::new()}
     }
 
     pub fn increment_invocation_metric(&self) {
@@ -191,66 +191,24 @@ impl Lambda {
         }
     }
 
-    // pub fn add_enhanced_metric_offset_data(&mut self, offset_data: EnhancedMetricData) {
-    //    self.enhanced_metric_offset.push(offset_data);
-    // }
+    pub fn push_enhanced_metric_data(&mut self, data: Box<dyn metric_data::EnhancedMetricData>) {
+        self.enhanced_metric_data.push(data);
+    }
 
-    pub fn set_network_enhanced_metrics(&self, network_offset_data: Option<NetworkEnhancedMetricData>) {
-        print!("=== set_network_enhanced_metrics ===\n");
-
+    pub fn send_enhanced_metrics(&self) {
         if !self.config.enhanced_metrics {
             print!("enhanced metrics is disabled");
             return;
         }
 
-        if network_offset_data.is_none() {
-            debug!("Could not emit network enhanced metrics");
-            return;
-        }
-        let network_offset = network_offset_data.unwrap();
-
-        let network_data_result = proc::get_network_data();
-        if network_data_result.is_err() {
-            debug!("Could not emit network enhanced metrics");
-            return; 
-        }
-        let network_data = network_data_result.unwrap();
-
-        let adjusted_rx_bytes = network_data.rx_bytes - network_offset.rx_bytes;
-        let adjusted_tx_bytes = network_data.tx_bytes - network_offset.tx_bytes;
-    
-        print!("=== network data - rx_bytes: {}, tx_bytes: {}, total_network: {}  ===\n\n", adjusted_rx_bytes, adjusted_tx_bytes, (adjusted_rx_bytes + adjusted_tx_bytes));
-
         let mut aggr: std::sync::MutexGuard<Aggregator> = self.aggregator.lock().expect("lock poisoned");
 
-        let metric = metric::Metric::new(
-            constants::RX_BYTES_METRIC.into(),
-            metric::Type::Distribution,
-            adjusted_rx_bytes.to_string().into(),
-            None,
-        );
-        if let Err(e) = aggr.insert(&metric) {
-            debug!("failed to insert rx_bytes metric: {}", e);
-        }
-
-        let metric = metric::Metric::new(
-            constants::TX_BYTES_METRIC.into(),
-            metric::Type::Distribution,
-            adjusted_tx_bytes.to_string().into(),
-            None,
-        );
-        if let Err(e) = aggr.insert(&metric) {
-            debug!("failed to insert tx_bytes metric: {}", e);
-        }
-
-        let metric = metric::Metric::new(
-            constants::TOTAL_NETWORK_METRIC.into(),
-            metric::Type::Distribution,
-            (adjusted_rx_bytes + adjusted_tx_bytes).to_string().into(),
-            None,
-        );
-        if let Err(e) = aggr.insert(&metric) {
-            debug!("failed to insert total_network metric: {}", e);
+        for metric_data in &self.enhanced_metric_data {
+            for metric in metric_data.get_metrics() {
+                if let Err(e) = aggr.insert(&metric) {
+                    debug!("failed to insert metric: {}", e);
+                }
+            }
         }
     }
 }
