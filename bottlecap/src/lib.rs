@@ -23,12 +23,12 @@ pub mod events;
 pub mod lifecycle;
 pub mod logger;
 pub mod logs;
+pub mod lwa;
 pub mod metrics;
 pub mod secrets;
 pub mod tags;
 pub mod telemetry;
 pub mod traces;
-pub mod lwa;
 
 use std::{env, io};
 
