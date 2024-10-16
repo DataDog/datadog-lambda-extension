@@ -110,9 +110,20 @@ jobs:
           severity-cutoff: low
           output-format: table
 
+  retry:
+    needs: check
+    if: failure() && fromJSON(github.run_attempt) < 2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Retry failed action
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run retry-workflow.yml -F run_id=${{ github.run_id }}
+
   notify:
     needs: check
-    if: failure()
+    if: failure() && fromJSON(github.run_attempt) >= 2
     runs-on: ubuntu-latest
     steps:
       - name: Notify
