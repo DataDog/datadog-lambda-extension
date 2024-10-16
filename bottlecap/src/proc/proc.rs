@@ -37,7 +37,6 @@ fn get_network_data_helper(path: &str) -> Result<NetworkData, Box<dyn std::error
             None => continue,
         };
 
-        print!("=== returning network data - rx_bytes: {}, tx_bytes: {} ===\n", rx_bytes, tx_bytes);
         return Ok(NetworkData { rx_bytes, tx_bytes });
     }
 

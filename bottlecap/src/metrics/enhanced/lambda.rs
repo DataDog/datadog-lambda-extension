@@ -6,7 +6,7 @@ use dogstatsd::metric;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use tracing::error;
-use tracing::debug;
+// use tracing::debug;
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
@@ -131,7 +131,6 @@ impl Lambda {
     }
 
     pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
-        print!("=== set_report_log_metrics ===\n");
         if !self.config.enhanced_metrics {
             return;
         }
@@ -195,29 +194,26 @@ impl Lambda {
         self.enhanced_metric_data.push(data);
     }
 
-    pub fn send_enhanced_metrics(&self) {
+    pub fn send_enhanced_metrics(&mut self) {
         if !self.config.enhanced_metrics {
-            print!("enhanced metrics is disabled");
             return;
         }
 
         let mut aggr: std::sync::MutexGuard<Aggregator> = self.aggregator.lock().expect("lock poisoned");
 
-        for metric_data in &self.enhanced_metric_data {
-            for metric in metric_data.get_metrics() {
-                if let Err(e) = aggr.insert(&metric) {
-                    debug!("failed to insert metric: {}", e);
-                }
-            }
-        }
+        while let Some(metric_data) = self.enhanced_metric_data.pop() {
+            metric_data.send_metrics(&mut aggr);
+        };
     }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use metric_data::NetworkEnhancedMetricData;
+
     use super::*;
-    use crate::config;
+    use crate::{config, proc::proc::NetworkData};
     const PRECISION: f64 = 0.000_000_01;
 
     fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
@@ -345,5 +341,20 @@ mod tests {
 
         assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0);
         assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0);
+    }
+
+    #[test]
+    fn test_set_network_enhanced_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+
+        let network_data_offset = NetworkData { rx_bytes: 180.0, tx_bytes: 254.0 };
+        let network_data = NetworkEnhancedMetricData { offset: network_data_offset };
+
+        network_data.generate_metrics(20180.0, 75000.0, &mut lambda.aggregator.lock().expect("lock poisoned"));
+
+        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
+        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746 as f64);
+        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746 as f64);
     }
 }
