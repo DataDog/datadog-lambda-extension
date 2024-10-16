@@ -13,6 +13,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - name: fail
+        run: exit 1
+
       - name: Checkout datadog-agent repository
         uses: actions/checkout@0ad4b8fadaa221de15dcec353f45205ec38ea70b # v4.1.4
         with:
@@ -141,7 +144,7 @@ jobs:
 
           See ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} for the full info on the found vulnerability. :bufo-thanks:"
 
-          curl -H "Content-type: application/json" -X POST "$SLACK_WEBHOOK" -d '{
-            "channel": "'"$SLACK_CHANNEL"'",
-            "text": "'"$OPS_MESSAGE"'"
-          }'
+          #curl -H "Content-type: application/json" -X POST "$SLACK_WEBHOOK" -d '{
+          #  "channel": "'"$SLACK_CHANNEL"'",
+          #  "text": "'"$OPS_MESSAGE"'"
+          #}'
