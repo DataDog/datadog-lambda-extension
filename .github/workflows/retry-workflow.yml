@@ -1,0 +1,27 @@
+# When triggered with a run_id, this workflow will retry other workflows. This
+# is useful so we can retry the Serverless Vulnerability Scan action. This must
+# be a separate action from the action to retry because you cannot retry an
+# action that is currently running.
+
+name: Retry workflow
+
+permissions:
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        required: true
+
+jobs:
+  rerun:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rerun ${{ inputs.run_id }}
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run watch ${{ inputs.run_id }} > /dev/null 2>&1
+          gh run rerun ${{ inputs.run_id }}
