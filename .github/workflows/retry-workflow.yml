@@ -5,6 +5,9 @@
 
 name: Retry workflow
 
+permissions:
+  actions: write
+
 on:
   workflow_dispatch:
     inputs:
