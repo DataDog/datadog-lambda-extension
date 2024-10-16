@@ -6,14 +6,18 @@ use hyper::{Body, Client, Request, Response, Server, Uri};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
-use tracing::error;
+use tracing::{debug, error};
 
 #[must_use]
 pub fn start_lwa_proxy() -> Option<JoinHandle<()>> {
     if let Some((proxy_socket, aws_runtime_uri)) = parse_env_addresses() {
+        debug!(
+            "LWA proxy enabled with proxy URI: {} and AWS runtime: {}",
+            proxy_socket, aws_runtime_uri
+        );
         let proxied_client = match build_proxy(aws_runtime_uri.clone()) {
             Some(client) => client,
-            None => return None
+            None => return None,
         };
 
         let proxy_task_handle = tokio::spawn({
@@ -29,7 +33,7 @@ pub fn start_lwa_proxy() -> Option<JoinHandle<()>> {
                 }));
 
                 if let Err(e) = proxy_server.await {
-                    error!("Lambda Web Adapter proxy server error: {}", e);
+                    error!("LWA proxy server error: {}", e);
                 }
             }
         });
@@ -68,14 +72,11 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                 None
             }
         },
-        Err(e) => {
-            error!("Error retrieving ALTERNATE_RUNTIME_API: {}", e);
-            None
-        }
+        Err(_) => None,
     };
 
     let aws_runtime_api = match std::env::var("AWS_LAMBDA_RUNTIME_API") {
-        Ok(uri) => match uri.parse() {
+        Ok(env_uri) => match format!("http://{env_uri}").parse() {
             Ok(parsed_uri) => Some(parsed_uri),
             Err(e) => {
                 error!("Error parsing AWS_LAMBDA_RUNTIME_API: {}", e);
@@ -113,7 +114,17 @@ async fn inject_spans(
     //     }
     // };
 
-    *req.uri_mut() = aws_runtime_addr;
+    // TODO append the path
+    debug!(
+        "Injecting spans into request. Intercepted uri: {} and substituting with uri: {}",
+        req.uri(),
+        aws_runtime_addr
+    );
+
+    let mut parts = aws_runtime_addr.into_parts();
+    parts.path_and_query = req.uri().path_and_query().cloned();
+
+    *req.uri_mut() = Uri::from_parts(parts).unwrap();
 
     let mut response = client.request(req).await?;
 
@@ -136,8 +147,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_proxy_with_env_vars() {
-        let proxy_uri = "http://127.0.0.1:12345";
-        let final_uri = "http://127.0.0.1:12344";
+        let proxy_uri = "127.0.0.1:12345";
+        let final_uri = "127.0.0.1:12344";
 
         env::set_var("ALTERNATE_RUNTIME_API", proxy_uri);
         env::set_var("AWS_LAMBDA_RUNTIME_API", final_uri);
@@ -158,12 +169,20 @@ mod tests {
         let proxy_task_handle = start_lwa_proxy().expect("Failed to start proxy");
 
         let client = Client::builder().build_http::<Body>();
-        let mut ask_proxy = client.get(Uri::from_static(proxy_uri)).await;
+        let uri_with_schema = format!("http://{}", proxy_uri);
+        let mut ask_proxy = client
+            .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+            .await;
 
         while ask_proxy.is_err() {
-            println!("Retrying request to proxy");
+            println!(
+                "Retrying request to proxy, err: {}",
+                ask_proxy.err().unwrap()
+            );
             sleep(Duration::from_millis(50)).await;
-            ask_proxy = client.get(Uri::from_static(proxy_uri)).await;
+            ask_proxy = client
+                .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+                .await;
         }
 
         let ask_proxy = ask_proxy.unwrap();
