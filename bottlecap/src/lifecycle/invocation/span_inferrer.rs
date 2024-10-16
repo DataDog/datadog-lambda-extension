@@ -1,13 +1,15 @@
 use datadog_trace_protobuf::pb::Span;
-use log::debug;
 use rand::Rng;
 use serde_json::Value;
+use tracing::debug;
 
 use crate::config::AwsConfig;
 
 use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent, Trigger,
 };
+
+use super::triggers::api_gateway_rest_event::APIGatewayRestEvent;
 
 const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
@@ -61,9 +63,34 @@ impl SpanInferrer {
                     self.is_async_span = t.is_async();
                     self.inferred_span = Some(span);
                 }
+            } else if APIGatewayRestEvent::is_match(&payload_value){
+                debug!("MATCH V1 REST EVENT");
+                if let Some(t) = APIGatewayRestEvent::new(payload_value) {
+                    debug!("ASTUYVE PARSING V1 REST EVENT");
+                    let mut span = Span {
+                        span_id: Self::generate_span_id(),
+                        ..Default::default()
+                    };
+
+                    t.enrich_span(&mut span);
+                    span.meta.extend([
+                        (
+                            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                            "api_gateway".to_string(),
+                        ),
+                        (
+                            FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                            t.get_arn(&aws_config.region),
+                        ),
+                    ]);
+
+                    self.is_async_span = t.is_async();
+                    self.inferred_span = Some(span);
+                }
             } else {
                 debug!("Unable to infer span from payload");
             }
+
         } else {
             debug!("Unable to serialize payload");
         }
@@ -78,6 +105,13 @@ impl SpanInferrer {
         }
     }
 
+    pub fn set_status_code(&mut self, status_code: String) {
+        if let Some(s) = &mut self.inferred_span {
+            s.meta.insert("http.status_code".to_string(), status_code);
+        }
+    }
+
+    // TODO add status tag and other info from response
     pub fn complete_inferred_span(&mut self, invocation_span: &Span) {
         if let Some(s) = &mut self.inferred_span {
             if self.is_async_span {
@@ -91,6 +125,7 @@ impl SpanInferrer {
             }
 
             s.trace_id = invocation_span.trace_id;
+            debug!("Final Span: {:?}", self.inferred_span);
         }
     }
 
