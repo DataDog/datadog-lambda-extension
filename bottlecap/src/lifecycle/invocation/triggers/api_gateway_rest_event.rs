@@ -298,6 +298,85 @@ mod tests {
     }
 
     #[test]
+    fn test_enrich_parameterized_span() {
+        let json = read_json_file("api_gateway_rest_event_parameterized.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
+        let mut span = Span::default();
+        event.enrich_span(&mut span);
+        assert_eq!(span.name, "aws.apigateway");
+        assert_eq!(
+            span.service,
+            "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com"
+        );
+        assert_eq!(span.resource, "GET /user/{id}");
+        assert_eq!(span.r#type, "http");
+        let sorted_span_meta = span.meta.iter()
+            .map(|(k, v)| format!("{}:{}", k, v))
+            .collect::<Vec<String>>()
+            .sort();
+        let expected = HashMap::from([
+                ("endpoint".to_string(), "/dev/user/42".to_string()),
+                (
+                    "http.url".to_string(),
+                    "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com".to_string()
+                ),
+                ("http.method".to_string(), "GET".to_string()),
+                ("http.protocol".to_string(), "HTTP/1.1".to_string()),
+                ("http.source_ip".to_string(), "76.115.124.192".to_string()),
+                ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+                ("operation_name".to_string(), "aws.api_gateway".to_string()),
+                ("request_id".to_string(), "mcwkra0ya4".to_string()),
+                ("resource_names".to_string(), "GET /dev/user/{id}".to_string()),
+            ]);
+        let sorted_expected = expected.iter()
+            .map(|(k, v)| format!("{}:{}", k, v))
+            .collect::<Vec<String>>()
+            .sort();
+        assert_eq!(
+            sorted_span_meta,
+            sorted_expected
+        );
+    }
+
+    #[test]
+    fn test_get_tags_parameterized() {
+        let json = read_json_file("api_gateway_rest_event_parameterized.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
+        let tags = event.get_tags();
+        let sorted_tags_array = tags
+            .iter()
+            .map(|(k, v)| format!("{}:{}", k, v))
+            .collect::<Vec<String>>()
+            .sort();
+
+        let expected = HashMap::from([
+            (
+                "http.url".to_string(),
+                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string(),
+            ),
+            (
+                "http_url_details.path".to_string(),
+                "/httpapi/get".to_string(),
+            ),
+            ("http.method".to_string(), "GET".to_string()),
+            ("http.route".to_string(), "GET /httpapi/get".to_string()),
+            ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
+            ("http.referer".to_string(), "".to_string()),
+        ]);
+        let expected_sorted_array = expected
+            .iter()
+            .map(|(k, v)| format!("{}:{}", k, v))
+            .collect::<Vec<String>>()
+            .sort();
+
+        assert_eq!(sorted_tags_array, expected_sorted_array);
+    }
+
+    #[test]
     fn test_get_arn() {
         let json = read_json_file("api_gateway_rest_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
