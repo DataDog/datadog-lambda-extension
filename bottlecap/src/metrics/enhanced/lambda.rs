@@ -1,21 +1,29 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
+use super::metric_data;
+use crate::proc::proc;
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
+use std::collections::VecDeque;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
-use tracing::error;
+use tracing::{debug, error};
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
     pub config: Arc<crate::config::Config>,
+    enhanced_metric_data: VecDeque<Vec<Box<dyn metric_data::EnhancedMetricData>>>,
 }
 
 impl Lambda {
     #[must_use]
     pub fn new(aggregator: Arc<Mutex<Aggregator>>, config: Arc<crate::config::Config>) -> Lambda {
-        Lambda { aggregator, config }
+        Lambda {
+            aggregator,
+            config,
+            enhanced_metric_data: VecDeque::new(),
+        }
     }
 
     pub fn increment_invocation_metric(&self) {
@@ -171,13 +179,47 @@ impl Lambda {
             error!("failed to insert estimated cost metric: {}", e);
         }
     }
+
+    pub fn collect_enhanced_metric_offsets(&mut self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let mut offsets: Vec<Box<dyn metric_data::EnhancedMetricData>> = Vec::new();
+
+        if let Ok(data) = proc::get_network_data() {
+            let network_data = metric_data::NetworkEnhancedMetricData { offset: data };
+            offsets.push(Box::new(network_data));
+        }
+
+        self.enhanced_metric_data.push_back(offsets);
+    }
+
+    pub fn send_enhanced_metrics(&mut self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let mut aggr: std::sync::MutexGuard<Aggregator> =
+            self.aggregator.lock().expect("lock poisoned");
+
+        if let Some(metric_data) = self.enhanced_metric_data.pop_front() {
+            for metric in metric_data {
+                metric.send_metrics(&mut aggr);
+            }
+        } else {
+            debug!("Failed to send enhanced metrics");
+        }
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use metric_data::NetworkEnhancedMetricData;
+
     use super::*;
-    use crate::config;
+    use crate::{config, proc::proc::NetworkData};
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
 
@@ -306,5 +348,29 @@ mod tests {
 
         assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0);
         assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0);
+    }
+
+    #[test]
+    fn test_set_network_enhanced_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+
+        let network_data_offset = NetworkData {
+            rx_bytes: 180.0,
+            tx_bytes: 254.0,
+        };
+        let network_data = NetworkEnhancedMetricData {
+            offset: network_data_offset,
+        };
+
+        network_data.generate_metrics(
+            20180.0,
+            75000.0,
+            &mut lambda.aggregator.lock().expect("lock poisoned"),
+        );
+
+        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
+        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0);
+        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0);
     }
 }

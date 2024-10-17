@@ -55,11 +55,9 @@ use dogstatsd::{
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
-    collections::hash_map,
-    collections::HashMap,
+    collections::{hash_map, HashMap},
     env,
-    io::Error,
-    io::Result,
+    io::{Error, Result},
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
@@ -333,7 +331,7 @@ async fn extension_loop_active(
         }
     });
 
-    let lambda_enhanced_metrics =
+    let mut lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
 
@@ -360,6 +358,7 @@ async fn extension_loop_active(
                     request_id, deadline_ms, invoked_function_arn
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
+                lambda_enhanced_metrics.collect_enhanced_metric_offsets();
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
@@ -461,6 +460,8 @@ async fn extension_loop_active(
                                         debug!("Impossible to compute post runtime duration for request_id: {:?}", request_id);
                                     }
                                 }
+
+                                lambda_enhanced_metrics.send_enhanced_metrics();
 
                                 if shutdown {
                                     break;
