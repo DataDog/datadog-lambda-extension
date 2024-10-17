@@ -1,8 +1,9 @@
-use hyper_proxy::{Intercept, Proxy, ProxyConnector};
-
+use hyper::body::Bytes;
 use hyper::client::HttpConnector;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Client, Request, Response, Server, Uri};
+use hyper::{Body, Client, Error, Request, Response, Server, Uri};
+use hyper_proxy::{Intercept, Proxy, ProxyConnector};
+use serde_json::Value;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
@@ -98,7 +99,7 @@ async fn inject_spans(
     mut req: Request<Body>,
     client: Arc<Client<ProxyConnector<HttpConnector>>>,
     aws_runtime_addr: Uri,
-) -> Result<Response<Body>, hyper::Error> {
+) -> Result<Response<Body>, Error> {
     // let tracer_getter_for_version = match (req.method(), req.uri().path()) {
     //     (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => get_traces_from_request_body,
     //     (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => get_v05_traces_from_request_body,
@@ -114,26 +115,64 @@ async fn inject_spans(
     //     }
     // };
 
-    // TODO append the path
-    debug!(
-        "Injecting spans into request. Intercepted uri: {} and substituting with uri: {}",
-        req.uri(),
-        aws_runtime_addr
-    );
-
     let mut parts = aws_runtime_addr.into_parts();
     parts.path_and_query = req.uri().path_and_query().cloned();
-
-    *req.uri_mut() = Uri::from_parts(parts).unwrap();
-
-    let mut response = client.request(req).await?;
-
-    response.headers_mut().insert(
-        "x-test-header",
-        hyper::header::HeaderValue::from_static("abc"),
+    let new_uri = Uri::from_parts(parts).unwrap();
+    debug!(
+        "Injecting spans into request. Intercepted uri: {} and substituting authority with uri: {}",
+        req.uri(),
+        new_uri
     );
 
-    Ok(response)
+    *req.uri_mut() = new_uri;
+
+    let mut response = client.request(req).await?;
+    let body_bytes = deserialize_json(hyper::body::to_bytes(response.body_mut()).await).unwrap();
+    let body_with_added_headers =
+        add_headers(body_bytes.clone(), "x-test-header", "val").to_string();
+
+    let new_length = body_with_added_headers.len();
+
+    let mut new_response = Response::builder()
+        .status(response.status())
+        .version(response.version())
+        .body(Body::from(body_with_added_headers))
+        .unwrap();
+
+    *new_response.headers_mut() = response.headers().clone();
+    new_response
+        .headers_mut()
+        .insert("Content-Length", new_length.to_string().parse().unwrap());
+
+    debug!("Response after header injections: {:?}", new_response);
+
+    Ok(new_response)
+}
+
+fn add_headers(mut body_json: Value, header_name: &str, header_value: &str) -> Value {
+    body_json
+        .get_mut("headers")
+        .and_then(|headers| headers.as_object_mut())
+        .map(|headers| {
+            headers.insert(
+                header_name.to_string(),
+                Value::String(header_value.to_string()),
+            );
+        });
+    body_json
+}
+
+fn deserialize_json(response: Result<Bytes, Error>) -> Option<Value> {
+    match response {
+        Ok(bytes) => serde_json::from_slice(bytes.as_ref()).unwrap_or_else(|e| {
+            error!("Error deserializing response body: {}", e);
+            None
+        }),
+        Err(e) => {
+            error!("Error reading response body: {}", e);
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -199,5 +238,70 @@ mod tests {
 
         env::remove_var("ALTERNATE_RUNTIME_API");
         env::remove_var("AWS_LAMBDA_RUNTIME_API");
+    }
+
+    #[test]
+    fn inject_headers_to_body() {
+        let example_payload = r#"
+    {
+        "version": "2.0",
+        "routeKey": "$default",
+        "rawPath": "/",
+        "rawQueryString": "",
+        "headers": {
+            "sec-fetch-mode": "navigate",
+            "x-amzn-tls-version": "TLSv1.3",
+            "if-none-match": "W/\"73-nZ1afAshmFkchuWGJW2eF+mD4HM\"",
+            "sec-fetch-site": "cross-site",
+            "x-forwarded-proto": "https",
+            "accept-language": "en-US,en;q=0.9,ha;q=0.8",
+            "x-forwarded-port": "443",
+            "x-forwarded-for": "64.124.12.18",
+            "sec-fetch-user": "?1",
+            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "x-amzn-tls-cipher-suite": "TLS_AES_128_GCM_SHA256",
+            "sec-ch-ua": "\"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\", \"Not?A_Brand\";v=\"99\"",
+            "x-amzn-trace-id": "Root=1-67114ebe-7daee824361c14682e44cc57",
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": "\"Linux\"",
+            "host": "nfaeiph7yxziojig2kl5u75r2m0vozse.lambda-url.us-east-1.on.aws",
+            "upgrade-insecure-requests": "1",
+            "cache-control": "max-age=0",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "sec-fetch-dest": "document"
+        },
+        "requestContext": {
+            "accountId": "anonymous",
+            "apiId": "nfaeiph7yxziojig2kl5u75r2m0vozse",
+            "domainName": "nfaeiph7yxziojig2kl5u75r2m0vozse.lambda-url.us-east-1.on.aws",
+            "domainPrefix": "nfaeiph7yxziojig2kl5u75r2m0vozse",
+            "http": {
+                "method": "GET",
+                "path": "/",
+                "protocol": "HTTP/1.1",
+                "sourceIp": "64.124.12.18",
+                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+            },
+            "requestId": "c6637907-97d0-4ebc-8c90-37adc31161be",
+            "routeKey": "$default",
+            "stage": "$default",
+            "time": "17/Oct/2024:17:51:58 +0000",
+            "timeEpoch": 1729187518389
+        },
+        "isBase64Encoded": false
+    }
+    "#;
+
+        let res = deserialize_json(Ok(Bytes::from(example_payload.as_bytes()))).unwrap();
+        println!("{:?}", res);
+
+        let res2 = add_headers(res.clone(), "x-test-header", "val");
+        println!("{:?}", res2);
+
+        assert_eq!(
+            res2["headers"]["x-test-header"],
+            Value::String("val".to_string())
+        );
     }
 }
