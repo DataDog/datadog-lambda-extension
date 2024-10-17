@@ -10,37 +10,37 @@
 #![deny(missing_debug_implementations)]
 
 use bottlecap::{
-    base_url, 
-    config::{self, AwsConfig, Config}, 
-    event_bus::bus::EventBus, 
-    events::Event, 
+    base_url,
+    config::{self, AwsConfig, Config},
+    event_bus::bus::EventBus,
+    events::Event,
     lifecycle::{
         flush_control::FlushControl,
         invocation_context::{InvocationContext, InvocationContextBuffer},
-    }, 
-    logger, 
+    },
+    logger,
     logs::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    }, 
-    metrics::enhanced::lambda::Lambda as enhanced_metrics, 
-    secrets::decrypt, 
-    tags::{lambda, provider::Provider as TagProvider}, 
+    },
+    metrics::enhanced::lambda::Lambda as enhanced_metrics,
+    secrets::decrypt,
+    tags::{lambda, provider::Provider as TagProvider},
     telemetry::{
         self,
         client::TelemetryApiClient,
         events::{Status, TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
-    }, 
+    },
     traces::{
         hello_agent,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
-    }, 
-    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST, 
-    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE, 
+    },
+    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
+    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT
 };
 use datadog_trace_obfuscation::obfuscation_config;

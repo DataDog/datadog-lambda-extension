@@ -1,15 +1,16 @@
 use dogstatsd::{aggregator::Aggregator, metric::{Metric, Type}};
-
 use super::constants;
 use crate::proc::proc::{self, NetworkData};
 use tracing::debug;
 use tracing::error;
 use std::sync::MutexGuard;
 
+#[allow(clippy::module_name_repetitions)]
 pub trait EnhancedMetricData {
     fn send_metrics(&self, aggr: &mut MutexGuard<Aggregator>);
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Copy, Clone)]
 pub struct NetworkEnhancedMetricData {
     pub offset: NetworkData
