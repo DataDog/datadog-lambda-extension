@@ -1,23 +1,24 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
 use super::metric_data;
+use crate::proc::proc;
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
+use std::collections::VecDeque;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
-use tracing::error;
-// use tracing::debug;
+use tracing::{debug, error};
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
     pub config: Arc<crate::config::Config>, 
-    pub enhanced_metric_data: Vec<Box<dyn metric_data::EnhancedMetricData>>,
+    enhanced_metric_data: VecDeque<Vec<Box<dyn metric_data::EnhancedMetricData>>>,
 }
 
 impl Lambda {
     #[must_use]
     pub fn new(aggregator: Arc<Mutex<Aggregator>>, config: Arc<crate::config::Config>) -> Lambda {
-        Lambda { aggregator, config, enhanced_metric_data: Vec::new()}
+        Lambda { aggregator, config, enhanced_metric_data: VecDeque::new()}
     }
 
     pub fn increment_invocation_metric(&self) {
@@ -190,8 +191,15 @@ impl Lambda {
         }
     }
 
-    pub fn push_enhanced_metric_data(&mut self, data: Box<dyn metric_data::EnhancedMetricData>) {
-        self.enhanced_metric_data.push(data);
+    pub fn collect_enhanced_metric_offsets(&mut self) {
+        let mut offsets: Vec<Box<dyn metric_data::EnhancedMetricData>> = Vec::new();
+
+        if let Ok(data) = proc::get_network_data() {
+            let network_data = metric_data::NetworkEnhancedMetricData { offset: data };
+            offsets.push(Box::new(network_data));
+        }
+
+        self.enhanced_metric_data.push_back(offsets);
     }
 
     pub fn send_enhanced_metrics(&mut self) {
@@ -201,9 +209,13 @@ impl Lambda {
 
         let mut aggr: std::sync::MutexGuard<Aggregator> = self.aggregator.lock().expect("lock poisoned");
 
-        while let Some(metric_data) = self.enhanced_metric_data.pop() {
-            metric_data.send_metrics(&mut aggr);
-        };
+        if let Some(metric_data) = self.enhanced_metric_data.pop_front() {
+            for metric in metric_data {
+                metric.send_metrics(&mut aggr);
+            }
+        } else {
+            debug!("Failed to send enhanced metrics");
+        }
     }
 }
 
@@ -354,7 +366,7 @@ mod tests {
         network_data.generate_metrics(20180.0, 75000.0, &mut lambda.aggregator.lock().expect("lock poisoned"));
 
         assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
-        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746 as f64);
-        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746 as f64);
+        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0);
+        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0);
     }
 }

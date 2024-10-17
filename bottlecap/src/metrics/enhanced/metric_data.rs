@@ -16,14 +16,14 @@ pub struct NetworkEnhancedMetricData {
 }
 
 impl NetworkEnhancedMetricData {
-    pub fn generate_metrics(&self, rx_bytes: f64, tx_bytes: f64, aggr: &mut MutexGuard<Aggregator>) {
-        let adjusted_rx_bytes = rx_bytes - self.offset.rx_bytes;
-        let adjusted_tx_bytes = tx_bytes - self.offset.tx_bytes;
+    pub fn generate_metrics(&self, rx_bytes_end: f64, tx_bytes_end: f64, aggr: &mut MutexGuard<Aggregator>) {
+        let rx_bytes = rx_bytes_end - self.offset.rx_bytes;
+        let tx_bytes = tx_bytes_end - self.offset.tx_bytes;
 
         let metric = Metric::new(
             constants::RX_BYTES_METRIC.into(),
             Type::Distribution,
-            adjusted_rx_bytes.to_string().into(),
+            rx_bytes.to_string().into(),
             None,
         );
         if let Err(e) = aggr.insert(&metric) {
@@ -33,7 +33,7 @@ impl NetworkEnhancedMetricData {
         let metric = Metric::new(
             constants::TX_BYTES_METRIC.into(),
             Type::Distribution,
-            adjusted_tx_bytes.to_string().into(),
+            tx_bytes.to_string().into(),
             None,
         );
         if let Err(e) = aggr.insert(&metric) {
@@ -43,7 +43,7 @@ impl NetworkEnhancedMetricData {
         let metric = Metric::new(
             constants::TOTAL_NETWORK_METRIC.into(),
             Type::Distribution,
-            (adjusted_rx_bytes + adjusted_tx_bytes).to_string().into(),
+            (rx_bytes + tx_bytes).to_string().into(),
             None,
         );
         if let Err(e) = aggr.insert(&metric) {
@@ -54,13 +54,13 @@ impl NetworkEnhancedMetricData {
 
 impl EnhancedMetricData for NetworkEnhancedMetricData {
     fn send_metrics(&self, aggr: &mut MutexGuard<Aggregator>) {
-        let data_result = proc::get_network_data();
-        if data_result.is_err() {
-            debug!("Could not emit network enhanced metrics");
-            return; 
+        match proc::get_network_data() {
+            Ok(data) => {
+                self.generate_metrics(data.rx_bytes, data.tx_bytes, aggr);
+            }
+            Err(_e) => {
+                debug!("Could not emit network enhanced metrics");
+            }
         }
-        let data = data_result.unwrap();
-
-        self.generate_metrics(data.rx_bytes, data.tx_bytes, aggr);
     }
 }

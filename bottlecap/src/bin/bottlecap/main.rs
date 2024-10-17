@@ -16,7 +16,7 @@ use bottlecap::{
     }, logger, logs::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    }, metrics::enhanced::lambda::Lambda as enhanced_metrics, metrics::enhanced::metric_data, proc::proc, secrets::decrypt, tags::{lambda, provider::Provider as TagProvider}, telemetry::{
+    }, metrics::enhanced::lambda::Lambda as enhanced_metrics, secrets::decrypt, tags::{lambda, provider::Provider as TagProvider}, telemetry::{
         self,
         client::TelemetryApiClient,
         events::{Status, TelemetryEvent, TelemetryRecord},
@@ -327,11 +327,7 @@ async fn extension_loop_active(
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
 
-                // read enhanced metric data at start
-                if let Ok(data) = proc::get_network_data() {
-                    let network_data = metric_data::NetworkEnhancedMetricData { offset: data };
-                    lambda_enhanced_metrics.push_enhanced_metric_data(Box::new(network_data));
-                }
+                lambda_enhanced_metrics.collect_enhanced_metric_offsets();
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
