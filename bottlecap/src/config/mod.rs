@@ -454,6 +454,52 @@ pub mod tests {
     }
 
     #[test]
+    fn test_parse_trace_propagation_style() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_TRACE_PROPAGATION_STYLE",
+                "datadog,tracecontext,b3,b3multi",
+            );
+            jail.set_env("DD_EXTENSION_VERSION", "next");
+            let config = get_config(Path::new("")).expect("should parse config");
+
+            let expected_styles = vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::B3,
+                TracePropagationStyle::B3Multi,
+            ];
+            assert_eq!(config.trace_propagation_style, expected_styles);
+            assert_eq!(config.trace_propagation_style_extract, expected_styles);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_trace_propagation_style_extract() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "datadog");
+            jail.set_env("DD_EXTENSION_VERSION", "next");
+            let config = get_config(Path::new("")).expect("should parse config");
+
+            assert_eq!(
+                config.trace_propagation_style,
+                vec![
+                    TracePropagationStyle::Datadog,
+                    TracePropagationStyle::TraceContext,
+                ]
+            );
+            assert_eq!(
+                config.trace_propagation_style_extract,
+                vec![TracePropagationStyle::Datadog]
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_ignore_apm_replace_tags() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
