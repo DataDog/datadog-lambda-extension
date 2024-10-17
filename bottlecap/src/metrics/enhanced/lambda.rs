@@ -5,6 +5,7 @@ use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
 use std::collections::VecDeque;
+use dogstatsd::metric::{Metric, MetricValue};
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error};
@@ -37,17 +38,17 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = metric::Metric::new(
+        let metric = Metric::new(
             constants::INIT_DURATION_METRIC.into(),
-            metric::Type::Distribution,
-            (init_duration_ms * constants::MS_TO_SEC).to_string().into(),
+            MetricValue::distribution(init_duration_ms * constants::MS_TO_SEC),
             None,
         );
+
         if let Err(e) = self
             .aggregator
             .lock()
             .expect("lock poisoned")
-            .insert(&metric)
+            .insert(metric)
         {
             error!("failed to insert metric: {}", e);
         }
@@ -57,17 +58,12 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = metric::Metric::new(
-            metric_name.into(),
-            metric::Type::Distribution,
-            "1".into(),
-            None,
-        );
+        let metric = Metric::new(metric_name.into(), MetricValue::distribution(1f64), None);
         if let Err(e) = self
             .aggregator
             .lock()
             .expect("lock poisoned")
-            .insert(&metric)
+            .insert(metric)
         {
             error!("failed to insert metric: {}", e);
         }
@@ -77,18 +73,17 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = metric::Metric::new(
+        let metric = Metric::new(
             constants::RUNTIME_DURATION_METRIC.into(),
-            metric::Type::Distribution,
+            MetricValue::distribution(duration_ms),
             // Datadog expects this value as milliseconds, not seconds
-            duration_ms.to_string().into(),
             None,
         );
         if let Err(e) = self
             .aggregator
             .lock()
             .expect("lock poisoned")
-            .insert(&metric)
+            .insert(metric)
         {
             error!("failed to insert runtime duration metric: {}", e);
         }
@@ -100,16 +95,15 @@ impl Lambda {
         }
         let metric = metric::Metric::new(
             constants::POST_RUNTIME_DURATION_METRIC.into(),
-            metric::Type::Distribution,
+            MetricValue::distribution(duration_ms),
             // Datadog expects this value as milliseconds, not seconds
-            duration_ms.to_string().into(),
             None,
         );
         if let Err(e) = self
             .aggregator
             .lock()
             .expect("lock poisoned")
-            .insert(&metric)
+            .insert(metric)
         {
             error!("failed to insert post runtime duration metric: {}", e);
         }
@@ -139,42 +133,34 @@ impl Lambda {
             self.aggregator.lock().expect("lock poisoned");
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
-            metric::Type::Distribution,
-            (metrics.duration_ms * constants::MS_TO_SEC)
-                .to_string()
-                .into(),
+            MetricValue::distribution(metrics.duration_ms * constants::MS_TO_SEC),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert duration metric: {}", e);
         }
         let metric = metric::Metric::new(
             constants::BILLED_DURATION_METRIC.into(),
-            metric::Type::Distribution,
-            (metrics.billed_duration_ms as f64 * constants::MS_TO_SEC)
-                .to_string()
-                .into(),
+            MetricValue::distribution(metrics.billed_duration_ms as f64 * constants::MS_TO_SEC),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert billed duration metric: {}", e);
         }
         let metric = metric::Metric::new(
             constants::MAX_MEMORY_USED_METRIC.into(),
-            metric::Type::Distribution,
-            (metrics.max_memory_used_mb as f64).to_string().into(),
+            MetricValue::distribution(metrics.max_memory_used_mb as f64),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert max memory used metric: {}", e);
         }
         let metric = metric::Metric::new(
             constants::MEMORY_SIZE_METRIC.into(),
-            metric::Type::Distribution,
-            (metrics.memory_size_mb as f64).to_string().into(),
+            MetricValue::distribution(metrics.memory_size_mb as f64),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert memory size metric: {}", e);
         }
 
@@ -182,11 +168,10 @@ impl Lambda {
             Self::calculate_estimated_cost_usd(metrics.billed_duration_ms, metrics.memory_size_mb);
         let metric = metric::Metric::new(
             constants::ESTIMATED_COST_METRIC.into(),
-            metric::Type::Distribution,
-            cost_usd.to_string().into(),
+            MetricValue::distribution(cost_usd),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert estimated cost metric: {}", e);
         }
     }
@@ -230,6 +215,8 @@ mod tests {
 
     use super::*;
     use crate::{config, proc::proc::NetworkData};
+    use crate::config;
+    use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
 
     fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
@@ -241,7 +228,7 @@ mod tests {
 
         (
             Arc::new(Mutex::new(
-                Aggregator::new(Vec::new(), 1024).expect("failed to create aggregator"),
+                Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
             )),
             config,
         )
@@ -249,8 +236,8 @@ mod tests {
 
     fn assert_sketch(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64) {
         let aggregator = aggregator_mutex.lock().unwrap();
-        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), None) {
-            let metric = e.metric_value.get_sketch().unwrap();
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None) {
+            let metric = e.value.get_sketch().unwrap();
             assert!((metric.max().unwrap() - value).abs() < PRECISION);
             assert!((metric.min().unwrap() - value).abs() < PRECISION);
             assert!((metric.sum().unwrap() - value).abs() < PRECISION);
@@ -304,37 +291,37 @@ mod tests {
         });
         let aggr = metrics_aggr.lock().expect("lock poisoned");
         assert!(aggr
-            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), None)
+            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::ERRORS_METRIC.into(), None)
+            .get_entry_by_id(constants::ERRORS_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), None)
+            .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::DURATION_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), None)
+            .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None)
+            .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), None)
+            .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), &None)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), None)
+            .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), &None)
             .is_none());
     }
 
