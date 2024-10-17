@@ -192,6 +192,10 @@ impl Lambda {
     }
 
     pub fn collect_enhanced_metric_offsets(&mut self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        
         let mut offsets: Vec<Box<dyn metric_data::EnhancedMetricData>> = Vec::new();
 
         if let Ok(data) = proc::get_network_data() {

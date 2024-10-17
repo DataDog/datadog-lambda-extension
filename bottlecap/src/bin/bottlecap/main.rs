@@ -10,24 +10,38 @@
 #![deny(missing_debug_implementations)]
 
 use bottlecap::{
-    base_url, config::{self, AwsConfig, Config}, event_bus::bus::EventBus, events::Event, lifecycle::{
+    base_url, 
+    config::{self, AwsConfig, Config}, 
+    event_bus::bus::EventBus, 
+    events::Event, 
+    lifecycle::{
         flush_control::FlushControl,
         invocation_context::{InvocationContext, InvocationContextBuffer},
-    }, logger, logs::{
+    }, 
+    logger, 
+    logs::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    }, metrics::enhanced::lambda::Lambda as enhanced_metrics, secrets::decrypt, tags::{lambda, provider::Provider as TagProvider}, telemetry::{
+    }, 
+    metrics::enhanced::lambda::Lambda as enhanced_metrics, 
+    secrets::decrypt, 
+    tags::{lambda, provider::Provider as TagProvider}, 
+    telemetry::{
         self,
         client::TelemetryApiClient,
         events::{Status, TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
-    }, traces::{
+    }, 
+    traces::{
         hello_agent,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
-    }, DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE, LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT
+    }, 
+    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST, 
+    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE, 
+    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
@@ -40,7 +54,13 @@ use dogstatsd::{
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
-    collections::{hash_map, HashMap}, env, io::{Error, Result}, os::unix::process::CommandExt, path::Path, process::Command, sync::{Arc, Mutex}
+    collections::{hash_map, HashMap}, 
+    env, 
+    io::{Error, Result}, 
+    os::unix::process::CommandExt, 
+    path::Path, 
+    process::Command, 
+    sync::{Arc, Mutex}
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;
@@ -300,7 +320,6 @@ async fn extension_loop_active(
 
     let mut lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
-    
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
 
     let telemetry_listener_cancel_token =
@@ -326,7 +345,6 @@ async fn extension_loop_active(
                     request_id, deadline_ms, invoked_function_arn
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
-
                 lambda_enhanced_metrics.collect_enhanced_metric_offsets();
             }
             Ok(NextEventResponse::Shutdown {
@@ -403,7 +421,6 @@ async fn extension_loop_active(
                                         stats_flusher.manual_flush()
                                     );
                                 }
-
                                 break;
                             }
                             TelemetryRecord::PlatformReport {
