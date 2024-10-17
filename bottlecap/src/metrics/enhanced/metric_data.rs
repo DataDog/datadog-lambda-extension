@@ -1,4 +1,4 @@
-use dogstatsd::{aggregator::Aggregator, metric::{Metric, Type}};
+use dogstatsd::{aggregator::Aggregator, metric::{Metric, MetricValue}};
 use super::constants;
 use crate::proc::proc::{self, NetworkData};
 use tracing::debug;
@@ -20,34 +20,32 @@ impl NetworkEnhancedMetricData {
     pub fn generate_metrics(&self, rx_bytes_end: f64, tx_bytes_end: f64, aggr: &mut MutexGuard<Aggregator>) {
         let rx_bytes = rx_bytes_end - self.offset.rx_bytes;
         let tx_bytes = tx_bytes_end - self.offset.tx_bytes;
+        let total_network = rx_bytes + tx_bytes;
 
         let metric = Metric::new(
             constants::RX_BYTES_METRIC.into(),
-            Type::Distribution,
-            rx_bytes.to_string().into(),
+            MetricValue::distribution(rx_bytes),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert rx_bytes metric: {}", e);
         }
 
         let metric = Metric::new(
             constants::TX_BYTES_METRIC.into(),
-            Type::Distribution,
-            tx_bytes.to_string().into(),
+            MetricValue::distribution(tx_bytes),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert tx_bytes metric: {}", e);
         }
 
         let metric = Metric::new(
             constants::TOTAL_NETWORK_METRIC.into(),
-            Type::Distribution,
-            (rx_bytes + tx_bytes).to_string().into(),
+            MetricValue::distribution(total_network),
             None,
         );
-        if let Err(e) = aggr.insert(&metric) {
+        if let Err(e) = aggr.insert(metric) {
             error!("failed to insert total_network metric: {}", e);
         }
     }

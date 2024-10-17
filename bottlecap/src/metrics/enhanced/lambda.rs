@@ -215,7 +215,6 @@ mod tests {
 
     use super::*;
     use crate::{config, proc::proc::NetworkData};
-    use crate::config;
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
 
