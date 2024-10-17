@@ -1,4 +1,8 @@
-use std::{error::Error, fs::File, io::{self, BufRead}};
+use std::{
+    error::Error,
+    fs::File,
+    io::{self, BufRead},
+};
 
 use super::constants::{LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH};
 
@@ -20,7 +24,9 @@ fn get_network_data_helper(path: &str) -> Result<NetworkData, Box<dyn std::error
         let line = line.map_err(|e| Box::new(e) as Box<dyn Error>)?;
         let mut values = line.split_whitespace();
 
-        let Some(interface_name) = values.next() else { continue };
+        let Some(interface_name) = values.next() else {
+            continue;
+        };
         if !interface_name.starts_with(LAMDBA_NETWORK_INTERFACE) {
             continue;
         }

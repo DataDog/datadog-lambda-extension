@@ -4,22 +4,26 @@ use crate::proc::proc;
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
-use std::collections::VecDeque;
 use dogstatsd::metric::{Metric, MetricValue};
+use std::collections::VecDeque;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, error};
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
-    pub config: Arc<crate::config::Config>, 
+    pub config: Arc<crate::config::Config>,
     enhanced_metric_data: VecDeque<Vec<Box<dyn metric_data::EnhancedMetricData>>>,
 }
 
 impl Lambda {
     #[must_use]
     pub fn new(aggregator: Arc<Mutex<Aggregator>>, config: Arc<crate::config::Config>) -> Lambda {
-        Lambda { aggregator, config, enhanced_metric_data: VecDeque::new()}
+        Lambda {
+            aggregator,
+            config,
+            enhanced_metric_data: VecDeque::new(),
+        }
     }
 
     pub fn increment_invocation_metric(&self) {
@@ -180,7 +184,7 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        
+
         let mut offsets: Vec<Box<dyn metric_data::EnhancedMetricData>> = Vec::new();
 
         if let Ok(data) = proc::get_network_data() {
@@ -196,7 +200,8 @@ impl Lambda {
             return;
         }
 
-        let mut aggr: std::sync::MutexGuard<Aggregator> = self.aggregator.lock().expect("lock poisoned");
+        let mut aggr: std::sync::MutexGuard<Aggregator> =
+            self.aggregator.lock().expect("lock poisoned");
 
         if let Some(metric_data) = self.enhanced_metric_data.pop_front() {
             for metric in metric_data {
@@ -350,10 +355,19 @@ mod tests {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
 
-        let network_data_offset = NetworkData { rx_bytes: 180.0, tx_bytes: 254.0 };
-        let network_data = NetworkEnhancedMetricData { offset: network_data_offset };
+        let network_data_offset = NetworkData {
+            rx_bytes: 180.0,
+            tx_bytes: 254.0,
+        };
+        let network_data = NetworkEnhancedMetricData {
+            offset: network_data_offset,
+        };
 
-        network_data.generate_metrics(20180.0, 75000.0, &mut lambda.aggregator.lock().expect("lock poisoned"));
+        network_data.generate_metrics(
+            20180.0,
+            75000.0,
+            &mut lambda.aggregator.lock().expect("lock poisoned"),
+        );
 
         assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
         assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0);

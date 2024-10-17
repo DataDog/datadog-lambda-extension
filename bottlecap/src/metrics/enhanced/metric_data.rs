@@ -1,9 +1,12 @@
-use dogstatsd::{aggregator::Aggregator, metric::{Metric, MetricValue}};
 use super::constants;
 use crate::proc::proc::{self, NetworkData};
+use dogstatsd::{
+    aggregator::Aggregator,
+    metric::{Metric, MetricValue},
+};
+use std::sync::MutexGuard;
 use tracing::debug;
 use tracing::error;
-use std::sync::MutexGuard;
 
 #[allow(clippy::module_name_repetitions)]
 pub trait EnhancedMetricData {
@@ -13,11 +16,16 @@ pub trait EnhancedMetricData {
 #[allow(clippy::module_name_repetitions)]
 #[derive(Copy, Clone)]
 pub struct NetworkEnhancedMetricData {
-    pub offset: NetworkData
+    pub offset: NetworkData,
 }
 
 impl NetworkEnhancedMetricData {
-    pub fn generate_metrics(&self, rx_bytes_end: f64, tx_bytes_end: f64, aggr: &mut MutexGuard<Aggregator>) {
+    pub fn generate_metrics(
+        &self,
+        rx_bytes_end: f64,
+        tx_bytes_end: f64,
+        aggr: &mut MutexGuard<Aggregator>,
+    ) {
         let rx_bytes = rx_bytes_end - self.offset.rx_bytes;
         let tx_bytes = tx_bytes_end - self.offset.tx_bytes;
         let total_network = rx_bytes + tx_bytes;

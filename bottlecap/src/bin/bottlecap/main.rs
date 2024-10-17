@@ -41,7 +41,7 @@ use bottlecap::{
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
-    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT
+    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
@@ -55,13 +55,13 @@ use dogstatsd::{
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
-    collections::{hash_map, HashMap}, 
-    env, 
-    io::{Error, Result}, 
-    os::unix::process::CommandExt, 
-    path::Path, 
-    process::Command, 
-    sync::{Arc, Mutex}
+    collections::{hash_map, HashMap},
+    env,
+    io::{Error, Result},
+    os::unix::process::CommandExt,
+    path::Path,
+    process::Command,
+    sync::{Arc, Mutex},
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;

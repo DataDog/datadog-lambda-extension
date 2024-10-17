@@ -23,6 +23,6 @@ pub const ERRORS_METRIC: &str = "aws.lambda.enhanced.errors";
 pub const INVOCATIONS_METRIC: &str = "aws.lambda.enhanced.invocations";
 pub const RX_BYTES_METRIC: &str = "aws.lambda.enhanced.rx_bytes";
 pub const TX_BYTES_METRIC: &str = "aws.lambda.enhanced.tx_bytes";
-pub const TOTAL_NETWORK_METRIC: &str =  "aws.lambda.enhanced.total_network";
+pub const TOTAL_NETWORK_METRIC: &str = "aws.lambda.enhanced.total_network";
 //pub const ASM_INVOCATIONS_METRIC: &str = "aws.lambda.enhanced.asm.invocations";
 pub const ENHANCED_METRICS_ENV_VAR: &str = "DD_ENHANCED_METRICS";
