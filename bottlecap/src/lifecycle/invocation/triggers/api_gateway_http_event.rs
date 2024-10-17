@@ -63,13 +63,19 @@ impl Trigger for APIGatewayHttpEvent {
     #[allow(clippy::cast_possible_truncation)]
     fn enrich_span(&self, span: &mut Span) {
         debug!("Enriching an Inferred Span for an API Gateway HTTP Event");
-        let resource = format!(
-            "{http_method} {path}",
-            http_method = self.request_context.http.method,
-            path = self.request_context.http.path
-        );
+        let resource: String;
+        if self.route_key.is_empty() {
+            resource = format!(
+                "{http_method} {route_key}",
+                http_method = self.request_context.http.method,
+                route_key = self.route_key
+            );
+        } else {
+            resource = self.route_key.clone();
+        }
+
         let http_url = format!(
-            "{domain_name}{path}",
+            "https://{domain_name}{path}",
             domain_name = self.request_context.domain_name,
             path = self.request_context.http.path
         );
@@ -254,7 +260,7 @@ mod tests {
                 ("endpoint".to_string(), "/httpapi/get".to_string()),
                 (
                     "http.url".to_string(),
-                    "x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get".to_string()
+                    "https://x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get".to_string()
                 ),
                 ("http.method".to_string(), "GET".to_string()),
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
