@@ -1,32 +1,28 @@
-use std::{collections::HashMap, sync::Arc};
-
+use crate::config::trace_propagation_style::Propagator;
+use crate::traces::propagation::traceparent::TRACESTATE_KEY;
 use crate::{
     config::{self, trace_propagation_style::TracePropagationStyle},
     traces::context::SpanContext,
 };
 use carrier::{Extractor, Injector};
 use datadog_trace_protobuf::pb::SpanLink;
+use std::{collections::HashMap, sync::Arc};
 use text_map_propagator::{
     BAGGAGE_PREFIX, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY,
-    TRACESTATE_KEY,
 };
 
 pub mod carrier;
 pub mod error;
 pub mod text_map_propagator;
-
-pub trait Propagator {
-    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
-    fn inject(&self, context: SpanContext, carrier: &mut dyn Injector);
-}
+mod traceparent;
 
 pub struct DatadogCompositePropagator {
-    propagators: Vec<Box<dyn Propagator + 'static>>,
+    propagators: Vec<TracePropagationStyle>,
     config: Arc<config::Config>,
 }
 
 #[allow(clippy::never_loop)]
-impl Propagator for DatadogCompositePropagator {
+impl DatadogCompositePropagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
         if self.config.trace_propagation_extract_first {
             for propagator in &self.propagators {
@@ -34,7 +30,7 @@ impl Propagator for DatadogCompositePropagator {
 
                 if self.config.trace_propagation_http_baggage_enabled {
                     if let Some(mut context) = context {
-                        Self::attach_baggage(&mut context, carrier);
+                        attach_baggage(&mut context, carrier);
                         return Some(context);
                     }
                 }
@@ -43,160 +39,141 @@ impl Propagator for DatadogCompositePropagator {
             }
         }
 
-        let (contexts, styles) = self.extract_available_contexts(carrier);
+        let (contexts, styles) =
+            extract_available_contexts(&self.config.trace_propagation_style, carrier);
         if contexts.is_empty() {
             return None;
         }
 
-        let mut context = Self::resolve_contexts(contexts, styles, carrier);
+        let mut context = resolve_contexts(contexts, styles);
         if self.config.trace_propagation_http_baggage_enabled {
-            Self::attach_baggage(&mut context, carrier);
+            attach_baggage(&mut context, carrier);
         }
 
         Some(context)
     }
+}
 
-    fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
-        todo!()
+pub fn new(config: Arc<config::Config>) -> DatadogCompositePropagator {
+    let propagators: Vec<TracePropagationStyle> = config
+        .trace_propagation_style_extract
+        .iter()
+        .filter_map(|style| match style {
+            TracePropagationStyle::Datadog => Some(TracePropagationStyle::Datadog),
+            TracePropagationStyle::TraceContext => Some(TracePropagationStyle::TraceContext),
+            _ => None,
+        })
+        .collect();
+
+    DatadogCompositePropagator {
+        propagators,
+        config,
     }
 }
 
-impl DatadogCompositePropagator {
-    #[must_use]
-    pub fn new(config: Arc<config::Config>) -> Self {
-        let propagators: Vec<Box<dyn Propagator + 'static>> = config
-            .trace_propagation_style_extract
-            .iter()
-            .filter_map(|style| match style {
-                TracePropagationStyle::Datadog => {
-                    Some(Box::new(text_map_propagator::DatadogHeaderPropagator)
-                        as Box<dyn Propagator>)
-                }
-                TracePropagationStyle::TraceContext => {
-                    Some(Box::new(text_map_propagator::TraceContextPropagator)
-                        as Box<dyn Propagator>)
-                }
+fn extract_available_contexts(
+    propagator_style: &Vec<TracePropagationStyle>,
+    carrier: &dyn Extractor,
+) -> (Vec<SpanContext>, Vec<TracePropagationStyle>) {
+    let mut contexts = Vec::<SpanContext>::new();
+    let mut styles = Vec::<TracePropagationStyle>::new();
+
+    for propagator in propagator_style {
+        if let Some(context) = propagator.extract(carrier) {
+            contexts.push(context);
+            styles.push(*propagator);
+        }
+    }
+    (contexts, styles)
+}
+
+fn resolve_contexts(contexts: Vec<SpanContext>, styles: Vec<TracePropagationStyle>) -> SpanContext {
+    let mut primary_context = contexts[0].clone();
+    let mut links = Vec::<SpanLink>::new();
+
+    let mut i = 1;
+    for context in contexts.iter().skip(1) {
+        let style = styles[i];
+
+        if context.span_id != 0
+            && context.trace_id != 0
+            && context.trace_id != primary_context.trace_id
+        {
+            let sampling = context.sampling.unwrap_or_default().priority.unwrap_or(0);
+            let tracestate: Option<String> = match style {
+                TracePropagationStyle::TraceContext => context.tags.get(TRACESTATE_KEY).cloned(),
                 _ => None,
-            })
-            .collect();
+            };
+            let attributes = HashMap::from([
+                ("reason".to_string(), "terminated_context".to_string()),
+                ("context_headers".to_string(), style.to_string()),
+            ]);
+            let trace_id_high_str = context
+                .tags
+                .get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
+                .cloned()
+                .unwrap_or_default();
+            let trace_ig_high = u64::from_str_radix(&trace_id_high_str, 16).unwrap_or_default();
 
-        Self {
-            propagators,
-            config,
-        }
-    }
-
-    fn extract_available_contexts(
-        &self,
-        carrier: &dyn Extractor,
-    ) -> (Vec<SpanContext>, Vec<TracePropagationStyle>) {
-        let mut contexts = Vec::<SpanContext>::new();
-        let mut styles = Vec::<TracePropagationStyle>::new();
-
-        for (i, propagator) in self.propagators.iter().enumerate() {
-            if let Some(context) = propagator.extract(carrier) {
-                contexts.push(context);
-                styles.push(self.config.trace_propagation_style_extract[i]);
-            }
-        }
-
-        (contexts, styles)
-    }
-
-    fn resolve_contexts(
-        contexts: Vec<SpanContext>,
-        styles: Vec<TracePropagationStyle>,
-        _carrier: &dyn Extractor,
-    ) -> SpanContext {
-        let mut primary_context = contexts[0].clone();
-        let mut links = Vec::<SpanLink>::new();
-
-        let mut i = 1;
-        for context in contexts.iter().skip(1) {
-            let style = styles[i];
-
-            if context.span_id != 0
-                && context.trace_id != 0
-                && context.trace_id != primary_context.trace_id
-            {
-                let sampling = context.sampling.unwrap_or_default().priority.unwrap_or(0);
-                let tracestate: Option<String> = match style {
-                    TracePropagationStyle::TraceContext => {
-                        context.tags.get(TRACESTATE_KEY).cloned()
-                    }
-                    _ => None,
-                };
-                let attributes = HashMap::from([
-                    ("reason".to_string(), "terminated_context".to_string()),
-                    ("context_headers".to_string(), style.to_string()),
-                ]);
-                let trace_id_high_str = context
+            links.push(SpanLink {
+                trace_id: context.trace_id,
+                trace_id_high: trace_ig_high,
+                span_id: context.span_id,
+                flags: u32::from(sampling > 0),
+                tracestate: tracestate.unwrap_or_default(),
+                attributes,
+            });
+        } else if style == TracePropagationStyle::TraceContext {
+            if let Some(tracestate) = context.tags.get(TRACESTATE_KEY) {
+                primary_context
                     .tags
-                    .get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
-                    .cloned()
-                    .unwrap_or_default();
-                let trace_ig_high = u64::from_str_radix(&trace_id_high_str, 16).unwrap_or_default();
+                    .insert(TRACESTATE_KEY.to_string(), tracestate.clone());
+            }
 
-                links.push(SpanLink {
-                    trace_id: context.trace_id,
-                    trace_id_high: trace_ig_high,
-                    span_id: context.span_id,
-                    flags: u32::from(sampling > 0),
-                    tracestate: tracestate.unwrap_or_default(),
-                    attributes,
-                });
-            } else if style == TracePropagationStyle::TraceContext {
-                if let Some(tracestate) = context.tags.get(TRACESTATE_KEY) {
+            if primary_context.trace_id == context.trace_id
+                && primary_context.span_id != context.span_id
+            {
+                let mut dd_context: Option<SpanContext> = None;
+                if styles.contains(&TracePropagationStyle::Datadog) {
+                    let position = styles
+                        .iter()
+                        .position(|&s| s == TracePropagationStyle::Datadog)
+                        .unwrap_or_default();
+                    dd_context = contexts.get(position).cloned();
+                }
+
+                if let Some(parent_id) = context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
                     primary_context
                         .tags
-                        .insert(TRACESTATE_KEY.to_string(), tracestate.clone());
+                        .insert(DATADOG_LAST_PARENT_ID_KEY.to_string(), parent_id.clone());
+                } else if let Some(sc) = dd_context {
+                    primary_context.tags.insert(
+                        DATADOG_LAST_PARENT_ID_KEY.to_string(),
+                        format!("{:016x}", sc.span_id),
+                    );
                 }
 
-                if primary_context.trace_id == context.trace_id
-                    && primary_context.span_id != context.span_id
-                {
-                    let mut dd_context: Option<SpanContext> = None;
-                    if styles.contains(&TracePropagationStyle::Datadog) {
-                        let position = styles
-                            .iter()
-                            .position(|&s| s == TracePropagationStyle::Datadog)
-                            .unwrap_or_default();
-                        dd_context = contexts.get(position).cloned();
-                    }
-
-                    if let Some(parent_id) = context.tags.get(DATADOG_LAST_PARENT_ID_KEY) {
-                        primary_context
-                            .tags
-                            .insert(DATADOG_LAST_PARENT_ID_KEY.to_string(), parent_id.clone());
-                    } else if let Some(sc) = dd_context {
-                        primary_context.tags.insert(
-                            DATADOG_LAST_PARENT_ID_KEY.to_string(),
-                            format!("{:016x}", sc.span_id),
-                        );
-                    }
-
-                    primary_context.span_id = context.span_id;
-                }
+                primary_context.span_id = context.span_id;
             }
-
-            i += 1;
         }
 
-        primary_context.links = links;
-
-        primary_context
+        i += 1;
     }
 
-    fn attach_baggage(context: &mut SpanContext, carrier: &dyn Extractor) {
-        let keys = carrier.keys();
+    primary_context.links = links;
 
-        for key in keys {
-            if let Some(stripped) = key.strip_prefix(BAGGAGE_PREFIX) {
-                context.tags.insert(
-                    stripped.to_string(),
-                    carrier.get(key).unwrap_or_default().to_string(),
-                );
-            }
+    primary_context
+}
+
+fn attach_baggage(context: &mut SpanContext, carrier: &dyn Extractor) {
+    let keys = carrier.keys();
+
+    for key in keys {
+        if let Some(stripped) = key.strip_prefix(BAGGAGE_PREFIX) {
+            context.tags.insert(
+                stripped.to_string(),
+                carrier.get(key).unwrap_or_default().to_string(),
+            );
         }
     }
 }
@@ -349,7 +326,7 @@ pub mod tests {
                         config.trace_propagation_style_extract.clone_from(&s);
                     }
 
-                    let propagator = DatadogCompositePropagator::new(Arc::new(config));
+                    let propagator = new(Arc::new(config));
 
                     let context = propagator.extract(&carrier).unwrap_or_default();
 
@@ -779,7 +756,7 @@ pub mod tests {
             TracePropagationStyle::B3Multi,
         ];
 
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+        let propagator = new(Arc::new(config));
 
         assert_eq!(propagator.propagators.len(), 2);
     }
@@ -788,20 +765,17 @@ pub mod tests {
     fn test_new_no_propagators() {
         let mut config = config::Config::default();
         config.trace_propagation_style_extract = vec![TracePropagationStyle::None];
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+        let propagator = new(Arc::new(config));
 
         assert_eq!(propagator.propagators.len(), 0);
     }
 
     #[test]
     fn test_extract_available_contexts() {
-        let mut config = config::Config::default();
-        config.trace_propagation_style_extract = vec![
+        let trace_propagation_style_extract = vec![
             TracePropagationStyle::Datadog,
             TracePropagationStyle::TraceContext,
         ];
-
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
         let carrier = HashMap::from([
             (
@@ -827,7 +801,8 @@ pub mod tests {
                 "_dd.p.test=value,_dd.p.tid=9291375655657946024,any=tag".to_string(),
             ),
         ]);
-        let (contexts, styles) = propagator.extract_available_contexts(&carrier);
+        let (contexts, styles) =
+            extract_available_contexts(&trace_propagation_style_extract, &carrier);
 
         assert_eq!(contexts.len(), 2);
         assert_eq!(styles.len(), 2);
@@ -835,10 +810,7 @@ pub mod tests {
 
     #[test]
     fn test_extract_available_contexts_no_contexts() {
-        let mut config = config::Config::default();
-        config.trace_propagation_style_extract = vec![TracePropagationStyle::Datadog];
-
-        let propagator = DatadogCompositePropagator::new(Arc::new(config));
+        let trace_propagation_style_extract = vec![TracePropagationStyle::Datadog];
 
         let carrier = HashMap::from([
             (
@@ -850,7 +822,8 @@ pub mod tests {
                 "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
             ),
         ]);
-        let (contexts, styles) = propagator.extract_available_contexts(&carrier);
+        let (contexts, styles) =
+            extract_available_contexts(&trace_propagation_style_extract, &carrier);
 
         assert_eq!(contexts.len(), 0);
         assert_eq!(styles.len(), 0);
@@ -865,7 +838,7 @@ pub mod tests {
             ("ot-baggage-key1".to_string(), "value1".to_string()),
         ]);
 
-        DatadogCompositePropagator::attach_baggage(&mut context, &carrier);
+        attach_baggage(&mut context, &carrier);
 
         assert_eq!(context.tags.len(), 1);
         assert_eq!(context.tags.get("key1").unwrap(), "value1");
