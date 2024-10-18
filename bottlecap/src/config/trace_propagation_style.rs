@@ -1,6 +1,9 @@
 use std::{fmt::Display, str::FromStr};
 
+use crate::traces::context::SpanContext;
+use crate::traces::propagation::carrier::{Extractor, Injector};
 use serde::{Deserialize, Deserializer};
+use crate::traces::propagation::text_map_propagator::extract_datadog;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TracePropagationStyle {
@@ -9,6 +12,27 @@ pub enum TracePropagationStyle {
     B3,
     TraceContext,
     None,
+}
+
+pub trait Propagator {
+    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
+    fn inject(&self, context: SpanContext, carrier: &mut dyn Injector);
+}
+
+impl Propagator for TracePropagationStyle {
+    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        match self {
+            TracePropagationStyle::Datadog => extract_datadog(carrier),
+            TracePropagationStyle::B3Multi => todo!(),
+            TracePropagationStyle::B3 => todo!(),
+            TracePropagationStyle::TraceContext => traceparent::extract_trace_context(carrier),
+            TracePropagationStyle::None => todo!(),
+        }
+    }
+
+    fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
+        todo!()
+    }
 }
 
 impl FromStr for TracePropagationStyle {
