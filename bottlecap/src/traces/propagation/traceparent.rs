@@ -34,7 +34,7 @@ struct Tracestate {
     origin: Option<String>,
     lower_order_trace_id: Option<String>,
 }
-fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
+pub(crate) fn extract(carrier: &dyn Extractor) -> Option<SpanContext> {
     let tp = carrier.get(TRACEPARENT_KEY)?.trim();
 
     match extract_traceparent(tp) {

@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
-use crate::config::trace_propagation_style::{Propagator, TracePropagationStyle};
 use crate::traces::context::{Sampling, SpanContext};
 use crate::traces::propagation::{
-    carrier::{Extractor, Injector},
+    carrier::Extractor,
     error::Error,
 };
 use lazy_static::lazy_static;
 use regex::Regex;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 // Datadog Keys
 const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
@@ -181,6 +180,7 @@ fn higher_order_bits_valid(trace_id_higher_order_bits: &str) -> bool {
 
 #[cfg(test)]
 mod test {
+    use crate::config::trace_propagation_style::TracePropagationStyle;
     use super::*;
 
     #[test]

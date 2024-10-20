@@ -1,10 +1,9 @@
-use crate::config::trace_propagation_style::Propagator;
 use crate::traces::propagation::traceparent::TRACESTATE_KEY;
 use crate::{
     config::{self, trace_propagation_style::TracePropagationStyle},
     traces::context::SpanContext,
 };
-use carrier::{Extractor, Injector};
+use carrier::Extractor;
 use datadog_trace_protobuf::pb::SpanLink;
 use std::{collections::HashMap, sync::Arc};
 use text_map_propagator::{
@@ -14,7 +13,7 @@ use text_map_propagator::{
 pub mod carrier;
 pub mod error;
 pub mod text_map_propagator;
-mod traceparent;
+pub mod traceparent;
 
 pub struct DatadogCompositePropagator {
     propagators: Vec<TracePropagationStyle>,
