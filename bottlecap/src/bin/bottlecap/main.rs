@@ -70,6 +70,7 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+use bottlecap::lwa::proxy::start_lwa_proxy;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -300,6 +301,9 @@ async fn extension_loop_active(
         Arc::clone(config),
         aws_config,
     )));
+    let _ = start_lwa_proxy(Arc::clone(&invocation_processor));
+
+
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(
             obfuscation_config::ObfuscationConfig::new()
