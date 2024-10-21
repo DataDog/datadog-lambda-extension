@@ -8,6 +8,9 @@ on:
 
 env:
   VERSION: 1  # env var required when building extension
+  # adds public.ecr.aws as fallback incase rate limit on ghcr.io is hit
+  TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db,public.ecr.aws/aquasecurity/trivy-db
+  TRIVY_JAVA_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-java-db,public.ecr.aws/aquasecurity/trivy-java-db
 
 jobs:
   check:
