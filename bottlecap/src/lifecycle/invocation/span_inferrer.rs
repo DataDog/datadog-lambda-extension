@@ -6,8 +6,7 @@ use tracing::debug;
 use crate::config::AwsConfig;
 
 use crate::lifecycle::invocation::triggers::{
-    api_gateway_http_event::APIGatewayHttpEvent,
-    api_gateway_rest_event::APIGatewayRestEvent,
+    api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
     Trigger,
 };
 
