@@ -116,7 +116,14 @@ impl Listener {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         debug!("Received end invocation request");
-        let (parts, _) = req.into_parts();
+        let (parts, body) = req.into_parts();
+        let parsed_body = serde_json::from_slice::<serde_json::Value>(
+            &hyper::body::to_bytes(body).await.unwrap_or_default(),
+        );
+        let mut parsed_status: Option<String> = None;
+        if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
+            parsed_status = Some(status_code.to_string());
+        }
         let headers = parts.headers;
 
         let mut processor = invocation_processor.lock().await;
@@ -142,7 +149,7 @@ impl Listener {
             }
         }
 
-        processor.on_invocation_end(trace_id, span_id, parent_id);
+        processor.on_invocation_end(trace_id, span_id, parent_id, parsed_status);
         drop(processor);
 
         Response::builder()
