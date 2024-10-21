@@ -6,10 +6,10 @@ use tracing::debug;
 use crate::config::AwsConfig;
 
 use crate::lifecycle::invocation::triggers::{
-    api_gateway_http_event::APIGatewayHttpEvent, Trigger,
+    api_gateway_http_event::APIGatewayHttpEvent,
+    api_gateway_rest_event::APIGatewayRestEvent,
+    Trigger,
 };
-
-use super::triggers::api_gateway_rest_event::APIGatewayRestEvent;
 
 const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
@@ -64,9 +64,7 @@ impl SpanInferrer {
                     self.inferred_span = Some(span);
                 }
             } else if APIGatewayRestEvent::is_match(&payload_value) {
-                debug!("MATCH V1 REST EVENT");
                 if let Some(t) = APIGatewayRestEvent::new(payload_value) {
-                    debug!("ASTUYVE PARSING V1 REST EVENT");
                     let mut span = Span {
                         span_id: Self::generate_span_id(),
                         ..Default::default()
@@ -124,7 +122,6 @@ impl SpanInferrer {
             }
 
             s.trace_id = invocation_span.trace_id;
-            debug!("Final Span: {:?}", self.inferred_span);
         }
     }
 
