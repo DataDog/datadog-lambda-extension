@@ -195,7 +195,7 @@ mod tests {
                 request_id: "id=".to_string(),
                 api_id: "id".to_string(),
                 domain_name: "id.execute-api.us-east-1.amazonaws.com".to_string(),
-                time_epoch: 1583349317135,
+                time_epoch: 1_583_349_317_135,
                 method: "GET".to_string(),
                 path: "/my/path".to_string(),
                 protocol: "HTTP/1.1".to_string(),
