@@ -117,8 +117,9 @@ impl Listener {
     ) -> http::Result<Response<Body>> {
         debug!("Received end invocation request");
         let (parts, body) = req.into_parts();
-        let parsed_body = serde_json::from_slice::<serde_json::Value>(&hyper::body::to_bytes(body).await.unwrap());
-        debug!("Parsed body: {:?}", parsed_body);
+        let parsed_body = serde_json::from_slice::<serde_json::Value>(
+            &hyper::body::to_bytes(body).await.unwrap_or_default(),
+        );
         let mut parsed_status: Option<String> = None;
         if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
             parsed_status = Some(status_code.to_string());

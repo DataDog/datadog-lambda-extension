@@ -63,7 +63,7 @@ impl SpanInferrer {
                     self.is_async_span = t.is_async();
                     self.inferred_span = Some(span);
                 }
-            } else if APIGatewayRestEvent::is_match(&payload_value){
+            } else if APIGatewayRestEvent::is_match(&payload_value) {
                 debug!("MATCH V1 REST EVENT");
                 if let Some(t) = APIGatewayRestEvent::new(payload_value) {
                     debug!("ASTUYVE PARSING V1 REST EVENT");
@@ -90,7 +90,6 @@ impl SpanInferrer {
             } else {
                 debug!("Unable to infer span from payload");
             }
-
         } else {
             debug!("Unable to serialize payload");
         }

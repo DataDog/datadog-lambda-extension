@@ -125,10 +125,16 @@ impl Trigger for APIGatewayHttpEvent {
         let mut tags = HashMap::from([
             (
                 "http.url".to_string(),
-                self.request_context.domain_name.clone(),
+                format!(
+                    "https://{domain_name}{path}",
+                    domain_name = self.request_context.domain_name.clone(),
+                    path = self.request_context.http.path.clone()
+                ),
             ),
+            // path and URL are full
+            // /users/12345/profile
             (
-                "http_url_details.path".to_string(),
+                "http.url_details.path".to_string(),
                 self.request_context.http.path.clone(),
             ),
             (
@@ -136,9 +142,18 @@ impl Trigger for APIGatewayHttpEvent {
                 self.request_context.http.method.clone(),
             ),
         ]);
-
+        // route is parameterized
+        // /users/{id}/profile
         if !self.route_key.is_empty() {
-            tags.insert("http.route".to_string(), self.route_key.clone());
+            tags.insert(
+                "http.route".to_string(),
+                self.route_key
+                    .clone()
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or(&self.route_key.clone())
+                    .to_string(),
+            );
         }
 
         if let Some(referer) = self.headers.get("referer") {
@@ -260,7 +275,8 @@ mod tests {
                 ("endpoint".to_string(), "/httpapi/get".to_string()),
                 (
                     "http.url".to_string(),
-                    "https://x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get".to_string()
+                    "https://x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get"
+                        .to_string()
                 ),
                 ("http.method".to_string(), "GET".to_string()),
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
@@ -280,33 +296,21 @@ mod tests {
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
         let tags = event.get_tags();
-        let sorted_tags_array = tags
-            .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
-
         let expected = HashMap::from([
             (
                 "http.url".to_string(),
-                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string(),
+                "https://x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get".to_string(),
             ),
             (
-                "http_url_details.path".to_string(),
+                "http.url_details.path".to_string(),
                 "/httpapi/get".to_string(),
             ),
             ("http.method".to_string(), "GET".to_string()),
-            ("http.route".to_string(), "GET /httpapi/get".to_string()),
+            ("http.route".to_string(), "/httpapi/get".to_string()),
             ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
-            ("http.referer".to_string(), "".to_string()),
         ]);
-        let expected_sorted_array = expected
-            .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
 
-        assert_eq!(sorted_tags_array, expected_sorted_array);
+        assert_eq!(tags, expected);
     }
 
     #[test]
@@ -350,34 +354,18 @@ mod tests {
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
         let tags = event.get_tags();
-        let sorted_tags_array = tags
-            .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
 
-        println!("ASTUYVE arr is {:?}", sorted_tags_array);
         let expected = HashMap::from([
             (
                 "http.url".to_string(),
-                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string(),
+                "https://9vj54we5ih.execute-api.sa-east-1.amazonaws.com/user/42".to_string(),
             ),
-            (
-                "http_url_details.path".to_string(),
-                "/httpapi/get".to_string(),
-            ),
+            ("http.url_details.path".to_string(), "/user/42".to_string()),
             ("http.method".to_string(), "GET".to_string()),
-            ("http.route".to_string(), "GET /httpapi/get".to_string()),
-            ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
-            ("http.referer".to_string(), "".to_string()),
+            ("http.route".to_string(), "/user/{id}".to_string()),
+            ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
         ]);
-        let expected_sorted_array = expected
-            .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
-
-        assert_eq!(sorted_tags_array, expected_sorted_array);
+        assert_eq!(tags, expected);
     }
     #[test]
     fn test_get_arn() {

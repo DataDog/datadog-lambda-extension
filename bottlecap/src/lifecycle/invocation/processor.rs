@@ -183,7 +183,13 @@ impl Processor {
 
     /// Given trace context information, set it to the current span.
     ///
-    pub fn on_invocation_end(&mut self, trace_id: u64, span_id: u64, parent_id: u64, status_code: Option<String>) {
+    pub fn on_invocation_end(
+        &mut self,
+        trace_id: u64,
+        span_id: u64,
+        parent_id: u64,
+        status_code: Option<String>,
+    ) {
         self.span.trace_id = trace_id;
         self.span.span_id = span_id;
 

@@ -86,10 +86,7 @@ impl Trigger for APIGatewayRestEvent {
         span.r#type = "http".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
-            (
-                "endpoint".to_string(),
-                self.request_context.path.clone(),
-            ),
+            ("endpoint".to_string(), self.request_context.path.clone()),
             ("http.url".to_string(), http_url),
             (
                 "http.method".to_string(),
@@ -113,7 +110,10 @@ impl Trigger for APIGatewayRestEvent {
                 self.request_context.request_id.clone(),
             ),
             ("resource_names".to_string(), resource.clone()),
-            ("http.route".to_string(), resource),
+            (
+                "http.route".to_string(),
+                self.request_context.resource_path.clone(),
+            ),
         ]));
 
         debug!("Enriched Span: {:?}", span);
@@ -124,10 +124,14 @@ impl Trigger for APIGatewayRestEvent {
         let mut tags = HashMap::from([
             (
                 "http.url".to_string(),
-                self.request_context.domain_name.clone(),
+                format!(
+                    "https://{domain_name}{path}",
+                    domain_name = self.request_context.domain_name,
+                    path = self.request_context.path
+                ),
             ),
             (
-                "http_url_details.path".to_string(),
+                "http.url_details.path".to_string(),
                 self.request_context.path.clone(),
             ),
             (
@@ -136,15 +140,11 @@ impl Trigger for APIGatewayRestEvent {
             ),
             (
                 "http.route".to_string(),
-                format!(
-                    "{method} {resource}",
-                    method = self.request_context.method.clone(),
-                    resource = self.request_context.resource_path.clone()
-                ),
+                self.request_context.resource_path.clone(),
             ),
             (
                 "http.user_agent".to_string(),
-                self.request_context.identity.user_agent.to_string()
+                self.request_context.identity.user_agent.to_string(),
             ),
         ]);
 
@@ -236,14 +236,13 @@ mod tests {
         let mut span = Span::default();
         event.enrich_span(&mut span);
         assert_eq!(span.name, "aws.apigateway");
-        assert_eq!(
-            span.service,
-            "id.execute-api.us-east-1.amazonaws.com"
-        );
+        assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
         assert_eq!(span.resource, "GET /path");
         assert_eq!(span.r#type, "http");
 
-        assert_eq!(span.meta, HashMap::from([
+        assert_eq!(
+            span.meta,
+            HashMap::from([
                 ("endpoint".to_string(), "/my/path".to_string()),
                 (
                     "http.url".to_string(),
@@ -253,11 +252,12 @@ mod tests {
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
                 ("http.source_ip".to_string(), "IP".to_string()),
                 ("http.user_agent".to_string(), "user-agent".to_string()),
-                ("http.route".to_string(), "GET /path".to_string()),
+                ("http.route".to_string(), "/path".to_string()),
                 ("operation_name".to_string(), "aws.apigateway".to_string()),
                 ("request_id".to_string(), "id=".to_string()),
                 ("resource_names".to_string(), "GET /path".to_string()),
-            ]));
+            ])
+        );
     }
 
     #[test]
@@ -267,33 +267,19 @@ mod tests {
         let event =
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
         let tags = event.get_tags();
-        let sorted_tags_array = tags
-            .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
 
         let expected = HashMap::from([
             (
                 "http.url".to_string(),
-                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string(),
+                "https://id.execute-api.us-east-1.amazonaws.com/my/path".to_string(),
             ),
-            (
-                "http_url_details.path".to_string(),
-                "/httpapi/get".to_string(),
-            ),
+            ("http.url_details.path".to_string(), "/my/path".to_string()),
             ("http.method".to_string(), "GET".to_string()),
-            ("http.route".to_string(), "GET /httpapi/get".to_string()),
-            ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
-            ("http.referer".to_string(), "".to_string()),
+            ("http.route".to_string(), "/path".to_string()),
+            ("http.user_agent".to_string(), "user-agent".to_string()),
         ]);
-        let expected_sorted_array = expected
-            .iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
 
-        assert_eq!(sorted_tags_array, expected_sorted_array);
+        assert_eq!(tags, expected);
     }
 
     #[test]
@@ -311,32 +297,25 @@ mod tests {
         );
         assert_eq!(span.resource, "GET /user/{id}");
         assert_eq!(span.r#type, "http");
-        let sorted_span_meta = span.meta.iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
         let expected = HashMap::from([
-                ("endpoint".to_string(), "/dev/user/42".to_string()),
-                (
-                    "http.url".to_string(),
-                    "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com".to_string()
-                ),
-                ("http.method".to_string(), "GET".to_string()),
-                ("http.protocol".to_string(), "HTTP/1.1".to_string()),
-                ("http.source_ip".to_string(), "76.115.124.192".to_string()),
-                ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
-                ("operation_name".to_string(), "aws.api_gateway".to_string()),
-                ("request_id".to_string(), "mcwkra0ya4".to_string()),
-                ("resource_names".to_string(), "GET /dev/user/{id}".to_string()),
-            ]);
-        let sorted_expected = expected.iter()
-            .map(|(k, v)| format!("{}:{}", k, v))
-            .collect::<Vec<String>>()
-            .sort();
-        assert_eq!(
-            sorted_span_meta,
-            sorted_expected
-        );
+            ("endpoint".to_string(), "/dev/user/42".to_string()),
+            (
+                "http.url".to_string(),
+                "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42".to_string(),
+            ),
+            ("http.method".to_string(), "GET".to_string()),
+            ("http.protocol".to_string(), "HTTP/1.1".to_string()),
+            ("http.source_ip".to_string(), "76.115.124.192".to_string()),
+            ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+            ("http.route".to_string(), "/user/{id}".to_string()),
+            ("operation_name".to_string(), "aws.apigateway".to_string()),
+            (
+                "request_id".to_string(),
+                "e16399f7-e984-463a-9931-745ba021a27f".to_string(),
+            ),
+            ("resource_names".to_string(), "GET /user/{id}".to_string()),
+        ]);
+        assert_eq!(span.meta, expected);
     }
 
     #[test]
@@ -347,19 +326,23 @@ mod tests {
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
         let tags = event.get_tags();
 
-        assert_eq!(tags, HashMap::from([
-            (
-                "http.url".to_string(),
-                "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com".to_string(),
-            ),
-            (
-                "http_url_details.path".to_string(),
-                "/dev/user/42".to_string(),
-            ),
-            ("http.method".to_string(), "GET".to_string()),
-            ("http.route".to_string(), "GET /user/{id}".to_string()),
-            ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
-        ]));
+        assert_eq!(
+            tags,
+            HashMap::from([
+                (
+                    "http.url".to_string(),
+                    "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42"
+                        .to_string(),
+                ),
+                (
+                    "http.url_details.path".to_string(),
+                    "/dev/user/42".to_string(),
+                ),
+                ("http.method".to_string(), "GET".to_string()),
+                ("http.route".to_string(), "/user/{id}".to_string()),
+                ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+            ])
+        );
     }
 
     #[test]
