@@ -6,7 +6,7 @@ use tracing::error;
 
 use crate::config;
 use crate::events::Event;
-use crate::lifecycle::invocation_context::InvocationContext;
+use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
@@ -53,10 +53,7 @@ impl LambdaProcessor {
             service,
             tags,
             rules,
-            invocation_context: InvocationContext {
-                request_id: String::new(),
-                runtime_duration_ms: 0.0,
-            },
+            invocation_context: InvocationContext::new(String::new(), 0.0, 0.0, 0),
             orphan_logs: Vec::new(),
             ready_logs: Vec::new(),
             event_bus,
