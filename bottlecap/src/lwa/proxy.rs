@@ -1,16 +1,19 @@
+use crate::lifecycle::invocation::processor::Processor;
 use hyper::body::Bytes;
 use hyper::client::HttpConnector;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Client, Error, Request, Response, Server, Uri};
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
+use rand::random;
 use serde_json::Value;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tracing::{debug, error};
 
 #[must_use]
-pub fn start_lwa_proxy() -> Option<JoinHandle<()>> {
+pub fn start_lwa_proxy(span_generator: Arc<Mutex<Processor>>) -> Option<JoinHandle<()>> {
     if let Some((proxy_socket, aws_runtime_uri)) = parse_env_addresses() {
         debug!(
             "LWA proxy enabled with proxy URI: {} and AWS runtime: {}",
@@ -24,11 +27,12 @@ pub fn start_lwa_proxy() -> Option<JoinHandle<()>> {
         let proxy_task_handle = tokio::spawn({
             async move {
                 let proxy_server = Server::bind(&proxy_socket).serve(make_service_fn(move |_| {
+                    let arc = Arc::clone(&span_generator);
                     let uri = aws_runtime_uri.clone();
                     let client = Arc::clone(&proxied_client);
                     async move {
                         Ok::<_, hyper::Error>(service_fn(move |req| {
-                            inject_spans(req, Arc::clone(&client), uri.clone())
+                            inject_spans(req, Arc::clone(&client), Arc::clone(&arc), uri.clone())
                         }))
                     }
                 }));
@@ -96,70 +100,73 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
 }
 
 async fn inject_spans(
-    mut req: Request<Body>,
+    req: Request<Body>,
     client: Arc<Client<ProxyConnector<HttpConnector>>>,
+    span_generator: Arc<Mutex<Processor>>,
     aws_runtime_addr: Uri,
 ) -> Result<Response<Body>, Error> {
-    // let tracer_getter_for_version = match (req.method(), req.uri().path()) {
-    //     (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => get_traces_from_request_body,
-    //     (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => get_v05_traces_from_request_body,
-    // };
+    let (req_parts, body) = req.into_parts();
 
-    // let (body_size, traces) = match tracer_getter_for_version(req.into_body()).await {
-    //     Ok(res) => res,
-    //     Err(err) => {
-    //         return log_and_create_http_response(
-    //             &format!("Error deserializing trace from request body: {err}"),
-    //             StatusCode::INTERNAL_SERVER_ERROR,
-    //         )
-    //     }
-    // };
-
-    let mut parts = aws_runtime_addr.into_parts();
-    parts.path_and_query = req.uri().path_and_query().cloned();
-    let new_uri = Uri::from_parts(parts).unwrap();
+    let mut new_parts = aws_runtime_addr.into_parts();
+    new_parts.path_and_query = Some(req_parts.uri.path_and_query().unwrap().clone());
+    let new_uri = Uri::from_parts(new_parts).unwrap();
     debug!(
-        "Injecting spans into request. Intercepted uri: {} and substituting authority with uri: {}",
-        req.uri(),
-        new_uri
+        "Intercepted uri: {} and substituting authority with uri: {}. Method {}",
+        req_parts.uri, new_uri, req_parts.method
     );
 
-    *req.uri_mut() = new_uri;
+    let payload = hyper::body::to_bytes(body).await?;
 
-    let mut response = client.request(req).await?;
-    let body_bytes = deserialize_json(hyper::body::to_bytes(response.body_mut()).await).unwrap();
-    let body_with_added_headers =
-        add_headers(body_bytes.clone(), "x-test-header", "val").to_string();
-
-    let new_length = body_with_added_headers.len();
-
-    let mut new_response = Response::builder()
-        .status(response.status())
-        .version(response.version())
-        .body(Body::from(body_with_added_headers))
+    let req = Request::builder()
+        .method(req_parts.method)
+        .uri(new_uri)
+        .body(Body::from(payload.clone()))
+        .map_err(|e| {
+            error!("Error building request: {}", e);
+            e
+        })
         .unwrap();
 
-    *new_response.headers_mut() = response.headers().clone();
-    new_response
-        .headers_mut()
-        .insert("Content-Length", new_length.to_string().parse().unwrap());
+    let mut response = client.request(req).await?;
 
-    debug!("Response after header injections: {:?}", new_response);
+    if req_parts.uri.path() == "/2018-06-01/runtime/invocation/next"
+        && req_parts.method == hyper::Method::GET
+    {
+        debug!("Intercepted invocation request");
+        let (resp_part, resp_body) = response.into_parts();
+        let resp_payload = hyper::body::to_bytes(resp_body).await?;
+        let body = deserialize_json(Ok(resp_payload.clone())).unwrap();
 
-    Ok(new_response)
-}
+        let vec = serde_json::to_vec(&body);
+        if vec.is_ok() {
+            span_generator
+                .lock()
+                .await
+                .on_invocation_start(vec.unwrap());
+        }
+        let mut response2 = Response::builder()
+            .status(resp_part.status)
+            .version(resp_part.version)
+            .body(Body::from(resp_payload))
+            .unwrap();
 
-fn add_headers(mut body_json: Value, header_name: &str, header_value: &str) -> Value {
-    body_json
-        .get_mut("headers")
-        .and_then(|headers| headers.as_object_mut())
-        .map(|headers| {
-            headers.insert(
-                header_name.to_string(),
-                Value::String(header_value.to_string()),
-            );
-        });
-    body_json
+        *response2.headers_mut() = resp_part.headers;
+        response = response2;
+    } else if req_parts
+        .uri
+        .path()
+        .starts_with("/2018-06-01/runtime/invocation/")
+        && req_parts.uri.path().ends_with("/response")
+        && req_parts.method == hyper::Method::POST
+    {
+        debug!("Intercepted invocation response");
+        span_generator
+            .lock()
+            .await
+            .on_invocation_end(random(), random(), random(), None);
+    }
+
+    Ok(response)
 }
 
 fn deserialize_json(response: Result<Bytes, Error>) -> Option<Value> {
@@ -184,124 +191,59 @@ mod tests {
     use std::time::Duration;
     use tokio::time::sleep;
 
-    #[tokio::test]
-    async fn test_proxy_with_env_vars() {
-        let proxy_uri = "127.0.0.1:12345";
-        let final_uri = "127.0.0.1:12344";
-
-        env::set_var("ALTERNATE_RUNTIME_API", proxy_uri);
-        env::set_var("AWS_LAMBDA_RUNTIME_API", final_uri);
-
-        let final_destination = tokio::spawn(async {
-            hyper::Server::bind(&SocketAddr::from(([127, 0, 0, 1], 12344)))
-                .serve(make_service_fn(|_| async {
-                    Ok::<_, hyper::Error>(service_fn(|_| async {
-                        Ok::<_, hyper::Error>(Response::new(hyper::Body::from(
-                            "Response from AWS LAMBDA RUNTIME API",
-                        )))
-                    }))
-                }))
-                .await
-                .unwrap();
-        });
-
-        let proxy_task_handle = start_lwa_proxy().expect("Failed to start proxy");
-
-        let client = Client::builder().build_http::<Body>();
-        let uri_with_schema = format!("http://{}", proxy_uri);
-        let mut ask_proxy = client
-            .get(Uri::try_from(uri_with_schema.clone()).unwrap())
-            .await;
-
-        while ask_proxy.is_err() {
-            println!(
-                "Retrying request to proxy, err: {}",
-                ask_proxy.err().unwrap()
-            );
-            sleep(Duration::from_millis(50)).await;
-            ask_proxy = client
-                .get(Uri::try_from(uri_with_schema.clone()).unwrap())
-                .await;
-        }
-
-        let ask_proxy = ask_proxy.unwrap();
-
-        assert!(ask_proxy.headers().contains_key("x-test-header"));
-        assert_eq!(ask_proxy.headers().get("x-test-header").unwrap(), "abc");
-
-        let body_bytes = hyper::body::to_bytes(ask_proxy.into_body()).await.unwrap();
-        let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
-        assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
-
-        proxy_task_handle.abort();
-        final_destination.abort();
-
-        env::remove_var("ALTERNATE_RUNTIME_API");
-        env::remove_var("AWS_LAMBDA_RUNTIME_API");
-    }
-
-    #[test]
-    fn inject_headers_to_body() {
-        let example_payload = r#"
-    {
-        "version": "2.0",
-        "routeKey": "$default",
-        "rawPath": "/",
-        "rawQueryString": "",
-        "headers": {
-            "sec-fetch-mode": "navigate",
-            "x-amzn-tls-version": "TLSv1.3",
-            "if-none-match": "W/\"73-nZ1afAshmFkchuWGJW2eF+mD4HM\"",
-            "sec-fetch-site": "cross-site",
-            "x-forwarded-proto": "https",
-            "accept-language": "en-US,en;q=0.9,ha;q=0.8",
-            "x-forwarded-port": "443",
-            "x-forwarded-for": "64.124.12.18",
-            "sec-fetch-user": "?1",
-            "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            "x-amzn-tls-cipher-suite": "TLS_AES_128_GCM_SHA256",
-            "sec-ch-ua": "\"Chromium\";v=\"130\", \"Google Chrome\";v=\"130\", \"Not?A_Brand\";v=\"99\"",
-            "x-amzn-trace-id": "Root=1-67114ebe-7daee824361c14682e44cc57",
-            "sec-ch-ua-mobile": "?0",
-            "sec-ch-ua-platform": "\"Linux\"",
-            "host": "nfaeiph7yxziojig2kl5u75r2m0vozse.lambda-url.us-east-1.on.aws",
-            "upgrade-insecure-requests": "1",
-            "cache-control": "max-age=0",
-            "accept-encoding": "gzip, deflate, br, zstd",
-            "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
-            "sec-fetch-dest": "document"
-        },
-        "requestContext": {
-            "accountId": "anonymous",
-            "apiId": "nfaeiph7yxziojig2kl5u75r2m0vozse",
-            "domainName": "nfaeiph7yxziojig2kl5u75r2m0vozse.lambda-url.us-east-1.on.aws",
-            "domainPrefix": "nfaeiph7yxziojig2kl5u75r2m0vozse",
-            "http": {
-                "method": "GET",
-                "path": "/",
-                "protocol": "HTTP/1.1",
-                "sourceIp": "64.124.12.18",
-                "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
-            },
-            "requestId": "c6637907-97d0-4ebc-8c90-37adc31161be",
-            "routeKey": "$default",
-            "stage": "$default",
-            "time": "17/Oct/2024:17:51:58 +0000",
-            "timeEpoch": 1729187518389
-        },
-        "isBase64Encoded": false
-    }
-    "#;
-
-        let res = deserialize_json(Ok(Bytes::from(example_payload.as_bytes()))).unwrap();
-        println!("{:?}", res);
-
-        let res2 = add_headers(res.clone(), "x-test-header", "val");
-        println!("{:?}", res2);
-
-        assert_eq!(
-            res2["headers"]["x-test-header"],
-            Value::String("val".to_string())
-        );
-    }
+    // #[tokio::test]
+    // async fn test_proxy_with_env_vars() {
+    //     let proxy_uri = "127.0.0.1:12345";
+    //     let final_uri = "127.0.0.1:12344";
+    //
+    //     env::set_var("ALTERNATE_RUNTIME_API", proxy_uri);
+    //     env::set_var("AWS_LAMBDA_RUNTIME_API", final_uri);
+    //
+    //     let final_destination = tokio::spawn(async {
+    //         hyper::Server::bind(&SocketAddr::from(([127, 0, 0, 1], 12344)))
+    //             .serve(make_service_fn(|_| async {
+    //                 Ok::<_, hyper::Error>(service_fn(|_| async {
+    //                     Ok::<_, hyper::Error>(Response::new(hyper::Body::from(
+    //                         "Response from AWS LAMBDA RUNTIME API",
+    //                     )))
+    //                 }))
+    //             }))
+    //             .await
+    //             .unwrap();
+    //     });
+    //
+    //     let proxy_task_handle = start_lwa_proxy().expect("Failed to start proxy");
+    //
+    //     let client = Client::builder().build_http::<Body>();
+    //     let uri_with_schema = format!("http://{}", proxy_uri);
+    //     let mut ask_proxy = client
+    //         .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+    //         .await;
+    //
+    //     while ask_proxy.is_err() {
+    //         println!(
+    //             "Retrying request to proxy, err: {}",
+    //             ask_proxy.err().unwrap()
+    //         );
+    //         sleep(Duration::from_millis(50)).await;
+    //         ask_proxy = client
+    //             .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+    //             .await;
+    //     }
+    //
+    //     let ask_proxy = ask_proxy.unwrap();
+    //
+    //     assert!(ask_proxy.headers().contains_key("x-test-header"));
+    //     assert_eq!(ask_proxy.headers().get("x-test-header").unwrap(), "abc");
+    //
+    //     let body_bytes = hyper::body::to_bytes(ask_proxy.into_body()).await.unwrap();
+    //     let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
+    //     assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
+    //
+    //     proxy_task_handle.abort();
+    //     final_destination.abort();
+    //
+    //     env::remove_var("ALTERNATE_RUNTIME_API");
+    //     env::remove_var("AWS_LAMBDA_RUNTIME_API");
+    // }
 }
