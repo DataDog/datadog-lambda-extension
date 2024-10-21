@@ -294,10 +294,7 @@ mod tests {
     "#;
 
         let res = deserialize_json(Ok(Bytes::from(example_payload.as_bytes()))).unwrap();
-        println!("{:?}", res);
-
         let res2 = add_headers(res.clone(), "x-test-header", "val");
-        println!("{:?}", res2);
 
         assert_eq!(
             res2["headers"]["x-test-header"],
