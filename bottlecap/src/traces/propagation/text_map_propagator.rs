@@ -12,9 +12,9 @@ use crate::traces::propagation::{
 };
 
 // Datadog Keys
-const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
+pub const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
 const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
-const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
+pub const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
 const DATADOG_ORIGIN_KEY: &str = "x-datadog-origin";
 const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
 
