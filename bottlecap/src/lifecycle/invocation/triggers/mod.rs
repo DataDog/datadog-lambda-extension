@@ -13,6 +13,7 @@ pub trait Trigger: Sized {
     fn enrich_span(&self, span: &mut Span);
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str) -> String;
+    fn get_carrier(&self) -> HashMap<String, String>;
     fn is_async(&self) -> bool;
 }
 
