@@ -1,6 +1,7 @@
 // Copyright 2024-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -83,13 +84,25 @@ impl Listener {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         debug!("Received start invocation request");
-        let (_, body) = req.into_parts();
+        let (parts, body) = req.into_parts();
         match hyper::body::to_bytes(body).await {
             Ok(b) => {
                 let body = b.to_vec();
                 let mut processor = invocation_processor.lock().await;
 
-                processor.on_invocation_start(body);
+                // HeaderMap to HashMap
+                let headers: HashMap<String, String> = parts
+                    .headers
+                    .iter()
+                    .map(|(k, v)| {
+                        (
+                            k.as_str().to_lowercase().to_string(),
+                            v.to_str().unwrap_or_default().to_string(),
+                        )
+                    })
+                    .collect();
+
+                processor.on_invocation_start(headers, body);
 
                 let mut response = Response::builder().status(200);
                 if processor.span.trace_id != 0 {
