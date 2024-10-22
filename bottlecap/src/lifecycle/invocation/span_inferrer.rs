@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use datadog_trace_protobuf::pb::Span;
 use rand::Rng;
 use serde_json::Value;
@@ -16,6 +18,7 @@ const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_sour
 pub struct SpanInferrer {
     inferred_span: Option<Span>,
     is_async_span: bool,
+    carrier: Option<HashMap<String, String>>,
 }
 
 impl Default for SpanInferrer {
@@ -30,6 +33,7 @@ impl SpanInferrer {
         Self {
             inferred_span: None,
             is_async_span: false,
+            carrier: None,
         }
     }
 
@@ -37,58 +41,56 @@ impl SpanInferrer {
     /// and try matching it to a `Trigger` implementation, which will create
     /// an inferred span and set it to `self.inferred_span`
     ///
-    pub fn infer_span(&mut self, payload: &[u8], aws_config: &AwsConfig) {
+    pub fn infer_span(&mut self, payload_value: &Value, aws_config: &AwsConfig) {
         self.inferred_span = None;
-        if let Ok(payload_value) = serde_json::from_slice::<Value>(payload) {
-            if APIGatewayHttpEvent::is_match(&payload_value) {
-                if let Some(t) = APIGatewayHttpEvent::new(payload_value) {
-                    let mut span = Span {
-                        span_id: Self::generate_span_id(),
-                        ..Default::default()
-                    };
+        if APIGatewayHttpEvent::is_match(payload_value) {
+            if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
+                let mut span = Span {
+                    span_id: Self::generate_span_id(),
+                    ..Default::default()
+                };
 
-                    t.enrich_span(&mut span);
-                    span.meta.extend([
-                        (
-                            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                            "api_gateway".to_string(),
-                        ),
-                        (
-                            FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                            t.get_arn(&aws_config.region),
-                        ),
-                    ]);
+                t.enrich_span(&mut span);
+                span.meta.extend([
+                    (
+                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                        "api_gateway".to_string(),
+                    ),
+                    (
+                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                        t.get_arn(&aws_config.region),
+                    ),
+                ]);
 
-                    self.is_async_span = t.is_async();
-                    self.inferred_span = Some(span);
-                }
-            } else if APIGatewayRestEvent::is_match(&payload_value) {
-                if let Some(t) = APIGatewayRestEvent::new(payload_value) {
-                    let mut span = Span {
-                        span_id: Self::generate_span_id(),
-                        ..Default::default()
-                    };
+                self.carrier = Some(t.get_carrier());
+                self.is_async_span = t.is_async();
+                self.inferred_span = Some(span);
+            }
+        } else if APIGatewayRestEvent::is_match(payload_value) {
+            if let Some(t) = APIGatewayRestEvent::new(payload_value.clone()) {
+                let mut span = Span {
+                    span_id: Self::generate_span_id(),
+                    ..Default::default()
+                };
 
-                    t.enrich_span(&mut span);
-                    span.meta.extend([
-                        (
-                            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                            "api_gateway".to_string(),
-                        ),
-                        (
-                            FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                            t.get_arn(&aws_config.region),
-                        ),
-                    ]);
+                t.enrich_span(&mut span);
+                span.meta.extend([
+                    (
+                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                        "api_gateway".to_string(),
+                    ),
+                    (
+                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                        t.get_arn(&aws_config.region),
+                    ),
+                ]);
 
-                    self.is_async_span = t.is_async();
-                    self.inferred_span = Some(span);
-                }
-            } else {
-                debug!("Unable to infer span from payload");
+                self.carrier = Some(t.get_carrier());
+                self.is_async_span = t.is_async();
+                self.inferred_span = Some(span);
             }
         } else {
-            debug!("Unable to serialize payload");
+            debug!("Unable to infer span from payload");
         }
     }
 
@@ -98,6 +100,12 @@ impl SpanInferrer {
     pub fn set_parent_id(&mut self, parent_id: u64) {
         if let Some(s) = &mut self.inferred_span {
             s.parent_id = parent_id;
+        }
+    }
+
+    pub fn extend_meta(&mut self, iter: HashMap<String, String>) {
+        if let Some(s) = &mut self.inferred_span {
+            s.meta.extend(iter);
         }
     }
 
@@ -135,5 +143,10 @@ impl SpanInferrer {
     #[must_use]
     pub fn get_inferred_span(&self) -> &Option<Span> {
         &self.inferred_span
+    }
+
+    #[must_use]
+    pub fn get_carrier(&self) -> Option<HashMap<String, String>> {
+        self.carrier.clone()
     }
 }
