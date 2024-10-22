@@ -7,6 +7,7 @@ use std::{
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
+use serde_json::{json, Value};
 use tokio::sync::mpsc::Sender;
 use tracing::debug;
 
@@ -14,7 +15,11 @@ use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
     tags::provider,
-    traces::trace_processor,
+    traces::{
+        context::SpanContext,
+        propagation::{DatadogCompositePropagator, Propagator},
+        trace_processor,
+    },
 };
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
@@ -23,6 +28,9 @@ pub struct Processor {
     pub context_buffer: ContextBuffer,
     inferrer: SpanInferrer,
     pub span: Span,
+    pub extracted_span_context: Option<SpanContext>,
+    // Used to extract the trace context from an inferred span
+    propagator: DatadogCompositePropagator,
     aws_config: AwsConfig,
     tracer_detected: bool,
 }
@@ -38,6 +46,8 @@ impl Processor {
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or("aws_lambda".to_string());
+
+        let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
             context_buffer: ContextBuffer::default(),
@@ -58,6 +68,8 @@ impl Processor {
                 meta_struct: HashMap::new(),
                 span_links: Vec::new(),
             },
+            extracted_span_context: None,
+            propagator,
             aws_config: aws_config.clone(),
             tracer_detected: false,
         }
@@ -166,7 +178,7 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(&mut self, payload: Vec<u8>) {
+    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
 
         // Reset trace context
@@ -174,10 +186,49 @@ impl Processor {
         self.span.parent_id = 0;
         self.span.span_id = 0;
 
-        self.inferrer.infer_span(&payload, &self.aws_config);
+        let payload_value = match serde_json::from_slice::<Value>(&payload) {
+            Ok(value) => value,
+            Err(_) => json!({}),
+        };
+
+        self.extract_span_context(&headers, &payload_value);
+        self.inferrer.infer_span(&payload_value, &self.aws_config);
+
+        if let Some(sp) = &self.extracted_span_context {
+            self.span.trace_id = sp.trace_id;
+            self.span.parent_id = sp.span_id;
+
+            if self.inferrer.get_inferred_span().is_some() {
+                self.inferrer.set_parent_id(sp.span_id);
+                self.inferrer.extend_meta(sp.tags.clone());
+            } else {
+                self.span.meta.extend(sp.tags.clone());
+            }
+        }
 
         if let Some(inferred_span) = self.inferrer.get_inferred_span() {
             self.span.parent_id = inferred_span.span_id;
+        }
+    }
+
+    fn extract_span_context(&mut self, headers: &HashMap<String, String>, payload_value: &Value) {
+        if let Some(carrier) = self.inferrer.get_carrier() {
+            if let Some(sc) = self.propagator.extract(&carrier) {
+                debug!("Extracted trace context from inferred span");
+                self.extracted_span_context = Some(sc);
+            }
+        }
+
+        if let Some(payload_headers) = payload_value.get("headers") {
+            if let Some(sc) = self.propagator.extract(payload_headers) {
+                debug!("Extracted trace context from event headers");
+                self.extracted_span_context = Some(sc);
+            }
+        }
+
+        if let Some(sc) = self.propagator.extract(headers) {
+            debug!("Extracted trace context from headers");
+            self.extracted_span_context = Some(sc);
         }
     }
 
@@ -194,7 +245,6 @@ impl Processor {
         self.span.span_id = span_id;
 
         if self.inferrer.get_inferred_span().is_some() {
-            self.inferrer.set_parent_id(parent_id);
             if let Some(status_code) = status_code {
                 self.inferrer.set_status_code(status_code);
             }
