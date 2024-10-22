@@ -1,10 +1,12 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
+use crate::proc::{self, NetworkData};
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
+use tracing::debug;
 use tracing::error;
 
 pub struct Lambda {
@@ -102,6 +104,65 @@ impl Lambda {
             .insert(metric)
         {
             error!("failed to insert post runtime duration metric: {}", e);
+        }
+    }
+
+    pub(crate) fn generate_network_enhanced_metrics(
+        network_offset: NetworkData,
+        network_data: NetworkData,
+        aggr: &mut std::sync::MutexGuard<Aggregator>,
+    ) {
+        let rx_bytes = network_data.rx_bytes - network_offset.rx_bytes;
+        let tx_bytes = network_data.tx_bytes - network_offset.tx_bytes;
+        let total_network = rx_bytes + tx_bytes;
+
+        let metric = Metric::new(
+            constants::RX_BYTES_METRIC.into(),
+            MetricValue::distribution(rx_bytes),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("failed to insert rx_bytes metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::TX_BYTES_METRIC.into(),
+            MetricValue::distribution(tx_bytes),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("failed to insert tx_bytes metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::TOTAL_NETWORK_METRIC.into(),
+            MetricValue::distribution(total_network),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("failed to insert total_network metric: {}", e);
+        }
+    }
+
+    pub fn set_network_enhanced_metrics(&self, network_offset: Option<NetworkData>) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        if let Some(offset) = network_offset {
+            let mut aggr: std::sync::MutexGuard<Aggregator> =
+                self.aggregator.lock().expect("lock poisoned");
+
+            match proc::get_network_data() {
+                Ok(data) => {
+                    Self::generate_network_enhanced_metrics(offset, data, &mut aggr);
+                }
+                Err(_e) => {
+                    debug!("Could not emit network enhanced metrics");
+                }
+            }
+        } else {
+            debug!("Could not emit network enhanced metrics");
         }
     }
 
@@ -306,5 +367,30 @@ mod tests {
 
         assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0);
         assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0);
+    }
+
+    #[test]
+    fn test_set_network_enhanced_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+
+        let network_offset = NetworkData {
+            rx_bytes: 180.0,
+            tx_bytes: 254.0,
+        };
+        let network_data = NetworkData {
+            rx_bytes: 20180.0,
+            tx_bytes: 75000.0,
+        };
+
+        Lambda::generate_network_enhanced_metrics(
+            network_offset,
+            network_data,
+            &mut lambda.aggregator.lock().expect("lock poisoned"),
+        );
+
+        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
+        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0);
+        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0);
     }
 }

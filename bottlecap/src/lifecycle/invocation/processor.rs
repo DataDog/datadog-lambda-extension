@@ -13,6 +13,7 @@ use tracing::debug;
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
+    proc::{self, NetworkData},
     tags::provider,
     traces::trace_processor,
 };
@@ -61,6 +62,14 @@ impl Processor {
             aws_config: aws_config.clone(),
             tracer_detected: false,
         }
+    }
+
+    /// Given a `request_id`, add the enhanced metric offsets to the context buffer.
+    ///
+    pub fn on_invoke_event(&mut self, request_id: String) {
+        let network_offset: Option<NetworkData> = proc::get_network_data().ok();
+        self.context_buffer
+            .add_network_offset(&request_id, network_offset);
     }
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
@@ -151,13 +160,19 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(&mut self, request_id: &String, duration_ms: f64) -> Option<f64> {
+    pub fn on_platform_report(
+        &mut self,
+        request_id: &String,
+        duration_ms: f64,
+    ) -> Option<(f64, Option<NetworkData>)> {
         if let Some(context) = self.context_buffer.remove(request_id) {
             if context.runtime_duration_ms == 0.0 {
                 return None;
             }
 
-            return Some(duration_ms - context.runtime_duration_ms);
+            let post_runtime_duration_ms = duration_ms - context.runtime_duration_ms;
+
+            return Some((post_runtime_duration_ms, context.network_offset));
         }
 
         None

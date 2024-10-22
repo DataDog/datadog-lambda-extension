@@ -53,7 +53,7 @@ impl LambdaProcessor {
             service,
             tags,
             rules,
-            invocation_context: InvocationContext::new(String::new(), 0.0, 0.0, 0),
+            invocation_context: InvocationContext::new(String::new(), 0.0, 0.0, 0, None),
             orphan_logs: Vec::new(),
             ready_logs: Vec::new(),
             event_bus,
