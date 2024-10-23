@@ -6,7 +6,7 @@ use tracing::debug;
 use crate::config::AwsConfig;
 
 use crate::lifecycle::invocation::triggers::{
-    api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
+    api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent, sqs_event::SqsRecord,
     Trigger,
 };
 
@@ -84,8 +84,30 @@ impl SpanInferrer {
                     self.is_async_span = t.is_async();
                     self.inferred_span = Some(span);
                 }
+            } else if SqsRecord::is_match(&payload_value) {
+                if let Some(t) = SqsRecord::new(payload_value) {
+                    let mut span = Span {
+                        span_id: Self::generate_span_id(),
+                        ..Default::default()
+                    };
+
+                    t.enrich_span(&mut span);
+                    span.meta.extend([
+                        (
+                            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                            "sqs".to_string(),
+                        ),
+                        (
+                            FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                            t.get_arn(&aws_config.region),
+                        ),
+                    ]);
+                    debug!("SQS span is {:?}", span);
+                    self.is_async_span = t.is_async();
+                    self.inferred_span = Some(span);
+                }
             } else {
-                debug!("Unable to infer span from payload");
+                debug!("Unable to infer span from payload: no matching trigger found");
             }
         } else {
             debug!("Unable to serialize payload");
