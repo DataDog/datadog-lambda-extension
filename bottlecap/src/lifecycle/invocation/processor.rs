@@ -191,7 +191,7 @@ impl Processor {
             Err(_) => json!({}),
         };
 
-        self.extract_span_context(&headers, &payload_value);
+        self.extracted_span_context = self.extract_span_context(&headers, &payload_value);
         self.inferrer.infer_span(&payload_value, &self.aws_config);
 
         if let Some(sp) = &self.extracted_span_context {
@@ -211,25 +211,31 @@ impl Processor {
         }
     }
 
-    fn extract_span_context(&mut self, headers: &HashMap<String, String>, payload_value: &Value) {
+    fn extract_span_context(
+        &mut self,
+        headers: &HashMap<String, String>,
+        payload_value: &Value,
+    ) -> Option<SpanContext> {
         if let Some(carrier) = self.inferrer.get_carrier() {
             if let Some(sc) = self.propagator.extract(&carrier) {
                 debug!("Extracted trace context from inferred span");
-                self.extracted_span_context = Some(sc);
+                return Some(sc);
             }
         }
 
         if let Some(payload_headers) = payload_value.get("headers") {
             if let Some(sc) = self.propagator.extract(payload_headers) {
                 debug!("Extracted trace context from event headers");
-                self.extracted_span_context = Some(sc);
+                return Some(sc);
             }
         }
 
         if let Some(sc) = self.propagator.extract(headers) {
             debug!("Extracted trace context from headers");
-            self.extracted_span_context = Some(sc);
+            return Some(sc);
         }
+
+        None
     }
 
     /// Given trace context information, set it to the current span.
