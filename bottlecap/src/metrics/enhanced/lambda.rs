@@ -108,12 +108,12 @@ impl Lambda {
     }
 
     pub(crate) fn generate_network_enhanced_metrics(
-        network_offset: NetworkData,
-        network_data: NetworkData,
+        network_data_offset: NetworkData,
+        network_data_end: NetworkData,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
     ) {
-        let rx_bytes = network_data.rx_bytes - network_offset.rx_bytes;
-        let tx_bytes = network_data.tx_bytes - network_offset.tx_bytes;
+        let rx_bytes = network_data_end.rx_bytes - network_data_offset.rx_bytes;
+        let tx_bytes = network_data_end.tx_bytes - network_data_offset.tx_bytes;
         let total_network = rx_bytes + tx_bytes;
 
         let metric = Metric::new(
@@ -122,7 +122,7 @@ impl Lambda {
             None,
         );
         if let Err(e) = aggr.insert(metric) {
-            error!("failed to insert rx_bytes metric: {}", e);
+            error!("Failed to insert rx_bytes metric: {}", e);
         }
 
         let metric = Metric::new(
@@ -131,7 +131,7 @@ impl Lambda {
             None,
         );
         if let Err(e) = aggr.insert(metric) {
-            error!("failed to insert tx_bytes metric: {}", e);
+            error!("Failed to insert tx_bytes metric: {}", e);
         }
 
         let metric = Metric::new(
@@ -140,7 +140,7 @@ impl Lambda {
             None,
         );
         if let Err(e) = aggr.insert(metric) {
-            error!("failed to insert total_network metric: {}", e);
+            error!("Failed to insert total_network metric: {}", e);
         }
     }
 
@@ -158,11 +158,11 @@ impl Lambda {
                     Self::generate_network_enhanced_metrics(offset, data, &mut aggr);
                 }
                 Err(_e) => {
-                    debug!("Could not emit network enhanced metrics");
+                    debug!("Could not find data to generate network enhanced metrics");
                 }
             }
         } else {
-            debug!("Could not emit network enhanced metrics");
+            debug!("Could not find data to generate network enhanced metrics");
         }
     }
 
