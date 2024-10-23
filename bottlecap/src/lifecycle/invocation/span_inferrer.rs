@@ -89,7 +89,7 @@ impl SpanInferrer {
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
-        } else if SqsRecord::is_match(&payload_value) {
+        } else if SqsRecord::is_match(payload_value) {
             if let Some(t) = SqsRecord::new(payload_value.clone()) {
                 let mut span = Span {
                     span_id: Self::generate_span_id(),
