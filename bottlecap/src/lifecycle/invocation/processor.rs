@@ -194,15 +194,17 @@ impl Processor {
         self.extracted_span_context = self.extract_span_context(&headers, &payload_value);
         self.inferrer.infer_span(&payload_value, &self.aws_config);
 
-        if let Some(sp) = &self.extracted_span_context {
-            self.span.trace_id = sp.trace_id;
-            self.span.parent_id = sp.span_id;
+        if let Some(sc) = &self.extracted_span_context {
+            self.span.trace_id = sc.trace_id;
+            self.span.parent_id = sc.span_id;
 
+            // Set the right data to the correct root level span,
+            // If there's an inferred span, then that should be the root.
             if self.inferrer.get_inferred_span().is_some() {
-                self.inferrer.set_parent_id(sp.span_id);
-                self.inferrer.extend_meta(sp.tags.clone());
+                self.inferrer.set_parent_id(sc.span_id);
+                self.inferrer.extend_meta(sc.tags.clone());
             } else {
-                self.span.meta.extend(sp.tags.clone());
+                self.span.meta.extend(sc.tags.clone());
             }
         }
 

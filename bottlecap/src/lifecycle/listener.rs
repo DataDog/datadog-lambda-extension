@@ -14,7 +14,8 @@ use tracing::{debug, error, warn};
 
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 use crate::traces::propagation::text_map_propagator::{
-    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
+    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+    DATADOG_TRACE_ID_KEY,
 };
 
 const HELLO_PATH: &str = "/lambda/hello";
@@ -114,8 +115,8 @@ impl Listener {
                         sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
                     {
                         response = response.header(
-                            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
-                            trace_id_higher_order_bits,
+                            DATADOG_TAGS_KEY,
+                            format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
                         );
                     }
                 }
