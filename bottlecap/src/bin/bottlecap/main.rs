@@ -375,6 +375,9 @@ async fn extension_loop_active(
                     request_id, deadline_ms, invoked_function_arn
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
+                let mut p = invocation_processor.lock().await;
+                p.on_invoke_event(request_id);
+                drop(p);
             }
             Ok(NextEventResponse::Shutdown {
                 shutdown_reason,
@@ -473,10 +476,11 @@ async fn extension_loop_active(
                                     );
                                     lambda_enhanced_metrics.set_report_log_metrics(&metrics);
                                     let mut p = invocation_processor.lock().await;
-                                    if let Some(post_runtime_duration_ms) = p.on_platform_report(&request_id, metrics.duration_ms) {
+                                    if let Some((post_runtime_duration_ms, network_offset)) = p.on_platform_report(&request_id, metrics.duration_ms) {
                                         lambda_enhanced_metrics.set_post_runtime_duration_metric(
                                             post_runtime_duration_ms,
                                         );
+                                        lambda_enhanced_metrics.set_network_enhanced_metrics(network_offset);
                                     }
                                     drop(p);
 

@@ -1,3 +1,4 @@
+use crate::proc::NetworkData;
 use std::collections::VecDeque;
 
 use tracing::debug;
@@ -8,6 +9,7 @@ pub struct Context {
     pub runtime_duration_ms: f64,
     pub init_duration_ms: f64,
     pub start_time: i64,
+    pub network_offset: Option<NetworkData>,
 }
 
 impl Context {
@@ -17,12 +19,14 @@ impl Context {
         runtime_duration_ms: f64,
         init_duration_ms: f64,
         start_time: i64,
+        network_offset: Option<NetworkData>,
     ) -> Self {
         Context {
             request_id,
             runtime_duration_ms,
             init_duration_ms,
             start_time,
+            network_offset,
         }
     }
 }
@@ -100,7 +104,13 @@ impl ContextBuffer {
         {
             context.init_duration_ms = init_duration_ms;
         } else {
-            self.insert(Context::new(request_id.clone(), 0.0, init_duration_ms, 0));
+            self.insert(Context::new(
+                request_id.clone(),
+                0.0,
+                init_duration_ms,
+                0,
+                None,
+            ));
         }
     }
 
@@ -115,7 +125,7 @@ impl ContextBuffer {
         {
             context.start_time = start_time;
         } else {
-            self.insert(Context::new(request_id.clone(), 0.0, 0.0, start_time));
+            self.insert(Context::new(request_id.clone(), 0.0, 0.0, start_time, None));
         }
     }
 
@@ -135,7 +145,23 @@ impl ContextBuffer {
                 runtime_duration_ms,
                 0.0,
                 0,
+                None,
             ));
+        }
+    }
+
+    /// Adds the network offset to a `Context` in the buffer. If the `Context` is not found, a new
+    /// `Context` is created and added to the buffer.
+    ///
+    pub fn add_network_offset(&mut self, request_id: &String, network_data: Option<NetworkData>) {
+        if let Some(context) = self
+            .buffer
+            .iter_mut()
+            .find(|context| context.request_id == *request_id)
+        {
+            context.network_offset = network_data;
+        } else {
+            self.insert(Context::new(request_id.clone(), 0.0, 0.0, 0, network_data));
         }
     }
 
@@ -157,20 +183,20 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
 
         // This should replace the first context
         let request_id_3 = String::from("3");
-        let context = Context::new(request_id_3.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_3.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_3).unwrap(), &context);
@@ -184,13 +210,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -211,13 +237,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -232,7 +258,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
@@ -255,7 +281,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
@@ -275,7 +301,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
@@ -293,6 +319,37 @@ mod tests {
                 .unwrap()
                 .runtime_duration_ms,
             200.0
+        );
+    }
+
+    #[test]
+    fn test_add_network_offset() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+
+        let request_id = String::from("1");
+        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        buffer.insert(context.clone());
+        assert_eq!(buffer.size(), 1);
+        assert_eq!(buffer.get(&request_id).unwrap(), &context);
+
+        let network_offset = Some(NetworkData {
+            rx_bytes: 180.0,
+            tx_bytes: 254.0,
+        });
+
+        buffer.add_network_offset(&request_id, network_offset);
+        assert_eq!(
+            buffer.get(&request_id).unwrap().network_offset,
+            network_offset,
+        );
+
+        // Add network offset to a context that doesn't exist
+        let unexistent_request_id = String::from("unexistent");
+        buffer.add_network_offset(&unexistent_request_id, network_offset);
+        assert_eq!(buffer.size(), 2);
+        assert_eq!(
+            buffer.get(&unexistent_request_id).unwrap().network_offset,
+            network_offset
         );
     }
 }
