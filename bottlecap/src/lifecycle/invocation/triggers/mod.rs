@@ -8,6 +8,8 @@ pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
 pub mod sqs_event;
 
+pub const DATADOG_CARRIER_KEY: &str = "_datadog";
+
 pub trait Trigger: Sized {
     fn new(payload: Value) -> Option<Self>;
     fn is_match(payload: &Value) -> bool;

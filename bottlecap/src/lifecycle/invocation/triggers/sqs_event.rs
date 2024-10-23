@@ -9,6 +9,8 @@ use crate::lifecycle::invocation::{
     triggers::{get_aws_partition_by_region, Trigger},
 };
 
+use super::DATADOG_CARRIER_KEY;
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SqsEvent {
     #[serde(rename = "Records")]
@@ -169,7 +171,16 @@ impl Trigger for SqsRecord {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        todo!()
+        let mut carrier = HashMap::new();
+        if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
+            if ma.data_type == "String" {
+                if let Some(string_value) = &ma.string_value {
+                    carrier = serde_json::from_str(string_value).unwrap_or_default();
+                }
+            }
+        }
+
+        carrier
     }
 }
 
@@ -280,5 +291,27 @@ mod tests {
             event.get_arn("us-east-1"),
             "arn:aws:sqs:us-east-1:123456789012:MyQueue"
         );
+    }
+
+    #[test]
+    fn test_get_carrier() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "2684756524522091840".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "7431398482019833808".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
     }
 }
