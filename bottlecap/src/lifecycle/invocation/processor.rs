@@ -29,7 +29,7 @@ pub struct Processor {
     inferrer: SpanInferrer,
     pub span: Span,
     pub extracted_span_context: Option<SpanContext>,
-    // Used to extract the trace context from an inferred span
+    // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
     aws_config: AwsConfig,
     tracer_detected: bool,
