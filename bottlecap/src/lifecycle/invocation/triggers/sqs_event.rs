@@ -115,12 +115,6 @@ impl Trigger for SqsRecord {
         span.resource.clone_from(&resource);
         span.r#type = "web".to_string();
         span.start = start_time;
-        // duration is current_time_epoch - start_time
-        span.duration = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as i64
-            - start_time;
         span.meta.extend(HashMap::from([
             ("operation_name".to_string(), "aws.sqs".to_string()),
             ("receipt_handle".to_string(), self.receipt_handle.clone()),
