@@ -25,21 +25,29 @@ fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
         let line = line?;
         let mut values = line.split_whitespace();
 
-        // Check for the line containing lambda network data by interface name
-        if let Some(interface_name) = values.next() {
-            if interface_name.starts_with(LAMDBA_NETWORK_INTERFACE) {
-                // Read the value for bytes received if present, otherwise break and return error
-                let rx_bytes: f64 = match values.next().and_then(|s| s.parse().ok()) {
-                    Some(value) => value,
-                    None => break,
-                };
-                // Read the value for bytes transmitted if present, otherwise break and return error
-                let tx_bytes: f64 = match values.nth(7).and_then(|s| s.parse().ok()) {
-                    Some(value) => value,
-                    None => break,
-                };
+        if values.next().map_or(false, |interface_name| {
+            interface_name.starts_with(LAMDBA_NETWORK_INTERFACE)
+        }) {
+            // Read the value for received bytes if present
+            let rx_bytes: Option<f64> = values.next().and_then(|s| s.parse().ok());
 
-                return Ok(NetworkData { rx_bytes, tx_bytes });
+            // Skip over the next 7 values representing metrics for received data and
+            // read the value for bytes transmitted if present
+            let tx_bytes: Option<f64> = values.nth(7).and_then(|s| s.parse().ok());
+
+            match (rx_bytes, tx_bytes) {
+                (Some(rx_val), Some(tx_val)) => {
+                    return Ok(NetworkData {
+                        rx_bytes: rx_val,
+                        tx_bytes: tx_val,
+                    })
+                }
+                (_, _) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "Network data not found",
+                    ))
+                }
             }
         }
     }
