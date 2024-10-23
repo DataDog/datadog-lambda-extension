@@ -171,6 +171,10 @@ impl Trigger for APIGatewayRestEvent {
             .get("x-amz-invocation-type")
             .is_some_and(|v| v == "Event")
     }
+
+    fn get_carrier(&self) -> HashMap<String, String> {
+        self.headers.clone()
+    }
 }
 
 #[cfg(test)]
