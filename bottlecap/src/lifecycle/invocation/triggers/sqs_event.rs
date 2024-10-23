@@ -2,7 +2,6 @@ use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::debug;
 
 use crate::lifecycle::invocation::{
@@ -124,7 +123,10 @@ impl Trigger for SqsRecord {
                 "retry_count".to_string(),
                 self.attributes.approximate_receive_count.clone(),
             ),
-            ( "retry_count".to_string(), self.attributes.approximate_receive_count.clone()),
+            (
+                "retry_count".to_string(),
+                self.attributes.approximate_receive_count.clone(),
+            ),
             ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
@@ -133,14 +135,15 @@ impl Trigger for SqsRecord {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        let tags = HashMap::from([
-            ( "retry_count".to_string(), self.attributes.approximate_receive_count.clone()),
+        HashMap::from([
+            (
+                "retry_count".to_string(),
+                self.attributes.approximate_receive_count.clone(),
+            ),
             ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
-        ]);
-
-        tags
+        ])
     }
 
     fn get_arn(&self, region: &str) -> String {
@@ -157,7 +160,7 @@ impl Trigger for SqsRecord {
                 queue_name
             )
         } else {
-            "".to_string()
+            String::new()
         }
     }
 
@@ -179,8 +182,7 @@ mod tests {
     fn test_new() {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let result = SqsRecord::new(payload)
-            .expect("Failed to deserialize into Record");
+        let result = SqsRecord::new(payload).expect("Failed to deserialize into Record");
 
         let expected = SqsRecord {
             message_id: "19dd0b57-b21e-4ac1-bd88-01bbb068cb78".to_string(),
@@ -197,17 +199,15 @@ mod tests {
             event_source: "aws:sqs".to_string(),
             event_source_arn: "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
             aws_region: "us-east-1".to_string(),
-
         };
 
-//         assert_eq!(result, expected);
-//     }
+        assert_eq!(result, expected);
+    }
 
     #[test]
     fn test_is_match() {
         let json = read_json_file("sqs_event.json");
-        let payload =
-            serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
 
         assert!(SqsRecord::is_match(&payload));
     }
@@ -215,8 +215,7 @@ mod tests {
     #[test]
     fn test_is_not_match() {
         let json = read_json_file("api_gateway_http_event.json");
-        let payload =
-            serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
         assert!(!SqsRecord::is_match(&payload));
     }
 
@@ -224,8 +223,7 @@ mod tests {
     fn test_enrich_span() {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         let mut span = Span::default();
         event.enrich_span(&mut span);
         assert_eq!(span.name, "aws.sqs");
@@ -243,7 +241,10 @@ mod tests {
                 ),
                 ("retry_count".to_string(), 1.to_string()),
                 ("sender_id".to_string(), "123456789012".to_string()),
-                ("source_arn".to_string(), "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string()),
+                (
+                    "source_arn".to_string(),
+                    "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string()
+                ),
                 ("aws_region".to_string(), "us-east-1".to_string()),
                 ("resource_names".to_string(), "MyQueue".to_string()),
             ])
@@ -254,30 +255,30 @@ mod tests {
     fn test_get_tags() {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         let tags = event.get_tags();
 
         let expected = HashMap::from([
             ("retry_count".to_string(), 1.to_string()),
             ("sender_id".to_string(), "123456789012".to_string()),
-            ("source_arn".to_string(), "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string()),
+            (
+                "source_arn".to_string(),
+                "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
+            ),
             ("aws_region".to_string(), "us-east-1".to_string()),
         ]);
 
         assert_eq!(tags, expected);
     }
-    
 
     #[test]
     fn test_get_arn() {
         let json = read_json_file("api_gateway_rest_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         assert_eq!(
             event.get_arn("us-east-1"),
-            "arn:aws:apigateway:us-east-1::/restapis/id/stages/$default"
+            "arn:aws:sqs:us-east-1:123456789012:MyQueue"
         );
     }
 }
