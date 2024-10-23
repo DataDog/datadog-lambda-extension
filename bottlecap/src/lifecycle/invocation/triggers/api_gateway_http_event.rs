@@ -116,8 +116,6 @@ impl Trigger for APIGatewayHttpEvent {
             ),
             ("resource_names".to_string(), resource),
         ]));
-
-        // todo: update global(? IsAsync if event payload is `Event`
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
