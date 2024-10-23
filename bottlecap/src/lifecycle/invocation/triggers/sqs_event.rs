@@ -58,6 +58,8 @@ pub struct Attributes {
     pub approximate_receive_count: String,
     #[serde(rename = "SentTimestamp")]
     pub sent_timestamp: String,
+    #[serde(rename = "SenderId")]
+    pub sender_id: String,
 }
 
 impl Trigger for SqsRecord {
@@ -122,7 +124,8 @@ impl Trigger for SqsRecord {
                 "retry_count".to_string(),
                 self.attributes.approximate_receive_count.clone(),
             ),
-            ("sender_id".to_string(), self.event_source.clone()),
+            ( "retry_count".to_string(), self.attributes.approximate_receive_count.clone()),
+            ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
             ("resource_names".to_string(), resource.clone()),
@@ -131,11 +134,8 @@ impl Trigger for SqsRecord {
 
     fn get_tags(&self) -> HashMap<String, String> {
         let tags = HashMap::from([
-            (
-                "retry_count".to_string(),
-                self.attributes.approximate_receive_count.clone(),
-            ),
-            ("sender_id".to_string(), self.event_source.clone()),
+            ( "retry_count".to_string(), self.attributes.approximate_receive_count.clone()),
+            ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
         ]);
@@ -170,187 +170,114 @@ impl Trigger for SqsRecord {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
 
-//     #[test]
-//     fn test_new() {
-//         let json = read_json_file("api_gateway_rest_event.json");
-//         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-//         let result = APIGatewayRestEvent::new(payload)
-//             .expect("Failed to deserialize into APIGatewayRestEvent");
+    #[test]
+    fn test_new() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = SqsRecord::new(payload)
+            .expect("Failed to deserialize into Record");
 
-//         let expected = APIGatewayRestEvent {
-//             headers: HashMap::from([
-//                 ("Header1".to_string(), "value1".to_string()),
-//                 ("Header2".to_string(), "value2".to_string()),
-//             ]),
-//             request_context: RequestContext {
-//                 stage: "$default".to_string(),
-//                 request_id: "id=".to_string(),
-//                 api_id: "id".to_string(),
-//                 domain_name: "id.execute-api.us-east-1.amazonaws.com".to_string(),
-//                 time_epoch: 1_583_349_317_135,
-//                 method: "GET".to_string(),
-//                 path: "/my/path".to_string(),
-//                 protocol: "HTTP/1.1".to_string(),
-//                 resource_path: "/path".to_string(),
-//                 identity: Identity {
-//                     source_ip: "IP".to_string(),
-//                     user_agent: "user-agent".to_string(),
-//                 },
-//             },
-//         };
+        let expected = SqsRecord {
+            message_id: "19dd0b57-b21e-4ac1-bd88-01bbb068cb78".to_string(),
+            receipt_handle: "MessageReceiptHandle".to_string(),
+            body: "Hello from SQS!".to_string(),
+            attributes: Attributes {
+                approximate_first_receive_timestamp: "1523232000001".to_string(),
+                approximate_receive_count: "1".to_string(),
+                sent_timestamp: "1523232000000".to_string(),
+                sender_id: "123456789012".to_string(),
+            },
+            message_attributes: HashMap::from([]),
+            md5_of_body: "{{{md5_of_body}}}".to_string(),
+            event_source: "aws:sqs".to_string(),
+            event_source_arn: "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
+            aws_region: "us-east-1".to_string(),
+
+        };
 
 //         assert_eq!(result, expected);
 //     }
 
-//     #[test]
-//     fn test_is_match() {
-//         let json = read_json_file("api_gateway_rest_event.json");
-//         let payload =
-//             serde_json::from_str(&json).expect("Failed to deserialize APIGatewayRestEvent");
+    #[test]
+    fn test_is_match() {
+        let json = read_json_file("sqs_event.json");
+        let payload =
+            serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
 
-//         assert!(APIGatewayRestEvent::is_match(&payload));
-//     }
+        assert!(SqsRecord::is_match(&payload));
+    }
 
-//     #[test]
-//     fn test_is_not_match() {
-//         let json = read_json_file("api_gateway_http_event.json");
-//         let payload =
-//             serde_json::from_str(&json).expect("Failed to deserialize APIGatewayRestEvent");
-//         assert!(!APIGatewayRestEvent::is_match(&payload));
-//     }
+    #[test]
+    fn test_is_not_match() {
+        let json = read_json_file("api_gateway_http_event.json");
+        let payload =
+            serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
+        assert!(!SqsRecord::is_match(&payload));
+    }
 
-//     #[test]
-//     fn test_enrich_span() {
-//         let json = read_json_file("api_gateway_rest_event.json");
-//         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-//         let event =
-//             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-//         let mut span = Span::default();
-//         event.enrich_span(&mut span);
-//         assert_eq!(span.name, "aws.apigateway");
-//         assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
-//         assert_eq!(span.resource, "GET /path");
-//         assert_eq!(span.r#type, "http");
+    #[test]
+    fn test_enrich_span() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let mut span = Span::default();
+        event.enrich_span(&mut span);
+        assert_eq!(span.name, "aws.sqs");
+        assert_eq!(span.service, "sqs");
+        assert_eq!(span.resource, "MyQueue");
+        assert_eq!(span.r#type, "web");
 
-//         assert_eq!(
-//             span.meta,
-//             HashMap::from([
-//                 ("endpoint".to_string(), "/my/path".to_string()),
-//                 (
-//                     "http.url".to_string(),
-//                     "https://id.execute-api.us-east-1.amazonaws.com/my/path".to_string()
-//                 ),
-//                 ("http.method".to_string(), "GET".to_string()),
-//                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
-//                 ("http.source_ip".to_string(), "IP".to_string()),
-//                 ("http.user_agent".to_string(), "user-agent".to_string()),
-//                 ("http.route".to_string(), "/path".to_string()),
-//                 ("operation_name".to_string(), "aws.apigateway".to_string()),
-//                 ("request_id".to_string(), "id=".to_string()),
-//                 ("resource_names".to_string(), "GET /path".to_string()),
-//             ])
-//         );
-//     }
+        assert_eq!(
+            span.meta,
+            HashMap::from([
+                ("operation_name".to_string(), "aws.sqs".to_string()),
+                (
+                    "receipt_handle".to_string(),
+                    "MessageReceiptHandle".to_string(),
+                ),
+                ("retry_count".to_string(), 1.to_string()),
+                ("sender_id".to_string(), "123456789012".to_string()),
+                ("source_arn".to_string(), "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string()),
+                ("aws_region".to_string(), "us-east-1".to_string()),
+                ("resource_names".to_string(), "MyQueue".to_string()),
+            ])
+        );
+    }
 
-//     #[test]
-//     fn test_get_tags() {
-//         let json = read_json_file("api_gateway_rest_event.json");
-//         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-//         let event =
-//             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-//         let tags = event.get_tags();
+    #[test]
+    fn test_get_tags() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let tags = event.get_tags();
 
-//         let expected = HashMap::from([
-//             (
-//                 "http.url".to_string(),
-//                 "https://id.execute-api.us-east-1.amazonaws.com/my/path".to_string(),
-//             ),
-//             ("http.url_details.path".to_string(), "/my/path".to_string()),
-//             ("http.method".to_string(), "GET".to_string()),
-//             ("http.route".to_string(), "/path".to_string()),
-//             ("http.user_agent".to_string(), "user-agent".to_string()),
-//         ]);
+        let expected = HashMap::from([
+            ("retry_count".to_string(), 1.to_string()),
+            ("sender_id".to_string(), "123456789012".to_string()),
+            ("source_arn".to_string(), "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string()),
+            ("aws_region".to_string(), "us-east-1".to_string()),
+        ]);
 
-//         assert_eq!(tags, expected);
-//     }
+        assert_eq!(tags, expected);
+    }
+    
 
-//     #[test]
-//     fn test_enrich_parameterized_span() {
-//         let json = read_json_file("api_gateway_rest_event_parameterized.json");
-//         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-//         let event =
-//             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-//         let mut span = Span::default();
-//         event.enrich_span(&mut span);
-//         assert_eq!(span.name, "aws.apigateway");
-//         assert_eq!(
-//             span.service,
-//             "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com"
-//         );
-//         assert_eq!(span.resource, "GET /user/{id}");
-//         assert_eq!(span.r#type, "http");
-//         let expected = HashMap::from([
-//             ("endpoint".to_string(), "/dev/user/42".to_string()),
-//             (
-//                 "http.url".to_string(),
-//                 "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42".to_string(),
-//             ),
-//             ("http.method".to_string(), "GET".to_string()),
-//             ("http.protocol".to_string(), "HTTP/1.1".to_string()),
-//             ("http.source_ip".to_string(), "76.115.124.192".to_string()),
-//             ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
-//             ("http.route".to_string(), "/user/{id}".to_string()),
-//             ("operation_name".to_string(), "aws.apigateway".to_string()),
-//             (
-//                 "request_id".to_string(),
-//                 "e16399f7-e984-463a-9931-745ba021a27f".to_string(),
-//             ),
-//             ("resource_names".to_string(), "GET /user/{id}".to_string()),
-//         ]);
-//         assert_eq!(span.meta, expected);
-//     }
-
-//     #[test]
-//     fn test_get_tags_parameterized() {
-//         let json = read_json_file("api_gateway_rest_event_parameterized.json");
-//         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-//         let event =
-//             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-//         let tags = event.get_tags();
-
-//         assert_eq!(
-//             tags,
-//             HashMap::from([
-//                 (
-//                     "http.url".to_string(),
-//                     "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42"
-//                         .to_string(),
-//                 ),
-//                 (
-//                     "http.url_details.path".to_string(),
-//                     "/dev/user/42".to_string(),
-//                 ),
-//                 ("http.method".to_string(), "GET".to_string()),
-//                 ("http.route".to_string(), "/user/{id}".to_string()),
-//                 ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
-//             ])
-//         );
-//     }
-
-//     #[test]
-//     fn test_get_arn() {
-//         let json = read_json_file("api_gateway_rest_event.json");
-//         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-//         let event =
-//             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
-//         assert_eq!(
-//             event.get_arn("us-east-1"),
-//             "arn:aws:apigateway:us-east-1::/restapis/id/stages/$default"
-//         );
-//     }
-// }
+    #[test]
+    fn test_get_arn() {
+        let json = read_json_file("api_gateway_rest_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
+        assert_eq!(
+            event.get_arn("us-east-1"),
+            "arn:aws:apigateway:us-east-1::/restapis/id/stages/$default"
+        );
+    }
+}
