@@ -141,7 +141,8 @@ impl SpanInferrer {
     pub fn complete_inferred_span(&mut self, invocation_span: &Span) {
         if let Some(s) = &mut self.inferred_span {
             if self.is_async_span {
-                if s.duration != 0 {
+                // SNS to SQS span duration will be set
+                if s.duration == 0 {
                     let duration = invocation_span.start - s.start;
                     s.duration = duration;
                 }
