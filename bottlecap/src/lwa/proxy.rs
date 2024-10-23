@@ -105,7 +105,7 @@ async fn inject_spans(
     span_generator: Arc<Mutex<Processor>>,
     aws_runtime_addr: Uri,
 ) -> Result<Response<Body>, Error> {
-    let (req_parts, body) = req.into_parts();
+    let (req_parts, req_body) = req.into_parts();
 
     let mut new_parts = aws_runtime_addr.into_parts();
     new_parts.path_and_query = Some(req_parts.uri.path_and_query().unwrap().clone());
@@ -115,12 +115,12 @@ async fn inject_spans(
         req_parts.uri, new_uri, req_parts.method
     );
 
-    let payload = hyper::body::to_bytes(body).await?;
+    let req_payload = hyper::body::to_bytes(req_body).await?;
 
     let req = Request::builder()
-        .method(req_parts.method)
+        .method(req_parts.method.clone())
         .uri(new_uri)
-        .body(Body::from(payload.clone()))
+        .body(Body::from(req_payload.clone()))
         .map_err(|e| {
             error!("Error building request: {}", e);
             e
@@ -129,29 +129,22 @@ async fn inject_spans(
 
     let mut response = client.request(req).await?;
 
+    let (resp_part, resp_body) = response.into_parts();
+    let resp_payload = hyper::body::to_bytes(resp_body).await?;
+    let resp_body = deserialize_json(Ok(resp_payload.clone())).unwrap();
+
     if req_parts.uri.path() == "/2018-06-01/runtime/invocation/next"
         && req_parts.method == hyper::Method::GET
     {
         debug!("Intercepted invocation request");
-        let (resp_part, resp_body) = response.into_parts();
-        let resp_payload = hyper::body::to_bytes(resp_body).await?;
-        let body = deserialize_json(Ok(resp_payload.clone())).unwrap();
 
-        let vec = serde_json::to_vec(&body);
+        let vec = serde_json::to_vec(&resp_body);
         if vec.is_ok() {
             span_generator
                 .lock()
                 .await
                 .on_invocation_start(vec.unwrap());
         }
-        let mut response2 = Response::builder()
-            .status(resp_part.status)
-            .version(resp_part.version)
-            .body(Body::from(resp_payload))
-            .unwrap();
-
-        *response2.headers_mut() = resp_part.headers;
-        response = response2;
     } else if req_parts
         .uri
         .path()
@@ -159,13 +152,20 @@ async fn inject_spans(
         && req_parts.uri.path().ends_with("/response")
         && req_parts.method == hyper::Method::POST
     {
-        debug!("Intercepted invocation response");
+        debug!("Intercepted invocation response {:?}", req_payload);
         span_generator
             .lock()
             .await
             .on_invocation_end(random(), random(), random(), None);
     }
+    let mut response2 = Response::builder()
+        .status(resp_part.status)
+        .version(resp_part.version)
+        .body(Body::from(resp_payload))
+        .unwrap();
 
+    *response2.headers_mut() = resp_part.headers;
+    response = response2;
     Ok(response)
 }
 
