@@ -600,7 +600,7 @@ dependencies = [
 [[package]]
 name = "datadog-protos"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki/#ec4959ed222687baa9eb239af3fc8bb6c0882dfb"
+source = "git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751#3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751"
 dependencies = [
  "bytes",
  "prost 0.13.3",
@@ -613,7 +613,7 @@ dependencies = [
 [[package]]
 name = "datadog-protos"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki-backport/#6e9738383188b867dba59b37fae9e0b0de50e3ca"
+source = "git+https://github.com/DataDog/saluki/#ec4959ed222687baa9eb239af3fc8bb6c0882dfb"
 dependencies = [
  "bytes",
  "prost 0.13.3",
@@ -626,7 +626,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-mini-agent"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?tag=v13.1.0#6e8dbaee2f74eaca52d0f47441f6cc5bf9a2c44b"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -645,7 +645,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?tag=v13.1.0#6e8dbaee2f74eaca52d0f47441f6cc5bf9a2c44b"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -654,7 +654,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?tag=v13.1.0#6e8dbaee2f74eaca52d0f47441f6cc5bf9a2c44b"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -671,7 +671,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?tag=v13.1.0#6e8dbaee2f74eaca52d0f47441f6cc5bf9a2c44b"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -681,7 +681,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?tag=v13.1.0#6e8dbaee2f74eaca52d0f47441f6cc5bf9a2c44b"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
  "anyhow",
  "bytes",
@@ -708,7 +708,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?tag=v13.1.0#6e8dbaee2f74eaca52d0f47441f6cc5bf9a2c44b"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
  "anyhow",
  "futures",
@@ -725,7 +725,7 @@ dependencies = [
  "pin-project",
  "regex",
  "rustls 0.23.14",
- "rustls-native-certs 0.6.3",
+ "rustls-native-certs 0.7.3",
  "serde",
  "static_assertions",
  "tokio",
@@ -736,9 +736,9 @@ dependencies = [
 [[package]]
 name = "ddsketch-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki/#ec4959ed222687baa9eb239af3fc8bb6c0882dfb"
+source = "git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751#3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751"
 dependencies = [
- "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/)",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
  "float_eq",
  "ordered-float",
  "smallvec",
@@ -747,9 +747,9 @@ dependencies = [
 [[package]]
 name = "ddsketch-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki-backport/#6e9738383188b867dba59b37fae9e0b0de50e3ca"
+source = "git+https://github.com/DataDog/saluki/#ec4959ed222687baa9eb239af3fc8bb6c0882dfb"
 dependencies = [
- "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/)",
  "float_eq",
  "ordered-float",
  "smallvec",
@@ -790,10 +790,10 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?branch=main#67d4f7a19afd7f7301423e400008d42cc9284c04"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
- "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
- "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki-backport/)",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
+ "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
  "fnv",
  "hashbrown 0.14.5",
  "protobuf",
@@ -2260,7 +2260,7 @@ dependencies = [
  "pin-project-lite",
  "quinn",
  "rustls 0.23.14",
- "rustls-pemfile 2.2.0",
+ "rustls-pemfile",
  "rustls-pki-types",
  "serde",
  "serde_json",
@@ -2412,12 +2412,13 @@ dependencies = [
 
 [[package]]
 name = "rustls-native-certs"
-version = "0.6.3"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9aace74cb666635c918e9c12bc0d348266037aa8eb599b5cba565709a8dff00"
+checksum = "e5bfb394eeed242e909609f56089eecfe5fda225042e8b171791b9c95f5931e5"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile 1.0.4",
+ "rustls-pemfile",
+ "rustls-pki-types",
  "schannel",
  "security-framework",
 ]
@@ -2429,19 +2430,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fcaf18a4f2be7326cd874a5fa579fae794320a0f388d365dca7e480e55f83f8a"
 dependencies = [
  "openssl-probe",
- "rustls-pemfile 2.2.0",
+ "rustls-pemfile",
  "rustls-pki-types",
  "schannel",
  "security-framework",
-]
-
-[[package]]
-name = "rustls-pemfile"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c74cae0a4cf6ccbbf5f359f08efdf8ee7e1dc532573bf0db71968cb56b1448c"
-dependencies = [
- "base64 0.21.7",
 ]
 
 [[package]]
@@ -2885,7 +2877,7 @@ dependencies = [
 [[package]]
 name = "tinybytes"
 version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?tag=v13.1.0#6e8dbaee2f74eaca52d0f47441f6cc5bf9a2c44b"
+source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
 dependencies = [
  "serde",
 ]

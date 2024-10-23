@@ -40,6 +40,7 @@ async fn test_enhanced_metrics() {
         dd_api_key.to_string(),
         metrics_aggr.clone(),
         server.base_url(),
+        None,
     );
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(&arc_config));
