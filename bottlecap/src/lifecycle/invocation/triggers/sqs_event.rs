@@ -23,7 +23,6 @@ pub struct SqsRecord {
     pub message_id: String,
     #[serde(rename = "receiptHandle")]
     pub receipt_handle: String,
-    pub body: String,
     pub attributes: Attributes,
     #[serde(rename = "messageAttributes")]
     pub message_attributes: HashMap<String, MessageAttribute>,
@@ -197,7 +196,6 @@ mod tests {
         let expected = SqsRecord {
             message_id: "19dd0b57-b21e-4ac1-bd88-01bbb068cb78".to_string(),
             receipt_handle: "MessageReceiptHandle".to_string(),
-            body: "Hello from SQS!".to_string(),
             attributes: Attributes {
                 approximate_first_receive_timestamp: "1523232000001".to_string(),
                 approximate_receive_count: "1".to_string(),
