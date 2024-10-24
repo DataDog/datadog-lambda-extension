@@ -115,9 +115,6 @@ impl Trigger for APIGatewayRestEvent {
                 self.request_context.resource_path.clone(),
             ),
         ]));
-
-        debug!("Enriched Span: {:?}", span);
-        // todo: update global(? IsAsync if event payload is `Event`
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
