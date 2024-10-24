@@ -69,6 +69,24 @@ jobs:
           severity-cutoff: low
           output-format: table
 
+      - name: Scan latest serverless-init image with grype
+        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        with:
+          image: "datadog/serverless-init:latest"
+          only-fixed: true
+          fail-build: true
+          severity-cutoff: low
+          output-format: table
+
+      - name: Scan latest-alpine serverless-init image with grype
+        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        with:
+          image: "datadog/serverless-init:latest-alpine"
+          only-fixed: true
+          fail-build: true
+          severity-cutoff: low
+          output-format: table
+
       # scan unreleased from main
 
       - name: Checkout datadog-agent repository
