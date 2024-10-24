@@ -34,6 +34,7 @@ pub struct TraceAgent {
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
+    tx: Sender<SendData>,
 }
 
 #[derive(Clone, Copy)]
@@ -43,9 +44,15 @@ pub enum ApiVersion {
 }
 
 impl TraceAgent {
-    pub async fn start_trace_agent(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let now = Instant::now();
-
+    #[must_use]
+    pub async fn new(
+        config: Arc<config::Config>,
+        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+        trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
+        stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
+        stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
+        tags_provider: Arc<provider::Provider>,
+    ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace flusher.
@@ -54,8 +61,23 @@ impl TraceAgent {
 
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
-        let trace_flusher = self.trace_flusher.clone();
+        let trace_flusher = trace_flusher.clone();
         trace_flusher.start_trace_flusher(trace_rx).await;
+
+        TraceAgent {
+            config,
+            trace_processor,
+            trace_flusher,
+            stats_processor,
+            stats_flusher,
+            tags_provider,
+            tx: trace_tx,
+        }
+    }
+
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let now = Instant::now();
+        let trace_tx = self.tx.clone();
 
         // channels to send processed stats to our stats flusher.
         let (stats_tx, stats_rx): (
@@ -266,5 +288,10 @@ impl TraceAgent {
         Response::builder()
             .status(200)
             .body(Body::from(response_json.to_string()))
+    }
+
+    #[must_use]
+    pub fn get_sender_copy(&self) -> Sender<SendData> {
+        self.tx.clone()
     }
 }
