@@ -132,7 +132,6 @@ impl Trigger for SqsRecord {
             ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
-            ("resource_names".to_string(), resource.clone()),
         ]));
     }
 
@@ -171,11 +170,11 @@ impl Trigger for SqsRecord {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        let mut carrier = HashMap::new();
+        let carrier = HashMap::new();
         if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
             if ma.data_type == "String" {
                 if let Some(string_value) = &ma.string_value {
-                    carrier = serde_json::from_str(string_value).unwrap_or_default();
+                    return serde_json::from_str(string_value).unwrap_or_default();
                 }
             }
         }
@@ -257,7 +256,6 @@ mod tests {
                     "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string()
                 ),
                 ("aws_region".to_string(), "us-east-1".to_string()),
-                ("resource_names".to_string(), "MyQueue".to_string()),
             ])
         );
     }

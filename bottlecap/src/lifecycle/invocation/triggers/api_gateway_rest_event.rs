@@ -109,7 +109,6 @@ impl Trigger for APIGatewayRestEvent {
                 "request_id".to_string(),
                 self.request_context.request_id.clone(),
             ),
-            ("resource_names".to_string(), resource.clone()),
             (
                 "http.route".to_string(),
                 self.request_context.resource_path.clone(),
@@ -256,7 +255,6 @@ mod tests {
                 ("http.route".to_string(), "/path".to_string()),
                 ("operation_name".to_string(), "aws.apigateway".to_string()),
                 ("request_id".to_string(), "id=".to_string()),
-                ("resource_names".to_string(), "GET /path".to_string()),
             ])
         );
     }
@@ -314,7 +312,6 @@ mod tests {
                 "request_id".to_string(),
                 "e16399f7-e984-463a-9931-745ba021a27f".to_string(),
             ),
-            ("resource_names".to_string(), "GET /user/{id}".to_string()),
         ]);
         assert_eq!(span.meta, expected);
     }
