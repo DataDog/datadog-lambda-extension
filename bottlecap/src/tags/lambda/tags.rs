@@ -10,8 +10,10 @@ use tracing::debug;
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
 const RUNTIME_VAR: &str = "AWS_EXECUTION_ENV";
 const MEMORY_SIZE_VAR: &str = "AWS_LAMBDA_FUNCTION_MEMORY_SIZE";
-const INIT_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
+pub const INIT_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
 const INIT_TYPE_KEY: &str = "init_type";
+// Value for INIT_TYPE when the function is using SnapStart
+pub const SNAP_START_VALUE: &str = "snap-start";
 
 // FunctionARNKey is the tag key for a function's arn
 pub const FUNCTION_ARN_KEY: &str = "function_arn";
