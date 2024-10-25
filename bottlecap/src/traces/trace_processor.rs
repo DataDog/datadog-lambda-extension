@@ -23,15 +23,20 @@ use datadog_trace_utils::trace_utils::{self};
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     pub resolved_api_key: String,
+    pub override_trace_id: Option<u64>,
+    pub substitute_parent_span_id: Option<(u64, u64)>,
 }
 
 struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
+    override_trace_id: Option<u64>,
+    override_span_id: Option<u64>,
+    substitute_parent_span_id: Option<(u64, u64)>,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
-    fn process(&mut self, chunk: &mut datadog_trace_protobuf::pb::TraceChunk, _index: usize) {
+    fn process(&mut self, chunk: &mut pb::TraceChunk, _index: usize) {
         chunk.spans.retain(|span| {
             (span.resource != "127.0.0.1" || span.resource != "0.0.0.0")
                 && span.name != "dns.lookup"
@@ -45,6 +50,18 @@ impl TraceChunkProcessor for ChunkProcessor {
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
             obfuscate_span(span, &self.obfuscation_config);
+
+            if self.substitute_parent_span_id.is_some()
+                && self.substitute_parent_span_id.unwrap().0 == span.parent_id
+            {
+                span.parent_id = self.substitute_parent_span_id.unwrap().1;
+            }
+            if self.override_trace_id.is_some() {
+                span.trace_id = self.override_trace_id.unwrap();
+            }
+            if self.override_span_id.is_some() {
+                span.span_id = self.override_span_id.unwrap();
+            }
         }
     }
 }
@@ -58,7 +75,9 @@ pub trait TraceProcessor {
         header_tags: tracer_header_tags::TracerHeaderTags,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
+        aws_lambda_span: bool,
     ) -> SendData;
+    fn override_ids(&mut self, trace_id: u64, parent_id: u64);
 }
 
 impl TraceProcessor for ServerlessTraceProcessor {
@@ -69,14 +88,25 @@ impl TraceProcessor for ServerlessTraceProcessor {
         header_tags: tracer_header_tags::TracerHeaderTags,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
+        aws_lambda_span: bool,
     ) -> SendData {
         debug!("Received traces to process");
+
+        let (parent_id_override, span_id_override) = if aws_lambda_span {
+            (None, Some(self.substitute_parent_span_id.unwrap().1))
+        } else {
+            (self.substitute_parent_span_id, None)
+        };
+
         let payload = trace_utils::collect_trace_chunks(
             V07(traces),
             &header_tags,
             &mut ChunkProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
+                override_trace_id: self.override_trace_id,
+                substitute_parent_span_id: parent_id_override,
+                override_span_id: span_id_override,
             },
             true,
         );
@@ -96,6 +126,11 @@ impl TraceProcessor for ServerlessTraceProcessor {
             config.https_proxy.clone(),
         )
     }
+
+    fn override_ids(&mut self, trace_id: u64, parent_id: u64) {
+        self.override_trace_id = Some(trace_id);
+        self.substitute_parent_span_id = Some((0, parent_id));
+    }
 }
 
 #[cfg(test)]
@@ -106,10 +141,10 @@ mod tests {
         sync::Arc,
         time::{SystemTime, UNIX_EPOCH},
     };
-
+    use crate::traces::trace_processor::TraceProcessor;
     use crate::config::Config;
     use crate::tags::provider::Provider;
-    use crate::traces::trace_processor::{self, TraceProcessor};
+    use crate::traces::trace_processor;
     use crate::LAMBDA_RUNTIME_SLUG;
     use datadog_trace_protobuf::pb;
     use datadog_trace_utils::{tracer_header_tags, tracer_payload::TracerPayloadCollection};
@@ -209,11 +244,19 @@ mod tests {
         let trace_processor = trace_processor::ServerlessTraceProcessor {
             resolved_api_key: "foo".to_string(),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
+            override_trace_id: None,
+            substitute_parent_span_id: None,
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
-        let tracer_payload =
-            trace_processor.process_traces(config, tags_provider.clone(), header_tags, traces, 100);
+        let tracer_payload = trace_processor.process_traces(
+            config,
+            tags_provider.clone(),
+            header_tags,
+            traces,
+            100,
+            false,
+        );
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),

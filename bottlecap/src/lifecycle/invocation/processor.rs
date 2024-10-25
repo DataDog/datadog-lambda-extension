@@ -9,16 +9,18 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 use tracing::debug;
 
+use crate::traces::trace_processor::TraceProcessor;
 use crate::{
-    config::{self, AwsConfig},
+    config,
+    config::AwsConfig,
     lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
     tags::provider,
     traces::{
         context::SpanContext,
         propagation::{DatadogCompositePropagator, Propagator},
-        trace_processor,
     },
 };
 
@@ -97,7 +99,7 @@ impl Processor {
         duration_ms: f64,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+        trace_processor: Arc<Mutex<impl TraceProcessor>>,
         trace_agent_tx: Sender<SendData>,
     ) {
         self.context_buffer
@@ -143,12 +145,13 @@ impl Processor {
                 client_computed_stats: false,
             };
 
-            let send_data = trace_processor.process_traces(
+            let send_data = trace_processor.lock().await.process_traces(
                 config.clone(),
                 tags_provider.clone(),
                 header_tags,
                 vec![traces],
                 body_size,
+                true,
             );
 
             if let Err(e) = trace_agent_tx.send(send_data).await {

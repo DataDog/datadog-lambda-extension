@@ -23,6 +23,7 @@ use bottlecap::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
     },
+    lwa::proxy::start_lwa_proxy,
     metrics::enhanced::lambda::Lambda as enhanced_metrics,
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
@@ -70,7 +71,6 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
-use bottlecap::lwa::proxy::start_lwa_proxy;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -301,16 +301,16 @@ async fn extension_loop_active(
         Arc::clone(config),
         aws_config,
     )));
-    let _ = start_lwa_proxy(Arc::clone(&invocation_processor));
 
-
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+    let trace_processor = Arc::new(TokioMutex::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(
             obfuscation_config::ObfuscationConfig::new()
                 .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
         ),
         resolved_api_key: resolved_api_key.clone(),
-    });
+        override_trace_id: None,
+        substitute_parent_span_id: None,
+    }));
 
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),
@@ -333,6 +333,12 @@ async fn extension_loop_active(
         )
         .await,
     );
+
+    let _ = start_lwa_proxy(
+        Arc::clone(&invocation_processor),
+        Arc::clone(&trace_processor),
+    );
+
     let trace_agent_tx = trace_agent.get_sender_copy();
 
     tokio::spawn(async move {

@@ -13,10 +13,12 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::tags::provider;
-use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
+use crate::traces::trace_processor::TraceProcessor;
+use crate::traces::{stats_flusher, stats_processor, trace_flusher};
 use datadog_trace_mini_agent::http_utils::{self, log_and_create_http_response};
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
+use tokio::sync::Mutex;
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -29,7 +31,7 @@ pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
-    pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+    pub trace_processor: Arc<Mutex<dyn TraceProcessor + Send + Sync>>,
     pub trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
@@ -47,7 +49,7 @@ impl TraceAgent {
     #[must_use]
     pub async fn new(
         config: Arc<config::Config>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+        trace_processor: Arc<Mutex<dyn TraceProcessor + Send + Sync>>,
         trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
@@ -148,7 +150,7 @@ impl TraceAgent {
     async fn trace_endpoint_handler(
         config: Arc<config::Config>,
         req: Request<Body>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+        trace_processor: Arc<Mutex<dyn TraceProcessor + Send + Sync>>,
         trace_tx: Sender<SendData>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
@@ -214,7 +216,7 @@ impl TraceAgent {
     async fn handle_traces(
         config: Arc<config::Config>,
         req: Request<Body>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+        trace_processor: Arc<Mutex<dyn TraceProcessor + Send + Sync>>,
         trace_tx: Sender<SendData>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -253,12 +255,13 @@ impl TraceAgent {
             },
         };
 
-        let send_data = trace_processor.process_traces(
+        let send_data = trace_processor.lock().await.process_traces(
             config,
             tags_provider,
             tracer_header_tags,
             traces,
             body_size,
+            false,
         );
 
         // send trace payload to our trace flusher
