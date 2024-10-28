@@ -1,5 +1,5 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
-use crate::proc::{self, NetworkData};
+use crate::proc::{self, CPUData, NetworkData};
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
@@ -166,6 +166,180 @@ impl Lambda {
         }
     }
 
+    pub(crate) fn generate_cpu_time_enhanced_metrics(
+        cpu_data_offset: &CPUData,
+        cpu_data_end: &CPUData,
+        aggr: &mut std::sync::MutexGuard<Aggregator>,
+    ) {
+        let cpu_user_time = cpu_data_end.total_user_time_ms - cpu_data_offset.total_user_time_ms;
+        let cpu_system_time =
+            cpu_data_end.total_system_time_ms - cpu_data_offset.total_system_time_ms;
+        let cpu_total_time = cpu_user_time + cpu_system_time;
+
+        let metric = Metric::new(
+            constants::CPU_USER_TIME_METRIC.into(),
+            MetricValue::distribution(cpu_user_time),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert cpu_user_time metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::CPU_SYSTEM_TIME_METRIC.into(),
+            MetricValue::distribution(cpu_system_time),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert cpu_system_time metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::CPU_TOTAL_TIME_METRIC.into(),
+            MetricValue::distribution(cpu_total_time),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert cpu_total_time metric: {}", e);
+        }
+    }
+
+    pub fn set_cpu_time_enhanced_metrics(
+        &self,
+        cpu_offset: Option<CPUData>,
+    ) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let mut aggr: std::sync::MutexGuard<Aggregator> =
+            self.aggregator.lock().expect("lock poisoned");
+
+        let cpu_data = proc::get_cpu_data();
+        match (cpu_offset, cpu_data) {
+            (Some(cpu_offset), Ok(cpu_data)) => {
+                Self::generate_cpu_time_enhanced_metrics(&cpu_offset, &cpu_data, &mut aggr);
+            }
+            (_, _) => {
+                debug!("Could not find data to generate cpu time enhanced metrics");
+            }
+        }
+    }
+
+    pub(crate) fn generate_cpu_utilization_enhanced_metrics(
+        cpu_data_offset: &CPUData,
+        cpu_data_end: &CPUData,
+        uptime_data_offset: f64,
+        uptime_data_end: f64,
+        aggr: &mut std::sync::MutexGuard<Aggregator>,
+    ) {
+        let num_cores = cpu_data_end.individual_cpu_idle_times.len() as f64;
+        let uptime = uptime_data_end - uptime_data_offset;
+        let total_idle_time = cpu_data_end.total_idle_time_ms - cpu_data_offset.total_idle_time_ms;
+
+        let mut max_idle_time = 0.0;
+        let mut min_idle_time = f64::MAX;
+
+        for (cpu_name, cpu_idle_time) in &cpu_data_end.individual_cpu_idle_times {
+            if let Some(cpu_idle_time_offset) =
+                cpu_data_offset.individual_cpu_idle_times.get(cpu_name)
+            {
+                let idle_time = cpu_idle_time - cpu_idle_time_offset;
+                if idle_time < min_idle_time {
+                    min_idle_time = idle_time;
+                }
+                if idle_time > max_idle_time {
+                    max_idle_time = idle_time;
+                }
+            }
+        }
+
+        // Maximally utilized CPU is the one with the least time spent in the idle process
+        let cpu_max_utilization = ((uptime - min_idle_time) / uptime) * 100.0;
+        // Minimally utilized CPU is the one with the most time spent in the idle process
+        let cpu_min_utilization = ((uptime - max_idle_time) / uptime) * 100.0;
+
+        let cpu_total_utilization_decimal =
+            ((uptime * num_cores) - total_idle_time) / (uptime * num_cores);
+        let cpu_total_utilization_pct = cpu_total_utilization_decimal * 100.0;
+        let cpu_total_utilization = cpu_total_utilization_decimal * num_cores;
+
+        let metric = Metric::new(
+            constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
+            MetricValue::distribution(cpu_total_utilization_pct),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert cpu_total_utilization_pct metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::CPU_TOTAL_UTILIZATION_METRIC.into(),
+            MetricValue::distribution(cpu_total_utilization),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert cpu_total_utilization metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::NUM_CORES_METRIC.into(),
+            MetricValue::distribution(num_cores),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert num_cores metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::CPU_MAX_UTILIZATION_METRIC.into(),
+            MetricValue::distribution(cpu_max_utilization),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert cpu_max_utilization metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::CPU_MIN_UTILIZATION_METRIC.into(),
+            MetricValue::distribution(cpu_min_utilization),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert cpu_min_utilization metric: {}", e);
+        }
+    }
+
+    pub fn set_cpu_utilization_enhanced_metrics(
+        &self,
+        cpu_offset: Option<CPUData>,
+        uptime_offset: Option<f64>,
+    ) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let mut aggr: std::sync::MutexGuard<Aggregator> =
+            self.aggregator.lock().expect("lock poisoned");
+
+        let cpu_data = proc::get_cpu_data();
+        let uptime_data = proc::get_uptime();
+        match (cpu_offset, cpu_data, uptime_offset, uptime_data) {
+            (Some(cpu_offset), Ok(cpu_data), Some(uptime_offset), Ok(uptime_data)) => {
+                Self::generate_cpu_utilization_enhanced_metrics(
+                    &cpu_offset,
+                    &cpu_data,
+                    uptime_offset,
+                    uptime_data,
+                    &mut aggr,
+                );
+            }
+            (_, _, _, _) => {
+                debug!("Could not find data to generate cpu utilization enhanced metrics");
+            }
+        }
+    }
+
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
         let gb_seconds = (billed_duration_ms as f64 * constants::MS_TO_SEC)
             * (memory_size_mb as f64 / constants::MB_TO_GB);
@@ -234,9 +408,18 @@ impl Lambda {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct EnhancedMetricData {
+    pub network_offset: Option<NetworkData>,
+    pub cpu_offset: Option<CPUData>,
+    pub uptime_offset: Option<f64>,
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
     use crate::config;
     use dogstatsd::metric::EMPTY_TAGS;
@@ -346,6 +529,39 @@ mod tests {
         assert!(aggr
             .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), &None)
             .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::RX_BYTES_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::TX_BYTES_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::NUM_CORES_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), &None)
+            .is_none());
     }
 
     #[test]
@@ -392,5 +608,84 @@ mod tests {
         assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
         assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0);
         assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0);
+    }
+
+    #[test]
+    fn test_set_cpu_time_enhanced_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+
+        let mut individual_cpu_idle_time_offsets = HashMap::new();
+        individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
+        individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 20.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 100.0,
+            total_system_time_ms: 3.0,
+            total_idle_time_ms: 20.0,
+            individual_cpu_idle_times: individual_cpu_idle_time_offsets,
+        };
+
+        let mut individual_cpu_idle_times_end = HashMap::new();
+        individual_cpu_idle_times_end.insert("cpu0".to_string(), 30.0);
+        individual_cpu_idle_times_end.insert("cpu1".to_string(), 80.0);
+        let cpu_data = CPUData {
+            total_user_time_ms: 200.0,
+            total_system_time_ms: 56.0,
+            total_idle_time_ms: 100.0,
+            individual_cpu_idle_times: individual_cpu_idle_times_end,
+        };
+
+        Lambda::generate_cpu_time_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            &mut lambda.aggregator.lock().expect("lock poisoned"),
+        );
+
+        assert_sketch(&metrics_aggr, constants::CPU_USER_TIME_METRIC, 100.0);
+        assert_sketch(&metrics_aggr, constants::CPU_SYSTEM_TIME_METRIC, 53.0);
+        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_TIME_METRIC, 153.0);
+    }
+
+    #[test]
+    fn test_set_cpu_utilization_enhanced_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+
+        let mut individual_cpu_idle_time_offsets = HashMap::new();
+        individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
+        individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 30.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 50.0,
+            total_system_time_ms: 10.0,
+            total_idle_time_ms: 10.0,
+            individual_cpu_idle_times: individual_cpu_idle_time_offsets,
+        };
+        let uptime_offset = 1891100.0;
+
+        let mut individual_cpu_idle_times_end = HashMap::new();
+        individual_cpu_idle_times_end.insert("cpu0".to_string(), 570.0);
+        individual_cpu_idle_times_end.insert("cpu1".to_string(), 600.0);
+        let cpu_data = CPUData {
+            total_user_time_ms: 200.0,
+            total_system_time_ms: 170.0,
+            total_idle_time_ms: 1130.0,
+            individual_cpu_idle_times: individual_cpu_idle_times_end,
+        };
+        let uptime_data = 1891900.0;
+
+        Lambda::generate_cpu_utilization_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            uptime_offset,
+            uptime_data,
+            &mut lambda.aggregator.lock().expect("lock poisoned"),
+        );
+
+        // the differences above and metric values below are from an invocation using the go agent to verify the calculations
+        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_UTILIZATION_PCT_METRIC, 30.0);
+        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_UTILIZATION_METRIC, 0.6);
+        assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0);
+        assert_sketch(&metrics_aggr, constants::CPU_MAX_UTILIZATION_METRIC, 30.0);
+        assert_sketch(&metrics_aggr, constants::CPU_MIN_UTILIZATION_METRIC, 28.75);
     }
 }

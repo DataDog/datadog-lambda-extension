@@ -1,4 +1,4 @@
-use crate::proc::NetworkData;
+use crate::metrics::enhanced::lambda::EnhancedMetricData;
 use std::collections::VecDeque;
 
 use tracing::debug;
@@ -9,7 +9,7 @@ pub struct Context {
     pub runtime_duration_ms: f64,
     pub init_duration_ms: f64,
     pub start_time: i64,
-    pub network_offset: Option<NetworkData>,
+    pub enhanced_metric_data: Option<EnhancedMetricData>,
 }
 
 impl Context {
@@ -19,14 +19,14 @@ impl Context {
         runtime_duration_ms: f64,
         init_duration_ms: f64,
         start_time: i64,
-        network_offset: Option<NetworkData>,
+        enhanced_metric_data: Option<EnhancedMetricData>,
     ) -> Self {
         Context {
             request_id,
             runtime_duration_ms,
             init_duration_ms,
             start_time,
-            network_offset,
+            enhanced_metric_data,
         }
     }
 }
@@ -150,18 +150,28 @@ impl ContextBuffer {
         }
     }
 
-    /// Adds the network offset to a `Context` in the buffer. If the `Context` is not found, a new
+    /// Adds the enhanced metric offsets to a `Context` in the buffer. If the `Context` is not found, a new
     /// `Context` is created and added to the buffer.
     ///
-    pub fn add_network_offset(&mut self, request_id: &String, network_data: Option<NetworkData>) {
+    pub fn add_enhanced_metric_data(
+        &mut self,
+        request_id: &String,
+        enhanced_metric_data: Option<EnhancedMetricData>,
+    ) {
         if let Some(context) = self
             .buffer
             .iter_mut()
             .find(|context| context.request_id == *request_id)
         {
-            context.network_offset = network_data;
+            context.enhanced_metric_data = enhanced_metric_data;
         } else {
-            self.insert(Context::new(request_id.clone(), 0.0, 0.0, 0, network_data));
+            self.insert(Context::new(
+                request_id.clone(),
+                0.0,
+                0.0,
+                0,
+                enhanced_metric_data,
+            ));
         }
     }
 
@@ -176,6 +186,9 @@ impl ContextBuffer {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use crate::proc::{CPUData, NetworkData};
+    use std::collections::HashMap;
+
     use super::*;
 
     #[test]
@@ -323,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_network_offset() {
+    fn test_add_enhanced_metric_data() {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
@@ -337,19 +350,40 @@ mod tests {
             tx_bytes: 254.0,
         });
 
-        buffer.add_network_offset(&request_id, network_offset);
+        let mut individual_cpu_idle_times = HashMap::new();
+        individual_cpu_idle_times.insert("cpu0".to_string(), 10.0);
+        individual_cpu_idle_times.insert("cpu1".to_string(), 20.0);
+        let cpu_offset = Some(CPUData {
+            total_user_time_ms: 100.0,
+            total_system_time_ms: 53.0,
+            total_idle_time_ms: 20.0,
+            individual_cpu_idle_times: individual_cpu_idle_times,
+        });
+
+        let uptime_offset = Some(50.0);
+
+        let enhanced_metric_data = Some(EnhancedMetricData {
+            network_offset: network_offset,
+            cpu_offset: cpu_offset,
+            uptime_offset: uptime_offset,
+        });
+
+        buffer.add_enhanced_metric_data(&request_id, enhanced_metric_data.clone());
         assert_eq!(
-            buffer.get(&request_id).unwrap().network_offset,
-            network_offset,
+            buffer.get(&request_id).unwrap().enhanced_metric_data,
+            enhanced_metric_data,
         );
 
-        // Add network offset to a context that doesn't exist
+        // Adds enhanced metric offsets to a context that doesn't exist
         let unexistent_request_id = String::from("unexistent");
-        buffer.add_network_offset(&unexistent_request_id, network_offset);
+        buffer.add_enhanced_metric_data(&unexistent_request_id, enhanced_metric_data.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(
-            buffer.get(&unexistent_request_id).unwrap().network_offset,
-            network_offset
+            buffer
+                .get(&unexistent_request_id)
+                .unwrap()
+                .enhanced_metric_data,
+            enhanced_metric_data
         );
     }
 }
