@@ -204,10 +204,7 @@ impl Lambda {
         }
     }
 
-    pub fn set_cpu_time_enhanced_metrics(
-        &self,
-        cpu_offset: Option<CPUData>,
-    ) {
+    pub fn set_cpu_time_enhanced_metrics(&self, cpu_offset: Option<CPUData>) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -682,7 +679,11 @@ mod tests {
         );
 
         // the differences above and metric values below are from an invocation using the go agent to verify the calculations
-        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_UTILIZATION_PCT_METRIC, 30.0);
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_TOTAL_UTILIZATION_PCT_METRIC,
+            30.0,
+        );
         assert_sketch(&metrics_aggr, constants::CPU_TOTAL_UTILIZATION_METRIC, 0.6);
         assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0);
         assert_sketch(&metrics_aggr, constants::CPU_MAX_UTILIZATION_METRIC, 30.0);

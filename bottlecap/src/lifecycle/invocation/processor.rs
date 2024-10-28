@@ -85,9 +85,9 @@ impl Processor {
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
             let enhanced_metric_offsets = Some(EnhancedMetricData {
-                network_offset: network_offset,
-                cpu_offset: cpu_offset,
-                uptime_offset: uptime_offset,
+                network_offset,
+                cpu_offset,
+                uptime_offset,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -140,7 +140,7 @@ impl Processor {
             // - trigger tags (from inferred spans)
             // - metrics tags (for asm)
 
-            enhanced_metric_data = context.enhanced_metric_data.clone();
+            enhanced_metric_data.clone_from(&context.enhanced_metric_data);
         }
 
         self.inferrer.complete_inferred_span(&self.span);

@@ -7,9 +7,7 @@ use std::{
     io::{self, BufRead},
 };
 
-use constants::{
-    LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
-};
+use constants::{LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct NetworkData {
@@ -114,8 +112,8 @@ fn get_cpu_data_from_path(path: &str) -> Result<CPUData, io::Error> {
                         ))
                     }
                 }
-            } else if label.starts_with("cpu") { // i.e. "cpu0", "cpu1"
-                // Parse per-core idle times
+            } else if label.starts_with("cpu") {
+                // Parse per core (i.e. "cpu0", "cpu1", etc.) idle times
                 // Skip the first three values (user, nice, system) and get the 4th value (idle)
                 let idle: Option<f64> = values.nth(3).and_then(|s| s.parse().ok());
 

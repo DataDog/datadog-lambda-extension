@@ -1,6 +1,7 @@
 use libc;
 use std::io;
 
+#[allow(clippy::cast_sign_loss)]
 #[cfg(not(target_os = "windows"))]
 pub fn get_clk_tck() -> Result<u64, io::Error> {
     let clk_tck = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
