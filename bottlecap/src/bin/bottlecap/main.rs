@@ -309,7 +309,8 @@ async fn extension_loop_active(
         ),
         resolved_api_key: resolved_api_key.clone(),
         override_trace_id: None,
-        substitute_parent_span_id: None,
+        root_parent_id: None,
+        aws_lambda_span_id: None,
     }));
 
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
