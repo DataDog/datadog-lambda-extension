@@ -35,6 +35,7 @@ pub struct Processor {
     propagator: DatadogCompositePropagator,
     aws_config: AwsConfig,
     tracer_detected: bool,
+    collect_enhanced_data: bool,
 }
 
 impl Processor {
@@ -74,13 +75,14 @@ impl Processor {
             propagator,
             aws_config: aws_config.clone(),
             tracer_detected: false,
+            collect_enhanced_data: config.enhanced_metrics,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
-    pub fn on_invoke_event(&mut self, request_id: String, collect_enhanced_data: bool) {
-        if collect_enhanced_data {
+    pub fn on_invoke_event(&mut self, request_id: String) {
+        if self.collect_enhanced_data {
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();

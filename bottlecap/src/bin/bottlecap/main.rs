@@ -376,7 +376,7 @@ async fn extension_loop_active(
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
                 let mut p = invocation_processor.lock().await;
-                p.on_invoke_event(request_id, lambda_enhanced_metrics.config.enhanced_metrics);
+                p.on_invoke_event(request_id);
                 drop(p);
             }
             Ok(NextEventResponse::Shutdown {

@@ -152,7 +152,8 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
     let file = File::open(path)?;
     let reader = io::BufReader::new(file);
 
-    if let Some(Ok(line)) = reader.lines().next() {
+    if let Some(line) = reader.lines().next() {
+        let line = line?;
         let mut values = line.split_whitespace();
 
         let uptime: Option<f64> = values.next().and_then(|s| s.parse().ok());

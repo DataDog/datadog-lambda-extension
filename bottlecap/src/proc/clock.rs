@@ -1,4 +1,3 @@
-use libc;
 use std::io;
 
 #[allow(clippy::cast_sign_loss)]
