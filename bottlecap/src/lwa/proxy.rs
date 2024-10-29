@@ -181,7 +181,10 @@ async fn process_tracing_headers(
             .collect();
 
         processor.lock().await.on_invocation_start(h, vec.unwrap());
-        span_generator.lock().await.override_ids(random(), random());
+        span_generator
+            .lock()
+            .await
+            .override_ids(random(), 0, random());
     }
     Ok(resp_payload)
 }
@@ -257,7 +260,8 @@ mod tests {
             obfuscation_config: Arc::new(obfuscation_config::ObfuscationConfig::new().unwrap()),
             resolved_api_key: "api_key".to_string(),
             override_trace_id: None,
-            substitute_parent_span_id: None,
+            root_parent_id: None,
+            aws_lambda_span_id: None,
         }));
 
         let proxy_task_handle =
