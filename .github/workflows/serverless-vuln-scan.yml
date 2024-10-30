@@ -52,7 +52,7 @@ jobs:
           format: table
 
       - name: Scan latest release image with grype
-        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        uses: anchore/scan-action@5ed195cc06065322983cae4bb31e2a751feb86fd # v5.2.0
         with:
           image: "public.ecr.aws/datadog/lambda-extension:latest"
           only-fixed: true
@@ -61,7 +61,7 @@ jobs:
           output-format: table
 
       - name: Scan latest-alpine release image with grype
-        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        uses: anchore/scan-action@5ed195cc06065322983cae4bb31e2a751feb86fd # v5.2.0
         with:
           image: "public.ecr.aws/datadog/lambda-extension:latest-alpine"
           only-fixed: true
@@ -70,7 +70,7 @@ jobs:
           output-format: table
 
       - name: Scan latest serverless-init image with grype
-        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        uses: anchore/scan-action@5ed195cc06065322983cae4bb31e2a751feb86fd # v5.2.0
         with:
           image: "datadog/serverless-init:latest"
           only-fixed: true
@@ -79,7 +79,7 @@ jobs:
           output-format: table
 
       - name: Scan latest-alpine serverless-init image with grype
-        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        uses: anchore/scan-action@5ed195cc06065322983cae4bb31e2a751feb86fd # v5.2.0
         with:
           image: "datadog/serverless-init:latest-alpine"
           only-fixed: true
@@ -126,7 +126,7 @@ jobs:
           format: table
 
       - name: Scan amd64 image with grype
-        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        uses: anchore/scan-action@5ed195cc06065322983cae4bb31e2a751feb86fd # v5.2.0
         with:
           image: "datadog/build-lambda-extension-amd64:${{ env.VERSION }}"
           only-fixed: true
@@ -135,7 +135,7 @@ jobs:
           output-format: table
 
       - name: Scan arm64 image with grype
-        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        uses: anchore/scan-action@5ed195cc06065322983cae4bb31e2a751feb86fd # v5.2.0
         with:
           image: "datadog/build-lambda-extension-arm64:${{ env.VERSION }}"
           only-fixed: true
@@ -144,7 +144,7 @@ jobs:
           output-format: table
 
       - name: Scan binary files with grype
-        uses: anchore/scan-action@ef0b0b023552a0c077534074723a9915280284bb # v5.1.0
+        uses: anchore/scan-action@5ed195cc06065322983cae4bb31e2a751feb86fd # v5.2.0
         with:
           path: go/src/github.com/DataDog/datadog-lambda-extension/.layers
           only-fixed: true
