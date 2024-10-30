@@ -173,52 +173,45 @@ async fn process_tracing_headers(
     let resp_payload = hyper::body::to_bytes(resp_body).await?;
     let req_wrapper_in_resp_body = deserialize_json(Ok(resp_payload.clone())).unwrap();
     let vec = serde_json::to_vec(&req_wrapper_in_resp_body);
-    let value = Value::String("".to_string());
     if vec.is_ok() {
-        let value1 = req_wrapper_in_resp_body.clone();
-        let headers = value1.get("headers").unwrap();
-        let h: HashMap<String, String> = headers
-            .as_object()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
-            .collect();
-
-        debug!("Starting invocation");
-        let value2 = value1.clone();
+        let headers = req_wrapper_in_resp_body.get("headers").unwrap();
         let mut r = Request::builder()
             .uri("http://127.0.0.1:8124/lambda/start-invocation")
             .method(hyper::Method::POST)
             .body(Body::from(
-                value2
+                headers
                     .get("body")
-                    .unwrap_or(&value)
+                    .unwrap_or(&Value::String(String::new()))
                     .as_str()
                     .unwrap()
                     .to_string(), // Clone the string to extend its lifetime
             ))
             .unwrap();
 
-        for h1 in h {
+        let headers_map: HashMap<String, String> = headers
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+            .collect();
+        for h1 in headers_map {
             r.headers_mut().insert(
                 hyper::header::HeaderName::from_bytes(h1.0.as_bytes()).unwrap(),
                 h1.1.parse().unwrap(),
             );
         }
 
-        let ids = crate::lifecycle::listener::Listener::start_invocation_handler(r, processor.clone())
-            .await
-            .unwrap();
+        let ids =
+            crate::lifecycle::listener::Listener::start_invocation_handler(r, processor.clone())
+                .await
+                .unwrap();
 
         let body_bytes = hyper::body::to_bytes(ids.into_body()).await?;
         let json: Value = serde_json::from_slice(&body_bytes).unwrap();
 
-        debug!("Received response from start invocation: {:?}", json);
         let mut span_id = json["span_id"].as_u64().unwrap_or(0);
         let mut trace_id = json["trace_id"].as_u64().unwrap_or(0);
         let parent_id = json["parent_id"].as_u64().unwrap_or(0);
-
-        debug!("Received trace_id: {}, span_id: {}, parent_id: {}", trace_id, span_id, parent_id);
 
         if span_id == 0 {
             span_id = random();
@@ -233,7 +226,6 @@ async fn process_tracing_headers(
             .await
             .override_ids(trace_id, parent_id, span_id);
     }
-
 
     Ok(resp_payload)
 }
@@ -317,7 +309,7 @@ mod tests {
             start_lwa_proxy(invocation_processor, trace_processor).expect("Failed to start proxy");
 
         let client = Client::builder().build_http::<Body>();
-        let uri_with_schema = format!("http://{}", proxy_uri);
+        let uri_with_schema = format!("http://{proxy_uri}");
         let mut ask_proxy = client
             .get(Uri::try_from(uri_with_schema.clone()).unwrap())
             .await;
