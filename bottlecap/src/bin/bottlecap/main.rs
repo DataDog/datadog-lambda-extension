@@ -335,11 +335,6 @@ async fn extension_loop_active(
         .await,
     );
 
-    let _ = start_lwa_proxy(
-        Arc::clone(&invocation_processor),
-        Arc::clone(&trace_processor),
-    );
-
     let trace_agent_tx = trace_agent.get_sender_copy();
 
     tokio::spawn(async move {
@@ -359,6 +354,12 @@ async fn extension_loop_active(
             error!("Error starting hello agent: {e:?}");
         }
     });
+
+    let _ = start_lwa_proxy(
+        Arc::clone(&invocation_processor),
+        Arc::clone(&trace_processor),
+    );
+
 
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));

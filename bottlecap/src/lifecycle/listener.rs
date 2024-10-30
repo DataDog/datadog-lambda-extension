@@ -83,7 +83,7 @@ impl Listener {
         }
     }
 
-    async fn start_invocation_handler(
+    pub async fn start_invocation_handler(
         req: Request<Body>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
@@ -96,7 +96,7 @@ impl Listener {
 
                 let headers = Self::headers_to_map(parts.headers);
 
-                processor.on_invocation_start(headers, body);
+                let (span_id, trace_id, parent_id) = processor.on_invocation_start(headers, body);
 
                 let mut response = Response::builder().status(200);
 
@@ -123,7 +123,11 @@ impl Listener {
 
                 drop(processor);
 
-                response.body(Body::from(json!({}).to_string()))
+                response.body(Body::from(json!({
+                    "span_id": span_id,
+                    "trace_id": trace_id,
+                    "parent_id": parent_id
+                }).to_string()))
             }
             Err(e) => {
                 error!("Could not read start invocation request body {e}");
@@ -150,7 +154,6 @@ impl Listener {
         }
         let headers = parts.headers;
 
-        let mut processor = invocation_processor.lock().await;
 
         // todo: fix this, code is a copy of the existing logic in Go, not accounting
         // when a 128 bit trace id exist
@@ -175,8 +178,7 @@ impl Listener {
             }
         }
 
-        processor.on_invocation_end(trace_id, span_id, parent_id, parsed_status);
-        drop(processor);
+        invocation_processor.lock().await.on_invocation_end(trace_id, span_id, parent_id, parsed_status);
 
         Response::builder()
             .status(200)
