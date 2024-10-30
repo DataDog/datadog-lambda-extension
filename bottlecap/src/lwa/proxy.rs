@@ -7,6 +7,7 @@ use hyper::{Body, Client, Error, Request, Response, Server, Uri};
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 use rand::random;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -138,15 +139,16 @@ async fn intercept_tracer_headers(
         (hyper::Method::GET, "/2018-06-01/runtime/invocation/next") => {
             let (resp_part, resp_body) = response.into_parts();
             let resp_payload =
-                process_tracing_headers(span_generator, processor, resp_body).await?;
+                process_tracing_headers(span_generator, Arc::clone(&processor), resp_body).await?;
 
             let mut rebuild_response = Response::builder()
                 .status(resp_part.status)
                 .version(resp_part.version)
-                .body(Body::from(resp_payload))
+                .body(Body::from(resp_payload.clone()))
                 .unwrap();
 
             *rebuild_response.headers_mut() = resp_part.headers;
+
             Ok(rebuild_response)
         }
         (hyper::Method::GET, path)
@@ -164,28 +166,75 @@ async fn intercept_tracer_headers(
 }
 
 async fn process_tracing_headers(
-    span_generator: Arc<Mutex<impl TraceProcessor>>,
+    trace_processor: Arc<Mutex<impl TraceProcessor>>,
     processor: Arc<Mutex<Processor>>,
     resp_body: Body,
 ) -> Result<Bytes, Error> {
     let resp_payload = hyper::body::to_bytes(resp_body).await?;
-    let resp_json = deserialize_json(Ok(resp_payload.clone())).unwrap();
-    let vec = serde_json::to_vec(&resp_json);
+    let req_wrapper_in_resp_body = deserialize_json(Ok(resp_payload.clone())).unwrap();
+    let vec = serde_json::to_vec(&req_wrapper_in_resp_body);
+    let value = Value::String("".to_string());
     if vec.is_ok() {
-        let headers = resp_json.get("headers").unwrap();
-        let h = headers
+        let value1 = req_wrapper_in_resp_body.clone();
+        let headers = value1.get("headers").unwrap();
+        let h: HashMap<String, String> = headers
             .as_object()
             .unwrap()
             .iter()
             .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
             .collect();
 
-        let (span_id, trace_id, parent_id) = processor.lock().await.on_invocation_start(h, vec.unwrap());
-        span_generator
+        debug!("Starting invocation");
+        let value2 = value1.clone();
+        let mut r = Request::builder()
+            .uri("http://127.0.0.1:8124/lambda/start-invocation")
+            .method(hyper::Method::POST)
+            .body(Body::from(
+                value2
+                    .get("body")
+                    .unwrap_or(&value)
+                    .as_str()
+                    .unwrap()
+                    .to_string(), // Clone the string to extend its lifetime
+            ))
+            .unwrap();
+
+        for h1 in h {
+            r.headers_mut().insert(
+                hyper::header::HeaderName::from_bytes(h1.0.as_bytes()).unwrap(),
+                h1.1.parse().unwrap(),
+            );
+        }
+
+        let ids = crate::lifecycle::listener::Listener::start_invocation_handler(r, processor.clone())
+            .await
+            .unwrap();
+
+        let body_bytes = hyper::body::to_bytes(ids.into_body()).await?;
+        let json: Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        debug!("Received response from start invocation: {:?}", json);
+        let mut span_id = json["span_id"].as_u64().unwrap_or(0);
+        let mut trace_id = json["trace_id"].as_u64().unwrap_or(0);
+        let parent_id = json["parent_id"].as_u64().unwrap_or(0);
+
+        debug!("Received trace_id: {}, span_id: {}, parent_id: {}", trace_id, span_id, parent_id);
+
+        if span_id == 0 {
+            span_id = random();
+        }
+
+        if trace_id == 0 {
+            trace_id = random();
+        }
+
+        trace_processor
             .lock()
             .await
             .override_ids(trace_id, parent_id, span_id);
     }
+
+
     Ok(resp_payload)
 }
 
