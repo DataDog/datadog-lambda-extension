@@ -48,6 +48,7 @@ pub mod test_utils {
     use std::fs;
     use std::path::PathBuf;
 
+    #[must_use]
     pub fn read_json_file(file_name: &str) -> String {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("tests/payloads");

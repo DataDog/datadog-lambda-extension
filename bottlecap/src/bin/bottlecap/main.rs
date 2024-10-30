@@ -360,7 +360,6 @@ async fn extension_loop_active(
         Arc::clone(&trace_processor),
     );
 
-
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;

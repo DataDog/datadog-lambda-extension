@@ -123,11 +123,14 @@ impl Listener {
 
                 drop(processor);
 
-                response.body(Body::from(json!({
-                    "span_id": span_id,
-                    "trace_id": trace_id,
-                    "parent_id": parent_id
-                }).to_string()))
+                response.body(Body::from(
+                    json!({
+                        "span_id": span_id,
+                        "trace_id": trace_id,
+                        "parent_id": parent_id
+                    })
+                    .to_string(),
+                ))
             }
             Err(e) => {
                 error!("Could not read start invocation request body {e}");
@@ -154,7 +157,6 @@ impl Listener {
         }
         let headers = parts.headers;
 
-
         // todo: fix this, code is a copy of the existing logic in Go, not accounting
         // when a 128 bit trace id exist
         let mut trace_id = 0;
@@ -178,7 +180,12 @@ impl Listener {
             }
         }
 
-        invocation_processor.lock().await.on_invocation_end(trace_id, span_id, parent_id, parsed_status);
+        invocation_processor.lock().await.on_invocation_end(
+            trace_id,
+            span_id,
+            parent_id,
+            parsed_status,
+        );
 
         Response::builder()
             .status(200)
