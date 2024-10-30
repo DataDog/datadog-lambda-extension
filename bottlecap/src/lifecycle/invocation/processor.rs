@@ -426,7 +426,7 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) -> (u64, u64, u64) {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -465,6 +465,7 @@ impl Processor {
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.span.parent_id = inferred_span.span_id;
         }
+        (self.span.span_id, self.span.trace_id, self.span.parent_id)
     }
 
     fn extract_span_context(
