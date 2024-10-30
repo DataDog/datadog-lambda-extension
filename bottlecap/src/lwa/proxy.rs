@@ -180,11 +180,11 @@ async fn process_tracing_headers(
             .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
             .collect();
 
-        processor.lock().await.on_invocation_start(h, vec.unwrap());
+        let (span_id, trace_id, parent_id) = processor.lock().await.on_invocation_start(h, vec.unwrap());
         span_generator
             .lock()
             .await
-            .override_ids(random(), 0, random());
+            .override_ids(trace_id, parent_id, span_id);
     }
     Ok(resp_payload)
 }
