@@ -171,7 +171,7 @@ async fn intercept_tracer_headers(
             // case response to invocation, the *request* contains the returned
             // values and headers from lambda handler
             let parsed_body = serde_json::from_slice::<Value>(&request_body_waited);
-            crate::lifecycle::listener::Listener::trace_invocation_end(
+            crate::lifecycle::listener::trace_invocation_end(
                 processor.clone(),
                 req_parts.headers.clone(),
                 parsed_body,
@@ -202,7 +202,7 @@ async fn invoke_universal_instrumentation_start(
             .collect();
 
         let (mut span_id, mut trace_id, parent_id, _) =
-            crate::lifecycle::listener::Listener::trace_invocation_start(
+            crate::lifecycle::listener::trace_invocation_start(
                 Arc::clone(&processor),
                 headers_map,
                 resp_body.clone(),
