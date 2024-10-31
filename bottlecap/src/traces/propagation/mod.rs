@@ -212,7 +212,7 @@ pub mod tests {
     use super::*;
 
     lazy_static! {
-        static ref TRACE_ID: u128 = 171395628812617415352188477958425669623;
+        static ref TRACE_ID: u128 = 171_395_628_812_617_415_352_188_477_958_425_669_623;
         static ref TRACE_ID_LOWER_ORDER_BITS: u64 = *TRACE_ID as u64;
         static ref TRACE_ID_HEX: String = String::from("80f198ee56343ba864fe8b2a57d3eff7");
 
@@ -365,7 +365,7 @@ pub mod tests {
             None,
             VALID_DATADOG_HEADERS.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -382,7 +382,7 @@ pub mod tests {
             None,
             VALID_DATADOG_HEADERS_NO_PRIORITY.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(2),
@@ -404,7 +404,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::Datadog]),
             VALID_DATADOG_HEADERS.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -440,8 +440,8 @@ pub mod tests {
             Some(vec![TracePropagationStyle::TraceContext]),
             VALID_TRACECONTEXT_HEADERS_BASIC.clone(),
             SpanContext {
-                trace_id: 7277407061855694839,
-                span_id: 67667974448284343,
+                trace_id: 7_277_407_061_855_694_839,
+                span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(2),
                     mechanism: None,
@@ -460,8 +460,8 @@ pub mod tests {
             Some(vec![TracePropagationStyle::TraceContext]),
             VALID_TRACECONTEXT_HEADERS_RUM_NO_SAMPLING_DECISION.clone(),
             SpanContext {
-                trace_id: 7277407061855694839,
-                span_id: 67667974448284343,
+                trace_id: 7_277_407_061_855_694_839,
+                span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(0),
                     mechanism: None,
@@ -484,7 +484,7 @@ pub mod tests {
             None,
             ALL_VALID_HEADERS.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -496,9 +496,9 @@ pub mod tests {
                 ]),
                 links: vec![
                     SpanLink {
-                        trace_id: 7277407061855694839,
+                        trace_id: 7_277_407_061_855_694_839,
                         trace_id_high: 0,
-                        span_id: 67667974448284343,
+                        span_id: 67_667_974_448_284_343,
                         flags: 1,
                         tracestate: "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string(),
                         attributes: HashMap::from([
@@ -513,7 +513,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]),
             ALL_VALID_HEADERS.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -525,9 +525,9 @@ pub mod tests {
                 ]),
                 links: vec![
                     SpanLink {
-                        trace_id: 7277407061855694839,
+                        trace_id: 7_277_407_061_855_694_839,
                         trace_id_high: 0,
-                        span_id: 67667974448284343,
+                        span_id: 67_667_974_448_284_343,
                         flags: 1,
                         tracestate: "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string(),
                         attributes: HashMap::from([
@@ -543,7 +543,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::Datadog]),
             ALL_VALID_HEADERS.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -568,7 +568,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::None]),
             ALL_VALID_HEADERS.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -591,8 +591,8 @@ pub mod tests {
             Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]),
             DATADOG_TRACECONTEXT_MATCHING_TRACE_ID_HEADERS.clone(),
             SpanContext {
-                trace_id: 7277407061855694839,
-                span_id: 67667974448284343,
+                trace_id: 7_277_407_061_855_694_839,
+                span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(1),
                     mechanism: None,
@@ -612,7 +612,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]),
             NO_TRACESTATE_SUPPORT_NOT_MATCHING_TRACE_ID.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -624,9 +624,9 @@ pub mod tests {
                 ]),
                 links: vec![
                     SpanLink {
-                        trace_id: 7277407061855694839,
+                        trace_id: 7_277_407_061_855_694_839,
                         trace_id_high: 0,
-                        span_id: 67667974448284343,
+                        span_id: 67_667_974_448_284_343,
                         flags: 0,
                         tracestate: "dd=o:rum".to_string(),
                         attributes: HashMap::from([
@@ -653,7 +653,7 @@ pub mod tests {
                 ("traceparent".to_string(), "00-000000000000000080f198ee56343ba8-000000000000000a-01".to_string()),
             ]),
             SpanContext {
-                trace_id: 9291375655657946024,
+                trace_id: 9_291_375_655_657_946_024,
                 span_id: 10,
                 sampling: Some(Sampling {
                     priority: Some(2),
@@ -672,8 +672,8 @@ pub mod tests {
             Some(vec![TracePropagationStyle::TraceContext, TracePropagationStyle::Datadog]),
             ALL_HEADERS_CHAOTIC_2.clone(),
             SpanContext {
-                trace_id: 7277407061855694839,
-                span_id: 67667974448284343,
+                trace_id: 7_277_407_061_855_694_839,
+                span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(2),
                     mechanism: None,
@@ -688,11 +688,11 @@ pub mod tests {
                 ]),
                 links: vec![
                     SpanLink {
-                        trace_id: 13088165645273925489,
+                        trace_id: 13_088_165_645_273_925_489,
                         trace_id_high: 0,
                         span_id: 5678,
                         flags: 1,
-                        tracestate: "".to_string(),
+                        tracestate: String::new(),
                         attributes: HashMap::from([
                             ("reason".to_string(), "terminated_context".to_string()),
                             ("context_headers".to_string(), "datadog".to_string()),
@@ -705,8 +705,8 @@ pub mod tests {
             Some(vec![TracePropagationStyle::TraceContext, TracePropagationStyle::Datadog]),
             ALL_VALID_HEADERS.clone(),
             SpanContext {
-                trace_id: 7277407061855694839,
-                span_id: 67667974448284343,
+                trace_id: 7_277_407_061_855_694_839,
+                span_id: 67_667_974_448_284_343,
                 sampling: Some(Sampling {
                     priority: Some(2),
                     mechanism: None,
@@ -721,11 +721,11 @@ pub mod tests {
                 ]),
                 links: vec![
                     SpanLink {
-                        trace_id: 13088165645273925489,
+                        trace_id: 13_088_165_645_273_925_489,
                         trace_id_high: 0,
                         span_id: 5678,
                         flags: 1,
-                        tracestate: "".to_string(),
+                        tracestate: String::new(),
                         attributes: HashMap::from([
                             ("reason".to_string(), "terminated_context".to_string()),
                             ("context_headers".to_string(), "datadog".to_string()),
@@ -739,7 +739,7 @@ pub mod tests {
             Some(vec![TracePropagationStyle::Datadog, TracePropagationStyle::TraceContext]),
             ALL_VALID_HEADERS.clone(),
             SpanContext {
-                trace_id: 13088165645273925489,
+                trace_id: 13_088_165_645_273_925_489,
                 span_id: 5678,
                 sampling: Some(Sampling {
                     priority: Some(1),
@@ -751,11 +751,11 @@ pub mod tests {
                 ]),
                 links: vec![
                     SpanLink {
-                        trace_id: 7277407061855694839,
+                        trace_id: 7_277_407_061_855_694_839,
                         // this should be `9291375655657946024` not `0`, but we don't have this data
                         // with the current definition of `SpanContext`
                         trace_id_high: 0,
-                        span_id: 67667974448284343,
+                        span_id: 67_667_974_448_284_343,
                         flags: 1,
                         tracestate: "dd=s:2;o:rum;t.dm:-4;t.usr.id:baz64,congo=t61rcWkgMz".to_string(),
                         attributes: HashMap::from([

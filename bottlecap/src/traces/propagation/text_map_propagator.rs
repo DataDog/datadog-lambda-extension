@@ -505,8 +505,8 @@ mod test {
             .extract(&headers)
             .expect("couldn't extract trace context");
 
-        assert_eq!(context.trace_id, 7277407061855694839);
-        assert_eq!(context.span_id, 67667974448284343);
+        assert_eq!(context.trace_id, 7_277_407_061_855_694_839);
+        assert_eq!(context.span_id, 67_667_974_448_284_343);
         assert_eq!(context.sampling.unwrap().priority, Some(2));
         assert_eq!(context.origin, Some("rum".to_string()));
         assert_eq!(

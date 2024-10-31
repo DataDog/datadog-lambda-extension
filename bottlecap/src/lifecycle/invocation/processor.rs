@@ -9,17 +9,19 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use serde_json::{json, Value};
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 use tracing::debug;
 
+use crate::traces::trace_processor::TraceProcessor;
 use crate::{
-    config::{self, AwsConfig},
+    config,
+    config::AwsConfig,
     lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
     proc::{self, NetworkData},
     tags::provider,
     traces::{
         context::SpanContext,
         propagation::{DatadogCompositePropagator, Propagator},
-        trace_processor,
     },
 };
 
@@ -106,7 +108,7 @@ impl Processor {
         duration_ms: f64,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+        trace_processor: Arc<Mutex<impl TraceProcessor>>,
         trace_agent_tx: Sender<SendData>,
     ) {
         self.context_buffer
@@ -155,12 +157,13 @@ impl Processor {
                 client_computed_stats: false,
             };
 
-            let send_data = trace_processor.process_traces(
+            let send_data = trace_processor.lock().await.process_traces(
                 config.clone(),
                 tags_provider.clone(),
                 header_tags,
                 vec![traces],
                 body_size,
+                true,
             );
 
             if let Err(e) = trace_agent_tx.send(send_data).await {
@@ -196,7 +199,11 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn on_invocation_start(
+        &mut self,
+        headers: HashMap<String, String>,
+        payload: Vec<u8>,
+    ) -> (u64, u64, u64) {
         self.tracer_detected = true;
 
         // Reset trace context
@@ -229,6 +236,7 @@ impl Processor {
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.span.parent_id = inferred_span.span_id;
         }
+        (self.span.span_id, self.span.trace_id, self.span.parent_id)
     }
 
     fn extract_span_context(
