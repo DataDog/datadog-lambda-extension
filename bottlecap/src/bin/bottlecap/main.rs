@@ -451,6 +451,7 @@ async fn extension_loop_active(
                                         request_id, status
                                     );
 
+                                    // set cpu utilization metrics here to avoid accounting for extra idle time
                                     if let Some(offsets) = enhanced_metric_data {
                                         lambda_enhanced_metrics.set_cpu_utilization_enhanced_metrics(offsets.cpu_offset, offsets.uptime_offset);
                                     }
