@@ -363,9 +363,9 @@ mod tests {
         let uptime_offset = Some(50.0);
 
         let enhanced_metric_data = Some(EnhancedMetricData {
-            network_offset: network_offset,
-            cpu_offset: cpu_offset,
-            uptime_offset: uptime_offset,
+            network_offset,
+            cpu_offset,
+            uptime_offset,
         });
 
         buffer.add_enhanced_metric_data(&request_id, enhanced_metric_data.clone());
