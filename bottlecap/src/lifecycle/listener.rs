@@ -6,13 +6,15 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hyper::body::Bytes;
+use hyper::http::response::Builder;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{http, Body, Method, Request, Response, StatusCode};
-use serde_json::json;
+use hyper::{http, Body, HeaderMap, Method, Request, Response, StatusCode};
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
-use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
+use crate::lifecycle::invocation::processor::{Processor as InvocationProcessor, Processor};
 use crate::traces::propagation::text_map_propagator::{
     DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
     DATADOG_TRACE_ID_KEY,
@@ -83,7 +85,7 @@ impl Listener {
         }
     }
 
-    pub async fn start_invocation_handler(
+    async fn start_invocation_handler(
         req: Request<Body>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
@@ -91,37 +93,12 @@ impl Listener {
         let (parts, body) = req.into_parts();
         match hyper::body::to_bytes(body).await {
             Ok(b) => {
-                let body = b.to_vec();
-                let mut processor = invocation_processor.lock().await;
-
-                let headers = Self::headers_to_map(parts.headers);
-
-                let (span_id, trace_id, parent_id) = processor.on_invocation_start(headers, body);
-
-                let mut response = Response::builder().status(200);
-
-                // If a `SpanContext` exists, then tell the tracer to use it.
-                // todo: update this whole code with DatadogHeaderPropagator::inject
-                // since this logic looks messy
-                if let Some(sp) = &processor.extracted_span_context {
-                    response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
-                    if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
-                        response =
-                            response.header(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string());
-                    }
-
-                    // Handle 128 bit trace ids
-                    if let Some(trace_id_higher_order_bits) =
-                        sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
-                    {
-                        response = response.header(
-                            DATADOG_TAGS_KEY,
-                            format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
-                        );
-                    }
-                }
-
-                drop(processor);
+                let (span_id, trace_id, parent_id, response) = Self::trace_invocation_start(
+                    invocation_processor,
+                    Self::headers_to_map(parts.headers),
+                    b,
+                )
+                .await;
 
                 response.body(Body::from(
                     json!({
@@ -142,21 +119,69 @@ impl Listener {
         }
     }
 
+    pub(crate) async fn trace_invocation_start(
+        invocation_processor: Arc<Mutex<Processor>>,
+        headers: HashMap<String, String>,
+        b: Bytes,
+    ) -> (u64, u64, u64, Builder) {
+        let body = b.to_vec();
+        let mut processor = invocation_processor.lock().await;
+
+        let (span_id, trace_id, parent_id) = processor.on_invocation_start(headers, body);
+
+        let mut response = Response::builder().status(200);
+
+        // If a `SpanContext` exists, then tell the tracer to use it.
+        // todo: update this whole code with DatadogHeaderPropagator::inject
+        // since this logic looks messy
+        if let Some(sp) = &processor.extracted_span_context {
+            response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
+            if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
+                response = response.header(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string());
+            }
+
+            // Handle 128 bit trace ids
+            if let Some(trace_id_higher_order_bits) =
+                sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
+            {
+                response = response.header(
+                    DATADOG_TAGS_KEY,
+                    format!(
+                        "{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"
+                    ),
+                );
+            }
+        }
+
+        drop(processor);
+        (span_id, trace_id, parent_id, response)
+    }
+
     async fn end_invocation_handler(
         req: Request<Body>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         debug!("Received end invocation request");
         let (parts, body) = req.into_parts();
-        let parsed_body = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(body).await.unwrap_or_default(),
-        );
+        let parsed_body =
+            serde_json::from_slice::<Value>(&hyper::body::to_bytes(body).await.unwrap_or_default());
+
+        Self::trace_invocation_end(invocation_processor, parts.headers, parsed_body).await;
+
+        Response::builder()
+            .status(200)
+            .body(Body::from(json!({}).to_string()))
+    }
+
+    pub(crate) async fn trace_invocation_end(
+        invocation_processor: Arc<Mutex<Processor>>,
+        headers: HeaderMap,
+        parsed_body: serde_json::Result<Value>,
+    ) {
         let mut parsed_status: Option<String> = None;
         if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
             parsed_status = Some(status_code.to_string());
         }
-        let headers = parts.headers;
-
         // todo: fix this, code is a copy of the existing logic in Go, not accounting
         // when a 128 bit trace id exist
         let mut trace_id = 0;
@@ -186,10 +211,6 @@ impl Listener {
             parent_id,
             parsed_status,
         );
-
-        Response::builder()
-            .status(200)
-            .body(Body::from(json!({}).to_string()))
     }
 
     fn hello_handler() -> http::Result<Response<Body>> {
