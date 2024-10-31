@@ -93,7 +93,7 @@ impl Listener {
         let (parts, body) = req.into_parts();
         match hyper::body::to_bytes(body).await {
             Ok(b) => {
-                let (span_id, trace_id, parent_id, response) = Self::trace_invocation_start(
+                let (span_id, trace_id, parent_id, response) = trace_invocation_start(
                     invocation_processor,
                     Self::headers_to_map(parts.headers),
                     b,
@@ -119,44 +119,6 @@ impl Listener {
         }
     }
 
-    pub(crate) async fn trace_invocation_start(
-        invocation_processor: Arc<Mutex<Processor>>,
-        headers: HashMap<String, String>,
-        b: Bytes,
-    ) -> (u64, u64, u64, Builder) {
-        let body = b.to_vec();
-        let mut processor = invocation_processor.lock().await;
-
-        let (span_id, trace_id, parent_id) = processor.on_invocation_start(headers, body);
-
-        let mut response = Response::builder().status(200);
-
-        // If a `SpanContext` exists, then tell the tracer to use it.
-        // todo: update this whole code with DatadogHeaderPropagator::inject
-        // since this logic looks messy
-        if let Some(sp) = &processor.extracted_span_context {
-            response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
-            if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
-                response = response.header(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string());
-            }
-
-            // Handle 128 bit trace ids
-            if let Some(trace_id_higher_order_bits) =
-                sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
-            {
-                response = response.header(
-                    DATADOG_TAGS_KEY,
-                    format!(
-                        "{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"
-                    ),
-                );
-            }
-        }
-
-        drop(processor);
-        (span_id, trace_id, parent_id, response)
-    }
-
     async fn end_invocation_handler(
         req: Request<Body>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
@@ -166,51 +128,11 @@ impl Listener {
         let parsed_body =
             serde_json::from_slice::<Value>(&hyper::body::to_bytes(body).await.unwrap_or_default());
 
-        Self::trace_invocation_end(invocation_processor, parts.headers, parsed_body).await;
+        trace_invocation_end(invocation_processor, parts.headers, parsed_body).await;
 
         Response::builder()
             .status(200)
             .body(Body::from(json!({}).to_string()))
-    }
-
-    pub(crate) async fn trace_invocation_end(
-        invocation_processor: Arc<Mutex<Processor>>,
-        headers: HeaderMap,
-        parsed_body: serde_json::Result<Value>,
-    ) {
-        let mut parsed_status: Option<String> = None;
-        if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
-            parsed_status = Some(status_code.to_string());
-        }
-        // todo: fix this, code is a copy of the existing logic in Go, not accounting
-        // when a 128 bit trace id exist
-        let mut trace_id = 0;
-        if let Some(header) = headers.get("x-datadog-trace-id") {
-            if let Ok(header_value) = header.to_str() {
-                trace_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        let mut span_id = 0;
-        if let Some(header) = headers.get("x-datadog-span-id") {
-            if let Ok(header_value) = header.to_str() {
-                span_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        let mut parent_id = 0;
-        if let Some(header) = headers.get("x-datadog-parent-id") {
-            if let Ok(header_value) = header.to_str() {
-                parent_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        invocation_processor.lock().await.on_invocation_end(
-            trace_id,
-            span_id,
-            parent_id,
-            parsed_status,
-        );
     }
 
     fn hello_handler() -> http::Result<Response<Body>> {
@@ -220,7 +142,7 @@ impl Listener {
             .body(Body::from(json!({}).to_string()))
     }
 
-    fn headers_to_map(headers: http::HeaderMap) -> HashMap<String, String> {
+    fn headers_to_map(headers: HeaderMap) -> HashMap<String, String> {
         headers
             .iter()
             .map(|(k, v)| {
@@ -231,4 +153,79 @@ impl Listener {
             })
             .collect()
     }
+}
+
+pub(crate) async fn trace_invocation_end(
+    invocation_processor: Arc<Mutex<Processor>>,
+    headers: HeaderMap,
+    parsed_body: serde_json::Result<Value>,
+) {
+    let mut parsed_status: Option<String> = None;
+    if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
+        parsed_status = Some(status_code.to_string());
+    }
+    // todo: fix this, code is a copy of the existing logic in Go, not accounting
+    // when a 128 bit trace id exist
+    let mut trace_id = 0;
+    if let Some(header) = headers.get("x-datadog-trace-id") {
+        if let Ok(header_value) = header.to_str() {
+            trace_id = header_value.parse::<u64>().unwrap_or(0);
+        }
+    }
+
+    let mut span_id = 0;
+    if let Some(header) = headers.get("x-datadog-span-id") {
+        if let Ok(header_value) = header.to_str() {
+            span_id = header_value.parse::<u64>().unwrap_or(0);
+        }
+    }
+
+    let mut parent_id = 0;
+    if let Some(header) = headers.get("x-datadog-parent-id") {
+        if let Ok(header_value) = header.to_str() {
+            parent_id = header_value.parse::<u64>().unwrap_or(0);
+        }
+    }
+
+    invocation_processor.lock().await.on_invocation_end(
+        trace_id,
+        span_id,
+        parent_id,
+        parsed_status,
+    );
+}
+pub(crate) async fn trace_invocation_start(
+    invocation_processor: Arc<Mutex<Processor>>,
+    headers: HashMap<String, String>,
+    b: Bytes,
+) -> (u64, u64, u64, Builder) {
+    let body = b.to_vec();
+    let mut processor = invocation_processor.lock().await;
+
+    let (span_id, trace_id, parent_id) = processor.on_invocation_start(headers, body);
+
+    let mut response = Response::builder().status(200);
+
+    // If a `SpanContext` exists, then tell the tracer to use it.
+    // todo: update this whole code with DatadogHeaderPropagator::inject
+    // since this logic looks messy
+    if let Some(sp) = &processor.extracted_span_context {
+        response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
+        if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
+            response = response.header(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string());
+        }
+
+        // Handle 128 bit trace ids
+        if let Some(trace_id_higher_order_bits) =
+            sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
+        {
+            response = response.header(
+                DATADOG_TAGS_KEY,
+                format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
+            );
+        }
+    }
+
+    drop(processor);
+    (span_id, trace_id, parent_id, response)
 }
