@@ -118,100 +118,96 @@ async fn intercept_tracer_headers(
     processor: Arc<Mutex<Processor>>,
     aws_runtime_addr: Uri,
 ) -> Result<Response<Body>, Error> {
+    // request received from lambda handler directed to AWS runtime API
+    // it can be either invocation/next, or a lambda handler response to it
     let (req_parts, req_body) = req.into_parts();
 
     let mut redirect_uri = aws_runtime_addr.into_parts();
     redirect_uri.path_and_query = Some(req_parts.uri.path_and_query().unwrap().clone());
     let new_uri = Uri::from_parts(redirect_uri).unwrap();
 
+    let request_body_waited = hyper::body::to_bytes(req_body).await?;
+
     let redirected_request = Request::builder()
         .method(req_parts.method.clone())
         .uri(new_uri)
-        .body(req_body)
+        .body(Body::from(request_body_waited.clone()))
         .unwrap_or_else(|e| {
             error!("Error building redirected request: {}", e);
             Request::new(Body::empty())
         });
 
+    // request forwarded to AWS runtime API
     let response = client.request(redirected_request).await?;
 
     match (req_parts.method, req_parts.uri.path()) {
         (hyper::Method::GET, "/2018-06-01/runtime/invocation/next") => {
+            // case invocation/next, the *response body* contains the payload of
+            // the request that the lambda handler will see
             let (resp_part, resp_body) = response.into_parts();
-            let resp_payload =
-                process_tracing_headers(span_generator, Arc::clone(&processor), resp_body).await?;
+            let resp_payload = hyper::body::to_bytes(resp_body).await?;
+            invoke_universal_instrumentation_start(
+                Arc::clone(&span_generator),
+                Arc::clone(&processor),
+                resp_payload.clone(),
+            )
+            .await;
 
+            // Response is not cloneable, so it must be built again
             let mut rebuild_response = Response::builder()
                 .status(resp_part.status)
                 .version(resp_part.version)
-                .body(Body::from(resp_payload.clone()))
+                .body(Body::from(resp_payload))
                 .unwrap();
-
             *rebuild_response.headers_mut() = resp_part.headers;
 
+            // complete forwarding to the lambda handler
             Ok(rebuild_response)
         }
-        (hyper::Method::GET, path)
+        (hyper::Method::POST, path)
             if path.starts_with("/2018-06-01/runtime/invocation/")
                 && path.ends_with("/response") =>
         {
-            processor
-                .lock()
-                .await
-                .on_invocation_end(random(), 0, 0, None);
+            // case response to invocation, the *request* contains the returned
+            // values and headers from lambda handler
+            let parsed_body = serde_json::from_slice::<Value>(&request_body_waited);
+            crate::lifecycle::listener::Listener::trace_invocation_end(
+                processor.clone(),
+                req_parts.headers.clone(),
+                parsed_body,
+            )
+            .await;
+            // only parsing of the original request (handler -> runtime API) is needed so
+            // the original response can be used
             Ok(response)
         }
         _ => Ok(response),
     }
 }
 
-async fn process_tracing_headers(
+async fn invoke_universal_instrumentation_start(
     trace_processor: Arc<Mutex<impl TraceProcessor>>,
     processor: Arc<Mutex<Processor>>,
-    resp_body: Body,
-) -> Result<Bytes, Error> {
-    let resp_payload = hyper::body::to_bytes(resp_body).await?;
-    let req_wrapper_in_resp_body = deserialize_json(Ok(resp_payload.clone())).unwrap();
+    resp_body: Bytes,
+) {
+    let req_wrapper_in_resp_body = deserialize_json(Ok(resp_body.clone())).unwrap();
     let vec = serde_json::to_vec(&req_wrapper_in_resp_body);
     if vec.is_ok() {
         let headers = req_wrapper_in_resp_body.get("headers").unwrap();
-        let mut r = Request::builder()
-            .uri("http://127.0.0.1:8124/lambda/start-invocation")
-            .method(hyper::Method::POST)
-            .body(Body::from(
-                headers
-                    .get("body")
-                    .unwrap_or(&Value::String(String::new()))
-                    .as_str()
-                    .unwrap()
-                    .to_string(), // Clone the string to extend its lifetime
-            ))
-            .unwrap();
-
         let headers_map: HashMap<String, String> = headers
             .as_object()
             .unwrap()
             .iter()
             .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
             .collect();
-        for h1 in headers_map {
-            r.headers_mut().insert(
-                hyper::header::HeaderName::from_bytes(h1.0.as_bytes()).unwrap(),
-                h1.1.parse().unwrap(),
-            );
-        }
 
-        let ids =
-            crate::lifecycle::listener::Listener::start_invocation_handler(r, processor.clone())
-                .await
-                .unwrap();
-
-        let body_bytes = hyper::body::to_bytes(ids.into_body()).await?;
-        let json: Value = serde_json::from_slice(&body_bytes).unwrap();
-
-        let mut span_id = json["span_id"].as_u64().unwrap_or(0);
-        let mut trace_id = json["trace_id"].as_u64().unwrap_or(0);
-        let parent_id = json["parent_id"].as_u64().unwrap_or(0);
+        let (mut span_id, mut trace_id, parent_id, _) =
+            crate::lifecycle::listener::Listener::trace_invocation_start(
+                Arc::clone(&processor),
+                headers_map,
+                resp_body.clone(),
+            )
+            .await;
 
         if span_id == 0 {
             span_id = random();
@@ -226,8 +222,6 @@ async fn process_tracing_headers(
             .await
             .override_ids(trace_id, parent_id, span_id);
     }
-
-    Ok(resp_payload)
 }
 
 fn deserialize_json(response: Result<Bytes, Error>) -> Option<Value> {
