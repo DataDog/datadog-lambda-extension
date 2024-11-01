@@ -79,6 +79,8 @@ impl Processor {
     /// Given a `request_id`, add the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        self.context_buffer.create_context(&request_id);
+
         let network_offset: Option<NetworkData> = proc::get_network_data().ok();
         self.context_buffer
             .add_network_offset(&request_id, network_offset);
