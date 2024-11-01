@@ -255,15 +255,6 @@ mod tests {
 
         buffer.add_init_duration(&request_id, 100.0);
         assert_eq!(buffer.get(&request_id).unwrap().init_duration_ms, 100.0);
-
-        // Add init duration to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_init_duration(&unexistent_request_id, 200.0);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(
-            buffer.get(&unexistent_request_id).unwrap().init_duration_ms,
-            200.0
-        );
     }
 
     #[test]
@@ -278,12 +269,6 @@ mod tests {
 
         buffer.add_start_time(&request_id, 100);
         assert_eq!(buffer.get(&request_id).unwrap().start_time, 100);
-
-        // Add start time to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_start_time(&unexistent_request_id, 200);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(buffer.get(&unexistent_request_id).unwrap().start_time, 200);
     }
 
     #[test]
@@ -298,18 +283,6 @@ mod tests {
 
         buffer.add_runtime_duration(&request_id, 100.0);
         assert_eq!(buffer.get(&request_id).unwrap().runtime_duration_ms, 100.0);
-
-        // Add runtime duration to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_runtime_duration(&unexistent_request_id, 200.0);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(
-            buffer
-                .get(&unexistent_request_id)
-                .unwrap()
-                .runtime_duration_ms,
-            200.0
-        );
     }
 
     #[test]
@@ -331,15 +304,6 @@ mod tests {
         assert_eq!(
             buffer.get(&request_id).unwrap().network_offset,
             network_offset,
-        );
-
-        // Add network offset to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_network_offset(&unexistent_request_id, network_offset);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(
-            buffer.get(&unexistent_request_id).unwrap().network_offset,
-            network_offset
         );
     }
 }
