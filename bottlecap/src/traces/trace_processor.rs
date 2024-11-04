@@ -17,6 +17,7 @@ use crate::tags::provider::Provider;
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
+use tracing_core::field::debug;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -33,7 +34,7 @@ struct ChunkProcessor {
     tags_provider: Arc<Provider>,
     override_trace_id: Option<u64>,
     override_span_id: Option<u64>,
-    substitute_parent_span_id: Option<(u64, u64)>,
+    substitute_parent_span_id: Option<u64>,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -52,10 +53,9 @@ impl TraceChunkProcessor for ChunkProcessor {
                 .insert("_dd.origin".to_string(), "lambda".to_string());
             obfuscate_span(span, &self.obfuscation_config);
 
-            if self.substitute_parent_span_id.is_some()
-                && self.substitute_parent_span_id.unwrap().0 == span.parent_id
-            {
-                span.parent_id = self.substitute_parent_span_id.unwrap().1;
+            debug!("AG: Processing span {:?}", span);
+            if self.substitute_parent_span_id.is_some() {
+                span.parent_id = self.substitute_parent_span_id.unwrap();
             }
             if self.override_trace_id.is_some() {
                 span.trace_id = self.override_trace_id.unwrap();
@@ -63,6 +63,7 @@ impl TraceChunkProcessor for ChunkProcessor {
             if self.override_span_id.is_some() {
                 span.span_id = self.override_span_id.unwrap();
             }
+            debug!("AG: Processing span override {:?}", span);
         }
     }
 }
@@ -117,8 +118,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
     }
 
     fn override_ids(&mut self, trace_id: u64, parent_id: u64, aws_lambda_span_id: u64) {
-        self.override_trace_id = Some(trace_id);
-        self.root_parent_id = Some(parent_id);
+        self.override_trace_id = None;
+        if parent_id != 0 {
+            self.root_parent_id = Some(parent_id);
+        }
         self.aws_lambda_span_id = Some(aws_lambda_span_id);
     }
 }
@@ -141,27 +144,32 @@ impl ServerlessTraceProcessor {
         // - the aws.lambda processor span, which will need to get the trace_id if available and re-parented only if there was
         // a substitute_parent_span_id. Inferred span
 
-        let override_parent_with_lambda_span =
-            if !aws_lambda_span && self.aws_lambda_span_id.is_some() {
-                Some((
-                    self.root_parent_id.unwrap_or(0),
-                    self.aws_lambda_span_id.unwrap(),
-                ))
-            } else {
-                None
-            };
+        debug!(
+            "AG: Configuring chunk processor for aws lambda span {} {:?} {:?}",
+            aws_lambda_span, self.aws_lambda_span_id, self.root_parent_id
+        );
 
-        let span_id_override = if aws_lambda_span {
-            self.aws_lambda_span_id
+        // let override_parent_with_lambda_span =
+        //     if !aws_lambda_span && self.aws_lambda_span_id.is_some() {
+        //         Some((
+        //             self.root_parent_id.unwrap_or(0),
+        //             self.aws_lambda_span_id.unwrap(),
+        //         ))
+        //     } else {
+        //         None
+        //     };
+
+        let (original_parent_id, span_id_override) = if aws_lambda_span {
+            (self.root_parent_id, self.aws_lambda_span_id)
         } else {
-            None
+            (None, None)
         };
 
         ChunkProcessor {
             obfuscation_config: self.obfuscation_config.clone(),
             tags_provider: tags_provider.clone(),
-            override_trace_id: self.override_trace_id,
-            substitute_parent_span_id: override_parent_with_lambda_span,
+            override_trace_id: None,
+            substitute_parent_span_id: original_parent_id,
             override_span_id: span_id_override,
         }
     }

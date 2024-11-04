@@ -168,22 +168,28 @@ pub(crate) async fn trace_invocation_end(
     // when a 128 bit trace id exist
     let mut trace_id = 0;
     if let Some(header) = headers.get("x-datadog-trace-id") {
+        debug!("AG: trace_id header: {:?}", header);
         if let Ok(header_value) = header.to_str() {
             trace_id = header_value.parse::<u64>().unwrap_or(0);
+            debug!("AG: trace_id: {trace_id}");
         }
     }
 
     let mut span_id = 0;
     if let Some(header) = headers.get("x-datadog-span-id") {
+        debug!("AG: span header: {:?}", header);
         if let Ok(header_value) = header.to_str() {
             span_id = header_value.parse::<u64>().unwrap_or(0);
+            debug!("AG: span_id: {trace_id}");
         }
     }
 
     let mut parent_id = 0;
     if let Some(header) = headers.get("x-datadog-parent-id") {
+        debug!("AG: parent header: {:?}", header);
         if let Ok(header_value) = header.to_str() {
             parent_id = header_value.parse::<u64>().unwrap_or(0);
+            debug!("AG: parent_id: {trace_id}");
         }
     }
 

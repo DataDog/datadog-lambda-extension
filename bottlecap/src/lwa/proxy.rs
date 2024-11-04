@@ -146,20 +146,32 @@ async fn intercept_tracer_headers(
             // the request that the lambda handler will see
             let (resp_part, resp_body) = response.into_parts();
             let resp_payload = hyper::body::to_bytes(resp_body).await?;
-            invoke_universal_instrumentation_start(
+
+            debug!("body before headers {:?}", resp_payload.clone());
+            let body_with_headers = invoke_universal_instrumentation_start(
                 Arc::clone(&span_generator),
                 Arc::clone(&processor),
                 resp_payload.clone(),
             )
             .await;
 
+            debug!("Body with headers {}", body_with_headers);
+
             // Response is not cloneable, so it must be built again
             let mut rebuild_response = Response::builder()
                 .status(resp_part.status)
                 .version(resp_part.version)
-                .body(Body::from(resp_payload))
+                .body(Body::from(serde_json::to_vec(&body_with_headers).unwrap()))
                 .unwrap();
-            *rebuild_response.headers_mut() = resp_part.headers;
+            debug!("top resp headers {:?}", resp_part.headers);
+
+            *rebuild_response.headers_mut() = resp_part.headers.clone();
+            rebuild_response.headers_mut().insert(
+                "content-length",
+                format!("{}", body_with_headers.to_string().len())
+                    .parse()
+                    .unwrap(),
+            );
 
             // complete forwarding to the lambda handler
             Ok(rebuild_response)
@@ -171,6 +183,8 @@ async fn intercept_tracer_headers(
             // case response to invocation, the *request* contains the returned
             // values and headers from lambda handler
             let parsed_body = serde_json::from_slice::<Value>(&request_body_waited);
+            debug!("AG end invocation body {:?}", parsed_body);
+            debug!("AG end invocation headers {:?}", req_parts.headers.clone());
             crate::lifecycle::listener::trace_invocation_end(
                 processor.clone(),
                 req_parts.headers.clone(),
@@ -189,39 +203,64 @@ async fn invoke_universal_instrumentation_start(
     trace_processor: Arc<Mutex<impl TraceProcessor>>,
     processor: Arc<Mutex<Processor>>,
     resp_body: Bytes,
-) {
-    let req_wrapper_in_resp_body = deserialize_json(Ok(resp_body.clone())).unwrap();
-    let vec = serde_json::to_vec(&req_wrapper_in_resp_body);
-    if vec.is_ok() {
-        let headers = req_wrapper_in_resp_body.get("headers").unwrap();
-        let headers_map: HashMap<String, String> = headers
+) -> Value {
+    let mut req_wrapper_in_resp_body = deserialize_json(Ok(resp_body.clone())).unwrap();
+
+    let headers = req_wrapper_in_resp_body.get("headers").unwrap();
+    let mut headers_map: HashMap<String, String> = headers
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
+        .collect();
+
+    if !headers_map.contains_key("x-datadog-trace-id") {
+        let trace_id: u64 = random();
+        debug!(
+            "AG: No trace id found in headers, generating new one {}",
+            trace_id
+        );
+        headers_map.insert("x-datadog-trace-id".to_string(), trace_id.to_string());
+    }
+
+    let mut existing_parent = 0;
+    if headers_map.contains_key("x-datadog-parent-id") {
+        existing_parent = headers_map
+            .get("x-datadog-parent-id")
+            .unwrap()
+            .parse()
+            .unwrap();
+        debug!("AG: Found parent id in headers {}", existing_parent);
+    }
+    let aws_lambda_span_id: u64 = random();
+    headers_map.insert(
+        "x-datadog-parent-id".to_string(),
+        aws_lambda_span_id.to_string(),
+    );
+
+    crate::lifecycle::listener::trace_invocation_start(
+        Arc::clone(&processor),
+        headers_map.clone(),
+        resp_body.clone(),
+    )
+    .await;
+
+    trace_processor
+        .lock()
+        .await
+        .override_ids(0, existing_parent, aws_lambda_span_id);
+
+    if let Some(headers) = req_wrapper_in_resp_body
+        .get_mut("headers")
+        .and_then(|h| h.as_object_mut())
+    {
+        *headers = serde_json::to_value(&headers_map)
+            .unwrap()
             .as_object()
             .unwrap()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
-            .collect();
-
-        let (mut span_id, mut trace_id, parent_id, _) =
-            crate::lifecycle::listener::trace_invocation_start(
-                Arc::clone(&processor),
-                headers_map,
-                resp_body.clone(),
-            )
-            .await;
-
-        if span_id == 0 {
-            span_id = random();
-        }
-
-        if trace_id == 0 {
-            trace_id = random();
-        }
-
-        trace_processor
-            .lock()
-            .await
-            .override_ids(trace_id, parent_id, span_id);
+            .clone();
     }
+    req_wrapper_in_resp_body
 }
 
 fn deserialize_json(response: Result<Bytes, Error>) -> Option<Value> {
