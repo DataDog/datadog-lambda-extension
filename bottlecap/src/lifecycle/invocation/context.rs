@@ -95,6 +95,7 @@ impl ContextBuffer {
 
     /// Creates a new `Context` and adds it to the buffer.
     ///
+    #[allow(clippy::ptr_arg)]
     pub fn create_context(&mut self, request_id: &String) {
         self.insert(Context::new(request_id.clone(), 0.0, 0.0, 0, None));
     }
@@ -109,7 +110,7 @@ impl ContextBuffer {
         {
             context.init_duration_ms = init_duration_ms;
         } else {
-            debug!("Could not add init duration - context not found")
+            debug!("Could not add init duration - context not found");
         }
     }
 
@@ -123,7 +124,7 @@ impl ContextBuffer {
         {
             context.start_time = start_time;
         } else {
-            debug!("Could not add start time - context not found")
+            debug!("Could not add start time - context not found");
         }
     }
 
@@ -137,7 +138,7 @@ impl ContextBuffer {
         {
             context.runtime_duration_ms = runtime_duration_ms;
         } else {
-            debug!("Could not add runtime duration - context not found")
+            debug!("Could not add runtime duration - context not found");
         }
     }
 
@@ -151,7 +152,7 @@ impl ContextBuffer {
         {
             context.network_offset = network_data;
         } else {
-            debug!("Could not add network offset - context not found")
+            debug!("Could not add network offset - context not found");
         }
     }
 
