@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use datadog_trace_protobuf::pb::Span;
-use rand::Rng;
+use rand::{rngs::OsRng, Rng, RngCore};
 use serde_json::Value;
 use tracing::debug;
 
@@ -11,6 +11,7 @@ use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
     sqs_event::SqsRecord, Trigger,
 };
+use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 
 const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
@@ -156,7 +157,10 @@ impl SpanInferrer {
     }
 
     fn generate_span_id() -> u64 {
-        // todo: secure random id with OsRng for SnapStart
+        if std::env::var(INIT_TYPE).map_or(false, |it| it == SNAP_START_VALUE) {
+            return OsRng.next_u64();
+        }
+
         let mut rng = rand::thread_rng();
         rng.gen()
     }
