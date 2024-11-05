@@ -21,7 +21,6 @@ pub struct SqsRecord {
     pub message_id: String,
     #[serde(rename = "receiptHandle")]
     pub receipt_handle: String,
-    pub body: String,
     pub attributes: Attributes,
     #[serde(rename = "messageAttributes")]
     pub message_attributes: HashMap<String, MessageAttribute>,
@@ -130,7 +129,6 @@ impl Trigger for SqsRecord {
             ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
-            ("resource_names".to_string(), resource.clone()),
         ]));
     }
 
@@ -169,11 +167,11 @@ impl Trigger for SqsRecord {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        let mut carrier = HashMap::new();
+        let carrier = HashMap::new();
         if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
             if ma.data_type == "String" {
                 if let Some(string_value) = &ma.string_value {
-                    carrier = serde_json::from_str(string_value).unwrap_or_default();
+                    return serde_json::from_str(string_value).unwrap_or_default();
                 }
             }
         }
@@ -196,7 +194,6 @@ mod tests {
         let expected = SqsRecord {
             message_id: "19dd0b57-b21e-4ac1-bd88-01bbb068cb78".to_string(),
             receipt_handle: "MessageReceiptHandle".to_string(),
-            body: "Hello from SQS!".to_string(),
             attributes: Attributes {
                 approximate_first_receive_timestamp: "1523232000001".to_string(),
                 approximate_receive_count: "1".to_string(),
@@ -255,7 +252,6 @@ mod tests {
                     "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string()
                 ),
                 ("aws_region".to_string(), "us-east-1".to_string()),
-                ("resource_names".to_string(), "MyQueue".to_string()),
             ])
         );
     }
