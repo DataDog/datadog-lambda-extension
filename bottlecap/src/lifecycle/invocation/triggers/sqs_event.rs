@@ -152,8 +152,9 @@ impl Trigger for SqsRecord {
             .as_slice()
         {
             format!(
-                "arn:aws:sqs:{}:{}:{}",
+                "arn:{}:sqs:{}:{}:{}",
                 get_aws_partition_by_region(region),
+                region,
                 account,
                 queue_name
             )
@@ -169,12 +170,12 @@ impl Trigger for SqsRecord {
     fn get_carrier(&self) -> HashMap<String, String> {
         let carrier = HashMap::new();
         if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
-            if ma.data_type == "String" {
-                if let Some(string_value) = &ma.string_value {
-                    return serde_json::from_str(string_value).unwrap_or_default();
-                }
+            if let Some(string_value) = &ma.string_value {
+                return serde_json::from_str(string_value).unwrap_or_default();
             }
         }
+
+        // TODO: AWSTraceHeader
 
         carrier
     }
@@ -191,6 +192,16 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let result = SqsRecord::new(payload).expect("Failed to deserialize into Record");
 
+        let message_attributes = HashMap::<String, MessageAttribute>::from([
+            ("_datadog".to_string(), MessageAttribute {
+                string_value: Some("{\"x-datadog-trace-id\":\"2684756524522091840\",\"x-datadog-parent-id\":\"7431398482019833808\",\"x-datadog-sampling-priority\":\"1\"}".to_string()),
+                binary_value: None,
+                string_list_values: Some(vec![]),
+                binary_list_values: Some(vec![]),
+                data_type: "String".to_string(),
+            })
+        ]);
+
         let expected = SqsRecord {
             message_id: "19dd0b57-b21e-4ac1-bd88-01bbb068cb78".to_string(),
             receipt_handle: "MessageReceiptHandle".to_string(),
@@ -200,7 +211,7 @@ mod tests {
                 sent_timestamp: "1523232000000".to_string(),
                 sender_id: "123456789012".to_string(),
             },
-            message_attributes: HashMap::from([]),
+            message_attributes,
             md5_of_body: "{{{md5_of_body}}}".to_string(),
             event_source: "aws:sqs".to_string(),
             event_source_arn: "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
@@ -278,7 +289,7 @@ mod tests {
 
     #[test]
     fn test_get_arn() {
-        let json = read_json_file("api_gateway_rest_event.json");
+        let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         assert_eq!(
