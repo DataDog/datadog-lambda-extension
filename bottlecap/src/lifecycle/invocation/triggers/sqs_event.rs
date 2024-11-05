@@ -6,10 +6,8 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{get_aws_partition_by_region, Trigger},
+    triggers::{get_aws_partition_by_region, Trigger, DATADOG_CARRIER_KEY},
 };
-
-use super::DATADOG_CARRIER_KEY;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SqsEvent {
