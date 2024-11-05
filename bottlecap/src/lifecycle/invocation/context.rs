@@ -95,9 +95,8 @@ impl ContextBuffer {
 
     /// Creates a new `Context` and adds it to the buffer.
     ///
-    #[allow(clippy::ptr_arg)]
-    pub fn create_context(&mut self, request_id: &String) {
-        self.insert(Context::new(request_id.clone(), 0.0, 0.0, 0, None));
+    pub fn create_context(&mut self, request_id: String) {
+        self.insert(Context::new(request_id, 0.0, 0.0, 0, None));
     }
 
     /// Adds the init duration to a `Context` in the buffer.
