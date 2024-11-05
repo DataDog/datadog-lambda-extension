@@ -112,7 +112,9 @@ impl SpanInferrer {
                         t.get_arn(&aws_config.region),
                     ),
                 ]);
-                debug!("SQS span is {:?}", span);
+                
+                self.carrier = Some(t.get_carrier());
+                self.trigger_tags = Some(t.get_tags());
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
