@@ -1,0 +1,17 @@
+{
+  "service": "eventbridge",
+  "name": "aws.eventbridge",
+  "resource": "my.event",
+  "trace_id": 0,
+  "span_id": 0,
+  "parent_id": 0,
+  "start": 1643040010000000000,
+  "duration": 0,
+  "meta": {
+    "resource_names": "my.event",
+    "operation_name": "aws.eventbridge",
+    "detail_type": "UserSignUp"
+  },
+  "metrics": {},
+  "type": "web"
+}

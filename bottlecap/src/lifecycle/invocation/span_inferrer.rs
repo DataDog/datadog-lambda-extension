@@ -7,6 +7,7 @@ use tracing::debug;
 
 use crate::config::AwsConfig;
 
+use crate::lifecycle::invocation::triggers::event_bridge_event::EventBridgeEvent;
 use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
     sqs_event::SqsRecord, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
@@ -101,6 +102,30 @@ impl SpanInferrer {
 
                 self.carrier = Some(t.get_carrier());
                 self.trigger_tags = Some(tt);
+                self.is_async_span = t.is_async();
+                self.inferred_span = Some(span);
+            }
+        } else if EventBridgeEvent::is_match(payload_value) {
+            if let Some(t) = EventBridgeEvent::new(payload_value.clone()) {
+                let mut span = Span {
+                    span_id: Self::generate_span_id(),
+                    ..Default::default()
+                };
+
+                t.enrich_span(&mut span);
+                span.meta.extend([
+                    (
+                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                        "eventbridge".to_string(),
+                    ),
+                    (
+                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                        t.get_arn(&aws_config.region),
+                    ),
+                ]);
+
+                self.carrier = Some(t.get_carrier());
+                self.trigger_tags = Some(t.get_tags());
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
