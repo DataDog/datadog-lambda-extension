@@ -264,7 +264,7 @@ impl Lambda {
             ((uptime * num_cores) - total_idle_time) / (uptime * num_cores);
         // Multiply by 100 to report as percentage
         let cpu_total_utilization_pct = cpu_total_utilization_decimal * 100.0;
-         // Multiply by num_cores to report in terms of cores
+        // Multiply by num_cores to report in terms of cores
         let cpu_total_utilization = cpu_total_utilization_decimal * num_cores;
 
         let metric = Metric::new(
