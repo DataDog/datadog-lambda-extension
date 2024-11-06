@@ -112,7 +112,7 @@ impl SpanInferrer {
                         t.get_arn(&aws_config.region),
                     ),
                 ]);
-                
+
                 self.carrier = Some(t.get_carrier());
                 self.trigger_tags = Some(t.get_tags());
                 self.is_async_span = t.is_async();
