@@ -46,6 +46,10 @@ impl SpanInferrer {
     ///
     pub fn infer_span(&mut self, payload_value: &Value, aws_config: &AwsConfig) {
         self.inferred_span = None;
+        self.is_async_span = false;
+        self.carrier = None;
+        self.trigger_tags = None;
+
         if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
                 let mut span = Span {
