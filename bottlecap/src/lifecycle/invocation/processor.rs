@@ -82,6 +82,7 @@ impl Processor {
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        self.context_buffer.create_context(request_id.clone());
         if self.collect_enhanced_data {
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
@@ -139,10 +140,13 @@ impl Processor {
             // - error.msg
             // - error.type
             // - error.stack
-            // - trigger tags (from inferred spans)
             // - metrics tags (for asm)
 
             enhanced_metric_data.clone_from(&context.enhanced_metric_data);
+        }
+
+        if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
+            self.span.meta.extend(trigger_tags);
         }
 
         self.inferrer.complete_inferred_span(&self.span);
@@ -150,7 +154,7 @@ impl Processor {
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&self.span);
             let mut traces = vec![self.span.clone()];
-            if let Some(inferred_span) = self.inferrer.get_inferred_span() {
+            if let Some(inferred_span) = &self.inferrer.inferred_span {
                 body_size += std::mem::size_of_val(inferred_span);
                 traces.push(inferred_span.clone());
             }
@@ -232,7 +236,7 @@ impl Processor {
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
-            if self.inferrer.get_inferred_span().is_some() {
+            if self.inferrer.inferred_span.is_some() {
                 self.inferrer.set_parent_id(sc.span_id);
                 self.inferrer.extend_meta(sc.tags.clone());
             } else {
@@ -240,7 +244,7 @@ impl Processor {
             }
         }
 
-        if let Some(inferred_span) = self.inferrer.get_inferred_span() {
+        if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.span.parent_id = inferred_span.span_id;
         }
     }
@@ -284,7 +288,7 @@ impl Processor {
         self.span.trace_id = trace_id;
         self.span.span_id = span_id;
 
-        if self.inferrer.get_inferred_span().is_some() {
+        if self.inferrer.inferred_span.is_some() {
             if let Some(status_code) = status_code {
                 self.inferrer.set_status_code(status_code);
             }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use datadog_trace_protobuf::pb::Span;
-use rand::Rng;
+use rand::{rngs::OsRng, Rng, RngCore};
 use serde_json::Value;
 use tracing::debug;
 
@@ -11,14 +11,16 @@ use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
     Trigger,
 };
+use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 
 const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
 
 pub struct SpanInferrer {
-    inferred_span: Option<Span>,
+    pub inferred_span: Option<Span>,
     is_async_span: bool,
     carrier: Option<HashMap<String, String>>,
+    trigger_tags: Option<HashMap<String, String>>,
 }
 
 impl Default for SpanInferrer {
@@ -34,6 +36,7 @@ impl SpanInferrer {
             inferred_span: None,
             is_async_span: false,
             carrier: None,
+            trigger_tags: None,
         }
     }
 
@@ -63,6 +66,7 @@ impl SpanInferrer {
                 ]);
 
                 self.carrier = Some(t.get_carrier());
+                self.trigger_tags = Some(t.get_tags());
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
@@ -86,6 +90,7 @@ impl SpanInferrer {
                 ]);
 
                 self.carrier = Some(t.get_carrier());
+                self.trigger_tags = Some(t.get_tags());
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
@@ -133,20 +138,25 @@ impl SpanInferrer {
     }
 
     fn generate_span_id() -> u64 {
-        // todo: secure random id with OsRng for SnapStart
+        if std::env::var(INIT_TYPE).map_or(false, |it| it == SNAP_START_VALUE) {
+            return OsRng.next_u64();
+        }
+
         let mut rng = rand::thread_rng();
         rng.gen()
     }
 
-    /// Returns a reference to the inner `self.inferred_span`
+    /// Returns a clone of the carrier associated with the inferred span
     ///
-    #[must_use]
-    pub fn get_inferred_span(&self) -> &Option<Span> {
-        &self.inferred_span
-    }
-
     #[must_use]
     pub fn get_carrier(&self) -> Option<HashMap<String, String>> {
         self.carrier.clone()
+    }
+
+    /// Returns a clone of the tags associated with the inferred span
+    ///
+    #[must_use]
+    pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
+        self.trigger_tags.clone()
     }
 }

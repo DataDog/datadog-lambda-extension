@@ -93,8 +93,13 @@ impl ContextBuffer {
             .find(|context| context.request_id == *request_id)
     }
 
-    /// Adds the init duration to a `Context` in the buffer. If the `Context` is not found, a new
-    /// `Context` is created and added to the buffer.
+    /// Creates a new `Context` and adds it to the buffer.
+    ///
+    pub fn create_context(&mut self, request_id: String) {
+        self.insert(Context::new(request_id, 0.0, 0.0, 0, None));
+    }
+
+    /// Adds the init duration to a `Context` in the buffer.
     ///
     pub fn add_init_duration(&mut self, request_id: &String, init_duration_ms: f64) {
         if let Some(context) = self
@@ -104,18 +109,11 @@ impl ContextBuffer {
         {
             context.init_duration_ms = init_duration_ms;
         } else {
-            self.insert(Context::new(
-                request_id.clone(),
-                0.0,
-                init_duration_ms,
-                0,
-                None,
-            ));
+            debug!("Could not add init duration - context not found");
         }
     }
 
-    /// Adds the start time to a `Context` in the buffer. If the `Context` is not found, a new
-    /// `Context` is created and added to the buffer.
+    /// Adds the start time to a `Context` in the buffer.
     ///
     pub fn add_start_time(&mut self, request_id: &String, start_time: i64) {
         if let Some(context) = self
@@ -125,12 +123,11 @@ impl ContextBuffer {
         {
             context.start_time = start_time;
         } else {
-            self.insert(Context::new(request_id.clone(), 0.0, 0.0, start_time, None));
+            debug!("Could not add start time - context not found");
         }
     }
 
-    /// Adds the runtime duration to a `Context` in the buffer. If the `Context` is not found, a new
-    /// `Context` is created and added to the buffer.
+    /// Adds the runtime duration to a `Context` in the buffer.
     ///
     pub fn add_runtime_duration(&mut self, request_id: &String, runtime_duration_ms: f64) {
         if let Some(context) = self
@@ -140,18 +137,11 @@ impl ContextBuffer {
         {
             context.runtime_duration_ms = runtime_duration_ms;
         } else {
-            self.insert(Context::new(
-                request_id.clone(),
-                runtime_duration_ms,
-                0.0,
-                0,
-                None,
-            ));
+            debug!("Could not add runtime duration - context not found");
         }
     }
 
-    /// Adds the enhanced metric offsets to a `Context` in the buffer. If the `Context` is not found, a new
-    /// `Context` is created and added to the buffer.
+    /// Adds the network offset to a `Context` in the buffer.
     ///
     pub fn add_enhanced_metric_data(
         &mut self,
@@ -165,13 +155,7 @@ impl ContextBuffer {
         {
             context.enhanced_metric_data = enhanced_metric_data;
         } else {
-            self.insert(Context::new(
-                request_id.clone(),
-                0.0,
-                0.0,
-                0,
-                enhanced_metric_data,
-            ));
+            debug!("Could not add network offset - context not found");
         }
     }
 
@@ -278,15 +262,6 @@ mod tests {
 
         buffer.add_init_duration(&request_id, 100.0);
         assert_eq!(buffer.get(&request_id).unwrap().init_duration_ms, 100.0);
-
-        // Add init duration to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_init_duration(&unexistent_request_id, 200.0);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(
-            buffer.get(&unexistent_request_id).unwrap().init_duration_ms,
-            200.0
-        );
     }
 
     #[test]
@@ -301,12 +276,6 @@ mod tests {
 
         buffer.add_start_time(&request_id, 100);
         assert_eq!(buffer.get(&request_id).unwrap().start_time, 100);
-
-        // Add start time to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_start_time(&unexistent_request_id, 200);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(buffer.get(&unexistent_request_id).unwrap().start_time, 200);
     }
 
     #[test]
@@ -321,18 +290,6 @@ mod tests {
 
         buffer.add_runtime_duration(&request_id, 100.0);
         assert_eq!(buffer.get(&request_id).unwrap().runtime_duration_ms, 100.0);
-
-        // Add runtime duration to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_runtime_duration(&unexistent_request_id, 200.0);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(
-            buffer
-                .get(&unexistent_request_id)
-                .unwrap()
-                .runtime_duration_ms,
-            200.0
-        );
     }
 
     #[test]
@@ -372,18 +329,6 @@ mod tests {
         assert_eq!(
             buffer.get(&request_id).unwrap().enhanced_metric_data,
             enhanced_metric_data,
-        );
-
-        // Adds enhanced metric offsets to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_enhanced_metric_data(&unexistent_request_id, enhanced_metric_data.clone());
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(
-            buffer
-                .get(&unexistent_request_id)
-                .unwrap()
-                .enhanced_metric_data,
-            enhanced_metric_data
         );
     }
 }
