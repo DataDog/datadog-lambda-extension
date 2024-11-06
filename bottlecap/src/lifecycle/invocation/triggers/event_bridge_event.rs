@@ -59,11 +59,13 @@ impl Trigger for EventBridgeEvent {
     fn get_tags(&self) -> HashMap<String, String> {
         // the only 2 trigger tags seems to be function_trigger.event_source and
         // function_trigger.event_source_arn and they are added in the trigger
+        // https://github.com/DataDog/datadog-agent/blob/main/pkg/serverless/invocationlifecycle/init.go#L114-L115
         HashMap::new()
     }
 
     fn get_arn(&self, _region: &str) -> String {
         // TODO not sure what the ARN should be for EventBridge, go-agent is using source
+        // https://github.com/DataDog/datadog-agent/blob/main/pkg/serverless/invocationlifecycle/init.go#L115
         self.source.clone()
     }
 
