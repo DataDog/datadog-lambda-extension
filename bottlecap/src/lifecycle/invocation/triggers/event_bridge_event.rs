@@ -126,8 +126,7 @@ mod tests {
     #[test]
     fn test_is_match() {
         let json = read_json_file("event_bridge.json");
-        let payload =
-            serde_json::from_str(&json).expect("Failed to deserialize APIGatewayRestEvent");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize EventBridgeEvent");
 
         assert!(EventBridgeEvent::is_match(&payload));
     }
@@ -135,8 +134,7 @@ mod tests {
     #[test]
     fn test_is_not_match() {
         let json = read_json_file("api_gateway_http_event.json");
-        let payload =
-            serde_json::from_str(&json).expect("Failed to deserialize APIGatewayRestEvent");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize EventBridgeEvent");
         assert!(!EventBridgeEvent::is_match(&payload));
     }
 
