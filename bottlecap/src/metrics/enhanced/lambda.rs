@@ -252,13 +252,19 @@ impl Lambda {
         }
 
         // Maximally utilized CPU is the one with the least time spent in the idle process
+        // Multiply by 100 to report as percentage
         let cpu_max_utilization = ((uptime - min_idle_time) / uptime) * 100.0;
+
         // Minimally utilized CPU is the one with the most time spent in the idle process
+        // Multiply by 100 to report as percentage
         let cpu_min_utilization = ((uptime - max_idle_time) / uptime) * 100.0;
 
+        // CPU total utilization is the proportion of total non-idle time to the total uptime across all cores
         let cpu_total_utilization_decimal =
             ((uptime * num_cores) - total_idle_time) / (uptime * num_cores);
+        // Multiply by 100 to report as percentage
         let cpu_total_utilization_pct = cpu_total_utilization_decimal * 100.0;
+         // Multiply by num_cores to report in terms of cores
         let cpu_total_utilization = cpu_total_utilization_decimal * num_cores;
 
         let metric = Metric::new(

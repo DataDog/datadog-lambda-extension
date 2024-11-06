@@ -101,9 +101,10 @@ fn get_cpu_data_from_path(path: &str) -> Result<CPUData, io::Error> {
 
                 match (user, system, idle) {
                     (Some(user_val), Some(system_val), Some(idle_val)) => {
-                        cpu_data.total_user_time_ms = (1000.0 * user_val) / clktck;
-                        cpu_data.total_system_time_ms = (1000.0 * system_val) / clktck;
-                        cpu_data.total_idle_time_ms = (1000.0 * idle_val) / clktck;
+                        // Divide values by clock tick to covert to seconds, then multiply by 1000 to convert to ms
+                        cpu_data.total_user_time_ms = (user_val / clktck) * 1000.0;
+                        cpu_data.total_system_time_ms = (system_val / clktck) * 1000.0;
+                        cpu_data.total_idle_time_ms = (idle_val / clktck) * 1000.0;
                     }
                     (_, _, _) => {
                         return Err(io::Error::new(
@@ -119,9 +120,10 @@ fn get_cpu_data_from_path(path: &str) -> Result<CPUData, io::Error> {
 
                 match idle {
                     Some(idle_val) => {
+                        // Divide value by clock tick to covert to seconds, then multiply by 1000 to convert to ms
                         cpu_data
                             .individual_cpu_idle_times
-                            .insert(label.to_string(), (1000.0 * idle_val) / clktck);
+                            .insert(label.to_string(), (idle_val / clktck) * 1000.0);
                     }
                     None => {
                         return Err(io::Error::new(
@@ -161,6 +163,7 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
 
         match (uptime, idle) {
             // Check that the file is correctly formatted (i.e. has both values)
+            // Multiply val by 1000 to convert seconds to milliseconds
             (Some(uptime_val), Some(_idle_val)) => return Ok(uptime_val * 1000.0),
             (_, _) => {
                 return Err(io::Error::new(
