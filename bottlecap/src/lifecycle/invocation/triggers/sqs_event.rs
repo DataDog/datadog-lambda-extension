@@ -104,7 +104,7 @@ impl Trigger for SqsRecord {
         let start_time = (self
             .attributes
             .sent_timestamp
-            .parse::<u64>()
+            .parse::<i64>()
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
         // todo: service mapping
@@ -118,10 +118,6 @@ impl Trigger for SqsRecord {
         span.meta.extend(HashMap::from([
             ("operation_name".to_string(), "aws.sqs".to_string()),
             ("receipt_handle".to_string(), self.receipt_handle.clone()),
-            (
-                "retry_count".to_string(),
-                self.attributes.approximate_receive_count.clone(),
-            ),
             (
                 "retry_count".to_string(),
                 self.attributes.approximate_receive_count.clone(),
