@@ -38,6 +38,7 @@ impl Trigger for EventBridgeEvent {
         payload.get("detail-type").is_some()
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     fn enrich_span(&self, span: &mut Span) {
         span.name = "aws.eventbridge".to_string();
         // TODO service name fallback value for now, needs service mapping
@@ -161,8 +162,9 @@ mod tests {
     fn test_get_arn() {
         let json = read_json_file("event_bridge.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let arn =
-            EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent").get_arn("don't care");
+        let arn = EventBridgeEvent::new(payload)
+            .expect("Failed to deserialize EventBridgeEvent")
+            .get_arn("don't care");
         assert_eq!(arn, "my.event");
     }
 }

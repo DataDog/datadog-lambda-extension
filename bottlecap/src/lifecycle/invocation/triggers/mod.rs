@@ -52,9 +52,13 @@ where
 #[cfg(test)]
 pub mod test_utils {
     use std::fs;
+    use std::path::PathBuf;
 
     #[must_use]
     pub fn read_json_file(file_name: &str) -> String {
-        fs::read_to_string(format!("tests/payloads/{file_name}")).expect("Failed to read file")
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests/payloads");
+        path.push(file_name);
+        fs::read_to_string(path).expect("Failed to read file")
     }
 }

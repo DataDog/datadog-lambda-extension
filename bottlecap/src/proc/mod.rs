@@ -184,6 +184,7 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     #[test]
     #[allow(clippy::float_cmp)]
