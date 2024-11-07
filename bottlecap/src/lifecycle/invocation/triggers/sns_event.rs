@@ -247,7 +247,10 @@ mod tests {
         let tags = event.get_tags();
 
         let expected = HashMap::from([
-            ("function_trigger.event_source".to_string(), "sns".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "sns".to_string(),
+            ),
             (
                 "function_trigger.event_source_arn".to_string(),
                 "arn:aws:sns:sa-east-1:425362996713:serverlessTracingTopicPy".to_string(),
