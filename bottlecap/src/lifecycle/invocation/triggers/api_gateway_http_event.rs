@@ -6,7 +6,9 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{get_aws_partition_by_region, lowercase_key, Trigger},
+    triggers::{
+        get_aws_partition_by_region, lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -136,6 +138,10 @@ impl Trigger for APIGatewayHttpEvent {
             (
                 "http.method".to_string(),
                 self.request_context.http.method.clone(),
+            ),
+            (
+                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                "api-gateway".to_string(),
             ),
         ]);
         // route is parameterized
@@ -307,6 +313,10 @@ mod tests {
             ("http.method".to_string(), "GET".to_string()),
             ("http.route".to_string(), "/httpapi/get".to_string()),
             ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "api-gateway".to_string(),
+            ),
         ]);
 
         assert_eq!(tags, expected);
@@ -362,6 +372,10 @@ mod tests {
             ("http.method".to_string(), "GET".to_string()),
             ("http.route".to_string(), "/user/{id}".to_string()),
             ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "api-gateway".to_string(),
+            ),
         ]);
         assert_eq!(tags, expected);
     }

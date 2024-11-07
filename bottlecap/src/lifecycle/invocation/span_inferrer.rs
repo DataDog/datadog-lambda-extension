@@ -10,7 +10,6 @@ use crate::config::AwsConfig;
 use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
     sns_event::SnsRecord, sqs_event::SqsRecord, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
-    FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
 };
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 
@@ -56,19 +55,14 @@ impl SpanInferrer {
                 };
 
                 t.enrich_span(&mut span);
-                span.meta.extend([
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                        "api_gateway".to_string(),
-                    ),
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                        t.get_arn(&aws_config.region),
-                    ),
-                ]);
+                let mut tt = t.get_tags();
+                tt.extend([(
+                    FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                    t.get_arn(&aws_config.region),
+                )]);
 
                 self.carrier = Some(t.get_carrier());
-                self.trigger_tags = Some(t.get_tags());
+                self.trigger_tags = Some(tt);
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
@@ -80,19 +74,14 @@ impl SpanInferrer {
                 };
 
                 t.enrich_span(&mut span);
-                span.meta.extend([
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                        "api_gateway".to_string(),
-                    ),
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                        t.get_arn(&aws_config.region),
-                    ),
-                ]);
+                let mut tt = t.get_tags();
+                tt.extend([(
+                    FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                    t.get_arn(&aws_config.region),
+                )]);
 
                 self.carrier = Some(t.get_carrier());
-                self.trigger_tags = Some(t.get_tags());
+                self.trigger_tags = Some(tt);
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
@@ -104,19 +93,14 @@ impl SpanInferrer {
                 };
 
                 t.enrich_span(&mut span);
-                span.meta.extend([
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                        "sqs".to_string(),
-                    ),
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                        t.get_arn(&aws_config.region),
-                    ),
-                ]);
+                let mut tt = t.get_tags();
+                tt.extend([(
+                    FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                    t.get_arn(&aws_config.region),
+                )]);
 
                 self.carrier = Some(t.get_carrier());
-                self.trigger_tags = Some(t.get_tags());
+                self.trigger_tags = Some(tt);
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }

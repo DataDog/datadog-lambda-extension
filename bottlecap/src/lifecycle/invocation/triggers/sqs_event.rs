@@ -6,7 +6,10 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{get_aws_partition_by_region, Trigger, DATADOG_CARRIER_KEY},
+    triggers::{
+        get_aws_partition_by_region, Trigger, DATADOG_CARRIER_KEY,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -137,6 +140,10 @@ impl Trigger for SqsRecord {
             ("sender_id".to_string(), self.attributes.sender_id.clone()),
             ("source_arn".to_string(), self.event_source_arn.clone()),
             ("aws_region".to_string(), self.aws_region.clone()),
+            (
+                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                "sqs".to_string(),
+            ),
         ])
     }
 
@@ -278,6 +285,10 @@ mod tests {
                 "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
             ),
             ("aws_region".to_string(), "us-east-1".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "sqs".to_string(),
+            ),
         ]);
 
         assert_eq!(tags, expected);
