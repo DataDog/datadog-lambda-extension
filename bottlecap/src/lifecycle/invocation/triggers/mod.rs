@@ -52,7 +52,7 @@ where
 pub mod test_utils {
     use std::fs;
 
-    pub fn read_json_file(file_name: &str) -> String {
-        fs::read_to_string(format!("tests/payloads/{}", file_name)).expect("Failed to read file")
+    #[must_use] pub fn read_json_file(file_name: &str) -> String {
+        fs::read_to_string(format!("tests/payloads/{file_name}")).expect("Failed to read file")
     }
 }
