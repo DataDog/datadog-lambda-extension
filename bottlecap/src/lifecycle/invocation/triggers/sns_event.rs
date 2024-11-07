@@ -103,7 +103,7 @@ impl Trigger for SnsRecord {
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend([
-            ("operation_name".to_string(), "aws.sqs".to_string()),
+            ("operation_name".to_string(), "aws.sns".to_string()),
             ("topicname".to_string(), resource),
             ("topic_arn".to_string(), self.sns.topic_arn.clone()),
             ("message_id".to_string(), self.sns.message_id.clone()),
