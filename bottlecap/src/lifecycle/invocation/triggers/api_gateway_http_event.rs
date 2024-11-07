@@ -372,6 +372,10 @@ mod tests {
             ("http.method".to_string(), "GET".to_string()),
             ("http.route".to_string(), "/user/{id}".to_string()),
             ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "api-gateway".to_string(),
+            ),
         ]);
         assert_eq!(tags, expected);
     }
