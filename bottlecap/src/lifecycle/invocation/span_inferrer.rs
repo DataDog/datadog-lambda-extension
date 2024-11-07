@@ -114,7 +114,7 @@ impl SpanInferrer {
                 t.enrich_span(&mut span);
 
                 self.carrier = Some(t.get_carrier());
-                self.trigger_tags = Some(tt);
+                self.trigger_tags = Some(t.get_tags());
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
