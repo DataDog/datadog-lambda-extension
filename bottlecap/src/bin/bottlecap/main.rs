@@ -54,15 +54,13 @@ use dogstatsd::{
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
-    collections::hash_map,
-    collections::HashMap,
+    collections::{hash_map, HashMap},
     env,
-    io::Error,
-    io::Result,
+    io::{Error, Result},
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;
@@ -375,8 +373,13 @@ async fn extension_loop_active(
                     request_id, deadline_ms, invoked_function_arn
                 );
                 lambda_enhanced_metrics.increment_invocation_metric();
+
+                // Start a channel for monitoring tmp enhanced data
+                let (tmp_chan_tx, tmp_chan_rx) = mpsc::channel::<bool>();
+                lambda_enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
+
                 let mut p = invocation_processor.lock().await;
-                p.on_invoke_event(request_id);
+                p.on_invoke_event(request_id, Some(tmp_chan_tx));
                 drop(p);
             }
             Ok(NextEventResponse::Shutdown {
@@ -487,9 +490,11 @@ async fn extension_loop_active(
                                     if let Some(duration) = post_runtime_duration_ms {
                                         lambda_enhanced_metrics.set_post_runtime_duration_metric(duration);
                                     }
-                                    if let Some(offsets) = enhanced_metric_data {
-                                        lambda_enhanced_metrics.set_network_enhanced_metrics(offsets.network_offset);
-                                        lambda_enhanced_metrics.set_cpu_time_enhanced_metrics(offsets.cpu_offset);
+                                    if let Some(data) = enhanced_metric_data {
+                                        lambda_enhanced_metrics.set_network_enhanced_metrics(data.network_offset);
+                                        lambda_enhanced_metrics.set_cpu_time_enhanced_metrics(data.cpu_offset);
+                                        // Drop tmp_chan as a signal to stop monitoring tmp
+                                        drop(data.tmp_chan);
                                     }
                                     drop(p);
 

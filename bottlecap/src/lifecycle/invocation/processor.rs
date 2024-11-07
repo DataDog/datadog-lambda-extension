@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{mpsc, Arc},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -81,7 +81,7 @@ impl Processor {
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
-    pub fn on_invoke_event(&mut self, request_id: String) {
+    pub fn on_invoke_event(&mut self, request_id: String, tmp_chan: Option<mpsc::Sender<bool>>) {
         self.context_buffer.create_context(request_id.clone());
         if self.collect_enhanced_data {
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
@@ -91,6 +91,7 @@ impl Processor {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
+                tmp_chan,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);

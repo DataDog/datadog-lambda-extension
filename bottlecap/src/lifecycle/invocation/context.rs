@@ -323,6 +323,7 @@ mod tests {
             network_offset,
             cpu_offset,
             uptime_offset,
+            tmp_chan: None,
         });
 
         buffer.add_enhanced_metric_data(&request_id, enhanced_metric_data.clone());

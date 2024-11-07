@@ -1,11 +1,17 @@
 use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
+use super::statfs::statfs_info;
 use crate::proc::{self, CPUData, NetworkData};
 use crate::telemetry::events::ReportMetrics;
 use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use std::env::consts::ARCH;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    mpsc::{self, Receiver},
+    Arc, Mutex,
+};
+use std::thread;
+use std::time::Duration;
 use tracing::debug;
 use tracing::error;
 
@@ -343,6 +349,83 @@ impl Lambda {
         }
     }
 
+    pub fn generate_tmp_enhanced_metrics(
+        tmp_max: f64,
+        tmp_used: f64,
+        aggr: &mut std::sync::MutexGuard<Aggregator>,
+    ) {
+        let metric = Metric::new(
+            constants::TMP_MAX_METRIC.into(),
+            MetricValue::distribution(tmp_max),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert tmp_max metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::TMP_USED_METRIC.into(),
+            MetricValue::distribution(tmp_used),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert tmp_used metric: {}", e);
+        }
+
+        let tmp_free = tmp_max - tmp_used;
+        let metric = Metric::new(
+            constants::TMP_FREE_METRIC.into(),
+            MetricValue::distribution(tmp_free),
+            None,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert tmp_free metric: {}", e);
+        }
+    }
+
+    pub fn set_tmp_enhanced_metrics(&self, send_metrics: Receiver<bool>) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let aggr = Arc::clone(&self.aggregator);
+
+        thread::spawn(move || {
+            let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
+                Ok(stats) => stats,
+                Err(err) => {
+                    debug!("Could not emit tmp enhanced metrics. {:?}", err);
+                    return;
+                }
+            };
+
+            let tmp_max = bsize * blocks;
+            let mut tmp_used = bsize * (blocks - bavail);
+
+            loop {
+                match send_metrics.try_recv() {
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        let mut aggr: std::sync::MutexGuard<Aggregator> =
+                            aggr.lock().expect("lock poisoned");
+                        Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr);
+                        return;
+                    }
+                    _ => {
+                        let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
+                            Ok(stats) => stats,
+                            Err(err) => {
+                                debug!("Could not emit tmp enhanced metrics. {:?}", err);
+                                return;
+                            }
+                        };
+                        tmp_used = tmp_used.max(bsize * (blocks - bavail));
+                        thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            }
+        });
+    }
+
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
         let gb_seconds = (billed_duration_ms as f64 * constants::MS_TO_SEC)
             * (memory_size_mb as f64 / constants::MB_TO_GB);
@@ -411,11 +494,20 @@ impl Lambda {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
+    pub tmp_chan: Option<mpsc::Sender<bool>>,
+}
+
+impl PartialEq for EnhancedMetricData {
+    fn eq(&self, other: &Self) -> bool {
+        self.network_offset == other.network_offset
+            && self.cpu_offset == other.cpu_offset
+            && self.uptime_offset == other.uptime_offset
+    }
 }
 
 #[cfg(test)]
@@ -694,5 +786,20 @@ mod tests {
         assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0);
         assert_sketch(&metrics_aggr, constants::CPU_MAX_UTILIZATION_METRIC, 30.0);
         assert_sketch(&metrics_aggr, constants::CPU_MIN_UTILIZATION_METRIC, 28.75);
+    }
+
+    #[test]
+    fn test_set_tmp_enhanced_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+
+        let tmp_max = 550461440.0;
+        let tmp_used = 12165120.0;
+
+        Lambda::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut lambda.aggregator.lock().expect("lock poisoned"));
+
+        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550461440.0);
+        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12165120.0);
+        assert_sketch(&metrics_aggr, constants::TMP_FREE_METRIC, 538296320.0);
     }
 }
