@@ -425,8 +425,9 @@ async fn extension_loop_active(
                                     ..
                                 } => {
                                     let mut p = invocation_processor.lock().await;
+                                    let mut enhanced_metric_data = None;
                                     if let Some(metrics) = metrics {
-                                        p.on_platform_runtime_done(
+                                        enhanced_metric_data = p.on_platform_runtime_done(
                                             &request_id,
                                             metrics.duration_ms,
                                             config.clone(),
@@ -450,6 +451,11 @@ async fn extension_loop_active(
                                         request_id, status
                                     );
 
+                                    // set cpu utilization metrics here to avoid accounting for extra idle time
+                                    if let Some(offsets) = enhanced_metric_data {
+                                        lambda_enhanced_metrics.set_cpu_utilization_enhanced_metrics(offsets.cpu_offset, offsets.uptime_offset);
+                                    }
+
                                     // TODO(astuyve) it'll be easy to
                                     // pass the invocation deadline to
                                     // flush tasks here, so they can
@@ -462,6 +468,7 @@ async fn extension_loop_active(
                                             stats_flusher.manual_flush()
                                         );
                                     }
+
                                     break;
                                 }
                                 TelemetryRecord::PlatformReport {
@@ -476,11 +483,13 @@ async fn extension_loop_active(
                                     );
                                     lambda_enhanced_metrics.set_report_log_metrics(&metrics);
                                     let mut p = invocation_processor.lock().await;
-                                    if let Some((post_runtime_duration_ms, network_offset)) = p.on_platform_report(&request_id, metrics.duration_ms) {
-                                        lambda_enhanced_metrics.set_post_runtime_duration_metric(
-                                            post_runtime_duration_ms,
-                                        );
-                                        lambda_enhanced_metrics.set_network_enhanced_metrics(network_offset);
+                                    let (post_runtime_duration_ms, enhanced_metric_data) = p.on_platform_report(&request_id, metrics.duration_ms);
+                                    if let Some(duration) = post_runtime_duration_ms {
+                                        lambda_enhanced_metrics.set_post_runtime_duration_metric(duration);
+                                    }
+                                    if let Some(offsets) = enhanced_metric_data {
+                                        lambda_enhanced_metrics.set_network_enhanced_metrics(offsets.network_offset);
+                                        lambda_enhanced_metrics.set_cpu_time_enhanced_metrics(offsets.cpu_offset);
                                     }
                                     drop(p);
 

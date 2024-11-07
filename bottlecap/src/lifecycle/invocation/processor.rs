@@ -14,7 +14,8 @@ use tracing::debug;
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
-    proc::{self, NetworkData},
+    metrics::enhanced::lambda::EnhancedMetricData,
+    proc::{self, CPUData, NetworkData},
     tags::provider,
     traces::{
         context::SpanContext,
@@ -34,6 +35,7 @@ pub struct Processor {
     propagator: DatadogCompositePropagator,
     aws_config: AwsConfig,
     tracer_detected: bool,
+    collect_enhanced_data: bool,
 }
 
 impl Processor {
@@ -73,17 +75,26 @@ impl Processor {
             propagator,
             aws_config: aws_config.clone(),
             tracer_detected: false,
+            collect_enhanced_data: config.enhanced_metrics,
         }
     }
 
-    /// Given a `request_id`, add the enhanced metric offsets to the context buffer.
+    /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
         self.context_buffer.create_context(request_id.clone());
-
-        let network_offset: Option<NetworkData> = proc::get_network_data().ok();
-        self.context_buffer
-            .add_network_offset(&request_id, network_offset);
+        if self.collect_enhanced_data {
+            let network_offset: Option<NetworkData> = proc::get_network_data().ok();
+            let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
+            let uptime_offset: Option<f64> = proc::get_uptime().ok();
+            let enhanced_metric_offsets = Some(EnhancedMetricData {
+                network_offset,
+                cpu_offset,
+                uptime_offset,
+            });
+            self.context_buffer
+                .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
+        }
     }
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
@@ -110,10 +121,11 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
-    ) {
+    ) -> Option<EnhancedMetricData> {
         self.context_buffer
             .add_runtime_duration(request_id, duration_ms);
 
+        let mut enhanced_metric_data: Option<EnhancedMetricData> = None;
         if let Some(context) = self.context_buffer.get(request_id) {
             let span = &mut self.span;
             // `round` is intentionally meant to be a whole integer
@@ -129,6 +141,8 @@ impl Processor {
             // - error.type
             // - error.stack
             // - metrics tags (for asm)
+
+            enhanced_metric_data.clone_from(&context.enhanced_metric_data);
         }
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
@@ -169,6 +183,8 @@ impl Processor {
                 debug!("Failed to send invocation span to agent: {e}");
             }
         }
+
+        enhanced_metric_data
     }
 
     /// Given a `request_id` and the duration in milliseconds of the platform report,
@@ -181,18 +197,18 @@ impl Processor {
         &mut self,
         request_id: &String,
         duration_ms: f64,
-    ) -> Option<(f64, Option<NetworkData>)> {
+    ) -> (Option<f64>, Option<EnhancedMetricData>) {
         if let Some(context) = self.context_buffer.remove(request_id) {
-            if context.runtime_duration_ms == 0.0 {
-                return None;
+            let mut post_runtime_duration_ms: Option<f64> = None;
+
+            if context.runtime_duration_ms != 0.0 {
+                post_runtime_duration_ms = Some(duration_ms - context.runtime_duration_ms);
             }
 
-            let post_runtime_duration_ms = duration_ms - context.runtime_duration_ms;
-
-            return Some((post_runtime_duration_ms, context.network_offset));
+            return (post_runtime_duration_ms, context.enhanced_metric_data);
         }
 
-        None
+        (None, None)
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented
