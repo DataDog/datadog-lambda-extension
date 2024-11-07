@@ -86,7 +86,7 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
         return true;
     }
 
-    if (span.resource == "127.0.0.1" || span.resource == "0.0.0.0") && span.name == "dns.lookup" {
+    if span.name == "dns.lookup" || span.resource == "127.0.0.1" || span.resource == "0.0.0.0" {
         return true;
     }
 
