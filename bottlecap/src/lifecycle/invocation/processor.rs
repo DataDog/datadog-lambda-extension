@@ -221,14 +221,15 @@ impl Processor {
         self.span.trace_id = 0;
         self.span.parent_id = 0;
         self.span.span_id = 0;
+        self.extracted_span_context = None;
 
         let payload_value = match serde_json::from_slice::<Value>(&payload) {
             Ok(value) => value,
             Err(_) => json!({}),
         };
 
-        self.extracted_span_context = self.extract_span_context(&headers, &payload_value);
         self.inferrer.infer_span(&payload_value, &self.aws_config);
+        self.extracted_span_context = self.extract_span_context(&headers, &payload_value);
 
         if let Some(sc) = &self.extracted_span_context {
             self.span.trace_id = sc.trace_id;
@@ -280,19 +281,46 @@ impl Processor {
     ///
     pub fn on_invocation_end(
         &mut self,
-        trace_id: u64,
-        span_id: u64,
-        parent_id: u64,
+        headers: HashMap<String, String>,
         status_code: Option<String>,
     ) {
-        self.span.trace_id = trace_id;
-        self.span.span_id = span_id;
-
+        self.update_span_context(headers);
         if self.inferrer.inferred_span.is_some() {
             if let Some(status_code) = status_code {
                 self.inferrer.set_status_code(status_code);
             }
-        } else {
+        }
+    }
+
+    fn update_span_context(&mut self, headers: HashMap<String, String>) {
+        // todo: fix this, code is a copy of the existing logic in Go, not accounting
+        // when a 128 bit trace id exist
+        let mut trace_id = 0;
+        let mut span_id = 0;
+        let mut parent_id = 0;
+
+        // If we have a trace context, update the span context
+        if let Some(sc) = &mut self.extracted_span_context {
+            trace_id = sc.trace_id;
+            span_id = sc.span_id;
+        }
+
+        if let Some(header) = headers.get("x-datadog-trace-id") {
+            trace_id = header.parse::<u64>().unwrap_or(0);
+        }
+
+        if let Some(header) = headers.get("x-datadog-span-id") {
+            span_id = header.parse::<u64>().unwrap_or(0);
+        }
+
+        if let Some(header) = headers.get("x-datadog-parent-id") {
+            parent_id = header.parse::<u64>().unwrap_or(0);
+        }
+
+        self.span.trace_id = trace_id;
+        self.span.span_id = span_id;
+
+        if self.inferrer.inferred_span.is_none() {
             self.span.parent_id = parent_id;
         }
     }

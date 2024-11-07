@@ -6,7 +6,9 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{get_aws_partition_by_region, lowercase_key, Trigger},
+    triggers::{
+        get_aws_partition_by_region, lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -109,7 +111,6 @@ impl Trigger for APIGatewayRestEvent {
                 "request_id".to_string(),
                 self.request_context.request_id.clone(),
             ),
-            ("resource_names".to_string(), resource.clone()),
             (
                 "http.route".to_string(),
                 self.request_context.resource_path.clone(),
@@ -142,6 +143,10 @@ impl Trigger for APIGatewayRestEvent {
             (
                 "http.user_agent".to_string(),
                 self.request_context.identity.user_agent.to_string(),
+            ),
+            (
+                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                "api-gateway".to_string(),
             ),
         ]);
 
@@ -256,7 +261,6 @@ mod tests {
                 ("http.route".to_string(), "/path".to_string()),
                 ("operation_name".to_string(), "aws.apigateway".to_string()),
                 ("request_id".to_string(), "id=".to_string()),
-                ("resource_names".to_string(), "GET /path".to_string()),
             ])
         );
     }
@@ -278,6 +282,10 @@ mod tests {
             ("http.method".to_string(), "GET".to_string()),
             ("http.route".to_string(), "/path".to_string()),
             ("http.user_agent".to_string(), "user-agent".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "api-gateway".to_string(),
+            ),
         ]);
 
         assert_eq!(tags, expected);
@@ -314,7 +322,6 @@ mod tests {
                 "request_id".to_string(),
                 "e16399f7-e984-463a-9931-745ba021a27f".to_string(),
             ),
-            ("resource_names".to_string(), "GET /user/{id}".to_string()),
         ]);
         assert_eq!(span.meta, expected);
     }
@@ -342,6 +349,10 @@ mod tests {
                 ("http.method".to_string(), "GET".to_string()),
                 ("http.route".to_string(), "/user/{id}".to_string()),
                 ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+                (
+                    "function_trigger.event_source".to_string(),
+                    "api-gateway".to_string()
+                ),
             ])
         );
     }
