@@ -9,7 +9,8 @@ use crate::config::AwsConfig;
 
 use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
-    event_bridge_event::EventBridgeEvent,sqs_event::SqsRecord, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
+    event_bridge_event::EventBridgeEvent, sqs_event::SqsRecord, Trigger,
+    FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
 };
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 

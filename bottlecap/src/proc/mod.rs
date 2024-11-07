@@ -186,6 +186,12 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn path_from_root(file: &str) -> String {
+        let mut safe_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        safe_path.push(file);
+        safe_path.to_str().unwrap().to_string()
+    }
+
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_get_network_data() {
