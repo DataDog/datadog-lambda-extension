@@ -9,6 +9,8 @@ pub mod api_gateway_rest_event;
 pub mod sqs_event;
 
 pub const DATADOG_CARRIER_KEY: &str = "_datadog";
+pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
+pub const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
 
 pub trait Trigger: Sized {
     fn new(payload: Value) -> Option<Self>;
