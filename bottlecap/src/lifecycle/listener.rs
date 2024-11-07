@@ -148,34 +148,11 @@ impl Listener {
         if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
             parsed_status = Some(status_code.to_string());
         }
-        let headers = parts.headers;
 
         let mut processor = invocation_processor.lock().await;
 
-        // todo: fix this, code is a copy of the existing logic in Go, not accounting
-        // when a 128 bit trace id exist
-        let mut trace_id = 0;
-        if let Some(header) = headers.get("x-datadog-trace-id") {
-            if let Ok(header_value) = header.to_str() {
-                trace_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        let mut span_id = 0;
-        if let Some(header) = headers.get("x-datadog-span-id") {
-            if let Ok(header_value) = header.to_str() {
-                span_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        let mut parent_id = 0;
-        if let Some(header) = headers.get("x-datadog-parent-id") {
-            if let Ok(header_value) = header.to_str() {
-                parent_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        processor.on_invocation_end(trace_id, span_id, parent_id, parsed_status);
+        let headers = Self::headers_to_map(parts.headers);
+        processor.on_invocation_end(headers, parsed_status);
         drop(processor);
 
         Response::builder()
