@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 use nix::sys::statfs::statfs;
 use std::io;
 use std::path::Path;

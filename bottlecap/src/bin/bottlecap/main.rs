@@ -455,8 +455,13 @@ async fn extension_loop_active(
                                     );
 
                                     // set cpu utilization metrics here to avoid accounting for extra idle time
-                                    if let Some(offsets) = enhanced_metric_data {
-                                        lambda_enhanced_metrics.set_cpu_utilization_enhanced_metrics(offsets.cpu_offset, offsets.uptime_offset);
+                                    if let Some(mut data) = enhanced_metric_data {
+                                        lambda_enhanced_metrics.set_cpu_utilization_enhanced_metrics(data.cpu_offset, data.uptime_offset);
+                                        // Drop tmp_chan as a signal to stop monitoring tmp
+                                        if let Some(tmp_chan) = data.tmp_chan.take() {
+                                            _ = tmp_chan.send(false);
+                                            drop(tmp_chan);
+                                        }
                                     }
 
                                     // TODO(astuyve) it'll be easy to
@@ -493,8 +498,6 @@ async fn extension_loop_active(
                                     if let Some(data) = enhanced_metric_data {
                                         lambda_enhanced_metrics.set_network_enhanced_metrics(data.network_offset);
                                         lambda_enhanced_metrics.set_cpu_time_enhanced_metrics(data.cpu_offset);
-                                        // Drop tmp_chan as a signal to stop monitoring tmp
-                                        drop(data.tmp_chan);
                                     }
                                     drop(p);
 

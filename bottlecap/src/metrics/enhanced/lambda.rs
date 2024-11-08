@@ -404,7 +404,7 @@ impl Lambda {
 
             loop {
                 match send_metrics.try_recv() {
-                    Err(mpsc::TryRecvError::Disconnected) => {
+                    Ok(false) | Err(mpsc::TryRecvError::Disconnected) => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
                         Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr);
@@ -796,7 +796,11 @@ mod tests {
         let tmp_max = 550461440.0;
         let tmp_used = 12165120.0;
 
-        Lambda::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut lambda.aggregator.lock().expect("lock poisoned"));
+        Lambda::generate_tmp_enhanced_metrics(
+            tmp_max,
+            tmp_used,
+            &mut lambda.aggregator.lock().expect("lock poisoned"),
+        );
 
         assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550461440.0);
         assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12165120.0);
