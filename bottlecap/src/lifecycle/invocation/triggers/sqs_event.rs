@@ -343,7 +343,7 @@ mod tests {
 
     #[test]
     fn test_get_carrier_from_sns() {
-        let json = read_json_file("sqs_sns_event.json");
+        let json = read_json_file("sns_sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         let carrier = event.get_carrier();
