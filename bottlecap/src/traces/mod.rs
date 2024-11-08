@@ -24,7 +24,7 @@ const DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX: &str = "0.0.0.0";
 // the first part of a URL from the localhost address for DNS traces
 const DNS_LOCAL_HOST_ADDRESS_URL_PREFIX: &str = "127.0.0.1";
 
-// awsXrayDaemonAddressURLPrefix is the first part of a URL from the _AWS_XRAY_DAEMON_ADDRESS for DNS traces
+// URL from the `_AWS_XRAY_DAEMON_ADDRESS` for DNS traces
 const AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX: &str = "169.254.79.129";
 
 // Name of the placeholder invocation span set by Java and Go tracers
