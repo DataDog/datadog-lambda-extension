@@ -63,8 +63,12 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
             return true;
         }
     }
-    if let Some(tcp_host) = span.meta.get("tcp.remote.host") {
-        if let Some(tcp_port) = span.meta.get("tcp.remote.port") {
+
+    if let (Some(tcp_host), Some(tcp_port)) = (
+        span.meta.get("tcp.remote.host"),
+        span.meta.get("tcp.remote.port"),
+    ) {
+        {
             let tcp_lambda_url_prefix = format!("http://{tcp_host}:{tcp_port}");
             if tcp_lambda_url_prefix.starts_with(LAMBDA_RUNTIME_URL_PREFIX)
                 || tcp_lambda_url_prefix.starts_with(LAMBDA_EXTENSION_URL_PREFIX)
@@ -74,6 +78,7 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
             }
         }
     }
+
     if let Some(dns_address) = span.meta.get("dns.address") {
         if dns_address.starts_with(DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX)
             || dns_address.starts_with(DNS_LOCAL_HOST_ADDRESS_URL_PREFIX)
@@ -86,7 +91,10 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
         return true;
     }
 
-    if span.name == "dns.lookup" || span.resource == "127.0.0.1" || span.resource == "0.0.0.0" {
+    if span.name == "dns.lookup"
+        || span.resource == DNS_LOCAL_HOST_ADDRESS_URL_PREFIX
+        || span.resource == DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX
+    {
         return true;
     }
 
