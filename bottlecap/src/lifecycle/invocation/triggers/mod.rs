@@ -14,9 +14,13 @@ pub const DATADOG_CARRIER_KEY: &str = "_datadog";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
 
-pub trait Trigger: Sized {
-    fn new(payload: Value) -> Option<Self>;
-    fn is_match(payload: &Value) -> bool;
+pub trait Trigger {
+    fn new(payload: Value) -> Option<Self>
+    where
+        Self: Sized;
+    fn is_match(payload: &Value) -> bool
+    where
+        Self: Sized;
     fn enrich_span(&self, span: &mut Span);
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str) -> String;
