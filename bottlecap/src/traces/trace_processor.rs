@@ -14,7 +14,13 @@ use std::sync::Arc;
 use tracing::debug;
 
 use crate::config;
+use crate::traces::{
+    AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
+    DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
+    LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
+};
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
+use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
 
@@ -31,11 +37,10 @@ struct ChunkProcessor {
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
-    fn process(&mut self, chunk: &mut datadog_trace_protobuf::pb::TraceChunk, _index: usize) {
-        chunk.spans.retain(|span| {
-            (span.resource != "127.0.0.1" || span.resource != "0.0.0.0")
-                && span.name != "dns.lookup"
-        });
+    fn process(&mut self, chunk: &mut pb::TraceChunk, _index: usize) {
+        chunk
+            .spans
+            .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
         for span in &mut chunk.spans {
             self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                 span.meta.insert(k.clone(), v.clone());
@@ -47,6 +52,53 @@ impl TraceChunkProcessor for ChunkProcessor {
             obfuscate_span(span, &self.obfuscation_config);
         }
     }
+}
+
+fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
+    if let Some(url) = span.meta.get("http.url") {
+        if url.starts_with(LAMBDA_RUNTIME_URL_PREFIX)
+            || url.starts_with(LAMBDA_EXTENSION_URL_PREFIX)
+            || url.starts_with(LAMBDA_STATSD_URL_PREFIX)
+        {
+            return true;
+        }
+    }
+
+    if let (Some(tcp_host), Some(tcp_port)) = (
+        span.meta.get("tcp.remote.host"),
+        span.meta.get("tcp.remote.port"),
+    ) {
+        {
+            let tcp_lambda_url_prefix = format!("http://{tcp_host}:{tcp_port}");
+            if tcp_lambda_url_prefix.starts_with(LAMBDA_RUNTIME_URL_PREFIX)
+                || tcp_lambda_url_prefix.starts_with(LAMBDA_EXTENSION_URL_PREFIX)
+                || tcp_lambda_url_prefix.starts_with(LAMBDA_STATSD_URL_PREFIX)
+            {
+                return true;
+            }
+        }
+    }
+
+    if let Some(dns_address) = span.meta.get("dns.address") {
+        if dns_address.starts_with(DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX)
+            || dns_address.starts_with(DNS_LOCAL_HOST_ADDRESS_URL_PREFIX)
+            || dns_address.starts_with(AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX)
+        {
+            return true;
+        }
+    }
+    if span.resource == INVOCATION_SPAN_RESOURCE {
+        return true;
+    }
+
+    if span.name == "dns.lookup"
+        || span.resource == DNS_LOCAL_HOST_ADDRESS_URL_PREFIX
+        || span.resource == DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX
+    {
+        return true;
+    }
+
+    false
 }
 
 #[allow(clippy::module_name_repetitions)]

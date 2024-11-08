@@ -189,26 +189,26 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn test_get_network_data() {
         let path = "./tests/proc/net/valid_dev";
-        let network_data_result = get_network_data_from_path(&path);
-        assert!(!network_data_result.is_err());
+        let network_data_result = get_network_data_from_path(path);
+        assert!(network_data_result.is_ok());
         let network_data_result = network_data_result.unwrap();
         assert_eq!(network_data_result.rx_bytes, 180.0);
         assert_eq!(network_data_result.tx_bytes, 254.0);
 
         let path = "./tests/proc/net/invalid_dev_malformed";
-        let network_data_result = get_network_data_from_path(&path);
+        let network_data_result = get_network_data_from_path(path);
         assert!(network_data_result.is_err());
 
         let path = "./tests/proc/net/invalid_dev_non_numerical_value";
-        let network_data_result = get_network_data_from_path(&path);
+        let network_data_result = get_network_data_from_path(path);
         assert!(network_data_result.is_err());
 
         let path = "./tests/proc/net/missing_interface_dev";
-        let network_data_result = get_network_data_from_path(&path);
+        let network_data_result = get_network_data_from_path(path);
         assert!(network_data_result.is_err());
 
         let path = "./tests/proc/net/nonexistent_dev";
-        let network_data_result = get_network_data_from_path(&path);
+        let network_data_result = get_network_data_from_path(path);
         assert!(network_data_result.is_err());
     }
 
@@ -216,12 +216,12 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn test_get_cpu_data() {
         let path = "./tests/proc/stat/valid_stat";
-        let cpu_data_result = get_cpu_data_from_path(&path);
-        assert!(!cpu_data_result.is_err());
+        let cpu_data_result = get_cpu_data_from_path(path);
+        assert!(cpu_data_result.is_ok());
         let cpu_data = cpu_data_result.unwrap();
         assert_eq!(cpu_data.total_user_time_ms, 23370.0);
         assert_eq!(cpu_data.total_system_time_ms, 1880.0);
-        assert_eq!(cpu_data.total_idle_time_ms, 178380.0);
+        assert_eq!(cpu_data.total_idle_time_ms, 178_380.0);
         assert_eq!(cpu_data.individual_cpu_idle_times.len(), 2);
         assert_eq!(
             *cpu_data
@@ -239,27 +239,27 @@ mod tests {
         );
 
         let path = "./tests/proc/stat/invalid_stat_non_numerical_value_1";
-        let cpu_data_result = get_cpu_data_from_path(&path);
+        let cpu_data_result = get_cpu_data_from_path(path);
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_non_numerical_value_2";
-        let cpu_data_result = get_cpu_data_from_path(&path);
+        let cpu_data_result = get_cpu_data_from_path(path);
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_malformed_first_line";
-        let cpu_data_result = get_cpu_data_from_path(&path);
+        let cpu_data_result = get_cpu_data_from_path(path);
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_malformed_per_cpu_line";
-        let cpu_data_result = get_cpu_data_from_path(&path);
+        let cpu_data_result = get_cpu_data_from_path(path);
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_missing_cpun_data";
-        let cpu_data_result = get_cpu_data_from_path(&path);
+        let cpu_data_result = get_cpu_data_from_path(path);
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/nonexistent_stat";
-        let cpu_data_result = get_cpu_data_from_path(&path);
+        let cpu_data_result = get_cpu_data_from_path(path);
         assert!(cpu_data_result.is_err());
     }
 
@@ -267,21 +267,21 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn test_get_uptime_data() {
         let path = "./tests/proc/uptime/valid_uptime";
-        let uptime_data_result = get_uptime_from_path(&path);
-        assert!(!uptime_data_result.is_err());
+        let uptime_data_result = get_uptime_from_path(path);
+        assert!(uptime_data_result.is_ok());
         let uptime_data = uptime_data_result.unwrap();
-        assert_eq!(uptime_data, 3213103123000.0);
+        assert_eq!(uptime_data, 3_213_103_123_000.0);
 
         let path = "./tests/proc/uptime/invalid_data_uptime";
-        let uptime_data_result = get_uptime_from_path(&path);
+        let uptime_data_result = get_uptime_from_path(path);
         assert!(uptime_data_result.is_err());
 
         let path = "./tests/proc/uptime/malformed_uptime";
-        let uptime_data_result = get_uptime_from_path(&path);
+        let uptime_data_result = get_uptime_from_path(path);
         assert!(uptime_data_result.is_err());
 
         let path = "./tests/proc/uptime/nonexistent_uptime";
-        let uptime_data_result = get_uptime_from_path(&path);
+        let uptime_data_result = get_uptime_from_path(path);
         assert!(uptime_data_result.is_err());
     }
 }
