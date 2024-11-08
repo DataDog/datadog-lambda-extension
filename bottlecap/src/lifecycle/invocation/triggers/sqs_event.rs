@@ -7,8 +7,9 @@ use tracing::debug;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
-        get_aws_partition_by_region, Trigger, DATADOG_CARRIER_KEY,
-        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        get_aws_partition_by_region,
+        sns_event::{SnsEntity, SnsRecord},
+        Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
 
@@ -35,6 +36,7 @@ pub struct SqsRecord {
     pub event_source_arn: String,
     #[serde(rename = "awsRegion")]
     pub aws_region: String,
+    pub body: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -178,8 +180,19 @@ impl Trigger for SqsRecord {
             }
         }
 
-        // TODO: AWSTraceHeader
+        // TODO: Check for EventBridge event sent through SQS
 
+        // Check for SNS event sent through SQS
+        if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&self.body) {
+            let sns_record = SnsRecord {
+                sns: sns_entity,
+                event_subscription_arn: None,
+            };
+
+            return sns_record.get_carrier();
+        }
+
+        // TODO: AWSTraceHeader
         carrier
     }
 }
@@ -219,6 +232,7 @@ mod tests {
             event_source: "aws:sqs".to_string(),
             event_source_arn: "arn:aws:sqs:us-east-1:123456789012:MyQueue".to_string(),
             aws_region: "us-east-1".to_string(),
+            body: "Hello from SQS!".to_string(),
         };
 
         assert_eq!(result, expected);
@@ -320,6 +334,28 @@ mod tests {
             (
                 "x-datadog-parent-id".to_string(),
                 "7431398482019833808".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_from_sns() {
+        let json = read_json_file("sqs_sns_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "2776434475358637757".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "4493917105238181843".to_string(),
             ),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
         ]);
