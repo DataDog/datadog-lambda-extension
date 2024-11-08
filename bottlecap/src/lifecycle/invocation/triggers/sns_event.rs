@@ -7,10 +7,8 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{base64_to_string, Trigger, DATADOG_CARRIER_KEY},
+    triggers::{base64_to_string, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
-
-use super::{FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SnsEvent {
@@ -123,16 +121,10 @@ impl Trigger for SnsRecord {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        HashMap::from([
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "sns".to_string(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                self.sns.topic_arn.clone(),
-            ),
-        ])
+        HashMap::from([(
+            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+            "sns".to_string(),
+        )])
     }
 
     fn get_arn(&self, _region: &str) -> String {
@@ -246,16 +238,10 @@ mod tests {
         let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
         let tags = event.get_tags();
 
-        let expected = HashMap::from([
-            (
-                "function_trigger.event_source".to_string(),
-                "sns".to_string(),
-            ),
-            (
-                "function_trigger.event_source_arn".to_string(),
-                "arn:aws:sns:sa-east-1:425362996713:serverlessTracingTopicPy".to_string(),
-            ),
-        ]);
+        let expected = HashMap::from([(
+            "function_trigger.event_source".to_string(),
+            "sns".to_string(),
+        )]);
 
         assert_eq!(tags, expected);
     }
