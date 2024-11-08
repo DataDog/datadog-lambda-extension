@@ -12,7 +12,7 @@ pub mod trace_processor;
 // the first part of a URL for a call to the Lambda runtime API. The value may be replaced if `AWS_LAMBDA_RUNTIME_API` is set.
 const LAMBDA_RUNTIME_URL_PREFIX: &str = "http://127.0.0.1:9001";
 
-// the first part of a URL for a call from the Datadog Lambda Library to the Lambda Extension
+// URL for a call from the Datadog Lambda Library to the Lambda Extension
 const LAMBDA_EXTENSION_URL_PREFIX: &str = "http://127.0.0.1:8124";
 
 // the first part of a URL for a call from Statsd
