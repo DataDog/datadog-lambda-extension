@@ -115,7 +115,7 @@ impl Trigger for SqsRecord {
 
         span.name = "aws.sqs".to_string();
         span.service = service_name.to_string();
-        span.resource.clone_from(&resource);
+        span.resource = resource;
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
