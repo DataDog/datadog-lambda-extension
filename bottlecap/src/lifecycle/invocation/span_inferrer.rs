@@ -9,7 +9,7 @@ use crate::config::AwsConfig;
 
 use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
-    sqs_event::SqsRecord, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
+    sns_event::SnsRecord, sqs_event::SqsRecord, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
 };
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 
@@ -101,6 +101,20 @@ impl SpanInferrer {
 
                 self.carrier = Some(t.get_carrier());
                 self.trigger_tags = Some(tt);
+                self.is_async_span = t.is_async();
+                self.inferred_span = Some(span);
+            }
+        } else if SnsRecord::is_match(payload_value) {
+            if let Some(t) = SnsRecord::new(payload_value.clone()) {
+                let mut span = Span {
+                    span_id: Self::generate_span_id(),
+                    ..Default::default()
+                };
+
+                t.enrich_span(&mut span);
+
+                self.carrier = Some(t.get_carrier());
+                self.trigger_tags = Some(t.get_tags());
                 self.is_async_span = t.is_async();
                 self.inferred_span = Some(span);
             }
