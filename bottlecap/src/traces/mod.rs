@@ -27,5 +27,5 @@ const DNS_LOCAL_HOST_ADDRESS_URL_PREFIX: &str = "127.0.0.1";
 // awsXrayDaemonAddressURLPrefix is the first part of a URL from the _AWS_XRAY_DAEMON_ADDRESS for DNS traces
 const AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX: &str = "169.254.79.129";
 
-// name of the placeholder span for java and golang tracer
+// Name of the placeholder invocation span set by Java and Go tracers
 const INVOCATION_SPAN_RESOURCE: &str = "dd-tracer-serverless-span";
