@@ -663,7 +663,7 @@ mod tests {
             total_idle_time_ms: 10.0,
             individual_cpu_idle_times: individual_cpu_idle_time_offsets,
         };
-        let uptime_offset = 1891100.0;
+        let uptime_offset = 1_891_100.0;
 
         let mut individual_cpu_idle_times_end = HashMap::new();
         individual_cpu_idle_times_end.insert("cpu0".to_string(), 570.0);
@@ -674,7 +674,7 @@ mod tests {
             total_idle_time_ms: 1130.0,
             individual_cpu_idle_times: individual_cpu_idle_times_end,
         };
-        let uptime_data = 1891900.0;
+        let uptime_data = 1_891_900.0;
 
         Lambda::generate_cpu_utilization_enhanced_metrics(
             &cpu_offset,
