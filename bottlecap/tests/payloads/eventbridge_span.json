@@ -1,11 +1,11 @@
 {
   "service": "eventbridge",
   "name": "aws.eventbridge",
-  "resource": "my.event",
+  "resource": "testBus",
   "trace_id": 0,
   "span_id": 0,
   "parent_id": 0,
-  "start": 1643040010000000000,
+  "start": 1731183820135000064,
   "duration": 0,
   "meta": {
     "operation_name": "aws.eventbridge",
