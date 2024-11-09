@@ -25,6 +25,7 @@ use crate::{
 };
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
+pub const S_TO_NS: f64 = 1_000_000_000.0;
 
 pub struct Processor {
     pub context_buffer: ContextBuffer,
@@ -149,14 +150,20 @@ impl Processor {
             self.span.meta.extend(trigger_tags);
         }
 
-        self.inferrer.complete_inferred_span(&self.span);
+        self.inferrer.complete_inferred_spans(&self.span);
 
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&self.span);
             let mut traces = vec![self.span.clone()];
+
             if let Some(inferred_span) = &self.inferrer.inferred_span {
                 body_size += std::mem::size_of_val(inferred_span);
                 traces.push(inferred_span.clone());
+            }
+
+            if let Some(ws) = &self.inferrer.wrapped_inferred_span {
+                body_size += std::mem::size_of_val(ws);
+                traces.push(ws.clone());
             }
 
             // todo: figure out what to do here
