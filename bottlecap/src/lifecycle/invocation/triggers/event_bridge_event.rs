@@ -81,8 +81,7 @@ impl Trigger for EventBridgeEvent {
     fn get_carrier(&self) -> HashMap<String, String> {
         if let Ok(detail) = serde_json::from_value::<HashMap<String, Value>>(self.detail.clone()) {
             if let Some(carrier) = detail.get(DATADOG_CARRIER_KEY) {
-                return serde_json::from_value::<HashMap<String, String>>(carrier.clone())
-                    .unwrap_or_default();
+                return serde_json::from_value(carrier.clone()).unwrap_or_default();
             }
         }
         HashMap::new()
@@ -162,15 +161,34 @@ mod tests {
     }
 
     #[test]
-    fn test_enrich_parameterized_span() {
-        //TODO
-    }
-
-    #[test]
     fn test_get_arn() {
         let json = read_json_file("eventbridge_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent");
         assert_eq!(event.get_arn("us-east-1"), "my.event");
+    }
+
+    #[test]
+    fn test_get_carrier() {
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridge Event");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "5827606813695714842".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "4726693487091824375".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-sampled".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
     }
 }
