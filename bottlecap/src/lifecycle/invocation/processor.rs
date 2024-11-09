@@ -25,6 +25,7 @@ use crate::{
 };
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
+pub const S_TO_NS: f64 = 1_000_000_000.0;
 
 pub struct Processor {
     pub context_buffer: ContextBuffer,
