@@ -32,7 +32,7 @@ pub struct DynamoDbRecord {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct DynamoDbEntity {
     #[serde(rename = "ApproximateCreationDateTime")]
-    pub approximate_creation_date_time: i64,
+    pub approximate_creation_date_time: f64,
     #[serde(rename = "SizeBytes")]
     pub size_bytes: i64,
     #[serde(rename = "StreamViewType")]
@@ -79,7 +79,7 @@ impl Trigger for DynamoDbRecord {
         let table_name = self.event_source_arn.split('/').nth(1).unwrap_or_default();
         let resource = format!("{} {}", self.event_name.clone(), table_name);
 
-        let start_time = (self.dynamodb.approximate_creation_date_time as f64 * S_TO_NS) as i64;
+        let start_time = (self.dynamodb.approximate_creation_date_time * S_TO_NS) as i64;
         // todo: service mapping and peer service
         let service_name = "dynamodb";
 
@@ -142,7 +142,7 @@ mod tests {
 
         let expected = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
-                approximate_creation_date_time: 1428537600,
+                approximate_creation_date_time: 1428537600.0,
                 size_bytes: 26,
                 stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
             },
