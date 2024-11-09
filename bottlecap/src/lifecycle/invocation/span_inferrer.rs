@@ -16,6 +16,8 @@ use crate::lifecycle::invocation::triggers::{
 };
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 
+use super::triggers::s3_event::S3Record;
+
 pub struct SpanInferrer {
     pub inferred_span: Option<Span>,
     pub wrapped_inferred_span: Option<Span>,
@@ -100,6 +102,12 @@ impl SpanInferrer {
             }
         } else if SnsRecord::is_match(payload_value) {
             if let Some(t) = SnsRecord::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if S3Record::is_match(payload_value) {
+            if let Some(t) = S3Record::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span);
 
                 trigger = Some(Box::new(t));
