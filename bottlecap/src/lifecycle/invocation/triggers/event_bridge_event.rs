@@ -5,7 +5,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-use crate::lifecycle::invocation::{processor::MS_TO_NS, triggers::Trigger};
+use crate::lifecycle::invocation::{
+    processor::MS_TO_NS,
+    triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 pub struct EventBridgeEvent {
@@ -57,10 +60,10 @@ impl Trigger for EventBridgeEvent {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        // the only 2 trigger tags seems to be function_trigger.event_source and
-        // function_trigger.event_source_arn and they are added in the trigger
-        // https://github.com/DataDog/datadog-agent/blob/main/pkg/serverless/invocationlifecycle/init.go#L114-L115
-        HashMap::new()
+        HashMap::from([(
+            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+            "eventbridge".to_string(),
+        )])
     }
 
     fn get_arn(&self, _region: &str) -> String {
