@@ -10,6 +10,7 @@ use crate::config::AwsConfig;
 use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent,
     api_gateway_rest_event::APIGatewayRestEvent,
+    dynamodb_event::DynamoDbRecord,
     sns_event::{SnsEntity, SnsRecord},
     sqs_event::SqsRecord,
     Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
@@ -102,6 +103,12 @@ impl SpanInferrer {
             }
         } else if SnsRecord::is_match(payload_value) {
             if let Some(t) = SnsRecord::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if DynamoDbRecord::is_match(payload_value) {
+            if let Some(t) = DynamoDbRecord::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span);
 
                 trigger = Some(Box::new(t));
