@@ -75,7 +75,7 @@ impl Trigger for KinesisRecord {
         span.name = "aws.kinesis".to_string();
         span.service = "kinesis".to_string();
         span.start = (self.kinesis.approximate_arrival_timestamp * S_TO_NS) as i64;
-        span.resource = parsed_stream_name.to_string();
+        span.resource = (*parsed_stream_name).to_string();
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
             ("operation_name".to_string(), "aws.kinesis".to_string()),
