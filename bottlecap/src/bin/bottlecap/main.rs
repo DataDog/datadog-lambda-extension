@@ -379,7 +379,7 @@ async fn extension_loop_active(
                 lambda_enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
 
                 let mut p = invocation_processor.lock().await;
-                p.on_invoke_event(request_id, Some(tmp_chan_tx));
+                p.on_invoke_event(request_id, tmp_chan_tx);
                 drop(p);
             }
             Ok(NextEventResponse::Shutdown {
@@ -455,13 +455,11 @@ async fn extension_loop_active(
                                     );
 
                                     // set cpu utilization metrics here to avoid accounting for extra idle time
-                                    if let Some(mut data) = enhanced_metric_data {
+                                    if let Some(data) = enhanced_metric_data {
                                         lambda_enhanced_metrics.set_cpu_utilization_enhanced_metrics(data.cpu_offset, data.uptime_offset);
                                         // Send signal to stop monitoring tmp
-                                        if let Some(tmp_chan) = data.tmp_chan.take() {
-                                            _ = tmp_chan.send(());
-                                            drop(tmp_chan);
-                                        }
+                                        _ = data.tmp_chan.send(());
+                                        drop(data.tmp_chan);
                                     }
 
                                     // TODO(astuyve) it'll be easy to

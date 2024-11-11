@@ -172,6 +172,7 @@ impl ContextBuffer {
 mod tests {
     use crate::proc::{CPUData, NetworkData};
     use std::collections::HashMap;
+    use tokio::sync::watch;
 
     use super::*;
 
@@ -318,12 +319,13 @@ mod tests {
         });
 
         let uptime_offset = Some(50.0);
+        let (tmp_chan, _) = watch::channel(());
 
         let enhanced_metric_data = Some(EnhancedMetricData {
             network_offset,
             cpu_offset,
             uptime_offset,
-            tmp_chan: None,
+            tmp_chan,
         });
 
         buffer.add_enhanced_metric_data(&request_id, enhanced_metric_data.clone());

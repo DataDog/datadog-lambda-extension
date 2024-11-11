@@ -5,6 +5,8 @@ use std::io;
 use std::path::Path;
 
 #[cfg(not(target_os = "windows"))]
+/// Returns the block size, total number of blocks, and number of blocks available for the specified directory path.
+///
 pub fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
     let stat = statfs(Path::new(path)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     Ok((
@@ -16,5 +18,8 @@ pub fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
 
 #[cfg(target_os = "windows")]
 fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
-    Err(io::Error::new(io::ErrorKind::Other, "Cannot get tmp data on Windows"))
+    Err(io::Error::new(
+        io::ErrorKind::Other,
+        "Cannot get tmp data on Windows",
+    ))
 }
