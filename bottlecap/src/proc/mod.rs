@@ -184,12 +184,19 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    fn path_from_root(file: &str) -> String {
+        let mut safe_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        safe_path.push(file);
+        safe_path.to_str().unwrap().to_string()
+    }
 
     #[test]
     #[allow(clippy::float_cmp)]
     fn test_get_network_data() {
         let path = "./tests/proc/net/valid_dev";
-        let network_data_result = get_network_data_from_path(path);
+        let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_ok());
         let network_data_result = network_data_result.unwrap();
         assert_eq!(network_data_result.rx_bytes, 180.0);
@@ -216,7 +223,7 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn test_get_cpu_data() {
         let path = "./tests/proc/stat/valid_stat";
-        let cpu_data_result = get_cpu_data_from_path(path);
+        let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_ok());
         let cpu_data = cpu_data_result.unwrap();
         assert_eq!(cpu_data.total_user_time_ms, 23370.0);
@@ -267,7 +274,7 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn test_get_uptime_data() {
         let path = "./tests/proc/uptime/valid_uptime";
-        let uptime_data_result = get_uptime_from_path(path);
+        let uptime_data_result = get_uptime_from_path(path_from_root(path).as_str());
         assert!(uptime_data_result.is_ok());
         let uptime_data = uptime_data_result.unwrap();
         assert_eq!(uptime_data, 3_213_103_123_000.0);
