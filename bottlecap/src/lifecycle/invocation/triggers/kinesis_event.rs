@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::lifecycle::invocation::triggers::FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
@@ -15,7 +14,7 @@ use crate::lifecycle::invocation::{
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct KinesisEvent {
     #[serde(rename = "Records")]
-    pub records: Vec<KinesisEventRecord>,
+    pub records: Vec<KinesisRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -39,12 +38,11 @@ pub struct KinesisEntity {
     pub partition_key: String,
 }
 
-impl Trigger for KinesisEventRecord {
+impl Trigger for KinesisRecord {
     fn new(payload: Value) -> Option<Self> {
         let records = payload.get("Records").and_then(Value::as_array);
         match records {
-            Some(records) => match serde_json::from_value::<KinesisEventRecord>(records[0].clone())
-            {
+            Some(records) => match serde_json::from_value::<KinesisRecord>(records[0].clone()) {
                 Ok(event) => Some(event),
                 Err(e) => {
                     debug!("Failed to deserialize Kinesis Record: {e}");
@@ -74,11 +72,10 @@ impl Trigger for KinesisEventRecord {
         let split_source_arn: Vec<&str> = event_source_arn.split('/').collect();
         let parsed_stream_name = split_source_arn.last().unwrap_or(&"");
         let parsed_shard_id = self.event_id.split(':').next().unwrap_or_default();
-        let service_name = "kinesis";
         span.name = "aws.kinesis".to_string();
-        span.service = service_name.to_string();
+        span.service = "kinesis".to_string();
         span.start = (self.kinesis.approximate_arrival_timestamp * MS_TO_NS) as i64;
-        span.resource = (*parsed_stream_name).to_string();
+        span.resource = parsed_stream_name.to_string();
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
             ("operation_name".to_string(), "aws.kinesis".to_string()),
@@ -100,16 +97,10 @@ impl Trigger for KinesisEventRecord {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        HashMap::from([
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                "kinesis".to_string(),
-            ),
-            (
-                FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                self.event_source_arn.clone(),
-            ),
-        ])
+        HashMap::from([(
+            FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+            "kinesis".to_string(),
+        )])
     }
 
     fn get_arn(&self, _region: &str) -> String {
@@ -134,9 +125,9 @@ mod tests {
     fn test_new() {
         let json = read_json_file("kinesis_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let result = KinesisEventRecord::new(payload).expect("Failed to deserialize into Record");
+        let result = KinesisRecord::new(payload).expect("Failed to deserialize into Record");
 
-        let expected = KinesisEventRecord {
+        let expected = KinesisRecord {
             event_id:
                 "shardId-000000000002:49624230154685806402418173680709770494154422022871973922"
                     .to_string(),
@@ -144,7 +135,7 @@ mod tests {
             event_source_arn: "arn:aws:kinesis:sa-east-1:425362996713:stream/kinesisStream"
                 .to_string(),
             event_version: "1.0".to_string(),
-            kinesis: KinesisRecord {
+            kinesis: KinesisEntity {
                 approximate_arrival_timestamp: 1_643_638_425.163,
                 partition_key: "partitionkey".to_string(),
             },
@@ -158,21 +149,21 @@ mod tests {
         let json = read_json_file("kinesis_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize S3Record");
 
-        assert!(KinesisEventRecord::is_match(&payload));
+        assert!(KinesisRecord::is_match(&payload));
     }
 
     #[test]
     fn test_is_not_match() {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
-        assert!(!KinesisEventRecord::is_match(&payload));
+        assert!(!KinesisRecord::is_match(&payload));
     }
 
     #[test]
     fn test_enrich_span() {
         let json = read_json_file("kinesis_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event = KinesisEventRecord::new(payload).expect("Failed to deserialize S3Record");
+        let event = KinesisRecord::new(payload).expect("Failed to deserialize S3Record");
         let mut span = Span::default();
         event.enrich_span(&mut span);
         assert_eq!(span.name, "aws.kinesis");
@@ -207,20 +198,13 @@ mod tests {
     fn test_get_tags() {
         let json = read_json_file("kinesis_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            KinesisEventRecord::new(payload).expect("Failed to deserialize KinesisEventRecord");
+        let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
         let tags = event.get_tags();
 
-        let expected = HashMap::from([
-            (
-                "function_trigger.event_source".to_string(),
-                "kinesis".to_string(),
-            ),
-            (
-                "function_trigger.event_source_arn".to_string(),
-                "arn:aws:kinesis:sa-east-1:425362996713:stream/kinesisStream".to_string(),
-            ),
-        ]);
+        let expected = HashMap::from([(
+            "function_trigger.event_source".to_string(),
+            "kinesis".to_string(),
+        )]);
 
         assert_eq!(tags, expected);
     }
@@ -229,8 +213,7 @@ mod tests {
     fn test_get_arn() {
         let json = read_json_file("kinesis_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            KinesisEventRecord::new(payload).expect("Failed to deserialize KinesisEventRecord");
+        let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
         assert_eq!(
             event.get_arn("us-east-1"),
             "arn:aws:kinesis:sa-east-1:425362996713:stream/kinesisStream".to_string()
@@ -241,8 +224,7 @@ mod tests {
     fn test_get_carrier() {
         let json = read_json_file("kinesis_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            KinesisEventRecord::new(payload).expect("Failed to deserialize KinesisEventRecord");
+        let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
         let carrier = event.get_carrier();
 
         let expected = HashMap::new();
