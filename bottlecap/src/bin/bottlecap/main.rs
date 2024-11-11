@@ -62,8 +62,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 use telemetry::listener::TelemetryListenerConfig;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
-use tokio::sync::{mpsc::Sender, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
