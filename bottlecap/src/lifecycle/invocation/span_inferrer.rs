@@ -7,6 +7,7 @@ use tracing::debug;
 
 use crate::config::AwsConfig;
 
+use crate::lifecycle::invocation::triggers::kinesis_event::KinesisEventRecord;
 use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent,
     api_gateway_rest_event::APIGatewayRestEvent,
@@ -122,6 +123,12 @@ impl SpanInferrer {
             }
         } else if EventBridgeEvent::is_match(payload_value) {
             if let Some(t) = EventBridgeEvent::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if KinesisEventRecord::is_match(payload_value) {
+            if let Some(t) = KinesisEventRecord::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span);
 
                 trigger = Some(Box::new(t));
