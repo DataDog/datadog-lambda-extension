@@ -1,14 +1,15 @@
 #![allow(clippy::module_name_repetitions)]
-use std::collections::HashMap;
-
+use base64::engine::general_purpose;
+use base64::Engine;
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{from_slice, Value};
+use std::collections::HashMap;
 use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::S_TO_NS,
-    triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -36,6 +37,7 @@ pub struct KinesisEntity {
     pub approximate_arrival_timestamp: f64,
     #[serde(rename = "partitionKey")]
     pub partition_key: String,
+    pub data: String,
 }
 
 impl Trigger for KinesisRecord {
@@ -108,6 +110,13 @@ impl Trigger for KinesisRecord {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
+        if let Ok(decoded_base64) = general_purpose::STANDARD.decode(&self.kinesis.data) {
+            if let Ok(as_json_map) = from_slice::<HashMap<String, Value>>(&decoded_base64) {
+                if let Some(carrier) = as_json_map.get(DATADOG_CARRIER_KEY) {
+                    return serde_json::from_value(carrier.clone()).unwrap_or_default();
+                }
+            }
+        };
         HashMap::new()
     }
 
@@ -138,6 +147,7 @@ mod tests {
             kinesis: KinesisEntity {
                 approximate_arrival_timestamp: 1_643_638_425.163,
                 partition_key: "partitionkey".to_string(),
+                data: "eyJmb28iOiAiYmFyIiwgIl9kYXRhZG9nIjogeyJ4LWRhdGFkb2ctdHJhY2UtaWQiOiAiNDk0ODM3NzMxNjM1NzI5MTQyMSIsICJ4LWRhdGFkb2ctcGFyZW50LWlkIjogIjI4NzYyNTMzODAwMTg2ODEwMjYiLCAieC1kYXRhZG9nLXNhbXBsaW5nLXByaW9yaXR5IjogIjEifX0=".to_string(),
             },
         };
 
@@ -227,7 +237,17 @@ mod tests {
         let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
         let carrier = event.get_carrier();
 
-        let expected = HashMap::new();
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "4948377316357291421".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "2876253380018681026".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
 
         assert_eq!(carrier, expected);
     }
