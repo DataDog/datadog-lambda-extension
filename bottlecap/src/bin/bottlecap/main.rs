@@ -60,11 +60,11 @@ use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
-    sync::{mpsc, Arc, Mutex},
+    sync::{Arc, Mutex},
 };
 use telemetry::listener::TelemetryListenerConfig;
-use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{mpsc::Sender, watch};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -375,7 +375,7 @@ async fn extension_loop_active(
                 lambda_enhanced_metrics.increment_invocation_metric();
 
                 // Start a channel for monitoring tmp enhanced data
-                let (tmp_chan_tx, tmp_chan_rx) = mpsc::channel::<bool>();
+                let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
                 lambda_enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
 
                 let mut p = invocation_processor.lock().await;
@@ -457,9 +457,9 @@ async fn extension_loop_active(
                                     // set cpu utilization metrics here to avoid accounting for extra idle time
                                     if let Some(mut data) = enhanced_metric_data {
                                         lambda_enhanced_metrics.set_cpu_utilization_enhanced_metrics(data.cpu_offset, data.uptime_offset);
-                                        // Drop tmp_chan as a signal to stop monitoring tmp
+                                        // Send signal to stop monitoring tmp
                                         if let Some(tmp_chan) = data.tmp_chan.take() {
-                                            _ = tmp_chan.send(false);
+                                            _ = tmp_chan.send(());
                                             drop(tmp_chan);
                                         }
                                     }

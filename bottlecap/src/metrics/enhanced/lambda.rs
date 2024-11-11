@@ -6,12 +6,12 @@ use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use std::env::consts::ARCH;
-use std::sync::{
-    mpsc::{self, Receiver},
-    Arc, Mutex,
-};
-use std::thread;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::{
+    sync::watch::{Receiver, Sender},
+    time::interval,
+};
 use tracing::debug;
 use tracing::error;
 
@@ -383,14 +383,15 @@ impl Lambda {
         }
     }
 
-    pub fn set_tmp_enhanced_metrics(&self, send_metrics: Receiver<bool>) {
+    pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
         if !self.config.enhanced_metrics {
             return;
         }
 
         let aggr = Arc::clone(&self.aggregator);
 
-        thread::spawn(move || {
+        tokio::spawn(async move {
+            // Set tmp_max and initial value for tmp_used
             let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
                 Ok(stats) => stats,
                 Err(err) => {
@@ -398,19 +399,22 @@ impl Lambda {
                     return;
                 }
             };
-
             let tmp_max = bsize * blocks;
             let mut tmp_used = bsize * (blocks - bavail);
 
+            let mut interval = interval(Duration::from_millis(10));
             loop {
-                match send_metrics.try_recv() {
-                    Ok(false) | Err(mpsc::TryRecvError::Disconnected) => {
+                tokio::select! {
+                    biased;
+                    // When the stop signal is received, generate final metrics
+                    _ = send_metrics.changed() => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
                         Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr);
                         return;
                     }
-                    _ => {
+                    // Otherwise keep monitoring tmp usage periodically
+                    _ = interval.tick() => {
                         let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
                             Ok(stats) => stats,
                             Err(err) => {
@@ -419,7 +423,6 @@ impl Lambda {
                             }
                         };
                         tmp_used = tmp_used.max(bsize * (blocks - bavail));
-                        thread::sleep(Duration::from_millis(10));
                     }
                 }
             }
@@ -499,7 +502,7 @@ pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
-    pub tmp_chan: Option<mpsc::Sender<bool>>,
+    pub tmp_chan: Option<Sender<()>>,
 }
 
 impl PartialEq for EnhancedMetricData {
@@ -656,6 +659,15 @@ mod tests {
             .is_none());
         assert!(aggr
             .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::TMP_MAX_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::TMP_USED_METRIC.into(), &None)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::TMP_FREE_METRIC.into(), &None)
             .is_none());
     }
 

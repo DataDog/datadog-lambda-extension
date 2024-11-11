@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{mpsc, Arc},
+    sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use serde_json::{json, Value};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, watch};
 use tracing::debug;
 
 use crate::{
@@ -81,7 +81,7 @@ impl Processor {
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
-    pub fn on_invoke_event(&mut self, request_id: String, tmp_chan: Option<mpsc::Sender<bool>>) {
+    pub fn on_invoke_event(&mut self, request_id: String, tmp_chan: Option<watch::Sender<()>>) {
         self.context_buffer.create_context(request_id.clone());
         if self.collect_enhanced_data {
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
