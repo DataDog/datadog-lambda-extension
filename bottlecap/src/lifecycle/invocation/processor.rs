@@ -174,9 +174,6 @@ impl Processor {
             // - language
             // - function.request - capture lambda payload
             // - function.response
-            // - error.msg
-            // - error.type
-            // - error.stack
             // - metrics tags (for asm)
 
             if let Some(offsets) = &context.enhanced_metric_data {
