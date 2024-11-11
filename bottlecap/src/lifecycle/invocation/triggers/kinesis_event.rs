@@ -19,7 +19,7 @@ pub struct KinesisEvent {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct KinesisEventRecord {
+pub struct KinesisRecord {
     #[serde(rename = "eventID")]
     pub event_id: String,
     #[serde(rename = "eventName")]
@@ -28,11 +28,11 @@ pub struct KinesisEventRecord {
     pub event_source_arn: String,
     #[serde(rename = "eventVersion")]
     pub event_version: String,
-    pub kinesis: KinesisRecord,
+    pub kinesis: KinesisEntity,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct KinesisRecord {
+pub struct KinesisEntity {
     #[serde(rename = "approximateArrivalTimestamp")]
     pub approximate_arrival_timestamp: f64,
     #[serde(rename = "partitionKey")]
