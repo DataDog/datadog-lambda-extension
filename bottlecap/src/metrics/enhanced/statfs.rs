@@ -16,5 +16,5 @@ pub fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
 
 #[cfg(target_os = "windows")]
 fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
-    Ok((0, 0, 0))
+    Err(io::Error::new(io::ErrorKind::Other, "Cannot get tmp data on Windows"))
 }
