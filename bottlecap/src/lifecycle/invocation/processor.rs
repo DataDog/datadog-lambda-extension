@@ -14,7 +14,9 @@ use tracing::debug;
 
 use crate::{
     config::{self, AwsConfig},
-    lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer, base64_to_string},
+    lifecycle::invocation::{
+        base64_to_string, context::ContextBuffer, span_inferrer::SpanInferrer,
+    },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{self, CPUData, NetworkData},
     tags::provider,
@@ -190,7 +192,7 @@ impl Processor {
         }
 
         self.inferrer
-            .complete_inferred_spans(&self.span, self.span.error == 1);
+            .complete_inferred_spans(&self.span);
 
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&self.span);
@@ -350,7 +352,9 @@ impl Processor {
         self.update_span_context_from_headers(&headers);
         self.set_span_error_from_headers(headers);
 
-        // todo: increment error metrics if there's an error
+        if self.span.error == 1 {
+            self.enhanced_metrics.increment_errors_metric();
+        }
     }
 
     fn update_span_context_from_headers(&mut self, headers: &HashMap<String, String>) {
@@ -429,6 +433,8 @@ impl Processor {
                     .meta
                     .insert(String::from("error.stack"), decoded_stack);
             }
+
+            // todo: handle timeout
         }
     }
 }
