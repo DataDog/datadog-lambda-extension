@@ -121,7 +121,7 @@ mod tests {
             id: "bd3c8258-8d30-007c-2562-64715b2d0ea8".to_string(),
             version: "0".to_string(),
             account: "601427279990".to_string(),
-            time: DateTime::parse_from_rfc3339("2022-01-24T16:00:10Z")
+            time: DateTime::parse_from_rfc3339("2024-11-09T08:22:15Z")
                 .expect("Failed to parse time")
                 .with_timezone(&Utc),
             region: "eu-west-1".to_string(),
@@ -134,7 +134,9 @@ mod tests {
                     "x-datadog-trace-id": "5827606813695714842",
                     "x-datadog-parent-id": "4726693487091824375",
                     "x-datadog-sampled": "1",
-                    "x-datadog-sampling-priority": "1"
+                    "x-datadog-sampling-priority": "1",
+                    "x-datadog-resource-name": "testBus",
+                    "x-datadog-start-time": "1731183820135"
                 }
             }),
             replay_name: None,
@@ -228,6 +230,11 @@ mod tests {
             ),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
             ("x-datadog-sampled".to_string(), "1".to_string()),
+            ("x-datadog-resource-name".to_string(), "testBus".to_string()),
+            (
+                "x-datadog-start-time".to_string(),
+                "1731183820135".to_string(),
+            ),
         ]);
 
         assert_eq!(carrier, expected);
