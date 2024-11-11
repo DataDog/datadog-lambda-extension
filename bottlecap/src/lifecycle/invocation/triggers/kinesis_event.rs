@@ -7,7 +7,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::lifecycle::invocation::{
-    processor::MS_TO_NS,
+    processor::S_TO_NS,
     triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
 
@@ -74,7 +74,7 @@ impl Trigger for KinesisRecord {
         let parsed_shard_id = self.event_id.split(':').next().unwrap_or_default();
         span.name = "aws.kinesis".to_string();
         span.service = "kinesis".to_string();
-        span.start = (self.kinesis.approximate_arrival_timestamp * MS_TO_NS) as i64;
+        span.start = (self.kinesis.approximate_arrival_timestamp * S_TO_NS) as i64;
         span.resource = parsed_stream_name.to_string();
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
