@@ -161,7 +161,7 @@ impl SpanInferrer {
 
     // TODO: add status tag and other info from response
     // TODO: add peer.service
-    pub fn complete_inferred_spans(&mut self, invocation_span: &Span) {
+    pub fn complete_inferred_spans(&mut self, invocation_span: &Span, has_errored: bool) {
         if let Some(s) = &mut self.inferred_span {
             if let Some(ws) = &mut self.wrapped_inferred_span {
                 // Set correct Parent ID for multiple inferred spans
@@ -180,6 +180,9 @@ impl SpanInferrer {
                     ws.duration = duration;
                 }
 
+                // Set error
+                ws.error = i32::from(has_errored);
+
                 ws.trace_id = invocation_span.trace_id;
             }
 
@@ -193,6 +196,9 @@ impl SpanInferrer {
                 let duration = (invocation_span.start + invocation_span.duration) - s.start;
                 s.duration = duration;
             }
+
+            // Set error
+            s.error = i32::from(has_errored);
 
             s.trace_id = invocation_span.trace_id;
         }
