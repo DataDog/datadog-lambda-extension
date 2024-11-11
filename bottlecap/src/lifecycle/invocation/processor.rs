@@ -1,12 +1,13 @@
 use std::{
     collections::HashMap,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
+use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{json, Value};
 use tokio::sync::mpsc::Sender;
 use tracing::debug;
@@ -14,9 +15,10 @@ use tracing::debug;
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
-    metrics::enhanced::lambda::EnhancedMetricData,
+    metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{self, CPUData, NetworkData},
     tags::provider,
+    telemetry::events::{ReportMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{DatadogCompositePropagator, Propagator},
@@ -34,9 +36,10 @@ pub struct Processor {
     pub extracted_span_context: Option<SpanContext>,
     // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
+    enhanced_metrics: EnhancedMetrics,
     aws_config: AwsConfig,
     tracer_detected: bool,
-    collect_enhanced_data: bool,
+    enhanced_metrics_enabled: bool,
 }
 
 impl Processor {
@@ -45,6 +48,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: &AwsConfig,
+        metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
     ) -> Self {
         let service = config.service.clone().unwrap_or("aws.lambda".to_string());
         let resource = tags_provider
@@ -74,9 +78,10 @@ impl Processor {
             },
             extracted_span_context: None,
             propagator,
+            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config: aws_config.clone(),
             tracer_detected: false,
-            collect_enhanced_data: config.enhanced_metrics,
+            enhanced_metrics_enabled: config.enhanced_metrics,
         }
     }
 
@@ -84,7 +89,7 @@ impl Processor {
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
         self.context_buffer.create_context(request_id.clone());
-        if self.collect_enhanced_data {
+        if self.enhanced_metrics_enabled {
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
@@ -96,6 +101,15 @@ impl Processor {
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
+
+        // Increment the invocation metric
+        self.enhanced_metrics.increment_invocation_metric();
+    }
+
+    /// Given the duration of the platform init report, set the init duration metric.
+    ///
+    pub fn on_platform_init_report(&mut self, duration_ms: f64) {
+        self.enhanced_metrics.set_init_duration_metric(duration_ms);
     }
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
@@ -113,20 +127,35 @@ impl Processor {
         self.span.start = start_time;
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[allow(clippy::cast_possible_truncation)]
     pub async fn on_platform_runtime_done(
         &mut self,
         request_id: &String,
         duration_ms: f64,
+        status: Status,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
-    ) -> Option<EnhancedMetricData> {
+    ) {
         self.context_buffer
             .add_runtime_duration(request_id, duration_ms);
 
-        let mut enhanced_metric_data: Option<EnhancedMetricData> = None;
+        // Set the runtime duration metric
+        self.enhanced_metrics
+            .set_runtime_duration_metric(duration_ms);
+
+        if status != Status::Success {
+            // Increment the error metric
+            self.enhanced_metrics.increment_errors_metric();
+
+            // Increment the error type metric
+            if status == Status::Timeout {
+                self.enhanced_metrics.increment_timeout_metric();
+            }
+        }
+
         if let Some(context) = self.context_buffer.get(request_id) {
             let span = &mut self.span;
             // `round` is intentionally meant to be a whole integer
@@ -143,7 +172,12 @@ impl Processor {
             // - error.stack
             // - metrics tags (for asm)
 
-            enhanced_metric_data.clone_from(&context.enhanced_metric_data);
+            if let Some(offsets) = &context.enhanced_metric_data {
+                self.enhanced_metrics.set_cpu_utilization_enhanced_metrics(
+                    offsets.cpu_offset.clone(),
+                    offsets.uptime_offset,
+                );
+            }
         }
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
@@ -190,8 +224,6 @@ impl Processor {
                 debug!("Failed to send invocation span to agent: {e}");
             }
         }
-
-        enhanced_metric_data
     }
 
     /// Given a `request_id` and the duration in milliseconds of the platform report,
@@ -200,22 +232,27 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(
-        &mut self,
-        request_id: &String,
-        duration_ms: f64,
-    ) -> (Option<f64>, Option<EnhancedMetricData>) {
-        if let Some(context) = self.context_buffer.remove(request_id) {
-            let mut post_runtime_duration_ms: Option<f64> = None;
+    pub fn on_platform_report(&mut self, request_id: &String, metrics: ReportMetrics) {
+        // Set the report log metrics
+        self.enhanced_metrics.set_report_log_metrics(&metrics);
 
+        if let Some(context) = self.context_buffer.remove(request_id) {
             if context.runtime_duration_ms != 0.0 {
-                post_runtime_duration_ms = Some(duration_ms - context.runtime_duration_ms);
+                let post_runtime_duration_ms = metrics.duration_ms - context.runtime_duration_ms;
+
+                // Set the post runtime duration metric
+                self.enhanced_metrics
+                    .set_post_runtime_duration_metric(post_runtime_duration_ms);
             }
 
-            return (post_runtime_duration_ms, context.enhanced_metric_data);
+            // Set Network and CPU time metrics
+            if let Some(offsets) = context.enhanced_metric_data {
+                self.enhanced_metrics
+                    .set_network_enhanced_metrics(offsets.network_offset);
+                self.enhanced_metrics
+                    .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
+            }
         }
-
-        (None, None)
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented

@@ -23,13 +23,12 @@ use bottlecap::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
     },
-    metrics::enhanced::lambda::Lambda as enhanced_metrics,
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
     telemetry::{
         self,
         client::TelemetryApiClient,
-        events::{Status, TelemetryEvent, TelemetryRecord},
+        events::{TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
     },
     traces::{
@@ -296,10 +295,12 @@ async fn extension_loop_active(
         buffer: Arc::new(TokioMutex::new(Vec::new())),
     });
 
+    // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
         Arc::clone(config),
         aws_config,
+        Arc::clone(&metrics_aggr),
     )));
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(
@@ -350,8 +351,6 @@ async fn extension_loop_active(
         }
     });
 
-    let lambda_enhanced_metrics =
-        enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
 
     let telemetry_listener_cancel_token =
@@ -375,7 +374,6 @@ async fn extension_loop_active(
                     "Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
-                lambda_enhanced_metrics.increment_invocation_metric();
                 let mut p = invocation_processor.lock().await;
                 p.on_invoke_event(request_id);
                 drop(p);
@@ -416,8 +414,9 @@ async fn extension_loop_active(
                                     metrics,
                                 } => {
                                     debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                    lambda_enhanced_metrics
-                                        .set_init_duration_metric(metrics.duration_ms);
+                                    let mut p = invocation_processor.lock().await;
+                                    p.on_platform_init_report(metrics.duration_ms);
+                                    drop(p);
                                 }
                                 TelemetryRecord::PlatformRuntimeDone {
                                     request_id,
@@ -425,37 +424,24 @@ async fn extension_loop_active(
                                     metrics,
                                     ..
                                 } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    let mut enhanced_metric_data = None;
-                                    if let Some(metrics) = metrics {
-                                        enhanced_metric_data = p.on_platform_runtime_done(
-                                            &request_id,
-                                            metrics.duration_ms,
-                                            config.clone(),
-                                            tags_provider.clone(),
-                                            trace_processor.clone(),
-                                            trace_agent_tx.clone()
-                                        ).await;
-                                        lambda_enhanced_metrics
-                                            .set_runtime_duration_metric(metrics.duration_ms);
-                                    }
-                                    drop(p);
-
-                                    if status != Status::Success {
-                                        lambda_enhanced_metrics.increment_errors_metric();
-                                        if status == Status::Timeout {
-                                            lambda_enhanced_metrics.increment_timeout_metric();
-                                        }
-                                    }
                                     debug!(
                                         "Runtime done for request_id: {:?} with status: {:?}",
                                         request_id, status
                                     );
 
-                                    // set cpu utilization metrics here to avoid accounting for extra idle time
-                                    if let Some(offsets) = enhanced_metric_data {
-                                        lambda_enhanced_metrics.set_cpu_utilization_enhanced_metrics(offsets.cpu_offset, offsets.uptime_offset);
+                                    let mut p = invocation_processor.lock().await;
+                                    if let Some(metrics) = metrics {
+                                        p.on_platform_runtime_done(
+                                            &request_id,
+                                            metrics.duration_ms,
+                                            status,
+                                            config.clone(),
+                                            tags_provider.clone(),
+                                            trace_processor.clone(),
+                                            trace_agent_tx.clone()
+                                        ).await;
                                     }
+                                    drop(p);
 
                                     // TODO(astuyve) it'll be easy to
                                     // pass the invocation deadline to
@@ -482,16 +468,8 @@ async fn extension_loop_active(
                                         "Platform report for request_id: {:?} with status: {:?}",
                                         request_id, status
                                     );
-                                    lambda_enhanced_metrics.set_report_log_metrics(&metrics);
                                     let mut p = invocation_processor.lock().await;
-                                    let (post_runtime_duration_ms, enhanced_metric_data) = p.on_platform_report(&request_id, metrics.duration_ms);
-                                    if let Some(duration) = post_runtime_duration_ms {
-                                        lambda_enhanced_metrics.set_post_runtime_duration_metric(duration);
-                                    }
-                                    if let Some(offsets) = enhanced_metric_data {
-                                        lambda_enhanced_metrics.set_network_enhanced_metrics(offsets.network_offset);
-                                        lambda_enhanced_metrics.set_cpu_time_enhanced_metrics(offsets.cpu_offset);
-                                    }
+                                    p.on_platform_report(&request_id, metrics);
                                     drop(p);
 
                                     if shutdown {
