@@ -6,8 +6,9 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::lifecycle::invocation::{
+    base64_to_string,
     processor::MS_TO_NS,
-    triggers::{base64_to_string, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -132,12 +133,13 @@ impl Trigger for SnsRecord {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        let carrier = HashMap::new();
         if let Some(ma) = self.sns.message_attributes.get(DATADOG_CARRIER_KEY) {
             match ma.r#type.as_str() {
                 "String" => return serde_json::from_str(&ma.value).unwrap_or_default(),
                 "Binary" => {
-                    return serde_json::from_str(&base64_to_string(&ma.value)).unwrap_or_default()
+                    if let Ok(carrier) = base64_to_string(&ma.value) {
+                        return serde_json::from_str(&carrier).unwrap_or_default();
+                    }
                 }
                 _ => {
                     debug!("Unsupported type in SNS message attribute");
@@ -145,7 +147,7 @@ impl Trigger for SnsRecord {
             }
         }
 
-        carrier
+        HashMap::new()
     }
 
     fn is_async(&self) -> bool {
