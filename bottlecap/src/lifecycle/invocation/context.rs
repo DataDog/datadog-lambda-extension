@@ -315,7 +315,7 @@ mod tests {
             total_user_time_ms: 100.0,
             total_system_time_ms: 53.0,
             total_idle_time_ms: 20.0,
-            individual_cpu_idle_times: individual_cpu_idle_times,
+            individual_cpu_idle_times,
         });
 
         let uptime_offset = Some(50.0);

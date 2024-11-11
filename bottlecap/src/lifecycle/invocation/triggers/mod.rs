@@ -1,15 +1,29 @@
 use std::{collections::HashMap, hash::BuildHasher};
 
+use base64::{engine::general_purpose, Engine};
 use datadog_trace_protobuf::pb::Span;
 use serde::{ser::SerializeMap, Serializer};
 use serde_json::Value;
 
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
+pub mod dynamodb_event;
+pub mod event_bridge_event;
+pub mod s3_event;
+pub mod sns_event;
+pub mod sqs_event;
 
-pub trait Trigger: Sized {
-    fn new(payload: Value) -> Option<Self>;
-    fn is_match(payload: &Value) -> bool;
+pub const DATADOG_CARRIER_KEY: &str = "_datadog";
+pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
+pub const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
+
+pub trait Trigger {
+    fn new(payload: Value) -> Option<Self>
+    where
+        Self: Sized;
+    fn is_match(payload: &Value) -> bool
+    where
+        Self: Sized;
     fn enrich_span(&self, span: &mut Span);
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str) -> String;
@@ -24,6 +38,14 @@ pub fn get_aws_partition_by_region(region: &str) -> String {
         r if r.starts_with("cn-") => "aws-cn".to_string(),
         _ => "aws".to_string(),
     }
+}
+
+#[must_use]
+pub fn base64_to_string(base64_string: &str) -> String {
+    let bytes = general_purpose::STANDARD
+        .decode(base64_string)
+        .unwrap_or_default();
+    String::from_utf8_lossy(&bytes).to_string()
 }
 
 /// Serialize a `HashMap` with lowercase keys
@@ -46,8 +68,13 @@ where
 #[cfg(test)]
 pub mod test_utils {
     use std::fs;
+    use std::path::PathBuf;
 
+    #[must_use]
     pub fn read_json_file(file_name: &str) -> String {
-        fs::read_to_string(format!("tests/payloads/{}", file_name)).expect("Failed to read file")
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests/payloads");
+        path.push(file_name);
+        fs::read_to_string(path).expect("Failed to read file")
     }
 }

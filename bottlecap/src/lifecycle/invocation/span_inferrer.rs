@@ -8,16 +8,21 @@ use tracing::debug;
 use crate::config::AwsConfig;
 
 use crate::lifecycle::invocation::triggers::{
-    api_gateway_http_event::APIGatewayHttpEvent, api_gateway_rest_event::APIGatewayRestEvent,
-    Trigger,
+    api_gateway_http_event::APIGatewayHttpEvent,
+    api_gateway_rest_event::APIGatewayRestEvent,
+    dynamodb_event::DynamoDbRecord,
+    event_bridge_event::EventBridgeEvent,
+    sns_event::{SnsEntity, SnsRecord},
+    sqs_event::SqsRecord,
+    Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
 };
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 
-const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
-const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
+use super::triggers::s3_event::S3Record;
 
 pub struct SpanInferrer {
     pub inferred_span: Option<Span>,
+    pub wrapped_inferred_span: Option<Span>,
     is_async_span: bool,
     carrier: Option<HashMap<String, String>>,
     trigger_tags: Option<HashMap<String, String>>,
@@ -34,6 +39,7 @@ impl SpanInferrer {
     pub fn new() -> Self {
         Self {
             inferred_span: None,
+            wrapped_inferred_span: None,
             is_async_span: false,
             carrier: None,
             trigger_tags: None,
@@ -46,56 +52,96 @@ impl SpanInferrer {
     ///
     pub fn infer_span(&mut self, payload_value: &Value, aws_config: &AwsConfig) {
         self.inferred_span = None;
+        self.wrapped_inferred_span = None;
+        self.is_async_span = false;
+        self.carrier = None;
+        self.trigger_tags = None;
+
+        let mut trigger: Option<Box<dyn Trigger>> = None;
+        let mut inferred_span = Span {
+            span_id: Self::generate_span_id(),
+            ..Default::default()
+        };
+
         if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
-                let mut span = Span {
-                    span_id: Self::generate_span_id(),
-                    ..Default::default()
-                };
+                t.enrich_span(&mut inferred_span);
 
-                t.enrich_span(&mut span);
-                span.meta.extend([
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                        "api_gateway".to_string(),
-                    ),
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                        t.get_arn(&aws_config.region),
-                    ),
-                ]);
-
-                self.carrier = Some(t.get_carrier());
-                self.trigger_tags = Some(t.get_tags());
-                self.is_async_span = t.is_async();
-                self.inferred_span = Some(span);
+                trigger = Some(Box::new(t));
             }
         } else if APIGatewayRestEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayRestEvent::new(payload_value.clone()) {
-                let mut span = Span {
-                    span_id: Self::generate_span_id(),
-                    ..Default::default()
-                };
+                t.enrich_span(&mut inferred_span);
 
-                t.enrich_span(&mut span);
-                span.meta.extend([
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
-                        "api_gateway".to_string(),
-                    ),
-                    (
-                        FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
-                        t.get_arn(&aws_config.region),
-                    ),
-                ]);
+                trigger = Some(Box::new(t));
+            }
+        } else if SqsRecord::is_match(payload_value) {
+            if let Some(t) = SqsRecord::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
 
-                self.carrier = Some(t.get_carrier());
-                self.trigger_tags = Some(t.get_tags());
-                self.is_async_span = t.is_async();
-                self.inferred_span = Some(span);
+                // Check for SNS event wrapped in the SQS body
+                if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&t.body) {
+                    debug!("Found an SNS event wrapped in the SQS body");
+                    let mut wrapped_inferred_span = Span {
+                        span_id: Self::generate_span_id(),
+                        ..Default::default()
+                    };
+
+                    let wt = SnsRecord {
+                        sns: sns_entity,
+                        event_subscription_arn: None,
+                    };
+                    wt.enrich_span(&mut wrapped_inferred_span);
+                    inferred_span.meta.extend(wt.get_tags());
+
+                    wrapped_inferred_span.duration =
+                        inferred_span.start - wrapped_inferred_span.start;
+
+                    self.wrapped_inferred_span = Some(wrapped_inferred_span);
+                }
+
+                trigger = Some(Box::new(t));
+            }
+        } else if SnsRecord::is_match(payload_value) {
+            if let Some(t) = SnsRecord::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if DynamoDbRecord::is_match(payload_value) {
+            if let Some(t) = DynamoDbRecord::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if S3Record::is_match(payload_value) {
+            if let Some(t) = S3Record::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if EventBridgeEvent::is_match(payload_value) {
+            if let Some(t) = EventBridgeEvent::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
             }
         } else {
-            debug!("Unable to infer span from payload");
+            debug!("Unable to infer span from payload: no matching trigger found");
+        }
+
+        // Inferred a trigger
+        if let Some(t) = trigger {
+            let mut trigger_tags = t.get_tags();
+            trigger_tags.extend([(
+                FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
+                t.get_arn(&aws_config.region),
+            )]);
+
+            self.trigger_tags = Some(trigger_tags);
+            self.carrier = Some(t.get_carrier());
+            self.is_async_span = t.is_async();
+            self.inferred_span = Some(inferred_span);
         }
     }
 
@@ -120,11 +166,33 @@ impl SpanInferrer {
         }
     }
 
-    // TODO add status tag and other info from response
-    pub fn complete_inferred_span(&mut self, invocation_span: &Span) {
+    // TODO: add status tag and other info from response
+    // TODO: add peer.service
+    pub fn complete_inferred_spans(&mut self, invocation_span: &Span) {
         if let Some(s) = &mut self.inferred_span {
+            if let Some(ws) = &mut self.wrapped_inferred_span {
+                // Set correct Parent ID for multiple inferred spans
+                ws.parent_id = s.parent_id;
+                s.parent_id = ws.span_id;
+
+                // TODO: clean this logic
+                if self.is_async_span {
+                    // SNS to SQS span duration will be set
+                    if ws.duration == 0 {
+                        let duration = s.start - ws.start;
+                        ws.duration = duration;
+                    }
+                } else {
+                    let duration = s.start - ws.start;
+                    ws.duration = duration;
+                }
+
+                ws.trace_id = invocation_span.trace_id;
+            }
+
             if self.is_async_span {
-                if s.duration != 0 {
+                // SNS to SQS span duration will be set
+                if s.duration == 0 {
                     let duration = invocation_span.start - s.start;
                     s.duration = duration;
                 }
