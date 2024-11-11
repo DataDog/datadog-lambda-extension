@@ -191,8 +191,7 @@ impl Processor {
             self.span.meta.extend(trigger_tags);
         }
 
-        self.inferrer
-            .complete_inferred_spans(&self.span);
+        self.inferrer.complete_inferred_spans(&self.span);
 
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&self.span);
