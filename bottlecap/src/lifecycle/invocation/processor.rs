@@ -39,7 +39,7 @@ pub struct Processor {
     enhanced_metrics: EnhancedMetrics,
     aws_config: AwsConfig,
     tracer_detected: bool,
-    collect_enhanced_data: bool,
+    enhanced_metrics_enabled: bool,
 }
 
 impl Processor {
@@ -81,7 +81,7 @@ impl Processor {
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config: aws_config.clone(),
             tracer_detected: false,
-            collect_enhanced_data: config.enhanced_metrics,
+            enhanced_metrics_enabled: config.enhanced_metrics,
         }
     }
 
@@ -89,7 +89,7 @@ impl Processor {
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
         self.context_buffer.create_context(request_id.clone());
-        if self.collect_enhanced_data {
+        if self.enhanced_metrics_enabled {
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
