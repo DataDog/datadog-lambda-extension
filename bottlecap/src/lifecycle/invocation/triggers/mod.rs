@@ -7,6 +7,7 @@ use serde_json::Value;
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
 pub mod dynamodb_event;
+pub mod event_bridge_event;
 pub mod s3_event;
 pub mod sns_event;
 pub mod sqs_event;
@@ -58,9 +59,13 @@ where
 #[cfg(test)]
 pub mod test_utils {
     use std::fs;
+    use std::path::PathBuf;
 
     #[must_use]
     pub fn read_json_file(file_name: &str) -> String {
-        fs::read_to_string(format!("tests/payloads/{file_name}")).expect("Failed to read file")
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests/payloads");
+        path.push(file_name);
+        fs::read_to_string(path).expect("Failed to read file")
     }
 }

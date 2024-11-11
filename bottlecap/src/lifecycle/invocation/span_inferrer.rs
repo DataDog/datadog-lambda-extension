@@ -11,6 +11,7 @@ use crate::lifecycle::invocation::triggers::{
     api_gateway_http_event::APIGatewayHttpEvent,
     api_gateway_rest_event::APIGatewayRestEvent,
     dynamodb_event::DynamoDbRecord,
+    event_bridge_event::EventBridgeEvent,
     sns_event::{SnsEntity, SnsRecord},
     sqs_event::SqsRecord,
     Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
@@ -115,6 +116,12 @@ impl SpanInferrer {
             }
         } else if S3Record::is_match(payload_value) {
             if let Some(t) = S3Record::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if EventBridgeEvent::is_match(payload_value) {
+            if let Some(t) = EventBridgeEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span);
 
                 trigger = Some(Box::new(t));
