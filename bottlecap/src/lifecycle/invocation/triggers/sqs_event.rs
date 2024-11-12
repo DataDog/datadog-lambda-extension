@@ -7,6 +7,7 @@ use tracing::debug;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
+        event_bridge_event::EventBridgeEvent,
         get_aws_partition_by_region,
         sns_event::{SnsEntity, SnsRecord},
         Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
@@ -180,8 +181,6 @@ impl Trigger for SqsRecord {
             }
         }
 
-        // TODO: Check for EventBridge event sent through SQS
-
         // Check for SNS event sent through SQS
         if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&self.body) {
             let sns_record = SnsRecord {
@@ -190,6 +189,8 @@ impl Trigger for SqsRecord {
             };
 
             return sns_record.get_carrier();
+        } else if let Ok(event) = serde_json::from_str::<EventBridgeEvent>(&self.body) {
+            return event.get_carrier();
         }
 
         // TODO: AWSTraceHeader
@@ -357,6 +358,34 @@ mod tests {
                 "x-datadog-parent-id".to_string(),
                 "4493917105238181843".to_string(),
             ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_from_eventbridge() {
+        let json = read_json_file("eventbridge_sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize EventBridgeEvent");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "7379586022458917877".to_string(),
+            ),
+            (
+                "traceparent".to_string(),
+                "00-000000000000000066698e63821a03f5-24b17e9b6476c018-01".to_string(),
+            ),
+            ("x-datadog-tags".to_string(), "_dd.p.dm=-0".to_string()),
+            (
+                "x-datadog-parent-id".to_string(),
+                "2644033662113726488".to_string(),
+            ),
+            ("tracestate".to_string(), "dd=t.dm:-0;s:1".to_string()),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
         ]);
 

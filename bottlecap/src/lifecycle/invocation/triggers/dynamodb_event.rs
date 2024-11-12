@@ -142,7 +142,7 @@ mod tests {
 
         let expected = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
-                approximate_creation_date_time: 1428537600.0,
+                approximate_creation_date_time: 1_428_537_600.0,
                 size_bytes: 26,
                 stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
             },

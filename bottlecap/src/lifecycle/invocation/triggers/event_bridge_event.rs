@@ -200,7 +200,7 @@ mod tests {
 
         assert_eq!(span.resource, "testBus");
         // Seconds resolution
-        assert_eq!(span.start, 1731140535000000000);
+        assert_eq!(span.start, 1_731_140_535_000_000_000);
     }
 
     #[test]
