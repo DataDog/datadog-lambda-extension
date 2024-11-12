@@ -202,7 +202,9 @@ impl SpanInferrer {
             self.is_async_span = t.is_async();
 
             // For Step Functions, there is no inferred span
-            if self.generated_span_context.is_none() {
+            if self.generated_span_context.is_some() {
+                self.inferred_span = None;
+            } else {
                 self.inferred_span = Some(inferred_span);
             }
         }
