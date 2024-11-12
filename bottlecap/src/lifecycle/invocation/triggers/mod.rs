@@ -1,6 +1,5 @@
 use std::{collections::HashMap, hash::BuildHasher};
 
-use base64::{engine::general_purpose, Engine};
 use datadog_trace_protobuf::pb::Span;
 use serde::{ser::SerializeMap, Serializer};
 use serde_json::Value;
@@ -9,6 +8,7 @@ pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
 pub mod dynamodb_event;
 pub mod event_bridge_event;
+pub mod kinesis_event;
 pub mod s3_event;
 pub mod sns_event;
 pub mod sqs_event;
@@ -39,14 +39,6 @@ pub fn get_aws_partition_by_region(region: &str) -> String {
         r if r.starts_with("cn-") => "aws-cn".to_string(),
         _ => "aws".to_string(),
     }
-}
-
-#[must_use]
-pub fn base64_to_string(base64_string: &str) -> String {
-    let bytes = general_purpose::STANDARD
-        .decode(base64_string)
-        .unwrap_or_default();
-    String::from_utf8_lossy(&bytes).to_string()
 }
 
 /// Serialize a `HashMap` with lowercase keys

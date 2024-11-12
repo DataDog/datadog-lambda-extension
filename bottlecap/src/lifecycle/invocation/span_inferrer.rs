@@ -13,6 +13,7 @@ use crate::lifecycle::invocation::triggers::{
     dynamodb_event::DynamoDbRecord,
     event_bridge_event::EventBridgeEvent,
     s3_event::S3Record,
+    kinesis_event::KinesisRecord,
     sns_event::{SnsEntity, SnsRecord},
     sqs_event::SqsRecord,
     step_function_event::StepFunctionEvent,
@@ -108,13 +109,49 @@ impl SpanInferrer {
                         inferred_span.start - wrapped_inferred_span.start;
 
                     self.wrapped_inferred_span = Some(wrapped_inferred_span);
-                }
+                } else if let Ok(event_bridge_entity) =
+                    serde_json::from_str::<EventBridgeEvent>(&t.body)
+                {
+                    let mut wrapped_inferred_span = Span {
+                        span_id: Self::generate_span_id(),
+                        ..Default::default()
+                    };
+
+                    event_bridge_entity.enrich_span(&mut wrapped_inferred_span);
+                    inferred_span.meta.extend(event_bridge_entity.get_tags());
+
+                    wrapped_inferred_span.duration =
+                        inferred_span.start - wrapped_inferred_span.start;
+
+                    self.wrapped_inferred_span = Some(wrapped_inferred_span);
+                };
 
                 trigger = Some(Box::new(t));
             }
         } else if SnsRecord::is_match(payload_value) {
             if let Some(t) = SnsRecord::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span);
+
+                if let Some(message) = &t.sns.message {
+                    if let Ok(event_bridge_wrapper_message) =
+                        serde_json::from_str::<EventBridgeEvent>(message)
+                    {
+                        let mut wrapped_inferred_span = Span {
+                            span_id: Self::generate_span_id(),
+                            ..Default::default()
+                        };
+
+                        event_bridge_wrapper_message.enrich_span(&mut wrapped_inferred_span);
+                        inferred_span
+                            .meta
+                            .extend(event_bridge_wrapper_message.get_tags());
+
+                        wrapped_inferred_span.duration =
+                            inferred_span.start - wrapped_inferred_span.start;
+
+                        self.wrapped_inferred_span = Some(wrapped_inferred_span);
+                    }
+                }
 
                 trigger = Some(Box::new(t));
             }
@@ -136,10 +173,15 @@ impl SpanInferrer {
 
                 trigger = Some(Box::new(t));
             }
+        } else if KinesisRecord::is_match(payload_value) {
+            if let Some(t) = KinesisRecord::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
         } else if StepFunctionEvent::is_match(payload_value) {
             if let Some(t) = StepFunctionEvent::new(payload_value.clone()) {
                 self.generated_span_context = Some(t.get_span_context());
-
                 trigger = Some(Box::new(t));
             }
         } else {
@@ -207,6 +249,9 @@ impl SpanInferrer {
                     ws.duration = duration;
                 }
 
+                // Set error
+                ws.error = invocation_span.error;
+
                 ws.trace_id = invocation_span.trace_id;
             }
 
@@ -220,6 +265,9 @@ impl SpanInferrer {
                 let duration = (invocation_span.start + invocation_span.duration) - s.start;
                 s.duration = duration;
             }
+
+            // Set error
+            s.error = invocation_span.error;
 
             s.trace_id = invocation_span.trace_id;
         }
