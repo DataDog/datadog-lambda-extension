@@ -14,7 +14,9 @@ use tracing::debug;
 
 use crate::{
     config::{self, AwsConfig},
-    lifecycle::invocation::{context::ContextBuffer, span_inferrer::SpanInferrer},
+    lifecycle::invocation::{
+        base64_to_string, context::ContextBuffer, span_inferrer::SpanInferrer,
+    },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{self, CPUData, NetworkData},
     tags::provider,
@@ -28,6 +30,11 @@ use crate::{
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
+
+pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
+pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
+pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
+pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
 
 pub struct Processor {
     pub context_buffer: ContextBuffer,
@@ -64,11 +71,11 @@ impl Processor {
                 service,
                 name: "aws.lambda".to_string(),
                 resource,
-                trace_id: 0,  // set later
-                span_id: 0,   // maybe set later?
-                parent_id: 0, // set later
-                start: 0,     // set later
-                duration: 0,  // set later
+                trace_id: 0,
+                span_id: 0,
+                parent_id: 0,
+                start: 0,
+                duration: 0,
                 error: 0,
                 meta: HashMap::new(),
                 metrics: HashMap::new(),
@@ -167,9 +174,6 @@ impl Processor {
             // - language
             // - function.request - capture lambda payload
             // - function.response
-            // - error.msg
-            // - error.type
-            // - error.stack
             // - metrics tags (for asm)
 
             if let Some(offsets) = &context.enhanced_metric_data {
@@ -328,15 +332,28 @@ impl Processor {
         headers: HashMap<String, String>,
         status_code: Option<String>,
     ) {
-        self.update_span_context(headers);
-        if self.inferrer.inferred_span.is_some() {
-            if let Some(status_code) = status_code {
-                self.inferrer.set_status_code(status_code);
+        if let Some(status_code) = status_code {
+            self.span
+                .meta
+                .insert("http.status_code".to_string(), status_code.clone());
+
+            if status_code.len() == 3 && status_code.starts_with('5') {
+                self.span.error = 1;
             }
+
+            // If we have an inferred span, set the status code to it
+            self.inferrer.set_status_code(status_code);
+        }
+
+        self.update_span_context_from_headers(&headers);
+        self.set_span_error_from_headers(headers);
+
+        if self.span.error == 1 {
+            self.enhanced_metrics.increment_errors_metric();
         }
     }
 
-    fn update_span_context(&mut self, headers: HashMap<String, String>) {
+    fn update_span_context_from_headers(&mut self, headers: &HashMap<String, String>) {
         // todo: fix this, code is a copy of the existing logic in Go, not accounting
         // when a 128 bit trace id exist
         let mut trace_id = 0;
@@ -364,8 +381,56 @@ impl Processor {
         self.span.trace_id = trace_id;
         self.span.span_id = span_id;
 
+        // If no inferred span, set the parent id right away
         if self.inferrer.inferred_span.is_none() {
             self.span.parent_id = parent_id;
+        }
+    }
+
+    /// Given end invocation headers, set error metadata, if present, to the current span.
+    ///
+    fn set_span_error_from_headers(&mut self, headers: HashMap<String, String>) {
+        let message = headers.get(DATADOG_INVOCATION_ERROR_MESSAGE_KEY);
+        let r#type = headers.get(DATADOG_INVOCATION_ERROR_TYPE_KEY);
+        let stack = headers.get(DATADOG_INVOCATION_ERROR_STACK_KEY);
+
+        let is_error = headers
+            .get(DATADOG_INVOCATION_ERROR_KEY)
+            .map_or(false, |v| v.to_lowercase() == "true")
+            || message.is_some()
+            || stack.is_some()
+            || r#type.is_some()
+            || self.span.error == 1;
+        if is_error {
+            self.span.error = 1;
+
+            if let Some(m) = message {
+                self.span
+                    .meta
+                    .insert(String::from("error.msg"), m.to_string());
+            }
+
+            if let Some(t) = r#type {
+                self.span
+                    .meta
+                    .insert(String::from("error.type"), t.to_string());
+            }
+
+            if let Some(s) = stack {
+                let decoded_stack = match base64_to_string(s) {
+                    Ok(decoded) => decoded,
+                    Err(e) => {
+                        debug!("Failed to decode error stack: {e}");
+                        s.to_string()
+                    }
+                };
+
+                self.span
+                    .meta
+                    .insert(String::from("error.stack"), decoded_stack);
+            }
+
+            // todo: handle timeout
         }
     }
 }

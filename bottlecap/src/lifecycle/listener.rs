@@ -144,15 +144,15 @@ impl Listener {
         let parsed_body = serde_json::from_slice::<serde_json::Value>(
             &hyper::body::to_bytes(body).await.unwrap_or_default(),
         );
-        let mut parsed_status: Option<String> = None;
-        if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
-            parsed_status = Some(status_code.to_string());
+        let mut parsed_status_code: Option<String> = None;
+        if let Some(sc) = parsed_body.unwrap_or_default().get("statusCode") {
+            parsed_status_code = Some(sc.to_string());
         }
 
         let mut processor = invocation_processor.lock().await;
 
         let headers = Self::headers_to_map(parts.headers);
-        processor.on_invocation_end(headers, parsed_status);
+        processor.on_invocation_end(headers, parsed_status_code);
         drop(processor);
 
         Response::builder()

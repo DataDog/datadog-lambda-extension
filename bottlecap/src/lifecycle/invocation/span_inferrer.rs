@@ -187,6 +187,9 @@ impl SpanInferrer {
                     ws.duration = duration;
                 }
 
+                // Set error
+                ws.error = invocation_span.error;
+
                 ws.trace_id = invocation_span.trace_id;
             }
 
@@ -200,6 +203,9 @@ impl SpanInferrer {
                 let duration = (invocation_span.start + invocation_span.duration) - s.start;
                 s.duration = duration;
             }
+
+            // Set error
+            s.error = invocation_span.error;
 
             s.trace_id = invocation_span.trace_id;
         }
