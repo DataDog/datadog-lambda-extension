@@ -13,19 +13,27 @@ use crate::lifecycle::invocation::triggers::{
     dynamodb_event::DynamoDbRecord,
     event_bridge_event::EventBridgeEvent,
     kinesis_event::KinesisRecord,
+    s3_event::S3Record,
     sns_event::{SnsEntity, SnsRecord},
     sqs_event::SqsRecord,
+    step_function_event::StepFunctionEvent,
     Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
 };
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
-
-use super::triggers::s3_event::S3Record;
+use crate::traces::{context::SpanContext, propagation::Propagator};
 
 pub struct SpanInferrer {
+    // Span inferred from the Lambda incoming request payload
     pub inferred_span: Option<Span>,
+    // Nested span inferred from the Lambda incoming request payload
     pub wrapped_inferred_span: Option<Span>,
+    // If the inferred span is async
     is_async_span: bool,
+    // Carrier to extract the span context from
     carrier: Option<HashMap<String, String>>,
+    // Generated Span Context from Step Functions
+    generated_span_context: Option<SpanContext>,
+    // Tags generated from the trigger
     trigger_tags: Option<HashMap<String, String>>,
 }
 
@@ -43,6 +51,7 @@ impl SpanInferrer {
             wrapped_inferred_span: None,
             is_async_span: false,
             carrier: None,
+            generated_span_context: None,
             trigger_tags: None,
         }
     }
@@ -51,11 +60,13 @@ impl SpanInferrer {
     /// and try matching it to a `Trigger` implementation, which will create
     /// an inferred span and set it to `self.inferred_span`
     ///
+    #[allow(clippy::too_many_lines)]
     pub fn infer_span(&mut self, payload_value: &Value, aws_config: &AwsConfig) {
         self.inferred_span = None;
         self.wrapped_inferred_span = None;
         self.is_async_span = false;
         self.carrier = None;
+        self.generated_span_context = None;
         self.trigger_tags = None;
 
         let mut trigger: Option<Box<dyn Trigger>> = None;
@@ -169,6 +180,11 @@ impl SpanInferrer {
 
                 trigger = Some(Box::new(t));
             }
+        } else if StepFunctionEvent::is_match(payload_value) {
+            if let Some(t) = StepFunctionEvent::new(payload_value.clone()) {
+                self.generated_span_context = Some(t.get_span_context());
+                trigger = Some(Box::new(t));
+            }
         } else {
             debug!("Unable to infer span from payload: no matching trigger found");
         }
@@ -184,7 +200,13 @@ impl SpanInferrer {
             self.trigger_tags = Some(trigger_tags);
             self.carrier = Some(t.get_carrier());
             self.is_async_span = t.is_async();
-            self.inferred_span = Some(inferred_span);
+
+            // For Step Functions, there is no inferred span
+            if self.generated_span_context.is_some() {
+                self.inferred_span = None;
+            } else {
+                self.inferred_span = Some(inferred_span);
+            }
         }
     }
 
@@ -263,11 +285,23 @@ impl SpanInferrer {
         rng.gen()
     }
 
-    /// Returns a clone of the carrier associated with the inferred span
+    /// Returns the extracted span context
     ///
-    #[must_use]
-    pub fn get_carrier(&self) -> Option<HashMap<String, String>> {
-        self.carrier.clone()
+    /// If the carrier is set, it will try to extract the span context,
+    /// otherwise it will
+    ///
+    pub fn get_span_context(&self, propagator: &impl Propagator) -> Option<SpanContext> {
+        // Step Functions `SpanContext` is deterministically generated
+        if let Some(sc) = &self.generated_span_context {
+            return Some(sc.clone());
+        }
+
+        if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
+            debug!("Extracted trace context from inferred span");
+            return Some(sc);
+        }
+
+        None
     }
 
     /// Returns a clone of the tags associated with the inferred span
