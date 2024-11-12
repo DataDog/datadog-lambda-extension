@@ -15,7 +15,8 @@ use tracing::debug;
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{
-        base64_to_string, context::ContextBuffer, span_inferrer::SpanInferrer,
+        base64_to_string, context::ContextBuffer, create_empty_span, generate_span_id,
+        span_inferrer::SpanInferrer,
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{self, CPUData, NetworkData},
@@ -37,15 +38,25 @@ pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
 
 pub struct Processor {
+    // Buffer containing context of the previous 5 invocations
     pub context_buffer: ContextBuffer,
+    // Helper to infer span information
     inferrer: SpanInferrer,
+    // Current invocation span
     pub span: Span,
+    // Cold start span
+    cold_start_span: Option<Span>,
+    // Extracted span context from inferred span, headers, or payload
     pub extracted_span_context: Option<SpanContext>,
     // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
+    // Helper to send enhanced metrics
     enhanced_metrics: EnhancedMetrics,
+    // AWS configuration from the Lambda environment
     aws_config: AwsConfig,
+    // Flag to determine if a tracer was detected
     tracer_detected: bool,
+    // Used to determine if we should calculate heavy enhanced metrics
     enhanced_metrics_enabled: bool,
 }
 
@@ -57,32 +68,18 @@ impl Processor {
         aws_config: &AwsConfig,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
     ) -> Self {
-        let service = config.service.clone().unwrap_or("aws.lambda".to_string());
+        let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
             .get_canonical_resource_name()
-            .unwrap_or("aws_lambda".to_string());
+            .unwrap_or(String::from("aws.lambda"));
 
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::default(),
-            span: Span {
-                service,
-                name: "aws.lambda".to_string(),
-                resource,
-                trace_id: 0,
-                span_id: 0,
-                parent_id: 0,
-                start: 0,
-                duration: 0,
-                error: 0,
-                meta: HashMap::new(),
-                metrics: HashMap::new(),
-                r#type: "serverless".to_string(),
-                meta_struct: HashMap::new(),
-                span_links: Vec::new(),
-            },
+            span: create_empty_span(String::from("aws.lambda"), resource, service),
+            cold_start_span: None,
             extracted_span_context: None,
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
@@ -120,10 +117,36 @@ impl Processor {
         self.enhanced_metrics.increment_invocation_metric();
     }
 
+    pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
+        // Create a cold start span
+        let mut cold_star_span = create_empty_span(
+            String::from("aws.lambda.cold_start"),
+            self.span.resource.clone(),
+            self.span.service.clone(),
+        );
+        cold_star_span.span_id = generate_span_id();
+        self.cold_start_span = Some(cold_star_span);
+
+        let start_time: i64 = SystemTime::from(time)
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+            .try_into()
+            .unwrap_or_default();
+
+        self.span.start = start_time;
+    }
+
     /// Given the duration of the platform init report, set the init duration metric.
     ///
+    #[allow(clippy::cast_possible_truncation)]
     pub fn on_platform_init_report(&mut self, duration_ms: f64) {
         self.enhanced_metrics.set_init_duration_metric(duration_ms);
+
+        if let Some(cold_start_span) = &mut self.cold_start_span {
+            // `round` is intentionally meant to be a whole integer
+            cold_start_span.duration = (duration_ms * MS_TO_NS).round() as i64;
+        }
     }
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
@@ -171,10 +194,10 @@ impl Processor {
         }
 
         if let Some(context) = self.context_buffer.get(request_id) {
-            let span = &mut self.span;
             // `round` is intentionally meant to be a whole integer
-            span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
-            span.meta
+            self.span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
+            self.span
+                .meta
                 .insert("request_id".to_string(), request_id.clone());
             // todo(duncanista): add missing tags
             // - cold start, proactive init
@@ -199,6 +222,14 @@ impl Processor {
 
         self.inferrer.complete_inferred_spans(&self.span);
 
+        if let Some(cold_start_span) = &mut self.cold_start_span {
+            cold_start_span.trace_id = self.span.trace_id;
+            cold_start_span.parent_id = self.span.span_id;
+            self.span
+                .meta
+                .insert(String::from("cold_start"), String::from("true"));
+        }
+
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&self.span);
             let mut traces = vec![self.span.clone()];
@@ -211,6 +242,11 @@ impl Processor {
             if let Some(ws) = &self.inferrer.wrapped_inferred_span {
                 body_size += std::mem::size_of_val(ws);
                 traces.push(ws.clone());
+            }
+
+            if let Some(cold_start_span) = &self.cold_start_span {
+                body_size += std::mem::size_of_val(cold_start_span);
+                traces.push(cold_start_span.clone());
             }
 
             // todo: figure out what to do here
