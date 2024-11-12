@@ -9,7 +9,7 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{json, Value};
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, watch};
 use tracing::debug;
 
 use crate::{
@@ -97,13 +97,20 @@ impl Processor {
     pub fn on_invoke_event(&mut self, request_id: String) {
         self.context_buffer.create_context(request_id.clone());
         if self.enhanced_metrics_enabled {
+            // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
+
+            // Start a channel for monitoring tmp enhanced data
+            let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
+            self.enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
+
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
+                tmp_chan_tx,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -181,6 +188,8 @@ impl Processor {
                     offsets.cpu_offset.clone(),
                     offsets.uptime_offset,
                 );
+                // Send the signal to stop monitoring tmp
+                _ = offsets.tmp_chan_tx.send(());
             }
         }
 

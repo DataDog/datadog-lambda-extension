@@ -53,11 +53,9 @@ use dogstatsd::{
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
-    collections::hash_map,
-    collections::HashMap,
+    collections::{hash_map, HashMap},
     env,
-    io::Error,
-    io::Result,
+    io::{Error, Result},
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
