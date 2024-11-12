@@ -502,7 +502,7 @@ pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
-    pub tmp_chan: Sender<()>,
+    pub tmp_chan_tx: Sender<()>,
 }
 
 impl PartialEq for EnhancedMetricData {

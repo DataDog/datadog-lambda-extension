@@ -103,7 +103,7 @@ impl Processor {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
-                tmp_chan: tmp_chan_tx,
+                tmp_chan_tx,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -185,7 +185,7 @@ impl Processor {
                     offsets.uptime_offset,
                 );
                 // Send the signal to stop monitoring tmp
-                _ = offsets.tmp_chan.send(());
+                _ = offsets.tmp_chan_tx.send(());
             }
         }
 
