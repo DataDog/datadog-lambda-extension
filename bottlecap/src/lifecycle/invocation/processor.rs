@@ -130,8 +130,6 @@ impl Processor {
             self.span.resource.clone(),
             self.span.service.clone(),
         );
-        cold_start_span.span_id = generate_span_id();
-        self.cold_start_span = Some(cold_start_span);
 
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
@@ -140,7 +138,10 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
 
-        self.span.start = start_time;
+        cold_start_span.span_id = generate_span_id();
+        cold_start_span.start = start_time;
+
+        self.cold_start_span = Some(cold_start_span);
     }
 
     /// Given the duration of the platform init report, set the init duration metric.
