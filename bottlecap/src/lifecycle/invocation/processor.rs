@@ -394,7 +394,7 @@ impl Processor {
         }
 
         // Extract tags from headers
-        tags = DatadogHeaderPropagator::extract_tags(&headers);
+        tags = DatadogHeaderPropagator::extract_tags(headers);
 
         self.span.trace_id = trace_id;
         self.span.span_id = span_id;
