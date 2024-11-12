@@ -5,11 +5,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
 
-use crate::lifecycle::invocation::triggers::event_bridge_event::EventBridgeEvent;
 use crate::lifecycle::invocation::{
     base64_to_string,
     processor::MS_TO_NS,
-    triggers::{Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{
+        event_bridge_event::EventBridgeEvent, Trigger, DATADOG_CARRIER_KEY,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
