@@ -12,6 +12,7 @@ pub mod event_bridge_event;
 pub mod s3_event;
 pub mod sns_event;
 pub mod sqs_event;
+pub mod step_function_event;
 
 pub const DATADOG_CARRIER_KEY: &str = "_datadog";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
