@@ -8,7 +8,10 @@ use tracing::debug;
 use crate::lifecycle::invocation::{
     base64_to_string,
     processor::MS_TO_NS,
-    triggers::{Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{
+        event_bridge_event::EventBridgeEvent, Trigger, DATADOG_CARRIER_KEY,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -39,6 +42,8 @@ pub struct SnsEntity {
     pub timestamp: DateTime<Utc>,
     #[serde(rename = "Subject")]
     pub subject: Option<String>,
+    #[serde(rename = "Message")]
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -50,7 +55,7 @@ pub struct MessageAttribute {
 }
 
 impl Trigger for SnsRecord {
-    fn new(payload: serde_json::Value) -> Option<Self> {
+    fn new(payload: Value) -> Option<Self> {
         match payload.get("Records").and_then(Value::as_array) {
             Some(records) => match serde_json::from_value::<SnsRecord>(records[0].clone()) {
                 Ok(record) => Some(record),
@@ -145,6 +150,10 @@ impl Trigger for SnsRecord {
                     debug!("Unsupported type in SNS message attribute");
                 }
             }
+        } else if let Some(event_bridge_message) = &self.sns.message {
+            if let Ok(event) = serde_json::from_str::<EventBridgeEvent>(event_bridge_message) {
+                return event.get_carrier();
+            }
         }
 
         HashMap::new()
@@ -187,6 +196,7 @@ mod tests {
                     .unwrap()
                     .with_timezone(&Utc),
                 subject: None,
+                message: Some("Asynchronously invoking a Lambda function with SNS.".to_string()),
             },
         };
 
@@ -298,6 +308,35 @@ mod tests {
                 "6746998015037429512".to_string(),
             ),
             ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_get_carrier_from_event_bridge() {
+        let json = read_json_file("eventbridge_sns_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        println!("{payload:?}");
+        let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-resource-name".to_string(),
+                "test-bus".to_string(),
+            ),
+            ("x-datadog-trace-id".to_string(), "12345".to_string()),
+            (
+                "x-datadog-start-time".to_string(),
+                "1726515840997".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-parent-id".to_string(), "67890".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.dm=-1,_dd.p.tid=123567890".to_string(),
+            ),
         ]);
 
         assert_eq!(carrier, expected);
