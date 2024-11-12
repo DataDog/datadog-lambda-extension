@@ -60,6 +60,7 @@ impl SpanInferrer {
     /// and try matching it to a `Trigger` implementation, which will create
     /// an inferred span and set it to `self.inferred_span`
     ///
+    #[allow(clippy::too_many_lines)]
     pub fn infer_span(&mut self, payload_value: &Value, aws_config: &AwsConfig) {
         self.inferred_span = None;
         self.wrapped_inferred_span = None;

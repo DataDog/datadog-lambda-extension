@@ -10,7 +10,7 @@ use std::path::Path;
 pub fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
     let stat = statfs(Path::new(path)).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     Ok((
-        stat.block_size() as f64,
+        f64::from(stat.block_size()),
         stat.blocks() as f64,
         stat.blocks_available() as f64,
     ))
