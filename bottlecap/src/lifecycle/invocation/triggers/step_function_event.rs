@@ -306,7 +306,7 @@ mod tests {
 
         let expected = SpanContext {
             trace_id: 5744042798732701615,
-            span_id: 3347375825762253425,
+            span_id: 2902498116043018663,
             sampling: Some(Sampling {
                 priority: Some(1),
                 mechanism: None,
