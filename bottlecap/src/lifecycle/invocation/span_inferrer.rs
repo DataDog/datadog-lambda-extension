@@ -106,6 +106,27 @@ impl SpanInferrer {
             if let Some(t) = SnsRecord::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span);
 
+                if let Some(message) = &t.sns.message {
+                    if let Ok(event_bridge_wrapper_message) =
+                        serde_json::from_str::<EventBridgeEvent>(message)
+                    {
+                        let mut wrapped_inferred_span = Span {
+                            span_id: Self::generate_span_id(),
+                            ..Default::default()
+                        };
+
+                        event_bridge_wrapper_message.enrich_span(&mut wrapped_inferred_span);
+                        inferred_span
+                            .meta
+                            .extend(event_bridge_wrapper_message.get_tags());
+
+                        wrapped_inferred_span.duration =
+                            inferred_span.start - wrapped_inferred_span.start;
+
+                        self.wrapped_inferred_span = Some(wrapped_inferred_span);
+                    }
+                }
+
                 trigger = Some(Box::new(t));
             }
         } else if DynamoDbRecord::is_match(payload_value) {
