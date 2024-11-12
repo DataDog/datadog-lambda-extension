@@ -284,6 +284,8 @@ impl Processor {
         self.span.trace_id = 0;
         self.span.parent_id = 0;
         self.span.span_id = 0;
+        self.span.error = 0;
+        self.span.meta.clear();
         self.extracted_span_context = None;
 
         let payload_value = match serde_json::from_slice::<Value>(&payload) {
@@ -294,6 +296,7 @@ impl Processor {
         self.inferrer.infer_span(&payload_value, &self.aws_config);
         self.extracted_span_context = self.extract_span_context(&headers, &payload_value);
 
+        // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
             self.span.trace_id = sc.trace_id;
             self.span.parent_id = sc.span_id;
@@ -308,6 +311,8 @@ impl Processor {
             }
         }
 
+        // If we have an inferred span, set the invocation span parent id
+        // to be the inferred span id, even if we don't have an extracted trace context
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.span.parent_id = inferred_span.span_id;
         }
@@ -366,38 +371,45 @@ impl Processor {
     }
 
     fn update_span_context_from_headers(&mut self, headers: &HashMap<String, String>) {
-        // todo: fix this, code is a copy of the existing logic in Go, not accounting
-        // when a 128 bit trace id exist
         let mut trace_id = 0;
-        let mut span_id = 0;
         let mut parent_id = 0;
         let mut tags: HashMap<String, String> = HashMap::new();
 
-        // If we have a trace context, update the span context
+        // If we have a trace context, this means we got it from
+        // distributed tracing
         if let Some(sc) = &mut self.extracted_span_context {
+            debug!("Trace context was found, not extracting it from incoming headers");
             trace_id = sc.trace_id;
-            span_id = sc.span_id;
+            parent_id = sc.span_id;
             tags.extend(sc.tags.clone());
         }
 
-        // Extract trace context from headers manually
-        if let Some(header) = headers.get(DATADOG_TRACE_ID_KEY) {
-            trace_id = header.parse::<u64>().unwrap_or(0);
+        // We are the root span, so we should extract the trace context
+        // from the tracer, which has sent it through end invocation headers
+        if trace_id == 0 {
+            debug!("No trace context found, extracting it from headers");
+            // Extract trace context from headers manually
+            if let Some(header) = headers.get(DATADOG_TRACE_ID_KEY) {
+                trace_id = header.parse::<u64>().unwrap_or(0);
+            }
+
+            if let Some(header) = headers.get(DATADOG_PARENT_ID_KEY) {
+                parent_id = header.parse::<u64>().unwrap_or(0);
+            }
+
+            // TODO: sampling priority extraction
+
+            // Extract tags from headers
+            // Used for 128 bit trace ids
+            tags = DatadogHeaderPropagator::extract_tags(headers);
         }
 
+        // We should always use the generated trace id from the tracer
         if let Some(header) = headers.get(DATADOG_SPAN_ID_KEY) {
-            span_id = header.parse::<u64>().unwrap_or(0);
+            self.span.span_id = header.parse::<u64>().unwrap_or(0);
         }
-
-        if let Some(header) = headers.get(DATADOG_PARENT_ID_KEY) {
-            parent_id = header.parse::<u64>().unwrap_or(0);
-        }
-
-        // Extract tags from headers
-        tags = DatadogHeaderPropagator::extract_tags(headers);
 
         self.span.trace_id = trace_id;
-        self.span.span_id = span_id;
 
         if self.inferrer.inferred_span.is_some() {
             self.inferrer.extend_meta(tags);
