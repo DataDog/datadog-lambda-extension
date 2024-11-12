@@ -4,10 +4,10 @@ use serde_json::Value;
 use std::collections::HashMap;
 use tracing::debug;
 
-use crate::lifecycle::invocation::triggers::event_bridge_event::EventBridgeEvent;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
+        event_bridge_event::EventBridgeEvent,
         get_aws_partition_by_region,
         sns_event::{SnsEntity, SnsRecord},
         Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
