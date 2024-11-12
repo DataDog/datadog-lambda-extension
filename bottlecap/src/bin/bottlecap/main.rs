@@ -400,9 +400,9 @@ async fn extension_loop_active(
                         }
                         Event::Telemetry(event) =>
                             match event.record {
-                                TelemetryRecord::PlatformStart { request_id, .. } => {
+                                TelemetryRecord::PlatformInitStart { .. } => {
                                     let mut p = invocation_processor.lock().await;
-                                    p.on_platform_start(request_id, event.time);
+                                    p.on_platform_init_start(event.time);
                                     drop(p);
                                 }
                                 TelemetryRecord::PlatformInitReport {
@@ -413,6 +413,11 @@ async fn extension_loop_active(
                                     debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
                                     let mut p = invocation_processor.lock().await;
                                     p.on_platform_init_report(metrics.duration_ms);
+                                    drop(p);
+                                }
+                                TelemetryRecord::PlatformStart { request_id, .. } => {
+                                    let mut p = invocation_processor.lock().await;
+                                    p.on_platform_start(request_id, event.time);
                                     drop(p);
                                 }
                                 TelemetryRecord::PlatformRuntimeDone {
