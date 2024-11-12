@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -41,7 +40,7 @@ pub struct State {
     #[serde(rename = "Name")]
     name: String,
     #[serde(rename = "EnteredTime")]
-    entered_time: DateTime<Utc>,
+    entered_time: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -121,7 +120,7 @@ impl StepFunctionEvent {
         let parent_id = Self::generate_parent_id(
             self.execution.id.clone(),
             self.state.name.clone(),
-            self.state.entered_time.to_rfc3339(),
+            self.state.entered_time.clone(),
         );
 
         SpanContext {
@@ -200,9 +199,8 @@ mod tests {
             },
             state: State {
                 name: String::from("agocsTest1"), 
-                entered_time: DateTime::parse_from_rfc3339("2024-07-30T19:55:53.018Z")
-                    .unwrap()
-                    .with_timezone(&Utc),},
+                entered_time: String::from("2024-07-30T19:55:53.018Z"),
+            },
             state_machine: Some(StateMachine {
                 id: String::from("arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"),
             }),
@@ -223,9 +221,8 @@ mod tests {
             },
             state: State {
                 name: String::from("agocsTest1"), 
-                entered_time: DateTime::parse_from_rfc3339("2024-07-30T19:55:53.018Z")
-                    .unwrap()
-                    .with_timezone(&Utc),},
+                entered_time: String::from("2024-07-30T19:55:53.018Z"),
+            },
             state_machine: Some(StateMachine {
                 id: String::from("arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"),
             }),
