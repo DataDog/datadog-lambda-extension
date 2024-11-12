@@ -21,7 +21,13 @@ use crate::{
     telemetry::events::{ReportMetrics, Status},
     traces::{
         context::SpanContext,
-        propagation::{DatadogCompositePropagator, Propagator},
+        propagation::{
+            text_map_propagator::{
+                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SPAN_ID_KEY,
+                DATADOG_TRACE_ID_KEY,
+            },
+            DatadogCompositePropagator, Propagator,
+        },
         trace_processor,
     },
 };
@@ -299,11 +305,8 @@ impl Processor {
         headers: &HashMap<String, String>,
         payload_value: &Value,
     ) -> Option<SpanContext> {
-        if let Some(carrier) = self.inferrer.get_carrier() {
-            if let Some(sc) = self.propagator.extract(&carrier) {
-                debug!("Extracted trace context from inferred span");
-                return Some(sc);
-            }
+        if let Some(sc) = self.inferrer.get_span_context(&self.propagator) {
+            return Some(sc);
         }
 
         if let Some(payload_headers) = payload_value.get("headers") {
@@ -342,30 +345,39 @@ impl Processor {
         let mut trace_id = 0;
         let mut span_id = 0;
         let mut parent_id = 0;
+        let mut tags: HashMap<String, String> = HashMap::new();
 
         // If we have a trace context, update the span context
         if let Some(sc) = &mut self.extracted_span_context {
             trace_id = sc.trace_id;
             span_id = sc.span_id;
+            tags.extend(sc.tags.clone());
         }
 
-        if let Some(header) = headers.get("x-datadog-trace-id") {
+        // Extract trace context from headers manually
+        if let Some(header) = headers.get(DATADOG_TRACE_ID_KEY) {
             trace_id = header.parse::<u64>().unwrap_or(0);
         }
 
-        if let Some(header) = headers.get("x-datadog-span-id") {
+        if let Some(header) = headers.get(DATADOG_SPAN_ID_KEY) {
             span_id = header.parse::<u64>().unwrap_or(0);
         }
 
-        if let Some(header) = headers.get("x-datadog-parent-id") {
+        if let Some(header) = headers.get(DATADOG_PARENT_ID_KEY) {
             parent_id = header.parse::<u64>().unwrap_or(0);
         }
+
+        // Extract tags from headers
+        tags = DatadogHeaderPropagator::extract_tags(&headers);
 
         self.span.trace_id = trace_id;
         self.span.span_id = span_id;
 
-        if self.inferrer.inferred_span.is_none() {
+        if self.inferrer.inferred_span.is_some() {
+            self.inferrer.extend_meta(tags);
+        } else {
             self.span.parent_id = parent_id;
+            self.span.meta.extend(tags);
         }
     }
 }
