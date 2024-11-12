@@ -5,6 +5,7 @@ use std::io;
 use std::path::Path;
 
 #[cfg(not(target_os = "windows"))]
+#[allow(clippy::cast_lossless)]
 /// Returns the block size, total number of blocks, and number of blocks available for the specified directory path.
 ///
 pub fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
