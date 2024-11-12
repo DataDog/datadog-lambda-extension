@@ -13,7 +13,8 @@ use crate::traces::propagation::{
 
 // Datadog Keys
 pub const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
-const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
+pub const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
+pub const DATADOG_SPAN_ID_KEY: &str = "x-datadog-span-id";
 pub const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
 const DATADOG_ORIGIN_KEY: &str = "x-datadog-origin";
 pub const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
@@ -148,7 +149,7 @@ impl DatadogHeaderPropagator {
         Some(origin.to_string())
     }
 
-    fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
+    pub fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
         let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
         let mut tags: HashMap<String, String> = HashMap::new();
 
