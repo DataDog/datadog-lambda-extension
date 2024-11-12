@@ -71,21 +71,16 @@ impl Trigger for KinesisRecord {
     #[allow(clippy::cast_possible_truncation)]
     fn enrich_span(&self, span: &mut Span) {
         let event_source_arn = &self.event_source_arn;
-        let split_source_arn: Vec<&str> = event_source_arn.split('/').collect();
-        let parsed_stream_name = split_source_arn.last().unwrap_or(&"");
+        let parsed_stream_name = event_source_arn.split('/').last().unwrap_or_default();
         let parsed_shard_id = self.event_id.split(':').next().unwrap_or_default();
         span.name = "aws.kinesis".to_string();
         span.service = "kinesis".to_string();
         span.start = (self.kinesis.approximate_arrival_timestamp * S_TO_NS) as i64;
-        span.resource = (*parsed_stream_name).to_string();
+        span.resource = parsed_stream_name.to_string();
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
             ("operation_name".to_string(), "aws.kinesis".to_string()),
-            (
-                "resource_names".to_string(),
-                (*parsed_stream_name).to_string(),
-            ),
-            ("stream_name".to_string(), (*parsed_stream_name).to_string()),
+            ("stream_name".to_string(), parsed_stream_name.to_string()),
             ("shard_id".to_string(), parsed_shard_id.to_string()),
             ("event_source_arn".to_string(), event_source_arn.to_string()),
             ("event_id".to_string(), self.event_id.to_string()),
@@ -185,7 +180,6 @@ mod tests {
             span.meta,
             HashMap::from([
                 ("operation_name".to_string(), "aws.kinesis".to_string()),
-                ("resource_names".to_string(), "kinesisStream".to_string()),
                 ("stream_name".to_string(), "kinesisStream".to_string()),
                 ("shard_id".to_string(), "shardId-000000000002".to_string()),
                 (
