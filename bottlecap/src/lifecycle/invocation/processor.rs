@@ -125,13 +125,13 @@ impl Processor {
 
     pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
         // Create a cold start span
-        let mut cold_star_span = create_empty_span(
+        let mut cold_start_span = create_empty_span(
             String::from("aws.lambda.cold_start"),
             self.span.resource.clone(),
             self.span.service.clone(),
         );
-        cold_star_span.span_id = generate_span_id();
-        self.cold_start_span = Some(cold_star_span);
+        cold_start_span.span_id = generate_span_id();
+        self.cold_start_span = Some(cold_start_span);
 
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
@@ -147,11 +147,12 @@ impl Processor {
     ///
     #[allow(clippy::cast_possible_truncation)]
     pub fn on_platform_init_report(&mut self, duration_ms: f64) {
+        debug!("Setting cold start span duration: {duration_ms}");
         self.enhanced_metrics.set_init_duration_metric(duration_ms);
 
         if let Some(cold_start_span) = &mut self.cold_start_span {
             // `round` is intentionally meant to be a whole integer
-            cold_start_span.duration = (duration_ms * MS_TO_NS).round() as i64;
+            cold_start_span.duration = (duration_ms * MS_TO_NS) as i64;
         }
     }
 
@@ -230,7 +231,7 @@ impl Processor {
 
         if let Some(cold_start_span) = &mut self.cold_start_span {
             cold_start_span.trace_id = self.span.trace_id;
-            cold_start_span.parent_id = self.span.span_id;
+            cold_start_span.parent_id = self.span.parent_id;
             self.span
                 .meta
                 .insert(String::from("cold_start"), String::from("true"));
@@ -253,6 +254,8 @@ impl Processor {
             if let Some(cold_start_span) = &self.cold_start_span {
                 body_size += std::mem::size_of_val(cold_start_span);
                 traces.push(cold_start_span.clone());
+                // Reset the cold start span
+                self.cold_start_span = None;
             }
 
             // todo: figure out what to do here
