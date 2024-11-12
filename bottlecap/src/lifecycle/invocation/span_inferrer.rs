@@ -98,7 +98,22 @@ impl SpanInferrer {
                         inferred_span.start - wrapped_inferred_span.start;
 
                     self.wrapped_inferred_span = Some(wrapped_inferred_span);
-                }
+                } else if let Ok(event_bridge_entity) =
+                    serde_json::from_str::<EventBridgeEvent>(&t.body)
+                {
+                    let mut wrapped_inferred_span = Span {
+                        span_id: Self::generate_span_id(),
+                        ..Default::default()
+                    };
+
+                    event_bridge_entity.enrich_span(&mut wrapped_inferred_span);
+                    inferred_span.meta.extend(event_bridge_entity.get_tags());
+
+                    wrapped_inferred_span.duration =
+                        inferred_span.start - wrapped_inferred_span.start;
+
+                    self.wrapped_inferred_span = Some(wrapped_inferred_span);
+                };
 
                 trigger = Some(Box::new(t));
             }
