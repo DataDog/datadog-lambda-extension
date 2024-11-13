@@ -202,7 +202,6 @@ impl Processor {
     ///
     #[allow(clippy::cast_possible_truncation)]
     pub fn on_platform_init_report(&mut self, duration_ms: f64) {
-        debug!("Setting cold start span duration: {duration_ms}");
         self.enhanced_metrics.set_init_duration_metric(duration_ms);
 
         if let Some(cold_start_span) = &mut self.cold_start_span {
