@@ -163,13 +163,15 @@ impl Processor {
             }
         }
 
-        self.span.meta.extend([
-            (String::from("cold_start"), cold_start.to_string()),
-            (
+        if proactive_initialization {
+            self.span.meta.insert(
                 String::from("proactive_initialization"),
                 proactive_initialization.to_string(),
-            ),
-        ]);
+            );
+        }
+        self.span
+            .meta
+            .insert(String::from("cold_start"), cold_start.to_string());
 
         self.enhanced_metrics
             .set_init_tags(proactive_initialization, cold_start);
