@@ -166,10 +166,6 @@ impl Trigger for SqsRecord {
         }
     }
 
-    fn is_async(&self) -> bool {
-        true
-    }
-
     fn get_carrier(&self) -> HashMap<String, String> {
         let carrier = HashMap::new();
 
@@ -194,6 +190,10 @@ impl Trigger for SqsRecord {
         // TODO: AWSTraceHeader
         carrier
     }
+
+    fn is_async(&self) -> bool {
+        true
+    }
 }
 
 impl ServiceNameResolver for SqsRecord {
@@ -214,14 +214,11 @@ impl ServiceNameResolver for SqsRecord {
 // AWSTraceHeader directly. Unlike the other carriers in this file, it should
 // not be passed to the tracer.Propagator, instead extracting context directly.
 pub(crate) fn extract_trace_context_from_aws_trace_header(
-    value: Option<String>,
-) -> Result<SpanContext, String> {
-    if value.is_none() {
-        return Err("awstrace_header is empty".to_string());
-    }
-    let value = value.unwrap();
+    headers_string: Option<String>,
+) -> Option<SpanContext> {
+    let value = headers_string?;
     if !value.starts_with("Root=") {
-        return Err("awstrace_header mismatch".to_string());
+        return None;
     }
 
     let mut start_part = 0;
@@ -254,13 +251,12 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         start_part = end_part + 1;
     }
 
-    let trace_id = u64::from_str_radix(&trace_id, 16)
-        .map_err(|e| format!("Failed to parse trace ID from awstrace_header: {e}"))?;
-    let parent_id = u64::from_str_radix(&parent_id, 16)
-        .map_err(|e| format!("Failed to parse parent ID from awstrace_header: {e}"))?;
+    let trace_id = u64::from_str_radix(&trace_id, 16).ok()?;
+    let parent_id = u64::from_str_radix(&parent_id, 16).ok()?;
 
     if trace_id == 0 || parent_id == 0 {
-        return Err("awstrace_header contains empty trace or parent ID".to_string());
+        debug!("awstrace_header contains empty trace or parent ID");
+        return None;
     }
 
     let sampling_priority = i8::from(sampled == "1");
@@ -272,7 +268,7 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         "sampling_priority".to_string(),
         sampling_priority.to_string(),
     );
-    Ok(SpanContext {
+    Some(SpanContext {
         trace_id,
         span_id: parent_id,
         sampling: Some(Sampling {
