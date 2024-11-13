@@ -35,6 +35,8 @@ pub struct SpanInferrer {
     is_async_span: bool,
     // Carrier to extract the span context from
     carrier: Option<HashMap<String, String>>,
+    // context taken from `AWSTraceHeader` when java->sqs->java
+    aws_header_context: Option<SpanContext>,
     // Generated Span Context from Step Functions
     generated_span_context: Option<SpanContext>,
     // Tags generated from the trigger
@@ -50,6 +52,7 @@ impl SpanInferrer {
             wrapped_inferred_span: None,
             is_async_span: false,
             carrier: None,
+            aws_header_context: None,
             generated_span_context: None,
             trigger_tags: None,
         }
@@ -95,6 +98,11 @@ impl SpanInferrer {
         } else if SqsRecord::is_match(payload_value) {
             if let Some(t) = SqsRecord::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
+
+                self.aws_header_context = extract_trace_context_from_aws_trace_header(
+                    t.attributes.aws_trace_header.clone(),
+                )
+                .ok();
 
                 // Check for SNS event wrapped in the SQS body
                 if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&t.body) {
@@ -297,6 +305,10 @@ impl SpanInferrer {
         // Step Functions `SpanContext` is deterministically generated
         if let Some(sc) = &self.generated_span_context {
             return Some(sc.clone());
+        }
+
+        if self.aws_header_context.clone().is_some() {
+            return self.aws_header_context.clone();
         }
 
         if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {

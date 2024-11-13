@@ -13,6 +13,7 @@ use crate::lifecycle::invocation::{
         ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
+use crate::traces::context::{Sampling, SpanContext};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SqsEvent {
@@ -64,6 +65,8 @@ pub struct Attributes {
     pub sent_timestamp: String,
     #[serde(rename = "SenderId")]
     pub sender_id: String,
+    #[serde(rename = "AWSTraceHeader")]
+    pub aws_trace_header: Option<String>,
 }
 
 impl Trigger for SqsRecord {
@@ -169,6 +172,7 @@ impl Trigger for SqsRecord {
 
     fn get_carrier(&self) -> HashMap<String, String> {
         let carrier = HashMap::new();
+
         if let Some(ma) = self.message_attributes.get(DATADOG_CARRIER_KEY) {
             if let Some(string_value) = &ma.string_value {
                 return serde_json::from_str(string_value).unwrap_or_default();
@@ -206,6 +210,82 @@ impl ServiceNameResolver for SqsRecord {
     }
 }
 
+// extractTraceContextfromAWSTraceHeader extracts trace context from the
+// AWSTraceHeader directly. Unlike the other carriers in this file, it should
+// not be passed to the tracer.Propagator, instead extracting context directly.
+pub(crate) fn extract_trace_context_from_aws_trace_header(
+    value: Option<String>,
+) -> Result<SpanContext, String> {
+    if value.is_none() {
+        return Err("awstrace_header is empty".to_string());
+    }
+    let value = value.unwrap();
+    if !value.starts_with("Root=") {
+        return Err("awstrace_header mismatch".to_string());
+    }
+
+    let mut start_part = 0;
+    let mut trace_id = String::new();
+    let mut parent_id = String::new();
+    let mut sampled = String::new();
+
+    let length = value.len();
+    while start_part < length {
+        let end_part = value[start_part..]
+            .find(';')
+            .map_or(length, |i| i + start_part);
+        let part = &value[start_part..end_part];
+
+        if part.starts_with("Root=") {
+            if trace_id.is_empty() {
+                trace_id = part[24..].to_string();
+            }
+        } else if part.starts_with("Parent=") {
+            if parent_id.is_empty() {
+                parent_id = part[7..].to_string();
+            }
+        } else if part.starts_with("Sampled=") && sampled.is_empty() {
+            sampled = part[8..].to_string();
+        }
+
+        if !trace_id.is_empty() && !parent_id.is_empty() && !sampled.is_empty() {
+            break;
+        }
+        start_part = end_part + 1;
+    }
+
+    let trace_id = u64::from_str_radix(&trace_id, 16)
+        .map_err(|e| format!("Failed to parse trace ID from awstrace_header: {e}"))?;
+    let parent_id = u64::from_str_radix(&parent_id, 16)
+        .map_err(|e| format!("Failed to parse parent ID from awstrace_header: {e}"))?;
+
+    if trace_id == 0 || parent_id == 0 {
+        return Err("awstrace_header contains empty trace or parent ID".to_string());
+    }
+
+    let sampling_priority = if sampled == "1" { "1" } else { "0" };
+
+    let mut trace_context = HashMap::new();
+    trace_context.insert("trace_id".to_string(), trace_id.to_string());
+    trace_context.insert("parent_id".to_string(), parent_id.to_string());
+    trace_context.insert(
+        "sampling_priority".to_string(),
+        sampling_priority.to_string(),
+    );
+    Ok(SpanContext {
+        trace_id,
+        span_id: parent_id,
+        sampling: Some(Sampling {
+            priority: Some(sampling_priority.parse().unwrap()),
+            mechanism: None,
+        }),
+        origin: None,
+        tags: HashMap::new(),
+        links: Vec::new(),
+    })
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,6 +315,7 @@ mod tests {
                 approximate_receive_count: "1".to_string(),
                 sent_timestamp: "1523232000000".to_string(),
                 sender_id: "123456789012".to_string(),
+                aws_trace_header: None,
             },
             message_attributes,
             md5_of_body: "{{{md5_of_body}}}".to_string(),
@@ -423,6 +504,31 @@ mod tests {
         assert_eq!(
             event.resolve_service_name(&generic_service_mapping, "sqs"),
             "generic-service"
+        );
+    }
+
+    #[test]
+    fn extract_java_sqs_header_context() {
+        let json = read_json_file("eventbridge_sqs_java_header_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize EventBridgeEvent");
+
+        assert_eq!(
+            extract_trace_context_from_aws_trace_header(Some(
+                event.attributes.aws_trace_header.unwrap().to_string()
+            ))
+            .unwrap(),
+            SpanContext {
+                trace_id: 130_944_522_478_755_159,
+                span_id: 9_032_698_535_745_367_362,
+                sampling: Some(Sampling {
+                    priority: Some("0".parse().unwrap()),
+                    mechanism: None,
+                }),
+                origin: None,
+                tags: HashMap::new(),
+                links: Vec::new(),
+            }
         );
     }
 }
