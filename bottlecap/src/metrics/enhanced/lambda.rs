@@ -35,7 +35,11 @@ impl Lambda {
         }
     }
 
+    /// Set the dynamic value tags that are not available at compile time
     pub fn set_init_tags(&mut self, proactive_initialization: bool, cold_start: bool) {
+        self.dynamic_value_tags.remove("cold_start");
+        self.dynamic_value_tags.remove("proactive_initialization");
+        
         self.dynamic_value_tags
             .insert(String::from("cold_start"), cold_start.to_string());
 
