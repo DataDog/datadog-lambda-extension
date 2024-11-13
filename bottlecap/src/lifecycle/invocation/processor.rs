@@ -112,11 +112,17 @@ impl Processor {
             let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
             self.enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
 
+            // Start a channel for monitoring file descriptor and thread count
+            let (process_chan_tx, process_chan_rx) = watch::channel(());
+            self.enhanced_metrics
+                .set_process_enhanced_metrics(process_chan_rx);
+
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
                 tmp_chan_tx,
+                process_chan_tx,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -196,6 +202,8 @@ impl Processor {
                 );
                 // Send the signal to stop monitoring tmp
                 _ = offsets.tmp_chan_tx.send(());
+                // Send the signal to stop monitoring file descriptors and threads
+                _ = offsets.process_chan_tx.send(());
             }
         }
 

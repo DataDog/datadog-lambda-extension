@@ -3,11 +3,44 @@ pub mod constants;
 
 use std::{
     collections::HashMap,
-    fs::File,
+    fs::{self, File},
     io::{self, BufRead},
 };
 
-use constants::{LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH};
+use constants::{
+    LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
+};
+use tracing::debug;
+
+pub fn get_pid_list() -> Vec<i32> {
+    get_pid_list_from_path(PROC_PATH)
+}
+
+pub fn get_pid_list_from_path(path: &str) -> Vec<i32> {
+    let mut pids = Vec::<i32>::new();
+
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(_) => {
+            debug!("Could not list /proc files");
+            return pids;
+        }
+    };
+
+    pids.extend(entries.filter_map(|entry| {
+        entry.ok().and_then(|dir_entry| {
+            // Check if the entry is a directory
+            if dir_entry.file_type().ok()?.is_dir() {
+                // If the directory name can be parsed as an integer, it will be added to the list
+                dir_entry.file_name().to_str()?.parse::<i32>().ok()
+            } else {
+                None
+            }
+        })
+    }));
+
+    pids
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct NetworkData {
@@ -180,6 +213,155 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
     ))
 }
 
+pub fn get_fd_max_data(pids: &[i32]) -> f64 {
+    get_fd_max_data_from_path(PROC_PATH, pids)
+}
+
+fn get_fd_max_data_from_path(path: &str, pids: &[i32]) -> f64 {
+    let mut fd_max: f64 = 1024.0; // Default to hard limit set by AWS Lambda
+
+    for &pid in pids {
+        let limits_path = format!("{}/{}/limits", path, pid);
+
+        let file = match File::open(&limits_path) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+
+        let reader = io::BufReader::new(file);
+        for line in reader.lines() {
+            if let Some(line) = line.ok() {
+                if line.starts_with("Max open files") {
+                    let values: Vec<&str> = line.split_whitespace().collect();
+
+                    // Line should have 6 items: Max open files [soft limit] [hard limit] [units]
+                    if values.len() < 6 {
+                        debug!("File descriptor max data not found in file {}", limits_path);
+                        break;
+                    }
+
+                    // Skip past the first three items ("Max open files") to get the soft limit
+                    let fd_max_pid_str = values[3];
+                    let fd_max_pid: f64 = match fd_max_pid_str.parse() {
+                        Ok(val) => val,
+                        Err(_) => {
+                            debug!("File descriptor max data not found in file {}", limits_path);
+                            break;
+                        }
+                    };
+                    fd_max = fd_max.min(fd_max_pid);
+                    break;
+                }
+            }
+        }
+    }
+
+    fd_max
+}
+
+pub fn get_fd_use_data(pids: &[i32]) -> Result<f64, io::Error> {
+    get_fd_use_data_from_path(PROC_PATH, pids)
+}
+
+fn get_fd_use_data_from_path(path: &str, pids: &[i32]) -> Result<f64, io::Error> {
+    let mut fd_use = 0;
+
+    for pid in pids {
+        let fd_path = format!("{}/{}/fd", path, pid);
+        let files = match fs::read_dir(fd_path) {
+            Ok(files) => files,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "File descriptor use data not found",
+                ));
+            }
+        };
+        fd_use += files.count();
+    }
+
+    Ok(fd_use as f64)
+}
+
+pub fn get_threads_max_data(pids: &[i32]) -> f64 {
+    get_threads_max_data_from_path(PROC_PATH, pids)
+}
+
+fn get_threads_max_data_from_path(path: &str, pids: &[i32]) -> f64 {
+    let mut threads_max: f64 = 1024.0; // Default to hard limit set by AWS Lambda
+
+    for &pid in pids {
+        let limits_path = format!("{}/{}/limits", path, pid);
+
+        let file = match File::open(&limits_path) {
+            Ok(file) => file,
+            Err(_) => continue,
+        };
+
+        let reader = io::BufReader::new(file);
+        for line in reader.lines() {
+            if let Some(line) = line.ok() {
+                if line.starts_with("Max processes") {
+                    let values: Vec<&str> = line.split_whitespace().collect();
+
+                    // Line should have 5 items: Max processes [soft limit] [hard limit] [units]
+                    if values.len() < 5 {
+                        debug!("Threads max data not found in file {}", limits_path);
+                        break;
+                    }
+
+                    // Skip past the first three items ("Max open files") to get the soft limit
+                    let fd_max_pid_str = values[2];
+                    let fd_max_pid: f64 = match fd_max_pid_str.parse() {
+                        Ok(val) => val,
+                        Err(_) => {
+                            debug!("Threads max data not found in file {}", limits_path);
+                            break;
+                        }
+                    };
+                    threads_max = threads_max.min(fd_max_pid);
+                    break;
+                }
+            }
+        }
+    }
+
+    threads_max
+}
+
+pub fn get_threads_use_data(pids: &[i32]) -> Result<f64, io::Error> {
+    get_threads_use_data_from_path(PROC_PATH, pids)
+}
+
+fn get_threads_use_data_from_path(path: &str, pids: &[i32]) -> Result<f64, io::Error> {
+    let mut threads_use = 0;
+
+    for pid in pids {
+        let task_path = format!("{}/{}/task", path, pid);
+        let files = match fs::read_dir(task_path) {
+            Ok(files) => files,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Threads use data not found",
+                ));
+            }
+        };
+
+        for entry in files {
+            if let Ok(dir_entry) = entry {
+                if let Some(file_type) = dir_entry.file_type().ok() {
+                    if file_type.is_dir() {
+                        threads_use += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(threads_use as f64)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -190,6 +372,21 @@ mod tests {
         let mut safe_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         safe_path.push(file);
         safe_path.to_str().unwrap().to_string()
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_get_pid_list() {
+        let path = "./tests/proc";
+        let mut pids = get_pid_list_from_path(path);
+        pids.sort();
+        assert_eq!(pids.len(), 2);
+        assert_eq!(pids[0], 13);
+        assert_eq!(pids[1], 142);
+
+        let path = "./tests/incorrect_folder";
+        let pids = get_pid_list_from_path(path);
+        assert_eq!(pids.len(), 0);
     }
 
     #[test]
@@ -290,5 +487,69 @@ mod tests {
         let path = "./tests/proc/uptime/nonexistent_uptime";
         let uptime_data_result = get_uptime_from_path(path);
         assert!(uptime_data_result.is_err());
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_get_fd_max_data() {
+        let path = "./tests/proc/process/valid";
+        let pids = get_pid_list_from_path(path);
+        let fd_max = get_fd_max_data_from_path(path, &pids);
+        assert_eq!(fd_max, 900.0);
+
+        let path = "./tests/proc/process/invalid_malformed";
+        let fd_max = get_fd_max_data_from_path(path, &pids);
+        assert_eq!(fd_max, 1024.0); // assert that fd_max is equal to AWS Lambda limit
+
+        let path = "./tests/proc/process/invalid_missing";
+        let fd_max = get_fd_max_data_from_path(path, &pids);
+        assert_eq!(fd_max, 1024.0); // assert that fd_max is equal to AWS Lambda limit
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_get_fd_use_data() {
+        let path = "./tests/proc/process/valid";
+        let pids = get_pid_list_from_path(path);
+        let fd_use_result = get_fd_use_data_from_path(path, &pids);
+        assert!(fd_use_result.is_ok());
+        let fd_use = fd_use_result.unwrap();
+        assert_eq!(fd_use, 5.0);
+
+        let path = "./tests/proc/process/invalid_missing";
+        let fd_use_result = get_fd_use_data_from_path(path, &pids);
+        assert!(fd_use_result.is_err());
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_get_threads_max_data() {
+        let path = "./tests/proc/process/valid";
+        let pids = get_pid_list_from_path(path);
+        let fd_max = get_threads_max_data_from_path(path, &pids);
+        assert_eq!(fd_max, 1024.0);
+
+        let path = "./tests/proc/process/invalid_malformed";
+        let fd_max = get_threads_max_data_from_path(path, &pids);
+        assert_eq!(fd_max, 1024.0); // assert that threads_max is equal to AWS Lambda limit
+
+        let path = "./tests/proc/process/invalid_missing";
+        let fd_max = get_threads_max_data_from_path(path, &pids);
+        assert_eq!(fd_max, 1024.0); // assert that threads_max is equal to AWS Lambda limit
+    }
+
+    #[test]
+    #[allow(clippy::float_cmp)]
+    fn test_get_threads_use_data() {
+        let path = "./tests/proc/process/valid";
+        let pids = get_pid_list_from_path(path);
+        let threads_use_result = get_threads_use_data_from_path(path, &pids);
+        assert!(threads_use_result.is_ok());
+        let threads_use = threads_use_result.unwrap();
+        assert_eq!(threads_use, 5.0);
+
+        let path = "./tests/proc/process/invalid_missing";
+        let threads_use_result = get_threads_use_data_from_path(path, &pids);
+        assert!(threads_use_result.is_err());
     }
 }
