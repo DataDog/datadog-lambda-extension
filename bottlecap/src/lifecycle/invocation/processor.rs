@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
@@ -37,6 +37,7 @@ use crate::{
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
+pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
 pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
@@ -98,6 +99,9 @@ impl Processor {
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        self.reset_state();
+        self.set_init_tags();
+
         self.context_buffer.create_context(request_id.clone());
         if self.enhanced_metrics_enabled {
             // Collect offsets for network and cpu metrics
@@ -121,6 +125,54 @@ impl Processor {
 
         // Increment the invocation metric
         self.enhanced_metrics.increment_invocation_metric();
+    }
+
+    /// Resets the state of the processor to default values.
+    ///
+    fn reset_state(&mut self) {
+        // Reset Span Context on Span
+        self.span.trace_id = 0;
+        self.span.parent_id = 0;
+        self.span.span_id = 0;
+        // Error
+        self.span.error = 0;
+        // Meta tags
+        self.span.meta.clear();
+        // Extracted Span Context
+        self.extracted_span_context = None;
+        // Cold Start Span
+        self.cold_start_span = None;
+    }
+
+    /// On the first invocation, determine if it's a cold start or proactive init.
+    ///
+    /// For every other invocation, it will always be warm start.
+    ///
+    fn set_init_tags(&mut self) {
+        let mut proactive_initialization = false;
+        let mut cold_start = false;
+
+        // If it's empty, then we are in a cold start
+        if self.context_buffer.is_empty() {
+            let now = Instant::now();
+            let time_since_sandbox_init = now.duration_since(self.aws_config.sandbox_init_time);
+            if time_since_sandbox_init.as_millis() > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into() {
+                proactive_initialization = true;
+            } else {
+                cold_start = true;
+            }
+        }
+
+        self.span.meta.extend([
+            (String::from("cold_start"), cold_start.to_string()),
+            (
+                String::from("proactive_initialization"),
+                proactive_initialization.to_string(),
+            ),
+        ]);
+
+        self.enhanced_metrics
+            .set_init_tags(proactive_initialization, cold_start);
     }
 
     pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
@@ -255,8 +307,6 @@ impl Processor {
             if let Some(cold_start_span) = &self.cold_start_span {
                 body_size += std::mem::size_of_val(cold_start_span);
                 traces.push(cold_start_span.clone());
-                // Reset the cold start span
-                self.cold_start_span = None;
             }
 
             // todo: figure out what to do here
@@ -295,7 +345,7 @@ impl Processor {
         // Set the report log metrics
         self.enhanced_metrics.set_report_log_metrics(&metrics);
 
-        if let Some(context) = self.context_buffer.remove(request_id) {
+        if let Some(context) = self.context_buffer.get(request_id) {
             if context.runtime_duration_ms != 0.0 {
                 let post_runtime_duration_ms = metrics.duration_ms - context.runtime_duration_ms;
 
@@ -305,7 +355,7 @@ impl Processor {
             }
 
             // Set Network and CPU time metrics
-            if let Some(offsets) = context.enhanced_metric_data {
+            if let Some(offsets) = context.enhanced_metric_data.clone() {
                 self.enhanced_metrics
                     .set_network_enhanced_metrics(offsets.network_offset);
                 self.enhanced_metrics
@@ -319,14 +369,6 @@ impl Processor {
     ///
     pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
-
-        // Reset trace context
-        self.span.trace_id = 0;
-        self.span.parent_id = 0;
-        self.span.span_id = 0;
-        self.span.error = 0;
-        self.span.meta.clear();
-        self.extracted_span_context = None;
 
         let payload_value = match serde_json::from_slice::<Value>(&payload) {
             Ok(value) => value,
