@@ -60,6 +60,7 @@ use std::{
     path::Path,
     process::Command,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;
@@ -201,6 +202,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_default(),
         aws_session_token: env::var("AWS_SESSION_TOKEN").unwrap_or_default(),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
+        sandbox_init_time: Instant::now(),
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
