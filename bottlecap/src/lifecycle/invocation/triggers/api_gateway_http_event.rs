@@ -253,6 +253,7 @@ mod tests {
     }
 
     #[test]
+
     fn test_is_not_match() {
         let json = read_json_file("api_gateway_proxy_event.json");
         let payload =
@@ -323,6 +324,7 @@ mod tests {
     }
 
     #[test]
+
     fn test_enrich_span_parameterized() {
         let json = read_json_file("api_gateway_http_event_parameterized.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
@@ -379,6 +381,7 @@ mod tests {
         ]);
         assert_eq!(tags, expected);
     }
+
     #[test]
     fn test_get_arn() {
         let json = read_json_file("api_gateway_http_event.json");

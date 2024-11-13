@@ -14,6 +14,7 @@ use crate::lifecycle::invocation::{
         dynamodb_event::DynamoDbRecord,
         event_bridge_event::EventBridgeEvent,
         kinesis_event::KinesisRecord,
+        lambda_function_url_event::LambdaFunctionUrlEvent,
         s3_event::S3Record,
         sns_event::{SnsEntity, SnsRecord},
         sqs_event::SqsRecord,
@@ -84,6 +85,12 @@ impl SpanInferrer {
             }
         } else if APIGatewayRestEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayRestEvent::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if LambdaFunctionUrlEvent::is_match(payload_value) {
+            if let Some(t) = LambdaFunctionUrlEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span);
 
                 trigger = Some(Box::new(t));
@@ -193,10 +200,10 @@ impl SpanInferrer {
         // Inferred a trigger
         if let Some(t) = trigger {
             let mut trigger_tags = t.get_tags();
-            trigger_tags.extend([(
+            trigger_tags.insert(
                 FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG.to_string(),
                 t.get_arn(&aws_config.region),
-            )]);
+            );
 
             self.trigger_tags = Some(trigger_tags);
             self.carrier = Some(t.get_carrier());
