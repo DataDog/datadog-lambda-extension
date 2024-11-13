@@ -263,7 +263,7 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         return Err("awstrace_header contains empty trace or parent ID".to_string());
     }
 
-    let sampling_priority = if sampled == "1" { "1" } else { "0" };
+    let sampling_priority = i8::from(sampled == "1");
 
     let mut trace_context = HashMap::new();
     trace_context.insert("trace_id".to_string(), trace_id.to_string());
@@ -276,7 +276,7 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         trace_id,
         span_id: parent_id,
         sampling: Some(Sampling {
-            priority: Some(sampling_priority.parse().unwrap()),
+            priority: Some(sampling_priority),
             mechanism: None,
         }),
         origin: None,
