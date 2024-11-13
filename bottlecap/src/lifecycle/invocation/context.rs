@@ -165,6 +165,13 @@ impl ContextBuffer {
     pub fn size(&self) -> usize {
         self.buffer.len()
     }
+
+    /// Returns if the buffer is empty.
+    ///
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
 }
 
 #[cfg(test)]
