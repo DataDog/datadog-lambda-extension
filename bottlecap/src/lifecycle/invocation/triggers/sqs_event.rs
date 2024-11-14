@@ -269,6 +269,8 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         sampling_priority.to_string(),
     );
     Some(SpanContext {
+        // the context from AWS Header is used by Datadog only and does not contain the upper
+        // 64 bits like other 128 w3c compliant trace ids
         trace_id,
         span_id: parent_id,
         sampling: Some(Sampling {
