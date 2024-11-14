@@ -15,7 +15,7 @@ use tracing::debug;
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{
-        base64_to_string, context::ContextBuffer, span_inferrer::SpanInferrer,
+        base64_to_string, context::ContextBuffer, span_inferrer::SpanInferrer, tag_span_from_value,
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{self, CPUData, NetworkData},
@@ -52,7 +52,7 @@ pub struct Processor {
     enhanced_metrics: EnhancedMetrics,
     aws_config: AwsConfig,
     tracer_detected: bool,
-    enhanced_metrics_enabled: bool,
+    config: Arc<config::Config>,
 }
 
 impl Processor {
@@ -94,7 +94,7 @@ impl Processor {
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config: aws_config.clone(),
             tracer_detected: false,
-            enhanced_metrics_enabled: config.enhanced_metrics,
+            config: Arc::clone(&config),
         }
     }
 
@@ -102,7 +102,7 @@ impl Processor {
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
         self.context_buffer.create_context(request_id.clone());
-        if self.enhanced_metrics_enabled {
+        if self.config.enhanced_metrics {
             // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
@@ -293,6 +293,17 @@ impl Processor {
             Err(_) => json!({}),
         };
 
+        // Tag the invocation span with the request payload
+        if self.config.capture_lambda_payload {
+            tag_span_from_value(
+                &mut self.span,
+                "function.request",
+                &payload_value,
+                0,
+                self.config.capture_lambda_payload_max_depth,
+            );
+        }
+
         self.inferrer.infer_span(&payload_value, &self.aws_config);
         self.extracted_span_context = self.extract_span_context(&headers, &payload_value);
 
@@ -344,22 +355,34 @@ impl Processor {
 
     /// Given trace context information, set it to the current span.
     ///
-    pub fn on_invocation_end(
-        &mut self,
-        headers: HashMap<String, String>,
-        status_code: Option<String>,
-    ) {
-        if let Some(status_code) = status_code {
+    pub fn on_invocation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+        let payload_value = match serde_json::from_slice::<Value>(&payload) {
+            Ok(value) => value,
+            Err(_) => json!({}),
+        };
+
+        // Tag the invocation span with the request payload
+        if self.config.capture_lambda_payload {
+            tag_span_from_value(
+                &mut self.span,
+                "function.response",
+                &payload_value,
+                0,
+                self.config.capture_lambda_payload_max_depth,
+            );
+        }
+
+        if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_str) {
             self.span
                 .meta
-                .insert("http.status_code".to_string(), status_code.clone());
+                .insert("http.status_code".to_string(), status_code.to_string());
 
             if status_code.len() == 3 && status_code.starts_with('5') {
                 self.span.error = 1;
             }
 
             // If we have an inferred span, set the status code to it
-            self.inferrer.set_status_code(status_code);
+            self.inferrer.set_status_code(status_code.to_string());
         }
 
         self.update_span_context_from_headers(&headers);
