@@ -74,6 +74,8 @@ impl SpanInferrer {
             ..Default::default()
         };
 
+        let mut is_step_function = false;
+
         if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
@@ -195,6 +197,7 @@ impl SpanInferrer {
             if let Some(t) = StepFunctionEvent::new(payload_value.clone()) {
                 self.generated_span_context = Some(t.get_span_context());
                 trigger = Some(Box::new(t));
+                is_step_function = true;
             }
         } else {
             debug!("Unable to infer span from payload: no matching trigger found");
@@ -213,7 +216,7 @@ impl SpanInferrer {
             self.is_async_span = t.is_async();
 
             // For Step Functions, there is no inferred span
-            if self.generated_span_context.is_some() {
+            if is_step_function && self.generated_span_context.is_some() {
                 self.inferred_span = None;
             } else {
                 self.inferred_span = Some(inferred_span);
