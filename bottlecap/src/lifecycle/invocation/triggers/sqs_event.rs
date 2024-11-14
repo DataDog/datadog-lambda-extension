@@ -237,9 +237,9 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
             if trace_id.is_empty() {
                 trace_id = part[24..].to_string();
             }
-        } else if part.starts_with("Parent=") {
+        } else if let Some(parent_part) = part.strip_prefix("Parent=") {
             if parent_id.is_empty() {
-                parent_id = part[7..].to_string();
+                parent_id = parent_part.to_string();
             }
         } else if part.starts_with("Sampled=") && sampled.is_empty() {
             sampled = part[8..].to_string();
