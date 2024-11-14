@@ -96,7 +96,7 @@ impl ContextBuffer {
     /// Creates a new `Context` and adds it to the buffer.
     ///
     pub fn create_context(&mut self, request_id: String) {
-        self.insert(Context::new(request_id, 0.0, 0.0, 0, None));
+        self.insert(Context::new(request_id, 0f64, 0f64, 0, None));
     }
 
     /// Adds the init duration to a `Context` in the buffer.
@@ -188,20 +188,20 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
 
         // This should replace the first context
         let request_id_3 = String::from("3");
-        let context = Context::new(request_id_3.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id_3.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_3).unwrap(), &context);
@@ -215,13 +215,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -242,13 +242,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -263,13 +263,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
-        buffer.add_init_duration(&request_id, 100.0);
-        assert_eq!(buffer.get(&request_id).unwrap().init_duration_ms, 100.0);
+        buffer.add_init_duration(&request_id, 100f64);
+        assert!((buffer.get(&request_id).unwrap().init_duration_ms - 100f64).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -277,7 +277,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
@@ -291,13 +291,15 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
-        buffer.add_runtime_duration(&request_id, 100.0);
-        assert_eq!(buffer.get(&request_id).unwrap().runtime_duration_ms, 100.0);
+        buffer.add_runtime_duration(&request_id, 100f64);
+        assert!(
+            (buffer.get(&request_id).unwrap().runtime_duration_ms - 100f64).abs() < f64::EPSILON
+        );
     }
 
     #[test]
@@ -305,27 +307,27 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0, None);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let network_offset = Some(NetworkData {
-            rx_bytes: 180.0,
+            rx_bytes: 180f64,
             tx_bytes: 254.0,
         });
 
         let mut individual_cpu_idle_times = HashMap::new();
-        individual_cpu_idle_times.insert("cpu0".to_string(), 10.0);
-        individual_cpu_idle_times.insert("cpu1".to_string(), 20.0);
+        individual_cpu_idle_times.insert("cpu0".to_string(), 10f64);
+        individual_cpu_idle_times.insert("cpu1".to_string(), 20f64);
         let cpu_offset = Some(CPUData {
-            total_user_time_ms: 100.0,
+            total_user_time_ms: 100f64,
             total_system_time_ms: 53.0,
-            total_idle_time_ms: 20.0,
+            total_idle_time_ms: 20f64,
             individual_cpu_idle_times,
         });
 
-        let uptime_offset = Some(50.0);
+        let uptime_offset = Some(50f64);
         let (tmp_chan_tx, _) = watch::channel(());
         let (process_chan_tx, _) = watch::channel(());
 
