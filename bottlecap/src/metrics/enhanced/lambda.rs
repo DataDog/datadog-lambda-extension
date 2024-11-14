@@ -443,7 +443,8 @@ impl Lambda {
             error!("Failed to insert fd_max metric: {}", e);
         }
 
-        if fd_use != -1.0 {
+        // Check if fd_use value is valid before inserting metric
+        if fd_use > 0.0 {
             let metric = Metric::new(
                 constants::FD_USE_METRIC.into(),
                 MetricValue::distribution(fd_use),
@@ -469,7 +470,8 @@ impl Lambda {
             error!("Failed to insert threads_max metric: {}", e);
         }
 
-        if threads_use != -1.0 {
+        // Check if threads_use value is valid before inserting metric
+        if threads_use > 0.0 {
             let metric = Metric::new(
                 constants::THREADS_USE_METRIC.into(),
                 MetricValue::distribution(threads_use),
@@ -494,11 +496,11 @@ impl Lambda {
 
             // Set fd_max and initial value for fd_use to -1
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = -1 as f64;
+            let mut fd_use = -1_f64;
 
             // Set threads_max and initial value for threads_use to -1
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = -1 as f64;
+            let mut threads_use = -1_f64;
 
             let mut interval = interval(Duration::from_millis(2));
             loop {

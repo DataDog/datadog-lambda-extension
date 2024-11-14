@@ -12,6 +12,7 @@ use constants::{
 };
 use tracing::debug;
 
+#[must_use]
 pub fn get_pid_list() -> Vec<i32> {
     get_pid_list_from_path(PROC_PATH)
 }
@@ -19,12 +20,9 @@ pub fn get_pid_list() -> Vec<i32> {
 pub fn get_pid_list_from_path(path: &str) -> Vec<i32> {
     let mut pids = Vec::<i32>::new();
 
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(_) => {
-            debug!("Could not list /proc files");
-            return pids;
-        }
+    let Ok(entries) = fs::read_dir(path) else {
+        debug!("Could not list /proc files");
+        return pids;
     };
 
     pids.extend(entries.filter_map(|entry| {
@@ -213,6 +211,7 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
     ))
 }
 
+#[must_use]
 pub fn get_fd_max_data(pids: &[i32]) -> f64 {
     get_fd_max_data_from_path(PROC_PATH, pids)
 }
@@ -221,37 +220,30 @@ fn get_fd_max_data_from_path(path: &str, pids: &[i32]) -> f64 {
     let mut fd_max: f64 = 1024.0; // Default to hard limit set by AWS Lambda
 
     for &pid in pids {
-        let limits_path = format!("{}/{}/limits", path, pid);
-
-        let file = match File::open(&limits_path) {
-            Ok(file) => file,
-            Err(_) => continue,
+        let limits_path = format!("{path}/{pid}/limits");
+        let Ok(file) = File::open(&limits_path) else {
+            continue;
         };
 
         let reader = io::BufReader::new(file);
-        for line in reader.lines() {
-            if let Some(line) = line.ok() {
-                if line.starts_with("Max open files") {
-                    let values: Vec<&str> = line.split_whitespace().collect();
+        for line in reader.lines().map_while(Result::ok) {
+            if line.starts_with("Max open files") {
+                let values: Vec<&str> = line.split_whitespace().collect();
 
-                    // Line should have 6 items: Max open files [soft limit] [hard limit] [units]
-                    if values.len() < 6 {
-                        debug!("File descriptor max data not found in file {}", limits_path);
-                        break;
-                    }
-
-                    // Skip past the first three items ("Max open files") to get the soft limit
-                    let fd_max_pid_str = values[3];
-                    let fd_max_pid: f64 = match fd_max_pid_str.parse() {
-                        Ok(val) => val,
-                        Err(_) => {
-                            debug!("File descriptor max data not found in file {}", limits_path);
-                            break;
-                        }
-                    };
-                    fd_max = fd_max.min(fd_max_pid);
+                // Line should have 6 items: Max open files [soft limit] [hard limit] [units]
+                if values.len() < 6 {
+                    debug!("File descriptor max data not found in file {}", limits_path);
                     break;
                 }
+
+                // Skip past the first three items ("Max open files") to get the soft limit
+                let fd_max_pid_str = values[3];
+                let Ok(fd_max_pid) = fd_max_pid_str.parse() else {
+                    debug!("File descriptor max data not found in file {}", limits_path);
+                    break;
+                };
+                fd_max = fd_max.min(fd_max_pid);
+                break;
             }
         }
     }
@@ -267,15 +259,12 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i32]) -> Result<f64, io::Error>
     let mut fd_use = 0;
 
     for pid in pids {
-        let fd_path = format!("{}/{}/fd", path, pid);
-        let files = match fs::read_dir(fd_path) {
-            Ok(files) => files,
-            Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "File descriptor use data not found",
-                ));
-            }
+        let fd_path = format!("{path}/{pid}/fd");
+        let Ok(files) = fs::read_dir(fd_path) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "File descriptor use data not found",
+            ));
         };
         fd_use += files.count();
     }
@@ -283,6 +272,7 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i32]) -> Result<f64, io::Error>
     Ok(fd_use as f64)
 }
 
+#[must_use]
 pub fn get_threads_max_data(pids: &[i32]) -> f64 {
     get_threads_max_data_from_path(PROC_PATH, pids)
 }
@@ -291,37 +281,30 @@ fn get_threads_max_data_from_path(path: &str, pids: &[i32]) -> f64 {
     let mut threads_max: f64 = 1024.0; // Default to hard limit set by AWS Lambda
 
     for &pid in pids {
-        let limits_path = format!("{}/{}/limits", path, pid);
-
-        let file = match File::open(&limits_path) {
-            Ok(file) => file,
-            Err(_) => continue,
+        let limits_path = format!("{path}/{pid}/limits");
+        let Ok(file) = File::open(&limits_path) else {
+            continue;
         };
 
         let reader = io::BufReader::new(file);
-        for line in reader.lines() {
-            if let Some(line) = line.ok() {
-                if line.starts_with("Max processes") {
-                    let values: Vec<&str> = line.split_whitespace().collect();
+        for line in reader.lines().map_while(Result::ok) {
+            if line.starts_with("Max processes") {
+                let values: Vec<&str> = line.split_whitespace().collect();
 
-                    // Line should have 5 items: Max processes [soft limit] [hard limit] [units]
-                    if values.len() < 5 {
-                        debug!("Threads max data not found in file {}", limits_path);
-                        break;
-                    }
-
-                    // Skip past the first three items ("Max open files") to get the soft limit
-                    let fd_max_pid_str = values[2];
-                    let fd_max_pid: f64 = match fd_max_pid_str.parse() {
-                        Ok(val) => val,
-                        Err(_) => {
-                            debug!("Threads max data not found in file {}", limits_path);
-                            break;
-                        }
-                    };
-                    threads_max = threads_max.min(fd_max_pid);
+                // Line should have 5 items: Max processes [soft limit] [hard limit] [units]
+                if values.len() < 5 {
+                    debug!("Threads max data not found in file {}", limits_path);
                     break;
                 }
+
+                // Skip past the first three items ("Max open files") to get the soft limit
+                let threads_max_pid_str = values[2];
+                let Ok(threads_max_pid) = threads_max_pid_str.parse() else {
+                    debug!("Threads max data not found in file {}", limits_path);
+                    break;
+                };
+                threads_max = threads_max.min(threads_max_pid);
+                break;
             }
         }
     }
@@ -337,29 +320,24 @@ fn get_threads_use_data_from_path(path: &str, pids: &[i32]) -> Result<f64, io::E
     let mut threads_use = 0;
 
     for pid in pids {
-        let task_path = format!("{}/{}/task", path, pid);
-        let files = match fs::read_dir(task_path) {
-            Ok(files) => files,
-            Err(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Threads use data not found",
-                ));
-            }
+        let task_path = format!("{path}/{pid}/task");
+        let Ok(files) = fs::read_dir(task_path) else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Threads use data not found",
+            ));
         };
 
-        for entry in files {
-            if let Ok(dir_entry) = entry {
-                if let Some(file_type) = dir_entry.file_type().ok() {
-                    if file_type.is_dir() {
-                        threads_use += 1;
-                    }
+        for dir_entry in files.flatten() {
+            if let Ok(file_type) = dir_entry.file_type() {
+                if file_type.is_dir() {
+                    threads_use += 1;
                 }
             }
         }
     }
 
-    Ok(threads_use as f64)
+    Ok(f64::from(threads_use))
 }
 
 #[cfg(test)]
