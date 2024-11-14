@@ -103,3 +103,154 @@ fn redact_value(key: &str, value: String) -> String {
         value
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_simple_tagging() {
+        let mut span = Span::default();
+        let value = json!({ "request": { "simple": "value" } });
+
+        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+
+        let expected = HashMap::from([("payload.request.simple".to_string(), "value".to_string())]);
+
+        assert_eq!(span.meta, expected);
+    }
+
+    #[test]
+    fn test_complex_object() {
+        let mut span = Span::default();
+        let value = json!({
+            "request": {
+                "simple": "value",
+                "obj": {
+                    "arr": ["a", "b", "c"],
+                    "boolean": true,
+                    "nested": {
+                        "value": "nested_value"
+                    }
+                },
+                "empty": null,
+                "number": 1,
+                "boolean": true,
+            }
+        });
+
+        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+
+        let expected = HashMap::from([
+            ("payload.request.simple".to_string(), "value".to_string()),
+            ("payload.request.obj.arr.0".to_string(), "a".to_string()),
+            ("payload.request.obj.arr.1".to_string(), "b".to_string()),
+            ("payload.request.obj.arr.2".to_string(), "c".to_string()),
+            (
+                "payload.request.obj.boolean".to_string(),
+                "true".to_string(),
+            ),
+            (
+                "payload.request.obj.nested.value".to_string(),
+                "nested_value".to_string(),
+            ),
+            ("payload.request.empty".to_string(), "null".to_string()),
+            ("payload.request.number".to_string(), "1".to_string()),
+            ("payload.request.boolean".to_string(), "true".to_string()),
+        ]);
+
+        assert_eq!(span.meta, expected);
+    }
+
+    #[test]
+    fn test_array_of_objects() {
+        let mut span = Span::default();
+        let value = json!({
+            "request": [
+                { "simple": "value" },
+                { "simple": "value" },
+                { "simple": "value" },
+            ]
+        });
+
+        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+
+        let expected = HashMap::from([
+            ("payload.request.0.simple".to_string(), "value".to_string()),
+            ("payload.request.1.simple".to_string(), "value".to_string()),
+            ("payload.request.2.simple".to_string(), "value".to_string()),
+        ]);
+
+        assert_eq!(span.meta, expected);
+    }
+
+    #[test]
+    fn test_reach_max_depth() {
+        let mut span = Span::default();
+        let value = json!({
+            "hello": "world",
+            "empty": null,
+            "level1": {
+                "obj": {
+                    "level3": 3
+                },
+                "arr": [null, true, "great", { "l3": "v3" }],
+                "boolean": true,
+                "number": 2,
+                "empty": null,
+                "empty_obj": {},
+                "empty_arr": []
+            },
+            "arr": [{ "a": "b" }, { "c": "d" }]
+        });
+
+        tag_span_from_value(&mut span, "payload", &value, 0, 2);
+
+        let expected = HashMap::from([
+            ("payload.hello".to_string(), "world".to_string()),
+            ("payload.empty".to_string(), "null".to_string()),
+            (
+                "payload.level1.obj".to_string(),
+                "{\"level3\":3}".to_string(),
+            ),
+            (
+                "payload.level1.arr".to_string(),
+                "[null,true,\"great\",{\"l3\":\"v3\"}]".to_string(),
+            ),
+            ("payload.level1.boolean".to_string(), "true".to_string()),
+            ("payload.level1.number".to_string(), "2".to_string()),
+            ("payload.level1.empty".to_string(), "null".to_string()),
+            ("payload.level1.empty_obj".to_string(), "{}".to_string()),
+            ("payload.level1.empty_arr".to_string(), "[]".to_string()),
+            ("payload.arr.0".to_string(), "{\"a\":\"b\"}".to_string()),
+            ("payload.arr.1".to_string(), "{\"c\":\"d\"}".to_string()),
+        ]);
+
+        assert_eq!(span.meta, expected);
+    }
+
+    #[test]
+    fn test_tag_redacts_key() {
+        let mut span = Span::default();
+        let value = json!({
+            "request": {
+                "headers": {
+                    "authorization": "secret token",
+                }
+            }
+        });
+
+        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+
+        let expected = HashMap::from([(
+            "payload.request.headers.authorization".to_string(),
+            "redacted".to_string(),
+        )]);
+
+        assert_eq!(span.meta, expected);
+    }
+}
