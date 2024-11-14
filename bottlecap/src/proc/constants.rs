@@ -4,3 +4,5 @@ pub const PROC_UPTIME_PATH: &str = "/proc/uptime";
 pub const PROC_PATH: &str = "/proc";
 
 pub const LAMDBA_NETWORK_INTERFACE: &str = "vinternal_1";
+pub const LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT: f64 = 1024.0;
+pub const LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT: f64 = 1024.0;

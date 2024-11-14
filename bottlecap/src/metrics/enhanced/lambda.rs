@@ -502,7 +502,7 @@ impl Lambda {
             let threads_max = proc::get_threads_max_data(&pids);
             let mut threads_use = -1_f64;
 
-            let mut interval = interval(Duration::from_millis(2));
+            let mut interval = interval(Duration::from_millis(1));
             loop {
                 tokio::select! {
                     biased;
