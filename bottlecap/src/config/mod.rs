@@ -65,6 +65,8 @@ pub struct Config {
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
     pub https_proxy: Option<String>,
+    pub capture_lambda_payload: bool,
+    pub capture_lambda_payload_max_depth: u32,
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -93,8 +95,9 @@ impl Default for Config {
             logs_config_processing_rules: None,
             // Metrics
             enhanced_metrics: true,
-            // Failover
             https_proxy: None,
+            capture_lambda_payload: false,
+            capture_lambda_payload_max_depth: 10,
             // Trace Propagation
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
