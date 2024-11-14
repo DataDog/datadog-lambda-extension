@@ -286,9 +286,6 @@ impl Processor {
         if let Some(cold_start_span) = &mut self.cold_start_span {
             cold_start_span.trace_id = self.span.trace_id;
             cold_start_span.parent_id = self.span.parent_id;
-            self.span
-                .meta
-                .insert(String::from("cold_start"), String::from("true"));
         }
 
         if self.tracer_detected {
