@@ -225,7 +225,7 @@ mod tests {
             ]),
             request_context: RequestContext {
                 request_id: String::from("ec4d58f8-2b8b-4ceb-a1d5-2be7bff58505"),
-                time_epoch: 1637169449721,
+                time_epoch: 1_637_169_449_721,
                 http: Http {
                     method: String::from("GET"),
                     path: String::from("/"),

@@ -17,7 +17,7 @@ use crate::lifecycle::invocation::{
         lambda_function_url_event::LambdaFunctionUrlEvent,
         s3_event::S3Record,
         sns_event::{SnsEntity, SnsRecord},
-        sqs_event::SqsRecord,
+        sqs_event::{extract_trace_context_from_aws_trace_header, SqsRecord},
         step_function_event::StepFunctionEvent,
         Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
     },
@@ -35,7 +35,7 @@ pub struct SpanInferrer {
     is_async_span: bool,
     // Carrier to extract the span context from
     carrier: Option<HashMap<String, String>>,
-    // Generated Span Context from Step Functions
+    // Generated Span Context from Step Functions or context taken from `AWSTraceHeader` when java->sqs->java
     generated_span_context: Option<SpanContext>,
     // Tags generated from the trigger
     trigger_tags: Option<HashMap<String, String>>,
@@ -74,6 +74,8 @@ impl SpanInferrer {
             ..Default::default()
         };
 
+        let mut is_step_function = false;
+
         if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
@@ -95,6 +97,10 @@ impl SpanInferrer {
         } else if SqsRecord::is_match(payload_value) {
             if let Some(t) = SqsRecord::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
+
+                self.generated_span_context = extract_trace_context_from_aws_trace_header(
+                    t.attributes.aws_trace_header.clone(),
+                );
 
                 // Check for SNS event wrapped in the SQS body
                 if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&t.body) {
@@ -191,6 +197,7 @@ impl SpanInferrer {
             if let Some(t) = StepFunctionEvent::new(payload_value.clone()) {
                 self.generated_span_context = Some(t.get_span_context());
                 trigger = Some(Box::new(t));
+                is_step_function = true;
             }
         } else {
             debug!("Unable to infer span from payload: no matching trigger found");
@@ -209,7 +216,7 @@ impl SpanInferrer {
             self.is_async_span = t.is_async();
 
             // For Step Functions, there is no inferred span
-            if self.generated_span_context.is_some() {
+            if is_step_function && self.generated_span_context.is_some() {
                 self.inferred_span = None;
             } else {
                 self.inferred_span = Some(inferred_span);
@@ -295,8 +302,8 @@ impl SpanInferrer {
     ///
     pub fn get_span_context(&self, propagator: &impl Propagator) -> Option<SpanContext> {
         // Step Functions `SpanContext` is deterministically generated
-        if let Some(sc) = &self.generated_span_context {
-            return Some(sc.clone());
+        if self.generated_span_context.is_some() {
+            return self.generated_span_context.clone();
         }
 
         if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
