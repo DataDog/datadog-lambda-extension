@@ -327,12 +327,14 @@ mod tests {
 
         let uptime_offset = Some(50.0);
         let (tmp_chan_tx, _) = watch::channel(());
+        let (process_chan_tx, _) = watch::channel(());
 
         let enhanced_metric_data = Some(EnhancedMetricData {
             network_offset,
             cpu_offset,
             uptime_offset,
             tmp_chan_tx,
+            process_chan_tx,
         });
 
         buffer.add_enhanced_metric_data(&request_id, enhanced_metric_data.clone());

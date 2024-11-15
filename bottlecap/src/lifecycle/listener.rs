@@ -141,23 +141,27 @@ impl Listener {
     ) -> http::Result<Response<Body>> {
         debug!("Received end invocation request");
         let (parts, body) = req.into_parts();
-        let parsed_body = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(body).await.unwrap_or_default(),
-        );
-        let mut parsed_status_code: Option<String> = None;
-        if let Some(sc) = parsed_body.unwrap_or_default().get("statusCode") {
-            parsed_status_code = Some(sc.to_string());
+        match hyper::body::to_bytes(body).await {
+            Ok(b) => {
+                let body = b.to_vec();
+                let mut processor = invocation_processor.lock().await;
+
+                let headers = Self::headers_to_map(parts.headers);
+                processor.on_invocation_end(headers, body);
+                drop(processor);
+
+                Response::builder()
+                    .status(200)
+                    .body(Body::from(json!({}).to_string()))
+            }
+            Err(e) => {
+                error!("Could not read end invocation request body {e}");
+
+                Response::builder()
+                    .status(400)
+                    .body(Body::from("Could not read end invocation request body"))
+            }
         }
-
-        let mut processor = invocation_processor.lock().await;
-
-        let headers = Self::headers_to_map(parts.headers);
-        processor.on_invocation_end(headers, parsed_status_code);
-        drop(processor);
-
-        Response::builder()
-            .status(200)
-            .body(Body::from(json!({}).to_string()))
     }
 
     fn hello_handler() -> http::Result<Response<Body>> {
