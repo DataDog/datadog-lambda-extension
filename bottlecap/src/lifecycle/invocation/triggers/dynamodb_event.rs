@@ -6,7 +6,7 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::S_TO_NS,
-    triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -74,14 +74,14 @@ impl Trigger for DynamoDbRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         debug!("Enriching an Inferred Span for a DynamoDB event");
-        let table_name = self.event_source_arn.split('/').nth(1).unwrap_or_default();
+        let table_name = self.get_specific_identifier();
         let resource = format!("{} {}", self.event_name.clone(), table_name);
 
         let start_time = (self.dynamodb.approximate_creation_date_time * S_TO_NS) as i64;
-        // todo: service mapping and peer service
-        let service_name = "dynamodb";
+
+        let service_name = self.resolve_service_name(service_mapping, "dynamodb");
 
         span.name = String::from("aws.dynamodb");
         span.service = service_name.to_string();
@@ -126,6 +126,20 @@ impl Trigger for DynamoDbRecord {
 
     fn is_async(&self) -> bool {
         true
+    }
+}
+
+impl ServiceNameResolver for DynamoDbRecord {
+    fn get_specific_identifier(&self) -> String {
+        self.event_source_arn
+            .split('/')
+            .nth(1)
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_dynamodb"
     }
 }
 
@@ -176,7 +190,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = DynamoDbRecord::new(payload).expect("Failed to deserialize DynamoDbRecord");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.dynamodb");
         assert_eq!(span.service, "dynamodb");
         assert_eq!(span.resource, "INSERT ExampleTableWithStream");
@@ -236,5 +251,33 @@ mod tests {
         let expected = HashMap::new();
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("dynamodb_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = DynamoDbRecord::new(payload).expect("Failed to deserialize DynamoDbRecord");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            (
+                "ExampleTableWithStream".to_string(),
+                "specific-service".to_string(),
+            ),
+            ("lambda_dynamodb".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "dynamodb"),
+            "specific-service"
+        );
+
+        let generic_service_mapping =
+            HashMap::from([("lambda_dynamodb".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "dynamodb"),
+            "generic-service"
+        );
     }
 }

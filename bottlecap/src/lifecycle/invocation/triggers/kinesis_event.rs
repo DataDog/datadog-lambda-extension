@@ -9,7 +9,9 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::S_TO_NS,
-    triggers::{Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{
+        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -69,20 +71,24 @@ impl Trigger for KinesisRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
-        let event_source_arn = &self.event_source_arn;
-        let parsed_stream_name = event_source_arn.split('/').last().unwrap_or_default();
-        let parsed_shard_id = self.event_id.split(':').next().unwrap_or_default();
-        span.name = "aws.kinesis".to_string();
-        span.service = "kinesis".to_string();
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+        let stream_name = self.get_specific_identifier();
+        let shard_id = self.event_id.split(':').next().unwrap_or_default();
+        let service_name = self.resolve_service_name(service_mapping, "kinesis");
+
+        span.name = String::from("aws.kinesis");
+        span.service = service_name;
         span.start = (self.kinesis.approximate_arrival_timestamp * S_TO_NS) as i64;
-        span.resource = parsed_stream_name.to_string();
+        span.resource.clone_from(&stream_name);
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
             ("operation_name".to_string(), "aws.kinesis".to_string()),
-            ("stream_name".to_string(), parsed_stream_name.to_string()),
-            ("shard_id".to_string(), parsed_shard_id.to_string()),
-            ("event_source_arn".to_string(), event_source_arn.to_string()),
+            ("stream_name".to_string(), stream_name.to_string()),
+            ("shard_id".to_string(), shard_id.to_string()),
+            (
+                "event_source_arn".to_string(),
+                self.event_source_arn.to_string(),
+            ),
             ("event_id".to_string(), self.event_id.to_string()),
             ("event_name".to_string(), self.event_name.to_string()),
             ("event_version".to_string(), self.event_version.to_string()),
@@ -117,6 +123,20 @@ impl Trigger for KinesisRecord {
 
     fn is_async(&self) -> bool {
         true
+    }
+}
+
+impl ServiceNameResolver for KinesisRecord {
+    fn get_specific_identifier(&self) -> String {
+        self.event_source_arn
+            .split('/')
+            .last()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_kinesis"
     }
 }
 
@@ -170,7 +190,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = KinesisRecord::new(payload).expect("Failed to deserialize S3Record");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.kinesis");
         assert_eq!(span.service, "kinesis");
         assert_eq!(span.resource, "kinesisStream");
@@ -244,5 +265,30 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("kinesis_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = KinesisRecord::new(payload).expect("Failed to deserialize KinesisRecord");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("kinesisStream".to_string(), "specific-service".to_string()),
+            ("lambda_kinesis".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "kinesis"),
+            "specific-service"
+        );
+
+        let generic_service_mapping =
+            HashMap::from([("lambda_kinesis".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "kinesis"),
+            "generic-service"
+        );
     }
 }

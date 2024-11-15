@@ -7,7 +7,9 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::{MS_TO_NS, S_TO_NS},
-    triggers::{Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{
+        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 const DATADOG_START_TIME_KEY: &str = "x-datadog-start-time";
@@ -49,7 +51,7 @@ impl Trigger for EventBridgeEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         // EventBridge events have a timestamp resolution in seconds
         let start_time_seconds = self
             .time
@@ -57,17 +59,13 @@ impl Trigger for EventBridgeEvent {
             .unwrap_or((self.time.timestamp_millis() as f64 * S_TO_NS) as i64);
 
         let carrier = self.get_carrier();
-        let resource_name = carrier
-            .get(DATADOG_RESOURCE_NAME_KEY)
-            .unwrap_or(&self.source)
-            .clone();
+        let resource_name = self.get_specific_identifier();
         let start_time = carrier
             .get(DATADOG_START_TIME_KEY)
             .and_then(|s| s.parse::<f64>().ok())
             .map_or(start_time_seconds, |s| (s * MS_TO_NS) as i64);
 
-        // todo: service mapping and peer service
-        let service_name = "eventbridge";
+        let service_name = self.resolve_service_name(service_mapping, "eventbridge");
 
         span.name = String::from("aws.eventbridge");
         span.service = service_name.to_string();
@@ -102,6 +100,20 @@ impl Trigger for EventBridgeEvent {
 
     fn is_async(&self) -> bool {
         true
+    }
+}
+
+impl ServiceNameResolver for EventBridgeEvent {
+    fn get_specific_identifier(&self) -> String {
+        let carrier = self.get_carrier();
+        carrier
+            .get(DATADOG_RESOURCE_NAME_KEY)
+            .unwrap_or(&self.source)
+            .to_string()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_eventbridge"
     }
 }
 
@@ -168,7 +180,8 @@ mod tests {
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
 
         let expected = serde_json::from_str(&read_json_file("eventbridge_span.json"))
             .expect("Failed to deserialize into Span");
@@ -183,7 +196,8 @@ mod tests {
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
 
         assert_eq!(span.resource, "my.event");
     }
@@ -196,7 +210,8 @@ mod tests {
             EventBridgeEvent::new(payload).expect("Failed to deserialize into EventBridgeEvent");
 
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
 
         assert_eq!(span.resource, "testBus");
         // Seconds resolution
@@ -238,5 +253,35 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("eventbridge_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = EventBridgeEvent::new(payload).expect("Failed to deserialize EventBridgeEvent");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("testBus".to_string(), "specific-service".to_string()),
+            (
+                "lambda_eventbridge".to_string(),
+                "generic-service".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "eventbridge"),
+            "specific-service"
+        );
+
+        let generic_service_mapping = HashMap::from([(
+            "lambda_eventbridge".to_string(),
+            "generic-service".to_string(),
+        )]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "eventbridge"),
+            "generic-service"
+        );
     }
 }
