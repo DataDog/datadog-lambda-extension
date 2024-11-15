@@ -1,8 +1,10 @@
 pub mod flush_strategy;
 pub mod log_level;
 pub mod processing_rule;
+pub mod service_mapping;
 pub mod trace_propagation_style;
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 use std::vec;
@@ -15,6 +17,7 @@ use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagat
 use crate::config::flush_strategy::FlushStrategy;
 use crate::config::log_level::{deserialize_log_level, LogLevel};
 use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
+use crate::config::service_mapping::deserialize_service_mapping;
 
 /// `FailoverConfig` is a struct that represents fields that are not supported in the extension yet.
 ///
@@ -68,6 +71,8 @@ pub struct Config {
     pub https_proxy: Option<String>,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
+    #[serde(deserialize_with = "deserialize_service_mapping")]
+    pub service_mapping: HashMap<String, String>,
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -99,6 +104,7 @@ impl Default for Config {
             https_proxy: None,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
+            service_mapping: HashMap::new(),
             // Trace Propagation
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
