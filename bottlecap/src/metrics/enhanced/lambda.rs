@@ -1,10 +1,13 @@
-use super::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
-use super::statfs::statfs_info;
+use crate::metrics::enhanced::{
+    constants::{self, BASE_LAMBDA_INVOCATION_PRICE},
+    statfs::statfs_info,
+};
 use crate::proc::{self, CPUData, NetworkData};
 use crate::telemetry::events::ReportMetrics;
-use dogstatsd::aggregator::Aggregator;
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
+use dogstatsd::{aggregator::Aggregator, metric::SortedTags};
+use std::collections::HashMap;
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -18,12 +21,47 @@ use tracing::error;
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
     pub config: Arc<crate::config::Config>,
+    // Dynamic value tags are the ones we cannot obtain statically from the sandbox
+    dynamic_value_tags: HashMap<String, String>,
 }
 
 impl Lambda {
     #[must_use]
     pub fn new(aggregator: Arc<Mutex<Aggregator>>, config: Arc<crate::config::Config>) -> Lambda {
-        Lambda { aggregator, config }
+        Lambda {
+            aggregator,
+            config,
+            dynamic_value_tags: HashMap::new(),
+        }
+    }
+
+    /// Set the dynamic value tags that are not available at compile time
+    pub fn set_init_tags(&mut self, proactive_initialization: bool, cold_start: bool) {
+        self.dynamic_value_tags.remove("cold_start");
+        self.dynamic_value_tags.remove("proactive_initialization");
+
+        self.dynamic_value_tags
+            .insert(String::from("cold_start"), cold_start.to_string());
+
+        // Only set `proactive_initialization` tag if it is true
+        if proactive_initialization {
+            self.dynamic_value_tags.insert(
+                String::from("proactive_initialization"),
+                String::from("true"),
+            );
+        }
+    }
+
+    fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
+        let vec_tags: Vec<String> = self
+            .dynamic_value_tags
+            .iter()
+            .map(|(k, v)| format!("{k}:{v}"))
+            .collect();
+
+        let string_tags = vec_tags.join(",");
+
+        SortedTags::parse(&string_tags).ok()
     }
 
     pub fn increment_invocation_metric(&self) {
@@ -45,7 +83,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::INIT_DURATION_METRIC.into(),
             MetricValue::distribution(init_duration_ms * constants::MS_TO_SEC),
-            None,
+            self.get_dynamic_value_tags(),
         );
 
         if let Err(e) = self
@@ -62,7 +100,11 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        let metric = Metric::new(metric_name.into(), MetricValue::distribution(1f64), None);
+        let metric = Metric::new(
+            metric_name.into(),
+            MetricValue::distribution(1f64),
+            self.get_dynamic_value_tags(),
+        );
         if let Err(e) = self
             .aggregator
             .lock()
@@ -81,7 +123,7 @@ impl Lambda {
             constants::RUNTIME_DURATION_METRIC.into(),
             MetricValue::distribution(duration_ms),
             // Datadog expects this value as milliseconds, not seconds
-            None,
+            self.get_dynamic_value_tags(),
         );
         if let Err(e) = self
             .aggregator
@@ -101,7 +143,7 @@ impl Lambda {
             constants::POST_RUNTIME_DURATION_METRIC.into(),
             MetricValue::distribution(duration_ms),
             // Datadog expects this value as milliseconds, not seconds
-            None,
+            self.get_dynamic_value_tags(),
         );
         if let Err(e) = self
             .aggregator
@@ -113,10 +155,11 @@ impl Lambda {
         }
     }
 
-    pub(crate) fn generate_network_enhanced_metrics(
+    pub fn generate_network_enhanced_metrics(
         network_data_offset: NetworkData,
         network_data_end: NetworkData,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
+        tags: Option<SortedTags>,
     ) {
         let rx_bytes = network_data_end.rx_bytes - network_data_offset.rx_bytes;
         let tx_bytes = network_data_end.tx_bytes - network_data_offset.tx_bytes;
@@ -125,7 +168,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::RX_BYTES_METRIC.into(),
             MetricValue::distribution(rx_bytes),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert rx_bytes metric: {}", e);
@@ -134,7 +177,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::TX_BYTES_METRIC.into(),
             MetricValue::distribution(tx_bytes),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tx_bytes metric: {}", e);
@@ -143,7 +186,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::TOTAL_NETWORK_METRIC.into(),
             MetricValue::distribution(total_network),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert total_network metric: {}", e);
@@ -161,7 +204,12 @@ impl Lambda {
 
             match proc::get_network_data() {
                 Ok(data) => {
-                    Self::generate_network_enhanced_metrics(offset, data, &mut aggr);
+                    Self::generate_network_enhanced_metrics(
+                        offset,
+                        data,
+                        &mut aggr,
+                        self.get_dynamic_value_tags(),
+                    );
                 }
                 Err(_e) => {
                     debug!("Could not find data to generate network enhanced metrics");
@@ -176,6 +224,7 @@ impl Lambda {
         cpu_data_offset: &CPUData,
         cpu_data_end: &CPUData,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
+        tags: Option<SortedTags>,
     ) {
         let cpu_user_time = cpu_data_end.total_user_time_ms - cpu_data_offset.total_user_time_ms;
         let cpu_system_time =
@@ -185,7 +234,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::CPU_USER_TIME_METRIC.into(),
             MetricValue::distribution(cpu_user_time),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_user_time metric: {}", e);
@@ -194,7 +243,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::CPU_SYSTEM_TIME_METRIC.into(),
             MetricValue::distribution(cpu_system_time),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_system_time metric: {}", e);
@@ -203,7 +252,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::CPU_TOTAL_TIME_METRIC.into(),
             MetricValue::distribution(cpu_total_time),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_total_time metric: {}", e);
@@ -221,7 +270,12 @@ impl Lambda {
         let cpu_data = proc::get_cpu_data();
         match (cpu_offset, cpu_data) {
             (Some(cpu_offset), Ok(cpu_data)) => {
-                Self::generate_cpu_time_enhanced_metrics(&cpu_offset, &cpu_data, &mut aggr);
+                Self::generate_cpu_time_enhanced_metrics(
+                    &cpu_offset,
+                    &cpu_data,
+                    &mut aggr,
+                    self.get_dynamic_value_tags(),
+                );
             }
             (_, _) => {
                 debug!("Could not find data to generate cpu time enhanced metrics");
@@ -235,6 +289,7 @@ impl Lambda {
         uptime_data_offset: f64,
         uptime_data_end: f64,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
+        tags: Option<SortedTags>,
     ) {
         let num_cores = cpu_data_end.individual_cpu_idle_times.len() as f64;
         let uptime = uptime_data_end - uptime_data_offset;
@@ -276,7 +331,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
             MetricValue::distribution(cpu_total_utilization_pct),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_total_utilization_pct metric: {}", e);
@@ -285,7 +340,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::CPU_TOTAL_UTILIZATION_METRIC.into(),
             MetricValue::distribution(cpu_total_utilization),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_total_utilization metric: {}", e);
@@ -294,7 +349,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::NUM_CORES_METRIC.into(),
             MetricValue::distribution(num_cores),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert num_cores metric: {}", e);
@@ -303,7 +358,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::CPU_MAX_UTILIZATION_METRIC.into(),
             MetricValue::distribution(cpu_max_utilization),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_max_utilization metric: {}", e);
@@ -312,7 +367,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::CPU_MIN_UTILIZATION_METRIC.into(),
             MetricValue::distribution(cpu_min_utilization),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_min_utilization metric: {}", e);
@@ -341,6 +396,7 @@ impl Lambda {
                     uptime_offset,
                     uptime_data,
                     &mut aggr,
+                    self.get_dynamic_value_tags(),
                 );
             }
             (_, _, _, _) => {
@@ -353,11 +409,12 @@ impl Lambda {
         tmp_max: f64,
         tmp_used: f64,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
+        tags: Option<SortedTags>,
     ) {
         let metric = Metric::new(
             constants::TMP_MAX_METRIC.into(),
             MetricValue::distribution(tmp_max),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_max metric: {}", e);
@@ -366,7 +423,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::TMP_USED_METRIC.into(),
             MetricValue::distribution(tmp_used),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_used metric: {}", e);
@@ -376,7 +433,7 @@ impl Lambda {
         let metric = Metric::new(
             constants::TMP_FREE_METRIC.into(),
             MetricValue::distribution(tmp_free),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_free metric: {}", e);
@@ -389,6 +446,7 @@ impl Lambda {
         }
 
         let aggr = Arc::clone(&self.aggregator);
+        let tags = self.get_dynamic_value_tags();
 
         tokio::spawn(async move {
             // Set tmp_max and initial value for tmp_used
@@ -410,7 +468,7 @@ impl Lambda {
                     _ = send_metrics.changed() => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
-                        Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr);
+                        Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr, tags);
                         return;
                     }
                     // Otherwise keep monitoring tmp usage periodically
@@ -563,7 +621,7 @@ impl Lambda {
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
             MetricValue::distribution(metrics.duration_ms * constants::MS_TO_SEC),
-            None,
+            self.get_dynamic_value_tags(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert duration metric: {}", e);
@@ -571,7 +629,7 @@ impl Lambda {
         let metric = metric::Metric::new(
             constants::BILLED_DURATION_METRIC.into(),
             MetricValue::distribution(metrics.billed_duration_ms as f64 * constants::MS_TO_SEC),
-            None,
+            self.get_dynamic_value_tags(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert billed duration metric: {}", e);
@@ -579,7 +637,7 @@ impl Lambda {
         let metric = metric::Metric::new(
             constants::MAX_MEMORY_USED_METRIC.into(),
             MetricValue::distribution(metrics.max_memory_used_mb as f64),
-            None,
+            self.get_dynamic_value_tags(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert max memory used metric: {}", e);
@@ -587,7 +645,7 @@ impl Lambda {
         let metric = metric::Metric::new(
             constants::MEMORY_SIZE_METRIC.into(),
             MetricValue::distribution(metrics.memory_size_mb as f64),
-            None,
+            self.get_dynamic_value_tags(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert memory size metric: {}", e);
@@ -598,7 +656,7 @@ impl Lambda {
         let metric = metric::Metric::new(
             constants::ESTIMATED_COST_METRIC.into(),
             MetricValue::distribution(cost_usd),
-            None,
+            self.get_dynamic_value_tags(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert estimated cost metric: {}", e);
@@ -832,6 +890,7 @@ mod tests {
             network_offset,
             network_data,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
@@ -868,6 +927,7 @@ mod tests {
             &cpu_offset,
             &cpu_data,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         assert_sketch(&metrics_aggr, constants::CPU_USER_TIME_METRIC, 100.0);
@@ -908,6 +968,7 @@ mod tests {
             uptime_offset,
             uptime_data,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         // the differences above and metric values below are from an invocation using the go agent to verify the calculations
@@ -934,6 +995,7 @@ mod tests {
             tmp_max,
             tmp_used,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550461440.0);

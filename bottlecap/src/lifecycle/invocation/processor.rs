@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
@@ -15,7 +15,8 @@ use tracing::debug;
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{
-        base64_to_string, context::ContextBuffer, span_inferrer::SpanInferrer, tag_span_from_value,
+        base64_to_string, context::ContextBuffer, create_empty_span, generate_span_id,
+        span_inferrer::SpanInferrer, tag_span_from_value,
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{self, CPUData, NetworkData},
@@ -36,6 +37,7 @@ use crate::{
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
+pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
 pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
@@ -43,14 +45,23 @@ pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
 
 pub struct Processor {
+    // Buffer containing context of the previous 5 invocations
     pub context_buffer: ContextBuffer,
+    // Helper to infer span information
     inferrer: SpanInferrer,
+    // Current invocation span
     pub span: Span,
+    // Cold start span
+    cold_start_span: Option<Span>,
+    // Extracted span context from inferred span, headers, or payload
     pub extracted_span_context: Option<SpanContext>,
     // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
+    // Helper to send enhanced metrics
     enhanced_metrics: EnhancedMetrics,
+    // AWS configuration from the Lambda environment
     aws_config: AwsConfig,
+    // Flag to determine if a tracer was detected
     tracer_detected: bool,
     config: Arc<config::Config>,
 }
@@ -63,32 +74,18 @@ impl Processor {
         aws_config: &AwsConfig,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
     ) -> Self {
-        let service = config.service.clone().unwrap_or("aws.lambda".to_string());
+        let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
             .get_canonical_resource_name()
-            .unwrap_or("aws_lambda".to_string());
+            .unwrap_or(String::from("aws.lambda"));
 
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::default(),
-            span: Span {
-                service,
-                name: "aws.lambda".to_string(),
-                resource,
-                trace_id: 0,
-                span_id: 0,
-                parent_id: 0,
-                start: 0,
-                duration: 0,
-                error: 0,
-                meta: HashMap::new(),
-                metrics: HashMap::new(),
-                r#type: "serverless".to_string(),
-                meta_struct: HashMap::new(),
-                span_links: Vec::new(),
-            },
+            span: create_empty_span(String::from("aws.lambda"), resource, service),
+            cold_start_span: None,
             extracted_span_context: None,
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
@@ -101,6 +98,9 @@ impl Processor {
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        self.reset_state();
+        self.set_init_tags();
+
         self.context_buffer.create_context(request_id.clone());
         if self.config.enhanced_metrics {
             // Collect offsets for network and cpu metrics
@@ -132,10 +132,87 @@ impl Processor {
         self.enhanced_metrics.increment_invocation_metric();
     }
 
+    /// Resets the state of the processor to default values.
+    ///
+    fn reset_state(&mut self) {
+        // Reset Span Context on Span
+        self.span.trace_id = 0;
+        self.span.parent_id = 0;
+        self.span.span_id = 0;
+        // Error
+        self.span.error = 0;
+        // Meta tags
+        self.span.meta.clear();
+        // Extracted Span Context
+        self.extracted_span_context = None;
+        // Cold Start Span
+        self.cold_start_span = None;
+    }
+
+    /// On the first invocation, determine if it's a cold start or proactive init.
+    ///
+    /// For every other invocation, it will always be warm start.
+    ///
+    fn set_init_tags(&mut self) {
+        let mut proactive_initialization = false;
+        let mut cold_start = false;
+
+        // If it's empty, then we are in a cold start
+        if self.context_buffer.is_empty() {
+            let now = Instant::now();
+            let time_since_sandbox_init = now.duration_since(self.aws_config.sandbox_init_time);
+            if time_since_sandbox_init.as_millis() > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into() {
+                proactive_initialization = true;
+            } else {
+                cold_start = true;
+            }
+        }
+
+        if proactive_initialization {
+            self.span.meta.insert(
+                String::from("proactive_initialization"),
+                proactive_initialization.to_string(),
+            );
+        }
+        self.span
+            .meta
+            .insert(String::from("cold_start"), cold_start.to_string());
+
+        self.enhanced_metrics
+            .set_init_tags(proactive_initialization, cold_start);
+    }
+
+    pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
+        // Create a cold start span
+        let mut cold_start_span = create_empty_span(
+            String::from("aws.lambda.cold_start"),
+            self.span.resource.clone(),
+            self.span.service.clone(),
+        );
+
+        let start_time: i64 = SystemTime::from(time)
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+            .try_into()
+            .unwrap_or_default();
+
+        cold_start_span.span_id = generate_span_id();
+        cold_start_span.start = start_time;
+
+        self.cold_start_span = Some(cold_start_span);
+    }
+
     /// Given the duration of the platform init report, set the init duration metric.
     ///
+    #[allow(clippy::cast_possible_truncation)]
     pub fn on_platform_init_report(&mut self, duration_ms: f64) {
         self.enhanced_metrics.set_init_duration_metric(duration_ms);
+
+        if let Some(cold_start_span) = &mut self.cold_start_span {
+            // `round` is intentionally meant to be a whole integer
+            cold_start_span.duration = (duration_ms * MS_TO_NS) as i64;
+        }
     }
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
@@ -183,10 +260,10 @@ impl Processor {
         }
 
         if let Some(context) = self.context_buffer.get(request_id) {
-            let span = &mut self.span;
             // `round` is intentionally meant to be a whole integer
-            span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
-            span.meta
+            self.span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
+            self.span
+                .meta
                 .insert("request_id".to_string(), request_id.clone());
             // todo(duncanista): add missing tags
             // - cold start, proactive init
@@ -213,6 +290,11 @@ impl Processor {
 
         self.inferrer.complete_inferred_spans(&self.span);
 
+        if let Some(cold_start_span) = &mut self.cold_start_span {
+            cold_start_span.trace_id = self.span.trace_id;
+            cold_start_span.parent_id = self.span.parent_id;
+        }
+
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&self.span);
             let mut traces = vec![self.span.clone()];
@@ -225,6 +307,11 @@ impl Processor {
             if let Some(ws) = &self.inferrer.wrapped_inferred_span {
                 body_size += std::mem::size_of_val(ws);
                 traces.push(ws.clone());
+            }
+
+            if let Some(cold_start_span) = &self.cold_start_span {
+                body_size += std::mem::size_of_val(cold_start_span);
+                traces.push(cold_start_span.clone());
             }
 
             // todo: figure out what to do here
@@ -263,7 +350,7 @@ impl Processor {
         // Set the report log metrics
         self.enhanced_metrics.set_report_log_metrics(&metrics);
 
-        if let Some(context) = self.context_buffer.remove(request_id) {
+        if let Some(context) = self.context_buffer.get(request_id) {
             if context.runtime_duration_ms != 0.0 {
                 let post_runtime_duration_ms = metrics.duration_ms - context.runtime_duration_ms;
 
@@ -273,7 +360,7 @@ impl Processor {
             }
 
             // Set Network and CPU time metrics
-            if let Some(offsets) = context.enhanced_metric_data {
+            if let Some(offsets) = context.enhanced_metric_data.clone() {
                 self.enhanced_metrics
                     .set_network_enhanced_metrics(offsets.network_offset);
                 self.enhanced_metrics
@@ -287,14 +374,6 @@ impl Processor {
     ///
     pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
-
-        // Reset trace context
-        self.span.trace_id = 0;
-        self.span.parent_id = 0;
-        self.span.span_id = 0;
-        self.span.error = 0;
-        self.span.meta.clear();
-        self.extracted_span_context = None;
 
         let payload_value = match serde_json::from_slice::<Value>(&payload) {
             Ok(value) => value,

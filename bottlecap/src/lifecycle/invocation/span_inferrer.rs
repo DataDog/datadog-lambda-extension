@@ -1,26 +1,27 @@
 use std::collections::HashMap;
 
 use datadog_trace_protobuf::pb::Span;
-use rand::{rngs::OsRng, Rng, RngCore};
 use serde_json::Value;
 use tracing::debug;
 
 use crate::config::AwsConfig;
 
-use crate::lifecycle::invocation::triggers::{
-    api_gateway_http_event::APIGatewayHttpEvent,
-    api_gateway_rest_event::APIGatewayRestEvent,
-    dynamodb_event::DynamoDbRecord,
-    event_bridge_event::EventBridgeEvent,
-    kinesis_event::KinesisRecord,
-    lambda_function_url_event::LambdaFunctionUrlEvent,
-    s3_event::S3Record,
-    sns_event::{SnsEntity, SnsRecord},
-    sqs_event::SqsRecord,
-    step_function_event::StepFunctionEvent,
-    Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
+use crate::lifecycle::invocation::{
+    generate_span_id,
+    triggers::{
+        api_gateway_http_event::APIGatewayHttpEvent,
+        api_gateway_rest_event::APIGatewayRestEvent,
+        dynamodb_event::DynamoDbRecord,
+        event_bridge_event::EventBridgeEvent,
+        kinesis_event::KinesisRecord,
+        lambda_function_url_event::LambdaFunctionUrlEvent,
+        s3_event::S3Record,
+        sns_event::{SnsEntity, SnsRecord},
+        sqs_event::SqsRecord,
+        step_function_event::StepFunctionEvent,
+        Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
+    },
 };
-use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 use crate::traces::{context::SpanContext, propagation::Propagator};
 
 pub struct SpanInferrer {
@@ -72,7 +73,7 @@ impl SpanInferrer {
 
         let mut trigger: Option<Box<dyn Trigger>> = None;
         let mut inferred_span = Span {
-            span_id: Self::generate_span_id(),
+            span_id: generate_span_id(),
             ..Default::default()
         };
 
@@ -102,7 +103,7 @@ impl SpanInferrer {
                 if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&t.body) {
                     debug!("Found an SNS event wrapped in the SQS body");
                     let mut wrapped_inferred_span = Span {
-                        span_id: Self::generate_span_id(),
+                        span_id: generate_span_id(),
                         ..Default::default()
                     };
 
@@ -121,7 +122,7 @@ impl SpanInferrer {
                     serde_json::from_str::<EventBridgeEvent>(&t.body)
                 {
                     let mut wrapped_inferred_span = Span {
-                        span_id: Self::generate_span_id(),
+                        span_id: generate_span_id(),
                         ..Default::default()
                     };
 
@@ -145,7 +146,7 @@ impl SpanInferrer {
                         serde_json::from_str::<EventBridgeEvent>(message)
                     {
                         let mut wrapped_inferred_span = Span {
-                            span_id: Self::generate_span_id(),
+                            span_id: generate_span_id(),
                             ..Default::default()
                         };
 
@@ -283,16 +284,7 @@ impl SpanInferrer {
         }
     }
 
-    fn generate_span_id() -> u64 {
-        if std::env::var(INIT_TYPE).map_or(false, |it| it == SNAP_START_VALUE) {
-            return OsRng.next_u64();
-        }
-
-        let mut rng = rand::thread_rng();
-        rng.gen()
-    }
-
-    /// Returns the extracted span context
+    /// Returns a clone of the carrier associated with the inferred span
     ///
     /// If the carrier is set, it will try to extract the span context,
     /// otherwise it will

@@ -87,8 +87,13 @@ impl LambdaProcessor {
                 runtime_version_arn,
                 .. // TODO: check if we could do something with this metrics: `initialization_type` and `phase`
             } => {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
+                    error!("Failed to send PlatformInitStart to the main event bus: {}", e);
+                }
+
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
+
                 Ok(Message::new(
                     format!("INIT_START Runtime Version: {rv} Runtime Version ARN: {rv_arn}"),
                     None,
@@ -178,7 +183,6 @@ impl LambdaProcessor {
                 ))
             },
             // TODO: PlatformInitRuntimeDone
-            // TODO: PlatformInitReport
             // TODO: PlatformExtension
             // TODO: PlatformTelemetrySubscription
             // TODO: PlatformLogsDropped
