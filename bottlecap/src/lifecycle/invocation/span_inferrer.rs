@@ -24,7 +24,9 @@ use crate::lifecycle::invocation::{
 };
 use crate::traces::{context::SpanContext, propagation::Propagator};
 
+#[derive(Default)]
 pub struct SpanInferrer {
+    service_mapping: HashMap<String, String>,
     // Span inferred from the Lambda incoming request payload
     pub inferred_span: Option<Span>,
     // Nested span inferred from the Lambda incoming request payload
@@ -39,16 +41,11 @@ pub struct SpanInferrer {
     trigger_tags: Option<HashMap<String, String>>,
 }
 
-impl Default for SpanInferrer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl SpanInferrer {
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(service_mapping: HashMap<String, String>) -> Self {
         Self {
+            service_mapping,
             inferred_span: None,
             wrapped_inferred_span: None,
             is_async_span: false,
@@ -79,25 +76,25 @@ impl SpanInferrer {
 
         if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
             }
         } else if APIGatewayRestEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayRestEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
             }
         } else if LambdaFunctionUrlEvent::is_match(payload_value) {
             if let Some(t) = LambdaFunctionUrlEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
             }
         } else if SqsRecord::is_match(payload_value) {
             if let Some(t) = SqsRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 // Check for SNS event wrapped in the SQS body
                 if let Ok(sns_entity) = serde_json::from_str::<SnsEntity>(&t.body) {
@@ -111,7 +108,7 @@ impl SpanInferrer {
                         sns: sns_entity,
                         event_subscription_arn: None,
                     };
-                    wt.enrich_span(&mut wrapped_inferred_span);
+                    wt.enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
                     inferred_span.meta.extend(wt.get_tags());
 
                     wrapped_inferred_span.duration =
@@ -126,7 +123,8 @@ impl SpanInferrer {
                         ..Default::default()
                     };
 
-                    event_bridge_entity.enrich_span(&mut wrapped_inferred_span);
+                    event_bridge_entity
+                        .enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
                     inferred_span.meta.extend(event_bridge_entity.get_tags());
 
                     wrapped_inferred_span.duration =
@@ -139,7 +137,7 @@ impl SpanInferrer {
             }
         } else if SnsRecord::is_match(payload_value) {
             if let Some(t) = SnsRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 if let Some(message) = &t.sns.message {
                     if let Ok(event_bridge_wrapper_message) =
@@ -150,7 +148,8 @@ impl SpanInferrer {
                             ..Default::default()
                         };
 
-                        event_bridge_wrapper_message.enrich_span(&mut wrapped_inferred_span);
+                        event_bridge_wrapper_message
+                            .enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
                         inferred_span
                             .meta
                             .extend(event_bridge_wrapper_message.get_tags());
@@ -166,25 +165,25 @@ impl SpanInferrer {
             }
         } else if DynamoDbRecord::is_match(payload_value) {
             if let Some(t) = DynamoDbRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
             }
         } else if S3Record::is_match(payload_value) {
             if let Some(t) = S3Record::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
             }
         } else if EventBridgeEvent::is_match(payload_value) {
             if let Some(t) = EventBridgeEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
             }
         } else if KinesisRecord::is_match(payload_value) {
             if let Some(t) = KinesisRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span);
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
             }
@@ -240,7 +239,6 @@ impl SpanInferrer {
     }
 
     // TODO: add status tag and other info from response
-    // TODO: add peer.service
     pub fn complete_inferred_spans(&mut self, invocation_span: &Span) {
         if let Some(s) = &mut self.inferred_span {
             if let Some(ws) = &mut self.wrapped_inferred_span {
@@ -262,6 +260,7 @@ impl SpanInferrer {
 
                 // Set error
                 ws.error = invocation_span.error;
+                ws.meta.insert(String::from("peer.service"), s.service.clone());
 
                 ws.trace_id = invocation_span.trace_id;
             }
@@ -279,6 +278,7 @@ impl SpanInferrer {
 
             // Set error
             s.error = invocation_span.error;
+            s.meta.insert(String::from("peer.service"), invocation_span.service.clone());
 
             s.trace_id = invocation_span.trace_id;
         }
