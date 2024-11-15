@@ -330,8 +330,6 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    const PRECISION: f64 = 1e-6;
-
     fn path_from_root(file: &str) -> String {
         let mut safe_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         safe_path.push(file);
@@ -341,7 +339,7 @@ mod tests {
     #[test]
     fn test_get_pid_list() {
         let path = "./tests/proc";
-        let mut pids = get_pid_list_from_path(path);
+        let mut pids = get_pid_list_from_path(path_from_root(path).as_str());
         pids.sort();
         assert_eq!(pids.len(), 2);
         assert_eq!(pids[0], 13);
@@ -358,8 +356,8 @@ mod tests {
         let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_ok());
         let network_data = network_data_result.unwrap();
-        assert!((network_data.rx_bytes - 180.0).abs() < PRECISION);
-        assert!((network_data.tx_bytes - 254.0).abs() < PRECISION);
+        assert!((network_data.rx_bytes - 180.0).abs() < f64::EPSILON);
+        assert!((network_data.tx_bytes - 254.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/net/invalid_dev_malformed";
         let network_data_result = get_network_data_from_path(path);
@@ -384,9 +382,9 @@ mod tests {
         let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_ok());
         let cpu_data = cpu_data_result.unwrap();
-        assert!((cpu_data.total_user_time_ms - 23370.0).abs() < PRECISION);
-        assert!((cpu_data.total_system_time_ms - 1880.0).abs() < PRECISION);
-        assert!((cpu_data.total_idle_time_ms - 178_380.0).abs() < PRECISION);
+        assert!((cpu_data.total_user_time_ms - 23370.0).abs() < f64::EPSILON);
+        assert!((cpu_data.total_system_time_ms - 1880.0).abs() < f64::EPSILON);
+        assert!((cpu_data.total_idle_time_ms - 178_380.0).abs() < f64::EPSILON);
         assert_eq!(cpu_data.individual_cpu_idle_times.len(), 2);
         assert!(
             (*cpu_data
@@ -395,7 +393,7 @@ mod tests {
                 .expect("cpu0 not found")
                 - 91880.0)
                 .abs()
-                < PRECISION
+                < f64::EPSILON
         );
         assert!(
             (*cpu_data
@@ -404,7 +402,7 @@ mod tests {
                 .expect("cpu1 not found")
                 - 86490.0)
                 .abs()
-                < PRECISION
+                < f64::EPSILON
         );
 
         let path = "./tests/proc/stat/invalid_stat_non_numerical_value_1";
@@ -438,7 +436,7 @@ mod tests {
         let uptime_data_result = get_uptime_from_path(path_from_root(path).as_str());
         assert!(uptime_data_result.is_ok());
         let uptime_data = uptime_data_result.unwrap();
-        assert!((uptime_data - 3_213_103_123_000.0).abs() < PRECISION);
+        assert!((uptime_data - 3_213_103_123_000.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/uptime/invalid_data_uptime";
         let uptime_data_result = get_uptime_from_path(path);
@@ -456,29 +454,29 @@ mod tests {
     #[test]
     fn test_get_fd_max_data() {
         let path = "./tests/proc/process/valid";
-        let pids = get_pid_list_from_path(path);
+        let pids = get_pid_list_from_path(path_from_root(path).as_str());
         let fd_max = get_fd_max_data_from_path(path, &pids);
-        assert!((fd_max - 900.0).abs() < PRECISION);
+        assert!((fd_max - 900.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_malformed";
         let fd_max = get_fd_max_data_from_path(path, &pids);
         // assert that fd_max is equal to AWS Lambda limit
-        assert!((fd_max - constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT).abs() < PRECISION);
+        assert!((fd_max - constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_missing";
         let fd_max = get_fd_max_data_from_path(path, &pids);
         // assert that fd_max is equal to AWS Lambda limit
-        assert!((fd_max - constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT).abs() < PRECISION);
+        assert!((fd_max - constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_get_fd_use_data() {
         let path = "./tests/proc/process/valid";
-        let pids = get_pid_list_from_path(path);
+        let pids = get_pid_list_from_path(path_from_root(path).as_str());
         let fd_use_result = get_fd_use_data_from_path(path, &pids);
         assert!(fd_use_result.is_ok());
         let fd_use = fd_use_result.unwrap();
-        assert!((fd_use - 5.0).abs() < PRECISION);
+        assert!((fd_use - 5.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_missing";
         let fd_use_result = get_fd_use_data_from_path(path, &pids);
@@ -488,33 +486,33 @@ mod tests {
     #[test]
     fn test_get_threads_max_data() {
         let path = "./tests/proc/process/valid";
-        let pids = get_pid_list_from_path(path);
+        let pids = get_pid_list_from_path(path_from_root(path).as_str());
         let threads_max = get_threads_max_data_from_path(path, &pids);
-        assert!((threads_max - 1024.0).abs() < PRECISION);
+        assert!((threads_max - 1024.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_malformed";
         let threads_max = get_threads_max_data_from_path(path, &pids);
         // assert that threads_max is equal to AWS Lambda limit
         assert!(
-            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs() < PRECISION
+            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs() < f64::EPSILON
         );
 
         let path = "./tests/proc/process/invalid_missing";
         let threads_max = get_threads_max_data_from_path(path, &pids);
         // assert that threads_max is equal to AWS Lambda limit
         assert!(
-            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs() < PRECISION
+            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs() < f64::EPSILON
         );
     }
 
     #[test]
     fn test_get_threads_use_data() {
         let path = "./tests/proc/process/valid";
-        let pids = get_pid_list_from_path(path);
+        let pids = get_pid_list_from_path(path_from_root(path).as_str());
         let threads_use_result = get_threads_use_data_from_path(path, &pids);
         assert!(threads_use_result.is_ok());
         let threads_use = threads_use_result.unwrap();
-        assert!((threads_use - 5.0).abs() < PRECISION);
+        assert!((threads_use - 5.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_missing";
         let threads_use_result = get_threads_use_data_from_path(path, &pids);

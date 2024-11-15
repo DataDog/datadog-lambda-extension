@@ -17,7 +17,7 @@ use crate::lifecycle::invocation::{
         lambda_function_url_event::LambdaFunctionUrlEvent,
         s3_event::S3Record,
         sns_event::{SnsEntity, SnsRecord},
-        sqs_event::SqsRecord,
+        sqs_event::{SqsRecord, extract_trace_context_from_aws_trace_header},
         step_function_event::StepFunctionEvent,
         Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
     },
