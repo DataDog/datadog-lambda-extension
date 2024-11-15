@@ -241,6 +241,7 @@ mod tests {
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
                 function_name: "arn:some-function".to_string(),
+                sandbox_init_time: Instant::now(),
             },
             RequestArgs {
                 service: "secretsmanager".to_string(),
