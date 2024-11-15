@@ -261,13 +261,6 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
 
     let sampling_priority = i8::from(sampled == "1");
 
-    let mut trace_context = HashMap::new();
-    trace_context.insert("trace_id".to_string(), trace_id.to_string());
-    trace_context.insert("parent_id".to_string(), parent_id.to_string());
-    trace_context.insert(
-        "sampling_priority".to_string(),
-        sampling_priority.to_string(),
-    );
     Some(SpanContext {
         // the context from AWS Header is used by Datadog only and does not contain the upper
         // 64 bits like other 128 w3c compliant trace ids
