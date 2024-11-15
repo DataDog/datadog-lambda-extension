@@ -340,7 +340,7 @@ mod tests {
     fn test_get_pid_list() {
         let path = "./tests/proc";
         let mut pids = get_pid_list_from_path(path_from_root(path).as_str());
-        pids.sort();
+        pids.sort_unstable();
         assert_eq!(pids.len(), 2);
         assert_eq!(pids[0], 13);
         assert_eq!(pids[1], 142);
@@ -494,14 +494,16 @@ mod tests {
         let threads_max = get_threads_max_data_from_path(path, &pids);
         // assert that threads_max is equal to AWS Lambda limit
         assert!(
-            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs() < f64::EPSILON
+            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs()
+                < f64::EPSILON
         );
 
         let path = "./tests/proc/process/invalid_missing";
         let threads_max = get_threads_max_data_from_path(path, &pids);
         // assert that threads_max is equal to AWS Lambda limit
         assert!(
-            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs() < f64::EPSILON
+            (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs()
+                < f64::EPSILON
         );
     }
 

@@ -283,7 +283,6 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
     })
 }
 
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
