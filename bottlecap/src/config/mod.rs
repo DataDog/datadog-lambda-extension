@@ -4,6 +4,7 @@ pub mod processing_rule;
 pub mod trace_propagation_style;
 
 use std::path::Path;
+use std::time::Instant;
 use std::vec;
 
 use figment::providers::{Format, Yaml};
@@ -221,6 +222,7 @@ pub struct AwsConfig {
     pub aws_secret_access_key: String,
     pub aws_session_token: String,
     pub function_name: String,
+    pub sandbox_init_time: Instant,
 }
 
 #[cfg(test)]
