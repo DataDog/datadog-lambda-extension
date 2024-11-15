@@ -7,7 +7,8 @@ use tracing::debug;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
-        get_aws_partition_by_region, lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        get_aws_partition_by_region, lowercase_key, ServiceNameResolver, Trigger,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
 
@@ -66,7 +67,7 @@ impl Trigger for APIGatewayRestEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         debug!("Enriching an Inferred Span for an API Gateway REST Event");
         let resource = format!(
             "{http_method} {path}",
@@ -79,8 +80,9 @@ impl Trigger for APIGatewayRestEvent {
             path = self.request_context.path
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
-        // todo: service mapping
-        let service_name = self.request_context.domain_name.clone();
+
+        let service_name =
+            self.resolve_service_name(service_mapping, &self.request_context.domain_name);
 
         span.name = "aws.apigateway".to_string();
         span.service = service_name;
@@ -179,6 +181,16 @@ impl Trigger for APIGatewayRestEvent {
     }
 }
 
+impl ServiceNameResolver for APIGatewayRestEvent {
+    fn get_specific_identifier(&self) -> String {
+        self.request_context.api_id.clone()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_api_gateway"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,7 +252,8 @@ mod tests {
         let event =
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
         assert_eq!(span.resource, "GET /path");
@@ -298,7 +311,8 @@ mod tests {
         let event =
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(
             span.service,
@@ -366,6 +380,41 @@ mod tests {
         assert_eq!(
             event.get_arn("us-east-1"),
             "arn:aws:apigateway:us-east-1::/restapis/id/stages/$default"
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("api_gateway_rest_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("id".to_string(), "specific-service".to_string()),
+            (
+                "lambda_api_gateway".to_string(),
+                "generic-service".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.request_context.domain_name
+            ),
+            "specific-service"
+        );
+
+        let generic_service_mapping = HashMap::from([(
+            "lambda_api_gateway".to_string(),
+            "generic-service".to_string(),
+        )]);
+        assert_eq!(
+            event
+                .resolve_service_name(&generic_service_mapping, &event.request_context.domain_name),
+            "generic-service"
         );
     }
 }

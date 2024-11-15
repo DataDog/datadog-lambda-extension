@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -28,6 +28,8 @@ pub struct RequestContext {
     pub time_epoch: i64,
     #[serde(rename = "requestId")]
     pub request_id: String,
+    #[serde(rename = "apiId")]
+    pub api_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -61,7 +63,7 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         let resource = format!(
             "{} {}",
             self.request_context.http.method, self.request_context.http.path
@@ -74,8 +76,9 @@ impl Trigger for LambdaFunctionUrlEvent {
         );
 
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
-        // todo: service mapping and peer service
-        let service_name = self.request_context.domain_name.clone();
+
+        let service_name =
+            self.resolve_service_name(service_mapping, &self.request_context.domain_name);
 
         span.name = String::from("aws.lambda.url");
         span.service = service_name;
@@ -168,6 +171,16 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 }
 
+impl ServiceNameResolver for LambdaFunctionUrlEvent {
+    fn get_specific_identifier(&self) -> String {
+        self.request_context.api_id.clone()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_url"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +235,7 @@ mod tests {
                 },
                 account_id: String::from("601427279990"),
                 domain_name: String::from("a8hyhsshac.lambda-url.eu-south-1.amazonaws.com"),
+                api_id: String::from("a8hyhsshac"),
             },
         };
 
@@ -252,7 +266,8 @@ mod tests {
         let event = LambdaFunctionUrlEvent::new(payload)
             .expect("Failed to deserialize LambdaFunctionUrlEvent");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.lambda.url");
         assert_eq!(
             span.service,
@@ -305,5 +320,31 @@ mod tests {
             "arn:aws:lambda:sa-east-1:601427279990:url:mock-lambda"
         );
         env::remove_var("AWS_LAMBDA_FUNCTION_NAME");
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("lambda_function_url_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = LambdaFunctionUrlEvent::new(payload)
+            .expect("Failed to deserialize LambdaFunctionUrlEvent");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("a8hyhsshac".to_string(), "specific-service".to_string()),
+            ("lambda_url".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "domain-name"),
+            "specific-service"
+        );
+
+        let generic_service_mapping =
+            HashMap::from([("lambda_url".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "domain-name"),
+            "generic-service"
+        );
     }
 }

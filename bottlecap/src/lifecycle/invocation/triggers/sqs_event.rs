@@ -10,7 +10,7 @@ use crate::lifecycle::invocation::{
         event_bridge_event::EventBridgeEvent,
         get_aws_partition_by_region,
         sns_event::{SnsEntity, SnsRecord},
-        Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
 
@@ -98,23 +98,17 @@ impl Trigger for SqsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         debug!("Enriching an Inferred Span for an SQS Event");
-        let resource = self
-            .event_source_arn
-            .clone()
-            .split(':')
-            .last()
-            .unwrap_or_default()
-            .to_string();
+        let resource = self.get_specific_identifier();
         let start_time = (self
             .attributes
             .sent_timestamp
             .parse::<i64>()
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
-        // todo: service mapping
-        let service_name = "sqs";
+
+        let service_name = self.resolve_service_name(service_mapping, "sqs");
 
         span.name = "aws.sqs".to_string();
         span.service = service_name.to_string();
@@ -198,6 +192,20 @@ impl Trigger for SqsRecord {
     }
 }
 
+impl ServiceNameResolver for SqsRecord {
+    fn get_specific_identifier(&self) -> String {
+        self.event_source_arn
+            .split(':')
+            .last()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_sqs"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,7 +268,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.sqs");
         assert_eq!(span.service, "sqs");
         assert_eq!(span.resource, "MyQueue");
@@ -390,5 +399,30 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("MyQueue".to_string(), "specific-service".to_string()),
+            ("lambda_sqs".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "sqs"),
+            "specific-service"
+        );
+
+        let generic_service_mapping =
+            HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "sqs"),
+            "generic-service"
+        );
     }
 }

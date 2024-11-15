@@ -83,7 +83,7 @@ impl Processor {
 
         Processor {
             context_buffer: ContextBuffer::default(),
-            inferrer: SpanInferrer::default(),
+            inferrer: SpanInferrer::new(config.service_mapping.clone()),
             span: create_empty_span(String::from("aws.lambda"), resource, service),
             cold_start_span: None,
             extracted_span_context: None,
@@ -266,10 +266,7 @@ impl Processor {
                 .meta
                 .insert("request_id".to_string(), request_id.clone());
             // todo(duncanista): add missing tags
-            // - cold start, proactive init
             // - language
-            // - function.request - capture lambda payload
-            // - function.response
             // - metrics tags (for asm)
 
             if let Some(offsets) = &context.enhanced_metric_data {
