@@ -322,8 +322,8 @@ mod tests {
         let span_context = event.get_span_context();
 
         let expected = SpanContext {
-            trace_id: 5744042798732701615,
-            span_id: 2902498116043018663,
+            trace_id: 5_744_042_798_732_701_615,
+            span_id: 2_902_498_116_043_018_663,
             sampling: Some(Sampling {
                 priority: Some(1),
                 mechanism: None,
@@ -347,7 +347,7 @@ mod tests {
             String::from("2022-12-08T21:08:19.224Z")
         );
 
-        assert_eq!(parent_id, 4340734536022949921);
+        assert_eq!(parent_id, 4_340_734_536_022_949_921);
 
         let parent_id = StepFunctionEvent::generate_parent_id(
             String::from("arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"),
@@ -355,7 +355,7 @@ mod tests {
             String::from("2022-12-08T21:08:19.224Y")
         );
 
-        assert_eq!(parent_id, 981693280319792699);
+        assert_eq!(parent_id, 981_693_280_319_792_699);
     }
 
     #[test]
@@ -363,20 +363,20 @@ mod tests {
         let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(String::from(
             "arn:aws:states:sa-east-1:425362996713:stateMachine:MyStateMachine-b276uka1j",
         ));
-        let hex_tid = format!("{:x}", hi_tid);
+        let hex_tid = format!("{hi_tid:x}");
 
-        assert_eq!(lo_tid, 1680583253837593461);
-        assert_eq!(hi_tid, 6984552746569958392);
+        assert_eq!(lo_tid, 1_680_583_253_837_593_461);
+        assert_eq!(hi_tid, 6_984_552_746_569_958_392);
 
         assert_eq!(hex_tid, "60ee1db79e4803f8");
 
         let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(
             String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44")
         );
-        let hex_tid = format!("{:x}", hi_tid);
+        let hex_tid = format!("{hi_tid:x}");
 
-        assert_eq!(lo_tid, 5744042798732701615);
-        assert_eq!(hi_tid, 1807349139850867390);
+        assert_eq!(lo_tid, 5_744_042_798_732_701_615);
+        assert_eq!(hi_tid, 1_807_349_139_850_867_390);
 
         assert_eq!(hex_tid, "1914fe7789eb32be");
     }

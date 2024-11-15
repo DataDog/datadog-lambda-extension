@@ -743,6 +743,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_disabled() {
         let (metrics_aggr, no_config) = setup();
         let my_config = Arc::new(config::Config {
@@ -991,8 +992,8 @@ mod tests {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
 
-        let tmp_max = 550461440.0;
-        let tmp_used = 12165120.0;
+        let tmp_max = 550_461_440.0;
+        let tmp_used = 12_165_120.0;
 
         Lambda::generate_tmp_enhanced_metrics(
             tmp_max,
@@ -1001,9 +1002,9 @@ mod tests {
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550461440.0);
-        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12165120.0);
-        assert_sketch(&metrics_aggr, constants::TMP_FREE_METRIC, 538296320.0);
+        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0);
+        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0);
+        assert_sketch(&metrics_aggr, constants::TMP_FREE_METRIC, 538_296_320.0);
     }
 
     #[test]

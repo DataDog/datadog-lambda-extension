@@ -174,6 +174,7 @@ impl ServiceNameResolver for SnsRecord {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use datadog_trace_protobuf::pb::Span;
 
