@@ -260,7 +260,8 @@ impl SpanInferrer {
 
                 // Set error
                 ws.error = invocation_span.error;
-                ws.meta.insert(String::from("peer.service"), s.service.clone());
+                ws.meta
+                    .insert(String::from("peer.service"), s.service.clone());
 
                 ws.trace_id = invocation_span.trace_id;
             }
@@ -278,7 +279,10 @@ impl SpanInferrer {
 
             // Set error
             s.error = invocation_span.error;
-            s.meta.insert(String::from("peer.service"), invocation_span.service.clone());
+            s.meta.insert(
+                String::from("peer.service"),
+                invocation_span.service.clone(),
+            );
 
             s.trace_id = invocation_span.trace_id;
         }

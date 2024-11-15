@@ -85,7 +85,7 @@ impl Trigger for S3Record {
             .timestamp_nanos_opt()
             .unwrap_or((self.event_time.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-            let service_name = self.resolve_service_name(service_mapping, "s3");
+        let service_name = self.resolve_service_name(service_mapping, "s3");
 
         span.name = String::from("aws.s3");
         span.service = service_name.to_string();
