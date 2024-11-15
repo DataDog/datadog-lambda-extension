@@ -491,11 +491,12 @@ impl Lambda {
         fd_max: f64,
         fd_use: f64,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
+        tags: Option<SortedTags>,
     ) {
         let metric = Metric::new(
             constants::FD_MAX_METRIC.into(),
             MetricValue::distribution(fd_max),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert fd_max metric: {}", e);
@@ -506,7 +507,7 @@ impl Lambda {
             let metric = Metric::new(
                 constants::FD_USE_METRIC.into(),
                 MetricValue::distribution(fd_use),
-                None,
+                tags,
             );
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert fd_use metric: {}", e);
@@ -518,11 +519,12 @@ impl Lambda {
         threads_max: f64,
         threads_use: f64,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
+        tags: Option<SortedTags>,
     ) {
         let metric = Metric::new(
             constants::THREADS_MAX_METRIC.into(),
             MetricValue::distribution(threads_max),
-            None,
+            tags.clone(),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert threads_max metric: {}", e);
@@ -533,7 +535,7 @@ impl Lambda {
             let metric = Metric::new(
                 constants::THREADS_USE_METRIC.into(),
                 MetricValue::distribution(threads_use),
-                None,
+                tags,
             );
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert threads_use metric: {}", e);
@@ -547,6 +549,7 @@ impl Lambda {
         }
 
         let aggr = Arc::clone(&self.aggregator);
+        let tags = self.get_dynamic_value_tags();
 
         tokio::spawn(async move {
             // get list of all process ids
@@ -568,8 +571,8 @@ impl Lambda {
                     _ = send_metrics.changed() => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
-                        Self::generate_fd_enhanced_metrics(fd_max, fd_use, &mut aggr);
-                        Self::generate_threads_enhanced_metrics(threads_max, threads_use, &mut aggr);
+                        Self::generate_fd_enhanced_metrics(fd_max, fd_use, &mut aggr, tags.clone());
+                        Self::generate_threads_enhanced_metrics(threads_max, threads_use, &mut aggr, tags);
                         return;
                     }
                     // Otherwise keep monitoring file descriptor and thread usage periodically
@@ -1015,6 +1018,7 @@ mod tests {
             fd_max,
             fd_use,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0);
@@ -1033,6 +1037,7 @@ mod tests {
             fd_max,
             fd_use,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0);
@@ -1055,6 +1060,7 @@ mod tests {
             threads_max,
             threads_use,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0);
@@ -1073,6 +1079,7 @@ mod tests {
             threads_max,
             threads_use,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
         );
 
         assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0);
