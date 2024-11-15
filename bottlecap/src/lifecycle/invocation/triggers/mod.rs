@@ -19,18 +19,42 @@ pub const DATADOG_CARRIER_KEY: &str = "_datadog";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
 
-pub trait Trigger {
+/// Resolves the service name for a given trigger depending on
+/// service mapping configuration.
+pub trait ServiceNameResolver {
+    /// Get the specific service name for this trigger type, it will
+    /// be used as a key to resolve the service name
+    fn get_specific_identifier(&self) -> String;
+
+    /// Get the generic service mapping key for the trigger
+    fn get_generic_identifier(&self) -> &'static str;
+}
+
+pub trait Trigger: ServiceNameResolver {
     fn new(payload: Value) -> Option<Self>
     where
         Self: Sized;
     fn is_match(payload: &Value) -> bool
     where
         Self: Sized;
-    fn enrich_span(&self, span: &mut Span);
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>);
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str) -> String;
     fn get_carrier(&self) -> HashMap<String, String>;
     fn is_async(&self) -> bool;
+
+    /// Default implementation for service name resolution
+    fn resolve_service_name(
+        &self,
+        service_mapping: &HashMap<String, String>,
+        fallback: &str,
+    ) -> String {
+        service_mapping
+            .get(&self.get_specific_identifier())
+            .or_else(|| service_mapping.get(self.get_generic_identifier()))
+            .unwrap_or(&fallback.to_string())
+            .to_string()
+    }
 }
 
 #[must_use]

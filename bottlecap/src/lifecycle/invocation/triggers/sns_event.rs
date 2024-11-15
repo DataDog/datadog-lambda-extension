@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
+use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::debug;
@@ -9,7 +10,7 @@ use crate::lifecycle::invocation::{
     base64_to_string,
     processor::MS_TO_NS,
     triggers::{
-        event_bridge_event::EventBridgeEvent, Trigger, DATADOG_CARRIER_KEY,
+        event_bridge_event::EventBridgeEvent, ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY,
         FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
@@ -82,33 +83,26 @@ impl Trigger for SnsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut datadog_trace_protobuf::pb::Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         debug!("Enriching an Inferred Span for an SNS Event");
-        let resource = self
-            .sns
-            .topic_arn
-            .clone()
-            .split(':')
-            .last()
-            .unwrap_or_default()
-            .to_string();
+        let resource_name = self.get_specific_identifier();
 
         let start_time = self
             .sns
             .timestamp
             .timestamp_nanos_opt()
             .unwrap_or((self.sns.timestamp.timestamp_millis() as f64 * MS_TO_NS) as i64);
-        // todo: service mapping
-        let service_name = "sns".to_string();
+
+        let service_name = self.resolve_service_name(service_mapping, "sns");
 
         span.name = "aws.sns".to_string();
         span.service = service_name.to_string();
-        span.resource.clone_from(&resource);
+        span.resource.clone_from(&resource_name);
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend([
             ("operation_name".to_string(), "aws.sns".to_string()),
-            ("topicname".to_string(), resource),
+            ("topicname".to_string(), resource_name),
             ("topic_arn".to_string(), self.sns.topic_arn.clone()),
             ("message_id".to_string(), self.sns.message_id.clone()),
             ("type".to_string(), self.sns.r#type.clone()),
@@ -161,6 +155,21 @@ impl Trigger for SnsRecord {
 
     fn is_async(&self) -> bool {
         true
+    }
+}
+
+impl ServiceNameResolver for SnsRecord {
+    fn get_specific_identifier(&self) -> String {
+        self.sns
+            .topic_arn
+            .split(':')
+            .last()
+            .unwrap_or_default()
+            .to_string()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_sns"
     }
 }
 
@@ -224,7 +233,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.sns");
         assert_eq!(span.service, "sns");
         assert_eq!(span.resource, "serverlessTracingTopicPy");
@@ -340,5 +350,33 @@ mod tests {
         ]);
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("sns_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            (
+                "serverlessTracingTopicPy".to_string(),
+                "specific-service".to_string(),
+            ),
+            ("lambda_sns".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "sns"),
+            "specific-service"
+        );
+
+        let generic_service_mapping =
+            HashMap::from([("lambda_sns".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "sns"),
+            "generic-service"
+        );
     }
 }

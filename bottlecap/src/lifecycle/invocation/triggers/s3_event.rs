@@ -8,7 +8,7 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -77,15 +77,15 @@ impl Trigger for S3Record {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         debug!("Enriching an InferredSpan span with S3 event");
-        let bucket_name = self.s3.bucket.name.clone();
+        let bucket_name = self.get_specific_identifier();
         let start_time = self
             .event_time
             .timestamp_nanos_opt()
             .unwrap_or((self.event_time.timestamp_millis() as f64 * MS_TO_NS) as i64);
-        // todo: service mapping
-        let service_name = "s3";
+
+        let service_name = self.resolve_service_name(service_mapping, "s3");
 
         span.name = String::from("aws.s3");
         span.service = service_name.to_string();
@@ -120,6 +120,16 @@ impl Trigger for S3Record {
 
     fn is_async(&self) -> bool {
         true
+    }
+}
+
+impl ServiceNameResolver for S3Record {
+    fn get_specific_identifier(&self) -> String {
+        self.s3.bucket.name.clone()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_s3"
     }
 }
 
@@ -177,7 +187,8 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.s3");
         assert_eq!(span.service, "s3");
         assert_eq!(span.resource, "example-bucket");
@@ -236,5 +247,30 @@ mod tests {
         let expected = HashMap::new();
 
         assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("s3_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("example-bucket".to_string(), "specific-service".to_string()),
+            ("lambda_s3".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "s3"),
+            "specific-service"
+        );
+
+        let generic_service_mapping =
+            HashMap::from([("lambda_s3".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "s3"),
+            "generic-service"
+        );
     }
 }

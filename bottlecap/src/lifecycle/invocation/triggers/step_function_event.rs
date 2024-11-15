@@ -5,7 +5,9 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    lifecycle::invocation::triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    lifecycle::invocation::triggers::{
+        ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
     traces::{
         context::{Sampling, SpanContext},
         propagation::text_map_propagator::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
@@ -82,7 +84,12 @@ impl Trigger for StepFunctionEvent {
         execution_id.is_some() && name.is_some() && entered_time.is_some()
     }
 
-    fn enrich_span(&self, _span: &mut datadog_trace_protobuf::pb::Span) {}
+    fn enrich_span(
+        &self,
+        _span: &mut datadog_trace_protobuf::pb::Span,
+        _service_mapping: &HashMap<String, String>,
+    ) {
+    }
 
     fn get_tags(&self) -> HashMap<String, String> {
         HashMap::from([(
@@ -179,6 +186,16 @@ impl StepFunctionEvent {
         } else {
             result
         }
+    }
+}
+
+impl ServiceNameResolver for StepFunctionEvent {
+    fn get_specific_identifier(&self) -> String {
+        String::new()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_stepfunction"
     }
 }
 
