@@ -7,14 +7,10 @@ use crate::telemetry::events::ReportMetrics;
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator::Aggregator, metric::SortedTags};
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::mpsc, thread};
 use std::env::consts::ARCH;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}};
 use std::time::Duration;
-use tokio::{
-    sync::watch::{Receiver, Sender},
-    time::interval,
-};
 use tracing::debug;
 use tracing::error;
 
@@ -440,7 +436,7 @@ impl Lambda {
         }
     }
 
-    pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
+    pub fn set_tmp_enhanced_metrics(&self, send_metrics: Receiver<bool>) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -448,7 +444,7 @@ impl Lambda {
         let aggr = Arc::clone(&self.aggregator);
         let tags = self.get_dynamic_value_tags();
 
-        tokio::spawn(async move {
+        thread::spawn(move || {
             // Set tmp_max and initial value for tmp_used
             let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
                 Ok(stats) => stats,
@@ -460,29 +456,25 @@ impl Lambda {
             let tmp_max = bsize * blocks;
             let mut tmp_used = bsize * (blocks - bavail);
 
-            let mut interval = interval(Duration::from_millis(10));
+            let interval = Duration::from_millis(50);
             loop {
-                tokio::select! {
-                    biased;
-                    // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
-                        let mut aggr: std::sync::MutexGuard<Aggregator> =
-                            aggr.lock().expect("lock poisoned");
+                // When the stop signal is received, generate final metrics
+                if matches!(send_metrics.try_recv(), Ok(true) | Err(std::sync::mpsc::TryRecvError::Disconnected)) {
+                    let mut aggr: std::sync::MutexGuard<Aggregator> =
+                        aggr.lock().expect("lock poisoned");
                         Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr, tags);
+                    return;
+                }
+                // Otherwise keep monitoring file descriptor and thread usage periodically
+                let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
+                    Ok(stats) => stats,
+                    Err(err) => {
+                        debug!("Could not emit tmp enhanced metrics. {:?}", err);
                         return;
                     }
-                    // Otherwise keep monitoring tmp usage periodically
-                    _ = interval.tick() => {
-                        let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
-                            Ok(stats) => stats,
-                            Err(err) => {
-                                debug!("Could not emit tmp enhanced metrics. {:?}", err);
-                                return;
-                            }
-                        };
-                        tmp_used = tmp_used.max(bsize * (blocks - bavail));
-                    }
-                }
+                };
+                tmp_used = tmp_used.max(bsize * (blocks - bavail));
+                thread::sleep(interval);
             }
         });
     }
@@ -543,7 +535,7 @@ impl Lambda {
         }
     }
 
-    pub fn set_process_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
+    pub fn set_process_enhanced_metrics(&self, send_metrics: Receiver<bool>) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -551,52 +543,60 @@ impl Lambda {
         let aggr = Arc::clone(&self.aggregator);
         let tags = self.get_dynamic_value_tags();
 
-        tokio::spawn(async move {
+        thread::spawn(move || {
             // get list of all process ids
             let pids = proc::get_pid_list();
 
             // Set fd_max and initial value for fd_use to -1
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = -1_f64;
+            let mut fd_use = match proc::get_fd_use_data(&pids) {
+                Ok(fd_use) => fd_use,
+                Err(_) => {
+                    debug!("Could not get fd_use data");
+                    -1_f64
+                }
+            };
 
             // Set threads_max and initial value for threads_use to -1
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = -1_f64;
+            let mut threads_use = match proc::get_threads_use_data(&pids) {
+                Ok(threads_use) => threads_use,
+                Err(_) => {
+                    debug!("Could not get threads_use data");
+                    -1_f64
+                }
+            };
 
-            let mut interval = interval(Duration::from_millis(1));
+            let mut interval = Duration::from_millis(10);
             loop {
-                tokio::select! {
-                    biased;
-                    // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
-                        let mut aggr: std::sync::MutexGuard<Aggregator> =
-                            aggr.lock().expect("lock poisoned");
-                        Self::generate_fd_enhanced_metrics(fd_max, fd_use, &mut aggr, tags.clone());
-                        Self::generate_threads_enhanced_metrics(threads_max, threads_use, &mut aggr, tags);
-                        return;
-                    }
-                    // Otherwise keep monitoring file descriptor and thread usage periodically
-                    _ = interval.tick() => {
-                        match proc::get_fd_use_data(&pids) {
-                            Ok(fd_use_curr) => {
-                                fd_use = fd_use.max(fd_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update file descriptor use enhanced metric.");
-                            }
-                        };
-                        match proc::get_threads_use_data(&pids) {
-                            Ok(threads_use_curr) => {
-                                threads_use = threads_use.max(threads_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update threads use enhanced metric.");
-                            }
-                        };
+                // When the stop signal is received, generate final metrics
+                if matches!(send_metrics.try_recv(), Ok(true) | Err(std::sync::mpsc::TryRecvError::Disconnected)) {
+                    let mut aggr: std::sync::MutexGuard<Aggregator> =
+                        aggr.lock().expect("lock poisoned");
+                    Self::generate_fd_enhanced_metrics(fd_max, fd_use, &mut aggr, tags.clone());
+                    Self::generate_threads_enhanced_metrics(threads_max, threads_use, &mut aggr, tags.clone());
+                    return;
+                }
+                // Otherwise keep monitoring file descriptor and thread usage periodically
+                if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
+                    if fd_use_curr >= fd_use {
+                        print!("*** fd_use increased: {fd_use} -> {fd_use_curr} ***\n");
+                        fd_use = fd_use_curr;
+                        interval = Duration::from_millis(1);
+                        print!("*** updated interval to be more frequent: {:?} ***\n", interval);
+                    } else {
+                        print!("*** fd_use did not increase ***\n");
+                        interval = Duration::from_millis(10);
+                        print!("*** updated interval to be less frequent: {:?} ***\n", interval);
                     }
                 }
+                if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
+                    threads_use = threads_use.max(threads_use_curr);
+                }
+                thread::sleep(interval);
             }
         });
+
     }
 
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
@@ -672,8 +672,8 @@ pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
-    pub tmp_chan_tx: Sender<()>,
-    pub process_chan_tx: Sender<()>,
+    pub tmp_chan_tx: Sender<bool>,
+    pub process_chan_tx: Sender<bool>,
 }
 
 impl PartialEq for EnhancedMetricData {

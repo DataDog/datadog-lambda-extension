@@ -178,8 +178,7 @@ impl ContextBuffer {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use crate::proc::{CPUData, NetworkData};
-    use std::collections::HashMap;
-    use tokio::sync::watch;
+    use std::{collections::HashMap, sync::mpsc};
 
     use super::*;
 
@@ -326,8 +325,8 @@ mod tests {
         });
 
         let uptime_offset = Some(50.0);
-        let (tmp_chan_tx, _) = watch::channel(());
-        let (process_chan_tx, _) = watch::channel(());
+        let (tmp_chan_tx, _) = mpsc::channel::<bool>();
+        let (process_chan_tx, _) = mpsc::channel::<bool>();
 
         let enhanced_metric_data = Some(EnhancedMetricData {
             network_offset,

@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
@@ -109,11 +109,11 @@ impl Processor {
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
 
             // Start a channel for monitoring tmp enhanced data
-            let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
+            let (tmp_chan_tx, tmp_chan_rx) = mpsc::channel::<bool>();
             self.enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
 
             // Start a channel for monitoring file descriptor and thread count
-            let (process_chan_tx, process_chan_rx) = watch::channel(());
+            let (process_chan_tx, process_chan_rx) = mpsc::channel::<bool>();
             self.enhanced_metrics
                 .set_process_enhanced_metrics(process_chan_rx);
 
@@ -275,9 +275,9 @@ impl Processor {
                     offsets.uptime_offset,
                 );
                 // Send the signal to stop monitoring tmp
-                _ = offsets.tmp_chan_tx.send(());
+                _ = offsets.tmp_chan_tx.send(true);
                 // Send the signal to stop monitoring file descriptors and threads
-                _ = offsets.process_chan_tx.send(());
+                _ = offsets.process_chan_tx.send(true);
             }
         }
 
