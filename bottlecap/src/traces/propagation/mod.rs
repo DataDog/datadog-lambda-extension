@@ -211,9 +211,13 @@ pub mod tests {
 
     use super::*;
 
+    fn lower_64_bits(value: u128) -> u64 {
+        (value & 0xFFFF_FFFF_FFFF_FFFF) as u64
+    }
+
     lazy_static! {
         static ref TRACE_ID: u128 = 171_395_628_812_617_415_352_188_477_958_425_669_623;
-        static ref TRACE_ID_LOWER_ORDER_BITS: u64 = *TRACE_ID as u64;
+        static ref TRACE_ID_LOWER_ORDER_BITS: u64 = lower_64_bits(*TRACE_ID);
         static ref TRACE_ID_HEX: String = String::from("80f198ee56343ba864fe8b2a57d3eff7");
 
         // TraceContext Headers
@@ -771,13 +775,15 @@ pub mod tests {
 
     #[test]
     fn test_new_filter_propagators() {
-        let mut config = config::Config::default();
-        config.trace_propagation_style_extract = vec![
-            TracePropagationStyle::Datadog,
-            TracePropagationStyle::TraceContext,
-            TracePropagationStyle::B3,
-            TracePropagationStyle::B3Multi,
-        ];
+        let config = config::Config {
+            trace_propagation_style_extract: vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+                TracePropagationStyle::B3,
+                TracePropagationStyle::B3Multi,
+            ],
+            ..Default::default()
+        };
 
         let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
@@ -786,8 +792,10 @@ pub mod tests {
 
     #[test]
     fn test_new_no_propagators() {
-        let mut config = config::Config::default();
-        config.trace_propagation_style_extract = vec![TracePropagationStyle::None];
+        let config = config::Config {
+            trace_propagation_style_extract: vec![TracePropagationStyle::None],
+            ..Default::default()
+        };
         let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
         assert_eq!(propagator.propagators.len(), 0);
@@ -795,11 +803,13 @@ pub mod tests {
 
     #[test]
     fn test_extract_available_contexts() {
-        let mut config = config::Config::default();
-        config.trace_propagation_style_extract = vec![
-            TracePropagationStyle::Datadog,
-            TracePropagationStyle::TraceContext,
-        ];
+        let config = config::Config {
+            trace_propagation_style_extract: vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ],
+            ..Default::default()
+        };
 
         let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
@@ -835,8 +845,10 @@ pub mod tests {
 
     #[test]
     fn test_extract_available_contexts_no_contexts() {
-        let mut config = config::Config::default();
-        config.trace_propagation_style_extract = vec![TracePropagationStyle::Datadog];
+        let config = config::Config {
+            trace_propagation_style_extract: vec![TracePropagationStyle::Datadog],
+            ..Default::default()
+        };
 
         let propagator = DatadogCompositePropagator::new(Arc::new(config));
 
@@ -868,6 +880,6 @@ pub mod tests {
         DatadogCompositePropagator::attach_baggage(&mut context, &carrier);
 
         assert_eq!(context.tags.len(), 1);
-        assert_eq!(context.tags.get("key1").unwrap(), "value1");
+        assert_eq!(context.tags.get("key1").expect("Missing tag"), "value1");
     }
 }

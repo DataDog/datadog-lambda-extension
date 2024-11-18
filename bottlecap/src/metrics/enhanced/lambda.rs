@@ -415,6 +415,7 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_max metric: {}", e);
         }
+        println!("=== inserted tmp_max metric: {tmp_max} ===");
 
         let metric = Metric::new(
             constants::TMP_USED_METRIC.into(),
@@ -424,6 +425,7 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_used metric: {}", e);
         }
+        println!("=== inserted tmp_used metric: {tmp_used} ===");
 
         let tmp_free = tmp_max - tmp_used;
         let metric = Metric::new(
@@ -434,6 +436,7 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_free metric: {}", e);
         }
+        println!("=== inserted tmp_free metric: {tmp_free} ===");
     }
 
     pub fn set_tmp_enhanced_metrics(&self, send_metrics: Receiver<bool>) {
@@ -493,6 +496,7 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert fd_max metric: {}", e);
         }
+        println!("=== inserted fd_max metric: {fd_max} ===");
 
         // Check if fd_use value is valid before inserting metric
         if fd_use > 0.0 {
@@ -504,6 +508,7 @@ impl Lambda {
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert fd_use metric: {}", e);
             }
+            println!("=== inserted fd_use metric: {fd_use} ===");
         }
     }
 
@@ -580,14 +585,10 @@ impl Lambda {
                 // Otherwise keep monitoring file descriptor and thread usage periodically
                 if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
                     if fd_use_curr >= fd_use {
-                        print!("*** fd_use increased: {fd_use} -> {fd_use_curr} ***\n");
                         fd_use = fd_use_curr;
                         interval = Duration::from_millis(1);
-                        print!("*** updated interval to be more frequent: {:?} ***\n", interval);
                     } else {
-                        print!("*** fd_use did not increase ***\n");
                         interval = Duration::from_millis(10);
-                        print!("*** updated interval to be less frequent: {:?} ***\n", interval);
                     }
                 }
                 if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
@@ -743,6 +744,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_disabled() {
         let (metrics_aggr, no_config) = setup();
         let my_config = Arc::new(config::Config {
@@ -991,8 +993,8 @@ mod tests {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
 
-        let tmp_max = 550461440.0;
-        let tmp_used = 12165120.0;
+        let tmp_max = 550_461_440.0;
+        let tmp_used = 12_165_120.0;
 
         Lambda::generate_tmp_enhanced_metrics(
             tmp_max,
@@ -1001,9 +1003,9 @@ mod tests {
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550461440.0);
-        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12165120.0);
-        assert_sketch(&metrics_aggr, constants::TMP_FREE_METRIC, 538296320.0);
+        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0);
+        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0);
+        assert_sketch(&metrics_aggr, constants::TMP_FREE_METRIC, 538_296_320.0);
     }
 
     #[test]
