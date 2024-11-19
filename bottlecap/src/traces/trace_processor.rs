@@ -11,7 +11,6 @@ use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use tracing::debug;
 
 use crate::config;
 use crate::traces::{
@@ -122,7 +121,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
     ) -> SendData {
-        debug!("Received traces to process");
         let payload = trace_utils::collect_trace_chunks(
             V07(traces),
             &header_tags,
