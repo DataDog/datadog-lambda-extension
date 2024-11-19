@@ -440,7 +440,12 @@ impl Lambda {
         }
     }
 
+    #[allow(unreachable_code)]
+    #[allow(unused_variables)]
+    #[allow(unused_mut)]
     pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
+        // Temporarily disabled
+        return;
         if !self.config.enhanced_metrics {
             return;
         }
@@ -543,7 +548,12 @@ impl Lambda {
         }
     }
 
+    #[allow(unreachable_code)]
+    #[allow(unused_variables)]
+    #[allow(unused_mut)]
     pub fn set_process_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
+        // Temporarily disabled
+        return;
         if !self.config.enhanced_metrics {
             return;
         }
