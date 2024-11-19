@@ -11,7 +11,6 @@ use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
 
-
 use crate::config;
 use crate::traces::{
     AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
