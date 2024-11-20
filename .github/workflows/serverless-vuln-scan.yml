@@ -20,7 +20,7 @@ jobs:
       # scan latest released images
 
       - name: Scan latest released image with trivy
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
           image-ref: "public.ecr.aws/datadog/lambda-extension:latest"
           ignore-unfixed: true
@@ -28,7 +28,7 @@ jobs:
           format: table
 
       - name: Scan latest-alpine released image with trivy
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
           image-ref: "public.ecr.aws/datadog/lambda-extension:latest-alpine"
           ignore-unfixed: true
@@ -36,7 +36,7 @@ jobs:
           format: table
 
       - name: Scan latest serverless-init image with trivy
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
           image-ref: "datadog/serverless-init:latest"
           ignore-unfixed: true
@@ -44,7 +44,7 @@ jobs:
           format: table
 
       - name: Scan latest-alpine serverless-init image with trivy
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
           image-ref: "datadog/serverless-init:latest-alpine"
           ignore-unfixed: true
@@ -110,7 +110,7 @@ jobs:
           ./scripts/build_binary_and_layer_dockerized.sh
 
       - name: Scan amd64 image with trivy
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
           image-ref: "datadog/build-lambda-extension-amd64:${{ env.VERSION }}"
           ignore-unfixed: true
@@ -118,7 +118,7 @@ jobs:
           format: table
 
       - name: Scan arm64 image with trivy
-        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
         with:
           image-ref: "datadog/build-lambda-extension-arm64:${{ env.VERSION }}"
           ignore-unfixed: true
