@@ -28,7 +28,7 @@ use bottlecap::{
     telemetry::{
         self,
         client::TelemetryApiClient,
-        events::{TelemetryEvent, TelemetryRecord},
+        events::{Status, TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
     },
     traces::{
@@ -452,7 +452,7 @@ async fn extension_loop_active(
                                     // pass the invocation deadline to
                                     // flush tasks here, so they can
                                     // retry if we have more time
-                                    if flush_control.should_flush_end() {
+                                    if flush_control.should_flush_end() || status == Status::Timeout {
                                         tokio::join!(
                                             logs_flusher.flush(),
                                             metrics_flusher.flush(),
