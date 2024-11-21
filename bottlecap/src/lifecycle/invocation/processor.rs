@@ -280,8 +280,13 @@ impl Processor {
                 self.span.trace_id = generate_span_id();
                 self.span.span_id = generate_span_id();
                 self.span.error = 1;
-                self.span.meta.insert("error.msg".to_string(), "Datadog detected an Impending Timeout".to_string());
-                self.span.meta.insert("error.type".to_string(), "Impending Timeout".to_string());
+                self.span.meta.insert(
+                    "error.msg".to_string(),
+                    "Datadog detected an Impending Timeout".to_string(),
+                );
+                self.span
+                    .meta
+                    .insert("error.type".to_string(), "Impending Timeout".to_string());
             }
         }
 
