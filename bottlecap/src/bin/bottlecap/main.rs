@@ -452,6 +452,8 @@ async fn extension_loop_active(
                                     // pass the invocation deadline to
                                     // flush tasks here, so they can
                                     // retry if we have more time
+                                    //
+                                    // We always want to flush on a timeout
                                     if flush_control.should_flush_end() || status == Status::Timeout {
                                         tokio::join!(
                                             logs_flusher.flush(),
