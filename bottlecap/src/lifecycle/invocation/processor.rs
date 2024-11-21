@@ -19,8 +19,12 @@ use crate::{
         span_inferrer::SpanInferrer, tag_span_from_value,
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
-    proc::{self, CPUData, NetworkData},
-    tags::provider,
+    proc::{
+        self,
+        constants::{ETC_PATH, PROC_PATH},
+        CPUData, NetworkData,
+    },
+    tags::{lambda::tags::resolve_runtime_from_proc, provider},
     telemetry::events::{ReportMetrics, Status},
     traces::{
         context::SpanContext,
@@ -63,6 +67,7 @@ pub struct Processor {
     aws_config: AwsConfig,
     // Flag to determine if a tracer was detected
     tracer_detected: bool,
+    runtime: Option<String>,
     config: Arc<config::Config>,
 }
 
@@ -91,6 +96,7 @@ impl Processor {
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config: aws_config.clone(),
             tracer_detected: false,
+            runtime: None,
             config: Arc::clone(&config),
         }
     }
@@ -166,6 +172,11 @@ impl Processor {
             } else {
                 cold_start = true;
             }
+
+            // Resolve runtime only once
+            let runtime = resolve_runtime_from_proc(PROC_PATH, ETC_PATH);
+            self.enhanced_metrics.set_runtime_tag(&runtime);
+            self.runtime = Some(runtime);
         }
 
         if proactive_initialization {
@@ -174,6 +185,13 @@ impl Processor {
                 proactive_initialization.to_string(),
             );
         }
+
+        if let Some(runtime) = &self.runtime {
+            self.span
+                .meta
+                .insert(String::from("runtime"), runtime.to_string());
+        }
+
         self.span
             .meta
             .insert(String::from("cold_start"), cold_start.to_string());

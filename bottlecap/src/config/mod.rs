@@ -19,13 +19,13 @@ use crate::config::log_level::{deserialize_log_level, LogLevel};
 use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
 use crate::config::service_mapping::deserialize_service_mapping;
 
-/// `FailoverConfig` is a struct that represents fields that are not supported in the extension yet.
+/// `FallbackConfig` is a struct that represents fields that are not supported in the extension yet.
 ///
 /// `extension_version` is expected to be set to "next" to enable the optimized extension.
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
-pub struct FailoverConfig {
+pub struct FallbackConfig {
     extension_version: Option<String>,
     serverless_appsec_enabled: bool,
     appsec_enabled: bool,
@@ -124,24 +124,24 @@ pub enum ConfigError {
     UnsupportedField(String),
 }
 
-fn log_failover_reason(reason: &str) {
-    println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{reason}\"}}");
+fn log_fallback_reason(reason: &str) {
+    println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
-fn failsover(figment: &Figment) -> Result<(), ConfigError> {
-    let failover_config: FailoverConfig = match figment.extract() {
-        Ok(failover_config) => failover_config,
+fn fallback(figment: &Figment) -> Result<(), ConfigError> {
+    let fallback_config: FallbackConfig = match figment.extract() {
+        Ok(fallback_config) => fallback_config,
         Err(err) => {
             println!("Failed to parse Datadog config: {err}");
             return Err(ConfigError::ParseError(err.to_string()));
         }
     };
 
-    let opted_in = match failover_config.extension_version.as_deref() {
+    let opted_in = match fallback_config.extension_version.as_deref() {
         Some("next") => true,
         // Only log when the field is present but its not "next"
         Some(_) => {
-            log_failover_reason("extension_version");
+            log_fallback_reason("extension_version");
             false
         }
         _ => false,
@@ -153,13 +153,13 @@ fn failsover(figment: &Figment) -> Result<(), ConfigError> {
         ));
     }
 
-    if failover_config.serverless_appsec_enabled || failover_config.appsec_enabled {
-        log_failover_reason("appsec_enabled");
+    if fallback_config.serverless_appsec_enabled || fallback_config.appsec_enabled {
+        log_fallback_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
 
-    if failover_config.profiling_enabled {
-        log_failover_reason("profiling_enabled");
+    if fallback_config.profiling_enabled {
+        log_fallback_reason("profiling_enabled");
         return Err(ConfigError::UnsupportedField(
             "profiling_enabled".to_string(),
         ));
@@ -182,8 +182,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     // Get YAML nested fields
     let yaml_figment = Figment::from(Yaml::file(&path));
 
-    // Failover
-    failsover(&figment)?;
+    fallback(&figment)?;
 
     let (mut config, yaml_config): (Config, YamlConfig) =
         match (figment.extract(), yaml_figment.extract()) {
