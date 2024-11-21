@@ -145,7 +145,7 @@ fn tags_from_env(
 }
 
 #[allow(dead_code)] // keeping this logic for when async runtime resolution will be supported
-fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &str) -> String {
+pub fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &str) -> String {
     let start = Instant::now();
     match fs::read_dir(proc_path) {
         Ok(proc_dir) => {

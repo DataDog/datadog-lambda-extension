@@ -35,7 +35,7 @@ impl Lambda {
         }
     }
 
-    /// Set the dynamic value tags that are not available at compile time
+    /// Set the init tags in `dynamic_value_tags`
     pub fn set_init_tags(&mut self, proactive_initialization: bool, cold_start: bool) {
         self.dynamic_value_tags.remove("cold_start");
         self.dynamic_value_tags.remove("proactive_initialization");
@@ -50,6 +50,12 @@ impl Lambda {
                 String::from("true"),
             );
         }
+    }
+
+    /// Sets the runtime tag in `dynamic_value_tags`
+    pub fn set_runtime_tag(&mut self, runtime: &str) {
+        self.dynamic_value_tags
+            .insert(String::from("runtime"), runtime.to_string());
     }
 
     fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
