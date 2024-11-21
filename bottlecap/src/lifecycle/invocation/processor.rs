@@ -274,7 +274,6 @@ impl Processor {
             // Increment the error type metric
             if status == Status::Timeout {
                 self.enhanced_metrics.increment_timeout_metric();
-                self.enhanced_metrics.increment_errors_metric();
 
                 // Invocation Span will never have the `trace_id` or `span_id` set
                 self.span.trace_id = generate_span_id();
