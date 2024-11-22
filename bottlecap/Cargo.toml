@@ -54,6 +54,3 @@ opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
 strip = true
-
-[profile.release.package."*"]
-opt-level = "z"
