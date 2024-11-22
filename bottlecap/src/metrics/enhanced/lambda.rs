@@ -82,6 +82,10 @@ impl Lambda {
         self.increment_metric(constants::TIMEOUTS_METRIC);
     }
 
+    pub fn increment_oom_metric(&self) {
+        self.increment_metric(constants::OUT_OF_MEMORY_METRIC);
+    }
+
     pub fn set_init_duration_metric(&self, init_duration_ms: f64) {
         if !self.config.enhanced_metrics {
             return;
