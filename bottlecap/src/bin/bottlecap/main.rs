@@ -400,7 +400,12 @@ async fn extension_loop_active(
                     match event {
                         Event::Metric(event) => {
                             debug!("Metric event: {:?}", event);
-                        }
+                        },
+                        Event::OutOfMemory => {
+                            let mut p = invocation_processor.lock().await;
+                            p.on_out_of_memory_error();
+                            drop(p);
+                        },
                         Event::Telemetry(event) =>
                             match event.record {
                                 TelemetryRecord::PlatformInitStart { .. } => {
