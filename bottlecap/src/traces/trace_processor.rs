@@ -40,6 +40,12 @@ impl TraceChunkProcessor for ChunkProcessor {
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
         for span in &mut chunk.spans {
+            if span.service == "aws.lambda" {
+                if let Some(service) = self.tags_provider.get_tags_map().get("service") {
+                    span.service.clone_from(service);
+                }
+            }
+
             self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                 span.meta.insert(k.clone(), v.clone());
             });
