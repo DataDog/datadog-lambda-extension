@@ -25,6 +25,7 @@ use crate::config::service_mapping::deserialize_service_mapping;
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct FallbackConfig {
     extension_version: Option<String>,
     serverless_appsec_enabled: bool,
@@ -267,6 +268,22 @@ pub mod tests {
                 config,
                 ConfigError::UnsupportedField("extension_version".to_string())
             );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_fallback_on_otel() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_EXTENSION_VERSION", "next");
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT",
+                "localhost:4138",
+            );
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
             Ok(())
         });
     }
