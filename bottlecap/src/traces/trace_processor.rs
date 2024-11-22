@@ -40,6 +40,8 @@ impl TraceChunkProcessor for ChunkProcessor {
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
         for span in &mut chunk.spans {
+            // Service name could be incorrectly set to 'aws.lambda'
+            // in datadog lambda libraries
             if span.service == "aws.lambda" {
                 if let Some(service) = self.tags_provider.get_tags_map().get("service") {
                     span.service.clone_from(service);
