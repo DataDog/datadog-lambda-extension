@@ -602,4 +602,8 @@ impl Processor {
             // todo: handle timeout
         }
     }
+
+    pub fn on_out_of_memory_error(&mut self) {
+        self.enhanced_metrics.increment_oom_metric();
+    }
 }
