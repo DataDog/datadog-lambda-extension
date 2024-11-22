@@ -30,6 +30,10 @@ pub struct FallbackConfig {
     serverless_appsec_enabled: bool,
     appsec_enabled: bool,
     profiling_enabled: bool,
+    // otel
+    trace_otel_enabled: bool,
+    otlp_config_receiver_protocols_http_endpoint: Option<String>,
+    otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -163,6 +167,18 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
         return Err(ConfigError::UnsupportedField(
             "profiling_enabled".to_string(),
         ));
+    }
+
+    if fallback_config.trace_otel_enabled
+        || fallback_config
+            .otlp_config_receiver_protocols_http_endpoint
+            .is_some()
+        || fallback_config
+            .otlp_config_receiver_protocols_grpc_endpoint
+            .is_some()
+    {
+        log_fallback_reason("otel");
+        return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
 
     Ok(())
