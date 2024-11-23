@@ -62,12 +62,17 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+use lazy_static::lazy_static;
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
+
+lazy_static! {
+    static ref API_KEY_REGEX: regex::Regex = regex::Regex::new(r"^[a-f0-9]{32}$").unwrap();
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,7 +180,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
+    if let Some(resolved_api_key) = validate_api_key(resolve_secrets(Arc::clone(&config), &aws_config).await) {
         match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
@@ -191,6 +196,15 @@ async fn main() -> Result<()> {
     } else {
         error!("Failed to resolve secrets, Datadog extension will be idle");
         extension_loop_idle(&client, &r).await
+    }
+}
+
+fn validate_api_key(key: Option<String>) -> Option<String> {
+    if API_KEY_REGEX.is_match(key.as_deref().unwrap_or_default()) {
+        key
+    } else {
+        warn!("API key has invalid format");
+        None
     }
 }
 
