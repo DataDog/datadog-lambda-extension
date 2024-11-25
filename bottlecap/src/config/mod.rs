@@ -24,7 +24,7 @@ use crate::config::{
 
 /// `FallbackConfig` is a struct that represents fields that are not supported in the extension yet.
 ///
-/// If `extension_version` is set to "legacy", the Go extension will be launched.
+/// If `extension_version` is set to `compatibility`, the Go extension will be launched.
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
@@ -149,7 +149,7 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
 
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match fallback_config.extension_version.as_deref() {
-        Some("legacy") => true,
+        Some("compatibility") => true,
         // We want customers using the `next` to not be affected
         _ => false,
     };
@@ -273,7 +273,7 @@ pub mod tests {
     fn test_reject_on_opted_out() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_EXTENSION_VERSION", "legacy");
+            jail.set_env("DD_EXTENSION_VERSION", "compatibility");
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
                 config,
