@@ -167,7 +167,10 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    let config_start_time = Instant::now();
     let (aws_config, config) = load_configs();
+    let config_duration = config_start_time.elapsed();
+    println!("Config loaded in {:?}", config_duration);
 
     enable_logging_subsystem(&config);
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
@@ -224,6 +227,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         sandbox_init_time: Instant::now(),
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let get_config_start_time = Instant::now();
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
@@ -231,6 +235,8 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
             panic!("Error starting the extension: {err:?}");
         }
     };
+
+    println!("Config loaded in {:?}", get_config_start_time.elapsed());
 
     (aws_config, config)
 }
@@ -381,6 +387,7 @@ async fn extension_loop_active(
     let mut flush_interval = flush_control.get_flush_interval();
     flush_interval.tick().await; // discard first tick, which is instantaneous
 
+    debug!("Extension ready, calling for event");
     loop {
         let evt = next_event(client, &r.extension_id).await;
         match evt {

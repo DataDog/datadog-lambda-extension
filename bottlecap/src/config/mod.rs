@@ -199,20 +199,27 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
 
 #[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
+    let full_config_time = Instant::now();
     let path = config_directory.join("datadog.yaml");
 
     // Get default config fields (and ENV specific ones)
+    let base_figment_time = Instant::now();
     let figment = Figment::new()
         .merge(Yaml::file(&path))
         .merge(Env::prefixed("DATADOG_"))
         .merge(Env::prefixed("DD_"))
         .merge(Env::raw().only(&["HTTPS_PROXY"]));
-
+    println!("base figment time: {:?}", base_figment_time.elapsed());
     // Get YAML nested fields
-    let yaml_figment = Figment::from(Yaml::file(&path));
+    // check if yaml exists
+    if path.exists() {
+        let yaml_figment = Figment::from(Yaml::file(&path));
+        return Ok(figment.extract()?);
+    }
 
     fallback(&figment)?;
 
+    let yaml_time = Instant::now();
     let (mut config, yaml_config): (Config, YamlConfig) =
         match (figment.extract(), yaml_figment.extract()) {
             (Ok(env_config), Ok(yaml_config)) => (env_config, yaml_config),
@@ -221,6 +228,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
                 return Err(ConfigError::ParseError(err.to_string()));
             }
         };
+    println!("yaml time: {:?}", yaml_time.elapsed());
 
     // Prefer DD_PROXY_HTTPS over HTTPS_PROXY
     // No else needed as HTTPS_PROXY is handled by reqwest and built into trace client
@@ -250,6 +258,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
             .clone_from(&config.trace_propagation_style);
     }
 
+    println!("full config time: {:?}", full_config_time.elapsed());
     Ok(config)
 }
 
