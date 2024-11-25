@@ -78,6 +78,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
+    pub flush_timeout: u64,
     pub https_proxy: Option<String>,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
@@ -102,6 +103,7 @@ impl Default for Config {
             api_key_secret_arn: String::default(),
             kms_api_key: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
+            flush_timeout: 5,
             // Unified Tagging
             env: None,
             service: None,
