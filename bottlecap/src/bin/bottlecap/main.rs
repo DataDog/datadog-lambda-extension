@@ -50,6 +50,7 @@ use dogstatsd::{
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
 };
+use lazy_static::lazy_static;
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
@@ -68,6 +69,11 @@ use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+
+lazy_static! {
+    static ref API_KEY_REGEX: regex::Regex =
+        regex::Regex::new(r"^[a-f0-9]{32}$").expect("Invalid regex for DD API KEY");
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -175,7 +181,9 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
+    if let Some(resolved_api_key) =
+        clean_api_key(resolve_secrets(Arc::clone(&config), &aws_config).await)
+    {
         match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
@@ -192,6 +200,17 @@ async fn main() -> Result<()> {
         error!("Failed to resolve secrets, Datadog extension will be idle");
         extension_loop_idle(&client, &r).await
     }
+}
+
+fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
+    if let Some(key) = maybe_key {
+        let clean_key = key.trim_end_matches('\n').replace(' ', "").to_string();
+        if API_KEY_REGEX.is_match(&clean_key) {
+            return Some(clean_key);
+        }
+        error!("API key has invalid format");
+    }
+    None
 }
 
 fn load_configs() -> (AwsConfig, Arc<Config>) {
