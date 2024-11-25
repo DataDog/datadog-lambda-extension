@@ -13,35 +13,49 @@ use tracing::debug;
 use tracing::error;
 
 pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Option<String> {
-    if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
-        let before_decrypt = Instant::now();
+    let api_key_candidate =
+        if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
+            let before_decrypt = Instant::now();
 
-        let client = match Client::builder().use_rustls_tls().build() {
-            Ok(client) => client,
-            Err(err) => {
-                error!("Error creating reqwest client: {}", err);
-                return None;
+            let client = match Client::builder().use_rustls_tls().build() {
+                Ok(client) => client,
+                Err(err) => {
+                    error!("Error creating reqwest client: {}", err);
+                    return None;
+                }
+            };
+
+            let decrypted_key = if config.kms_api_key.is_empty() {
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
+            } else {
+                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
+            };
+
+            debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
+
+            match decrypted_key {
+                Ok(key) => Some(key),
+                Err(err) => {
+                    error!("Error decrypting key: {}", err);
+                    None
+                }
             }
-        };
-
-        let decrypted_key = if config.kms_api_key.is_empty() {
-            decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
         } else {
-            decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
+            Some(config.api_key.clone())
         };
 
-        debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
+    clean_api_key(api_key_candidate)
+}
 
-        match decrypted_key {
-            Ok(key) => Some(key),
-            Err(err) => {
-                error!("Error decrypting key: {}", err);
-                None
-            }
+fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
+    if let Some(key) = maybe_key {
+        let clean_key = key.trim_end_matches('\n').replace(' ', "").to_string();
+        if !clean_key.is_empty() {
+            return Some(clean_key);
         }
-    } else {
-        Some(config.api_key.clone())
+        error!("API key has invalid format");
     }
+    None
 }
 
 struct RequestArgs<'a> {
@@ -249,6 +263,14 @@ fn get_aws4_signature_key(
 mod tests {
     use super::*;
     use chrono::{NaiveDateTime, TimeZone};
+
+    #[test]
+    fn key_cleanup() {
+        let key = clean_api_key(Some(" 32alxcxf\n".to_string()));
+        assert_eq!(key.expect("it should parse the key"), "32alxcxf");
+        let key = clean_api_key(Some("   \n".to_string()));
+        assert_eq!(key, None);
+    }
 
     #[test]
     #[allow(clippy::unwrap_used)]
