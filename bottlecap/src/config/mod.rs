@@ -149,17 +149,13 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
 
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match fallback_config.extension_version.as_deref() {
-        Some("next") => false,
         Some("legacy") => true,
-        // Only log when the field is present but its not "legacy"
-        Some(_) => {
-            log_fallback_reason("extension_version");
-            true
-        }
+        // We want customers using the `next` to not be affected
         _ => false,
     };
 
     if opted_out {
+        log_fallback_reason("extension_version");
         return Err(ConfigError::UnsupportedField(
             "extension_version".to_string(),
         ));

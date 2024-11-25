@@ -59,10 +59,13 @@ async fn decrypt_aws_kms(
     kms_key: String,
     aws_config: &AwsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    // When the API key is encrypted using the AWS console, the function name is added as an
+    // encryption context. When the API key is encrypted using the AWS CLI, no encryption context
+    // is added. We need to try decrypting the API key both with and without the encryption context.
+
     let json_body = &serde_json::json!({
-        "CiphertextBlob": kms_key,
-        "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
-    );
+        "CiphertextBlob": kms_key
+    });
 
     let headers = build_get_secret_signed_headers(
         aws_config,
@@ -80,7 +83,29 @@ async fn decrypt_aws_kms(
         let secret_string = String::from_utf8(BASE64_STANDARD.decode(secret_string_b64)?)?;
         Ok(secret_string)
     } else {
-        Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
+        let json_body = &serde_json::json!({
+            "CiphertextBlob": kms_key,
+            "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
+        );
+
+        let headers = build_get_secret_signed_headers(
+            aws_config,
+            RequestArgs {
+                service: "kms".to_string(),
+                body: json_body,
+                time: Utc::now(),
+                x_amz_target: "TrentService.Decrypt".to_string(),
+            },
+        );
+
+        let v = request(json_body, headers?, client).await?;
+
+        if let Some(secret_string_b64) = v["Plaintext"].as_str() {
+            let secret_string = String::from_utf8(BASE64_STANDARD.decode(secret_string_b64)?)?;
+            Ok(secret_string)
+        } else {
+            Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
+        }
     }
 }
 
