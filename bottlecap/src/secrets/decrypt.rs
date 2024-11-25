@@ -25,9 +25,9 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Opt
         };
 
         let decrypted_key = if config.kms_api_key.is_empty() {
-            decrypt_aws_kms(&client, config.api_key_secret_arn.clone(), aws_config).await
+            decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
         } else {
-            decrypt_aws_sm(&client, config.kms_api_key.clone(), aws_config).await
+            decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
         };
 
         debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
