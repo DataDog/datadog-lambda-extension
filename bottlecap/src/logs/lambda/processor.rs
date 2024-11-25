@@ -254,8 +254,8 @@ impl LambdaProcessor {
 
     pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
         if let Ok(mut log) = self.make_log(event).await {
-            let should_send_log =
-                self.logs_enabled && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
+            let should_send_log = self.logs_enabled
+                && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
             if should_send_log {
                 if let Ok(serialized_log) = serde_json::to_string(&log) {
                     // explicitly drop log so we don't accidentally re-use it and push
