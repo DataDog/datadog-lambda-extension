@@ -12,12 +12,15 @@ use std::vec;
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
 use serde::Deserialize;
+use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
-use crate::config::flush_strategy::FlushStrategy;
-use crate::config::log_level::{deserialize_log_level, LogLevel};
-use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
-use crate::config::service_mapping::deserialize_service_mapping;
+use crate::config::{
+    flush_strategy::FlushStrategy,
+    log_level::{deserialize_log_level, LogLevel},
+    processing_rule::{deserialize_processing_rules, ProcessingRule},
+    service_mapping::deserialize_service_mapping,
+};
 
 /// `FallbackConfig` is a struct that represents fields that are not supported in the extension yet.
 ///
@@ -35,6 +38,8 @@ pub struct FallbackConfig {
     trace_otel_enabled: bool,
     otlp_config_receiver_protocols_http_endpoint: Option<String>,
     otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
+    // YAML otel, we don't care about the content
+    otlp_config: Option<Value>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -172,6 +177,7 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
         ));
     }
 
+    // OTEL env
     if fallback_config.trace_otel_enabled
         || fallback_config
             .otlp_config_receiver_protocols_http_endpoint
@@ -180,6 +186,12 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
             .otlp_config_receiver_protocols_grpc_endpoint
             .is_some()
     {
+        log_fallback_reason("otel");
+        return Err(ConfigError::UnsupportedField("otel".to_string()));
+    }
+
+    // OTEL YAML
+    if fallback_config.otlp_config.is_some() {
         log_fallback_reason("otel");
         return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
@@ -283,6 +295,47 @@ pub mod tests {
                 "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT",
                 "localhost:4138",
             );
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_fallback_on_otel_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                otlp_config:
+                  receiver:
+                    protocols:
+                      http:
+                        endpoint: localhost:4138
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_fallback_on_otel_yaml_empty_section() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                otlp_config:
+                  receiver:
+                    protocols:
+                      http:
+            ",
+            )?;
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
