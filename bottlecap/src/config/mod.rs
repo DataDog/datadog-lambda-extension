@@ -78,6 +78,7 @@ pub struct Config {
     pub capture_lambda_payload_max_depth: u32,
     #[serde(deserialize_with = "deserialize_service_mapping")]
     pub service_mapping: HashMap<String, String>,
+    pub serverless_logs_enabled: bool,
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -110,6 +111,7 @@ impl Default for Config {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             service_mapping: HashMap::new(),
+            serverless_logs_enabled: true,
             // Trace Propagation
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
