@@ -3,7 +3,7 @@ use std::time;
 use tokio::time::Interval;
 use tracing::debug;
 
-use super::invocation_times::InvocationTimes;
+use crate::lifecycle::invocation_times::InvocationTimes;
 
 const DEFAULT_FLUSH_INTERVAL: u64 = 1000; // 1s
 const TWENTY_SECONDS: u64 = 20 * 1000;
