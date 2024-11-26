@@ -6370,7 +6370,7 @@ third_party_libraries:
       See the License for the specific language governing permissions and
       limitations under the License.
 - package_name: dogstatsd
-  package_version: 13.1.0
+  package_version: 14.3.0
   repository: ''
   license: Apache-2.0
   licenses:
