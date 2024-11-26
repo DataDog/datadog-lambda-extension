@@ -11,7 +11,7 @@
 
 use bottlecap::{
     base_url,
-    config::{self, AwsConfig, Config},
+    config::{self, flush_strategy::FlushStrategy, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -356,7 +356,7 @@ async fn extension_loop_active(
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
-    let flush_control = FlushControl::new(config.serverless_flush_strategy);
+    let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
     let mut shutdown = false;
 
     let mut flush_interval = flush_control.get_flush_interval();
@@ -501,7 +501,7 @@ async fn extension_loop_active(
                         trace_flusher.manual_flush(),
                         stats_flusher.manual_flush()
                     );
-                    if !flush_control.should_flush_end() {
+                    if matches!(flush_control.flush_strategy, FlushStrategy::Periodically(_)) {
                         break;
                     }
                 }
