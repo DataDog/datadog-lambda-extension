@@ -5,7 +5,7 @@ use tracing::debug;
 
 use crate::lifecycle::invocation_times::InvocationTimes;
 
-const DEFAULT_FLUSH_INTERVAL: u64 = 1000; // 1s
+const DEFAULT_FLUSH_INTERVAL: u64 = 30 * 1000; // 30s
 const TWENTY_SECONDS: u64 = 20 * 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
