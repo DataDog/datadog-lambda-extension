@@ -44,8 +44,7 @@ impl FlushControl {
         };
         self.invocation_times.add(now);
         match &self.flush_strategy {
-            FlushStrategy::End => true,
-            FlushStrategy::EndPeriodically(_) => true,
+            FlushStrategy::End | FlushStrategy::EndPeriodically(_) => true,
             FlushStrategy::Periodically(_) => false,
             FlushStrategy::Default => {
                 if self.invocation_times.should_adapt_to_periodic(now) {
