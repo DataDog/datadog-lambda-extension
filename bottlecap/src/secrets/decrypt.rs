@@ -13,38 +13,49 @@ use tracing::debug;
 use tracing::error;
 
 pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Option<String> {
-    if !config.api_key.is_empty() {
-        debug!("DD_API_KEY found, not trying to resolve secrets");
-        Some(config.api_key.clone())
-    } else if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
-        let before_decrypt = Instant::now();
+    let api_key_candidate =
+        if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
+            let before_decrypt = Instant::now();
 
-        let client = match Client::builder().use_rustls_tls().build() {
-            Ok(client) => client,
-            Err(err) => {
-                error!("Error creating reqwest client: {}", err);
-                return None;
+            let client = match Client::builder().use_rustls_tls().build() {
+                Ok(client) => client,
+                Err(err) => {
+                    error!("Error creating reqwest client: {}", err);
+                    return None;
+                }
+            };
+
+            let decrypted_key = if config.kms_api_key.is_empty() {
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
+            } else {
+                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
+            };
+
+            debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
+
+            match decrypted_key {
+                Ok(key) => Some(key),
+                Err(err) => {
+                    error!("Error decrypting key: {}", err);
+                    None
+                }
             }
-        };
-
-        let decrypted_key = if config.api_key_secret_arn.is_empty() {
-            decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
         } else {
-            decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
+            Some(config.api_key.clone())
         };
 
-        debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
+    clean_api_key(api_key_candidate)
+}
 
-        match decrypted_key {
-            Ok(key) => Some(key),
-            Err(err) => {
-                error!("Error decrypting key: {}", err);
-                None
-            }
+fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
+    if let Some(key) = maybe_key {
+        let clean_key = key.trim_end_matches('\n').replace(' ', "").to_string();
+        if !clean_key.is_empty() {
+            return Some(clean_key);
         }
-    } else {
-        return None;
+        error!("API key has invalid format");
     }
+    None
 }
 
 struct RequestArgs<'a> {
@@ -59,10 +70,13 @@ async fn decrypt_aws_kms(
     kms_key: String,
     aws_config: &AwsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
+    // When the API key is encrypted using the AWS console, the function name is added as an
+    // encryption context. When the API key is encrypted using the AWS CLI, no encryption context
+    // is added. We need to try decrypting the API key both with and without the encryption context.
+
     let json_body = &serde_json::json!({
-        "CiphertextBlob": kms_key,
-        "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
-    );
+        "CiphertextBlob": kms_key
+    });
 
     let headers = build_get_secret_signed_headers(
         aws_config,
@@ -80,7 +94,29 @@ async fn decrypt_aws_kms(
         let secret_string = String::from_utf8(BASE64_STANDARD.decode(secret_string_b64)?)?;
         Ok(secret_string)
     } else {
-        Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
+        let json_body = &serde_json::json!({
+            "CiphertextBlob": kms_key,
+            "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
+        );
+
+        let headers = build_get_secret_signed_headers(
+            aws_config,
+            RequestArgs {
+                service: "kms".to_string(),
+                body: json_body,
+                time: Utc::now(),
+                x_amz_target: "TrentService.Decrypt".to_string(),
+            },
+        );
+
+        let v = request(json_body, headers?, client).await?;
+
+        if let Some(secret_string_b64) = v["Plaintext"].as_str() {
+            let secret_string = String::from_utf8(BASE64_STANDARD.decode(secret_string_b64)?)?;
+            Ok(secret_string)
+        } else {
+            Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
+        }
     }
 }
 
@@ -229,6 +265,14 @@ mod tests {
     use chrono::{NaiveDateTime, TimeZone};
 
     #[test]
+    fn key_cleanup() {
+        let key = clean_api_key(Some(" 32alxcxf\n".to_string()));
+        assert_eq!(key.expect("it should parse the key"), "32alxcxf");
+        let key = clean_api_key(Some("   \n".to_string()));
+        assert_eq!(key, None);
+    }
+
+    #[test]
     #[allow(clippy::unwrap_used)]
     fn test_build_get_secret_signed_headers() {
         let time = Utc.from_utc_datetime(
@@ -241,6 +285,7 @@ mod tests {
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
                 function_name: "arn:some-function".to_string(),
+                sandbox_init_time: Instant::now(),
             },
             RequestArgs {
                 service: "secretsmanager".to_string(),

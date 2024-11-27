@@ -10,8 +10,10 @@ use tracing::debug;
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
 const RUNTIME_VAR: &str = "AWS_EXECUTION_ENV";
 const MEMORY_SIZE_VAR: &str = "AWS_LAMBDA_FUNCTION_MEMORY_SIZE";
-const INIT_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
+pub const INIT_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
 const INIT_TYPE_KEY: &str = "init_type";
+// Value for INIT_TYPE when the function is using SnapStart
+pub const SNAP_START_VALUE: &str = "snap-start";
 
 // FunctionARNKey is the tag key for a function's arn
 pub const FUNCTION_ARN_KEY: &str = "function_arn";
@@ -45,7 +47,7 @@ const COMPUTE_STATS_VALUE: &str = "1";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-const EXTENSION_VERSION: &str = "65-next";
+const EXTENSION_VERSION: &str = "67-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -142,8 +144,7 @@ fn tags_from_env(
     tags_map
 }
 
-#[allow(dead_code)] // keeping this logic for when async runtime resolution will be supported
-fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &str) -> String {
+pub fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &str) -> String {
     let start = Instant::now();
     match fs::read_dir(proc_path) {
         Ok(proc_dir) => {

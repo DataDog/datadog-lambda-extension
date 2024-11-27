@@ -6,7 +6,10 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{get_aws_partition_by_region, lowercase_key, Trigger},
+    triggers::{
+        get_aws_partition_by_region, lowercase_key, ServiceNameResolver, Trigger,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -61,21 +64,27 @@ impl Trigger for APIGatewayHttpEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span) {
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         debug!("Enriching an Inferred Span for an API Gateway HTTP Event");
-        let resource = format!(
-            "{http_method} {path}",
-            http_method = self.request_context.http.method,
-            path = self.request_context.http.path
-        );
+        let resource = if self.route_key.is_empty() {
+            format!(
+                "{http_method} {route_key}",
+                http_method = self.request_context.http.method,
+                route_key = self.route_key
+            )
+        } else {
+            self.route_key.clone()
+        };
+
         let http_url = format!(
-            "{domain_name}{path}",
+            "https://{domain_name}{path}",
             domain_name = self.request_context.domain_name,
             path = self.request_context.http.path
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
-        // todo: service mapping
-        let service_name = self.request_context.domain_name.clone();
+
+        let service_name =
+            self.resolve_service_name(service_mapping, &self.request_context.domain_name);
 
         span.name = "aws.httpapi".to_string();
         span.service = service_name;
@@ -109,30 +118,46 @@ impl Trigger for APIGatewayHttpEvent {
                 "request_id".to_string(),
                 self.request_context.request_id.clone(),
             ),
-            ("resource_names".to_string(), resource),
         ]));
-
-        // todo: update global(? IsAsync if event payload is `Event`
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
         let mut tags = HashMap::from([
             (
                 "http.url".to_string(),
-                self.request_context.domain_name.clone(),
+                format!(
+                    "https://{domain_name}{path}",
+                    domain_name = self.request_context.domain_name.clone(),
+                    path = self.request_context.http.path.clone()
+                ),
             ),
+            // path and URL are full
+            // /users/12345/profile
             (
-                "http_url_details.path".to_string(),
+                "http.url_details.path".to_string(),
                 self.request_context.http.path.clone(),
             ),
             (
                 "http.method".to_string(),
                 self.request_context.http.method.clone(),
             ),
+            (
+                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                "api-gateway".to_string(),
+            ),
         ]);
-
+        // route is parameterized
+        // /users/{id}/profile
         if !self.route_key.is_empty() {
-            tags.insert("http.route".to_string(), self.route_key.clone());
+            tags.insert(
+                "http.route".to_string(),
+                self.route_key
+                    .clone()
+                    .split_whitespace()
+                    .last()
+                    .unwrap_or(&self.route_key.clone())
+                    .to_string(),
+            );
         }
 
         if let Some(referer) = self.headers.get("referer") {
@@ -162,8 +187,21 @@ impl Trigger for APIGatewayHttpEvent {
             .get("x-amz-invocation-type")
             .is_some_and(|v| v == "Event")
     }
+
+    fn get_carrier(&self) -> HashMap<String, String> {
+        self.headers.clone()
+    }
 }
 
+impl ServiceNameResolver for APIGatewayHttpEvent {
+    fn get_specific_identifier(&self) -> String {
+        self.request_context.api_id.clone()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_api_gateway"
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -202,7 +240,7 @@ mod tests {
                 request_id: "FaHnXjKCGjQEJ7A=".to_string(),
                 api_id: "x02yirxc7a".to_string(),
                 domain_name: "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string(),
-                time_epoch: 1631212283738,
+                time_epoch: 1_631_212_283_738,
                 http: RequestContextHTTP {
                     method: "GET".to_string(),
                     path: "/httpapi/get".to_string(),
@@ -226,6 +264,7 @@ mod tests {
     }
 
     #[test]
+
     fn test_is_not_match() {
         let json = read_json_file("api_gateway_proxy_event.json");
         let payload =
@@ -240,7 +279,8 @@ mod tests {
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
         let mut span = Span::default();
-        event.enrich_span(&mut span);
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.httpapi");
         assert_eq!(
             span.service,
@@ -254,7 +294,8 @@ mod tests {
                 ("endpoint".to_string(), "/httpapi/get".to_string()),
                 (
                     "http.url".to_string(),
-                    "x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get".to_string()
+                    "https://x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get"
+                        .to_string()
                 ),
                 ("http.method".to_string(), "GET".to_string()),
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
@@ -262,7 +303,6 @@ mod tests {
                 ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
                 ("operation_name".to_string(), "aws.httpapi".to_string()),
                 ("request_id".to_string(), "FaHnXjKCGjQEJ7A=".to_string()),
-                ("resource_names".to_string(), "GET /httpapi/get".to_string()),
             ])
         );
     }
@@ -274,22 +314,84 @@ mod tests {
         let event =
             APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
         let tags = event.get_tags();
+        let expected = HashMap::from([
+            (
+                "http.url".to_string(),
+                "https://x02yirxc7a.execute-api.sa-east-1.amazonaws.com/httpapi/get".to_string(),
+            ),
+            (
+                "http.url_details.path".to_string(),
+                "/httpapi/get".to_string(),
+            ),
+            ("http.method".to_string(), "GET".to_string()),
+            ("http.route".to_string(), "/httpapi/get".to_string()),
+            ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "api-gateway".to_string(),
+            ),
+        ]);
+
+        assert_eq!(tags, expected);
+    }
+
+    #[test]
+
+    fn test_enrich_span_parameterized() {
+        let json = read_json_file("api_gateway_http_event_parameterized.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
+        let mut span = Span::default();
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
+        assert_eq!(span.name, "aws.httpapi");
+        assert_eq!(
+            span.service,
+            "9vj54we5ih.execute-api.sa-east-1.amazonaws.com"
+        );
+        assert_eq!(span.resource, "GET /user/{id}");
+        assert_eq!(span.r#type, "http");
+        assert_eq!(
+            span.meta,
+            HashMap::from([
+                ("endpoint".to_string(), "/user/42".to_string()),
+                (
+                    "http.url".to_string(),
+                    "https://9vj54we5ih.execute-api.sa-east-1.amazonaws.com/user/42".to_string()
+                ),
+                ("http.method".to_string(), "GET".to_string()),
+                ("http.protocol".to_string(), "HTTP/1.1".to_string()),
+                ("http.source_ip".to_string(), "76.115.124.192".to_string()),
+                ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+                ("operation_name".to_string(), "aws.httpapi".to_string()),
+                ("request_id".to_string(), "Ur2JtjEfGjQEPOg=".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_get_tags_parameterized() {
+        let json = read_json_file("api_gateway_http_event_parameterized.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
+        let tags = event.get_tags();
 
         let expected = HashMap::from([
             (
                 "http.url".to_string(),
-                "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string(),
+                "https://9vj54we5ih.execute-api.sa-east-1.amazonaws.com/user/42".to_string(),
             ),
-            (
-                "http_url_details.path".to_string(),
-                "/httpapi/get".to_string(),
-            ),
+            ("http.url_details.path".to_string(), "/user/42".to_string()),
             ("http.method".to_string(), "GET".to_string()),
-            ("http.route".to_string(), "GET /httpapi/get".to_string()),
-            ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
-            ("http.referer".to_string(), "".to_string()),
+            ("http.route".to_string(), "/user/{id}".to_string()),
+            ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "api-gateway".to_string(),
+            ),
         ]);
-
         assert_eq!(tags, expected);
     }
 
@@ -302,6 +404,41 @@ mod tests {
         assert_eq!(
             event.get_arn("sa-east-1"),
             "arn:aws:apigateway:sa-east-1::/restapis/x02yirxc7a/stages/$default"
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("api_gateway_http_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("x02yirxc7a".to_string(), "specific-service".to_string()),
+            (
+                "lambda_api_gateway".to_string(),
+                "generic-service".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.request_context.domain_name
+            ),
+            "specific-service"
+        );
+
+        let generic_service_mapping = HashMap::from([(
+            "lambda_api_gateway".to_string(),
+            "generic-service".to_string(),
+        )]);
+        assert_eq!(
+            event
+                .resolve_service_name(&generic_service_mapping, &event.request_context.domain_name),
+            "generic-service"
         );
     }
 }

@@ -1,6 +1,7 @@
 // Copyright 2024-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,6 +13,10 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
+use crate::traces::propagation::text_map_propagator::{
+    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+    DATADOG_TRACE_ID_KEY,
+};
 
 const HELLO_PATH: &str = "/lambda/hello";
 const START_INVOCATION_PATH: &str = "/lambda/start-invocation";
@@ -83,18 +88,37 @@ impl Listener {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         debug!("Received start invocation request");
-        let (_, body) = req.into_parts();
+        let (parts, body) = req.into_parts();
         match hyper::body::to_bytes(body).await {
             Ok(b) => {
                 let body = b.to_vec();
                 let mut processor = invocation_processor.lock().await;
 
-                processor.on_invocation_start(body);
+                let headers = Self::headers_to_map(parts.headers);
+
+                processor.on_invocation_start(headers, body);
 
                 let mut response = Response::builder().status(200);
-                if processor.span.trace_id != 0 {
-                    response =
-                        response.header("x-datadog-trace-id", processor.span.trace_id.to_string());
+
+                // If a `SpanContext` exists, then tell the tracer to use it.
+                // todo: update this whole code with DatadogHeaderPropagator::inject
+                // since this logic looks messy
+                if let Some(sp) = &processor.extracted_span_context {
+                    response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
+                    if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
+                        response =
+                            response.header(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string());
+                    }
+
+                    // Handle 128 bit trace ids
+                    if let Some(trace_id_higher_order_bits) =
+                        sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
+                    {
+                        response = response.header(
+                            DATADOG_TAGS_KEY,
+                            format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
+                        );
+                    }
                 }
 
                 drop(processor);
@@ -117,44 +141,27 @@ impl Listener {
     ) -> http::Result<Response<Body>> {
         debug!("Received end invocation request");
         let (parts, body) = req.into_parts();
-        let parsed_body = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(body).await.unwrap_or_default(),
-        );
-        let mut parsed_status: Option<String> = None;
-        if let Some(status_code) = parsed_body.unwrap_or_default().get("statusCode") {
-            parsed_status = Some(status_code.to_string());
-        }
-        let headers = parts.headers;
+        match hyper::body::to_bytes(body).await {
+            Ok(b) => {
+                let body = b.to_vec();
+                let mut processor = invocation_processor.lock().await;
 
-        let mut processor = invocation_processor.lock().await;
+                let headers = Self::headers_to_map(parts.headers);
+                processor.on_invocation_end(headers, body);
+                drop(processor);
 
-        let mut trace_id = 0;
-        if let Some(header) = headers.get("x-datadog-trace-id") {
-            if let Ok(header_value) = header.to_str() {
-                trace_id = header_value.parse::<u64>().unwrap_or(0);
+                Response::builder()
+                    .status(200)
+                    .body(Body::from(json!({}).to_string()))
+            }
+            Err(e) => {
+                error!("Could not read end invocation request body {e}");
+
+                Response::builder()
+                    .status(400)
+                    .body(Body::from("Could not read end invocation request body"))
             }
         }
-
-        let mut span_id = 0;
-        if let Some(header) = headers.get("x-datadog-span-id") {
-            if let Ok(header_value) = header.to_str() {
-                span_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        let mut parent_id = 0;
-        if let Some(header) = headers.get("x-datadog-parent-id") {
-            if let Ok(header_value) = header.to_str() {
-                parent_id = header_value.parse::<u64>().unwrap_or(0);
-            }
-        }
-
-        processor.on_invocation_end(trace_id, span_id, parent_id, parsed_status);
-        drop(processor);
-
-        Response::builder()
-            .status(200)
-            .body(Body::from(json!({}).to_string()))
     }
 
     fn hello_handler() -> http::Result<Response<Body>> {
@@ -162,5 +169,17 @@ impl Listener {
         Response::builder()
             .status(200)
             .body(Body::from(json!({}).to_string()))
+    }
+
+    fn headers_to_map(headers: http::HeaderMap) -> HashMap<String, String> {
+        headers
+            .iter()
+            .map(|(k, v)| {
+                (
+                    k.as_str().to_string(),
+                    v.to_str().unwrap_or_default().to_string(),
+                )
+            })
+            .collect()
     }
 }

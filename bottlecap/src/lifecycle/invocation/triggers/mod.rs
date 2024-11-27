@@ -5,14 +5,56 @@ use serde::{ser::SerializeMap, Serializer};
 use serde_json::Value;
 
 pub mod api_gateway_http_event;
+pub mod api_gateway_rest_event;
+pub mod dynamodb_event;
+pub mod event_bridge_event;
+pub mod kinesis_event;
+pub mod lambda_function_url_event;
+pub mod s3_event;
+pub mod sns_event;
+pub mod sqs_event;
+pub mod step_function_event;
 
-pub trait Trigger: Sized {
-    fn new(payload: Value) -> Option<Self>;
-    fn is_match(payload: &Value) -> bool;
-    fn enrich_span(&self, span: &mut Span);
+pub const DATADOG_CARRIER_KEY: &str = "_datadog";
+pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
+pub const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
+
+/// Resolves the service name for a given trigger depending on
+/// service mapping configuration.
+pub trait ServiceNameResolver {
+    /// Get the specific service name for this trigger type, it will
+    /// be used as a key to resolve the service name
+    fn get_specific_identifier(&self) -> String;
+
+    /// Get the generic service mapping key for the trigger
+    fn get_generic_identifier(&self) -> &'static str;
+}
+
+pub trait Trigger: ServiceNameResolver {
+    fn new(payload: Value) -> Option<Self>
+    where
+        Self: Sized;
+    fn is_match(payload: &Value) -> bool
+    where
+        Self: Sized;
+    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>);
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str) -> String;
+    fn get_carrier(&self) -> HashMap<String, String>;
     fn is_async(&self) -> bool;
+
+    /// Default implementation for service name resolution
+    fn resolve_service_name(
+        &self,
+        service_mapping: &HashMap<String, String>,
+        fallback: &str,
+    ) -> String {
+        service_mapping
+            .get(&self.get_specific_identifier())
+            .or_else(|| service_mapping.get(self.get_generic_identifier()))
+            .unwrap_or(&fallback.to_string())
+            .to_string()
+    }
 }
 
 #[must_use]
@@ -44,8 +86,13 @@ where
 #[cfg(test)]
 pub mod test_utils {
     use std::fs;
+    use std::path::PathBuf;
 
+    #[must_use]
     pub fn read_json_file(file_name: &str) -> String {
-        fs::read_to_string(format!("tests/payloads/{}", file_name)).expect("Failed to read file")
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("tests/payloads");
+        path.push(file_name);
+        fs::read_to_string(path).expect("Failed to read file")
     }
 }

@@ -1,32 +1,34 @@
 use std::collections::HashMap;
 
 use lazy_static::lazy_static;
-use log::warn;
 use regex::Regex;
-use tracing::{debug, error};
-
-use super::{
-    carrier::{Extractor, Injector},
-    error::Error,
-};
+use tracing::{debug, error, warn};
 
 use crate::traces::context::{Sampling, SpanContext};
+use crate::traces::propagation::{
+    carrier::{Extractor, Injector},
+    error::Error,
+    Propagator,
+};
 
 // Datadog Keys
-const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
-const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
-const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
+pub const DATADOG_TRACE_ID_KEY: &str = "x-datadog-trace-id";
+pub const DATADOG_PARENT_ID_KEY: &str = "x-datadog-parent-id";
+pub const DATADOG_SPAN_ID_KEY: &str = "x-datadog-span-id";
+pub const DATADOG_SAMPLING_PRIORITY_KEY: &str = "x-datadog-sampling-priority";
 const DATADOG_ORIGIN_KEY: &str = "x-datadog-origin";
-const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
+pub const DATADOG_TAGS_KEY: &str = "x-datadog-tags";
 
-const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
+pub const DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY: &str = "_dd.p.tid";
 const DATADOG_PROPAGATION_ERROR_KEY: &str = "_dd.propagation_error";
-const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
+pub const DATADOG_LAST_PARENT_ID_KEY: &str = "_dd.parent_id";
 const DATADOG_SAMPLING_DECISION_KEY: &str = "_dd.p.dm";
 
 // Traceparent Keys
 const TRACEPARENT_KEY: &str = "traceparent";
-const TRACESTATE_KEY: &str = "tracestate";
+pub const TRACESTATE_KEY: &str = "tracestate";
+
+pub const BAGGAGE_PREFIX: &str = "ot-baggage-";
 
 lazy_static! {
     static ref TRACEPARENT_REGEX: Regex =
@@ -43,17 +45,12 @@ lazy_static! {
         Regex::new(r"^-([0-9])$").expect("failed creating regex");
 }
 
-pub trait TextMapPropagator {
-    fn extract(&self, carrier: &dyn Extractor) -> SpanContext;
-    fn inject(&self, context: SpanContext, carrier: &mut dyn Injector);
-}
-
 #[derive(Clone, Copy)]
-pub struct DatadogPropagator;
+pub struct DatadogHeaderPropagator;
 
-impl TextMapPropagator for DatadogPropagator {
-    fn extract(&self, carrier: &dyn Extractor) -> SpanContext {
-        Self::extract_context(carrier).unwrap_or_default()
+impl Propagator for DatadogHeaderPropagator {
+    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        Self::extract_context(carrier)
     }
 
     fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
@@ -61,29 +58,39 @@ impl TextMapPropagator for DatadogPropagator {
     }
 }
 
-impl DatadogPropagator {
+impl DatadogHeaderPropagator {
     fn extract_context(carrier: &dyn Extractor) -> Option<SpanContext> {
-        if let Some(trace_id) = Self::extract_trace_id(carrier) {
-            let parent_id = Self::extract_parent_id(carrier).unwrap_or(0);
-            let origin = Self::extract_origin(carrier);
-            let mut tags = Self::extract_tags(carrier);
-            let sampling_priority = Self::extract_sampling_priority(carrier).unwrap_or(2);
+        let trace_id = match Self::extract_trace_id(carrier) {
+            Ok(trace_id) => trace_id,
+            Err(e) => {
+                debug!("{e}");
+                return None;
+            }
+        };
 
-            Self::validate_sampling_decision(&mut tags);
+        let parent_id = Self::extract_parent_id(carrier).unwrap_or(0);
+        let sampling_priority = match Self::extract_sampling_priority(carrier) {
+            Ok(sampling_priority) => sampling_priority,
+            Err(e) => {
+                debug!("{e}");
+                return None;
+            }
+        };
+        let origin = Self::extract_origin(carrier);
+        let mut tags = Self::extract_tags(carrier);
+        Self::validate_sampling_decision(&mut tags);
 
-            return Some(SpanContext {
-                trace_id,
-                span_id: parent_id,
-                sampling: Some(Sampling {
-                    priority: Some(sampling_priority),
-                    mechanism: None,
-                }),
-                origin,
-                tags,
-            });
-        }
-
-        None
+        Some(SpanContext {
+            trace_id,
+            span_id: parent_id,
+            sampling: Some(Sampling {
+                priority: Some(sampling_priority),
+                mechanism: None,
+            }),
+            origin,
+            tags,
+            links: Vec::new(),
+        })
     }
 
     fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
@@ -108,14 +115,18 @@ impl DatadogPropagator {
         // todo: appsec standalone
     }
 
-    fn extract_trace_id(carrier: &dyn Extractor) -> Option<u64> {
-        let trace_id = carrier.get(DATADOG_TRACE_ID_KEY)?;
+    fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
+        let trace_id = carrier
+            .get(DATADOG_TRACE_ID_KEY)
+            .ok_or(Error::extract("`trace_id` not found", "datadog"))?;
 
         if INVALID_SEGMENT_REGEX.is_match(trace_id) {
-            return None;
+            return Err(Error::extract("Invalid `trace_id` found", "datadog"));
         }
 
-        trace_id.parse::<u64>().ok()
+        trace_id
+            .parse::<u64>()
+            .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))
     }
 
     fn extract_parent_id(carrier: &dyn Extractor) -> Option<u64> {
@@ -124,10 +135,13 @@ impl DatadogPropagator {
         parent_id.parse::<u64>().ok()
     }
 
-    fn extract_sampling_priority(carrier: &dyn Extractor) -> Option<i8> {
-        let sampling_priority = carrier.get(DATADOG_SAMPLING_PRIORITY_KEY)?;
+    fn extract_sampling_priority(carrier: &dyn Extractor) -> Result<i8, Error> {
+        // todo: enum? Default is USER_KEEP=2
+        let sampling_priority = carrier.get(DATADOG_SAMPLING_PRIORITY_KEY).unwrap_or("2");
 
-        sampling_priority.parse::<i8>().ok()
+        sampling_priority
+            .parse::<i8>()
+            .map_err(|_| Error::extract("Failed to decode `sampling_priority`", "datadog"))
     }
 
     fn extract_origin(carrier: &dyn Extractor) -> Option<String> {
@@ -135,7 +149,7 @@ impl DatadogPropagator {
         Some(origin.to_string())
     }
 
-    fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
+    pub fn extract_tags(carrier: &dyn Extractor) -> HashMap<String, String> {
         let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
         let mut tags: HashMap<String, String> = HashMap::new();
 
@@ -147,7 +161,7 @@ impl DatadogPropagator {
         for pair in pairs {
             if let Some((k, v)) = pair.split_once('=') {
                 // todo: reject key on tags extract reject
-                if k.starts_with("_dd.p") {
+                if k.starts_with("_dd.p.") {
                     tags.insert(k.to_string(), v.to_string());
                 }
             }
@@ -203,11 +217,11 @@ struct Tracestate {
 }
 
 #[derive(Clone, Copy)]
-pub struct TraceparentPropagator;
+pub struct TraceContextPropagator;
 
-impl TextMapPropagator for TraceparentPropagator {
-    fn extract(&self, carrier: &dyn Extractor) -> SpanContext {
-        Self::extract_context(carrier).unwrap_or_default()
+impl Propagator for TraceContextPropagator {
+    fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+        Self::extract_context(carrier)
     }
 
     fn inject(&self, _context: SpanContext, _carrier: &mut dyn Injector) {
@@ -215,7 +229,7 @@ impl TextMapPropagator for TraceparentPropagator {
     }
 }
 
-impl TraceparentPropagator {
+impl TraceContextPropagator {
     fn extract_context(carrier: &dyn Extractor) -> Option<SpanContext> {
         let tp = carrier.get(TRACEPARENT_KEY)?.trim();
 
@@ -259,6 +273,7 @@ impl TraceparentPropagator {
                     }),
                     origin,
                     tags,
+                    links: Vec::new(),
                 })
             }
             Err(e) => {
@@ -318,9 +333,10 @@ impl TraceparentPropagator {
                 tracestate.lower_order_trace_id = Some(lo_tid.to_string());
             }
 
+            // Convert from `t.` to `_dd.p.`
             for (k, v) in &dd {
-                if k.starts_with("t.") {
-                    let nk = format!("_dd.p.{k}");
+                if let Some(stripped) = k.strip_prefix("t.") {
+                    let nk = format!("_dd.p.{stripped}");
                     tags.insert(nk, Self::decode_tag_value(v));
                 }
             }
@@ -440,24 +456,28 @@ impl TraceparentPropagator {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
     use super::*;
 
     #[test]
     fn test_extract_datadog_propagator() {
-        let mut headers = HashMap::new();
-        headers.insert("x-datadog-trace-id".to_string(), "1234".to_string());
-        headers.insert("x-datadog-parent-id".to_string(), "5678".to_string());
-        headers.insert("x-datadog-sampling-priority".to_string(), "1".to_string());
-        headers.insert("x-datadog-origin".to_string(), "synthetics".to_string());
-        headers.insert(
-            "x-datadog-tags".to_string(),
-            "_dd.p.test=value,_dd.p.tid=4321,any=tag".to_string(),
-        );
+        let headers = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "1234".to_string()),
+            ("x-datadog-parent-id".to_string(), "5678".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+            ("x-datadog-origin".to_string(), "synthetics".to_string()),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.test=value,_dd.p.tid=4321,any=tag".to_string(),
+            ),
+        ]);
 
-        let propagator = DatadogPropagator;
+        let propagator = DatadogHeaderPropagator;
 
-        let context = propagator.extract(&headers);
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
 
         assert_eq!(context.trace_id, 1234);
         assert_eq!(context.span_id, 5678);
@@ -471,21 +491,24 @@ mod test {
 
     #[test]
     fn test_extract_traceparent_propagator() {
-        let mut headers = HashMap::new();
-        headers.insert(
-            "traceparent".to_string(),
-            "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
-        );
-        headers.insert(
-            "tracestate".to_string(),
-            "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
-        );
+        let headers = HashMap::from([
+            (
+                "traceparent".to_string(),
+                "00-80f198ee56343ba864fe8b2a57d3eff7-00f067aa0ba902b7-01".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
+            ),
+        ]);
 
-        let propagator = TraceparentPropagator;
-        let context = propagator.extract(&headers);
+        let propagator = TraceContextPropagator;
+        let context = propagator
+            .extract(&headers)
+            .expect("couldn't extract trace context");
 
-        assert_eq!(context.trace_id, 7277407061855694839);
-        assert_eq!(context.span_id, 67667974448284343);
+        assert_eq!(context.trace_id, 7_277_407_061_855_694_839);
+        assert_eq!(context.span_id, 67_667_974_448_284_343);
         assert_eq!(context.sampling.unwrap().priority, Some(2));
         assert_eq!(context.origin, Some("rum".to_string()));
         assert_eq!(

@@ -1,3 +1,4 @@
+use crate::metrics::enhanced::lambda::EnhancedMetricData;
 use std::collections::VecDeque;
 
 use tracing::debug;
@@ -8,6 +9,7 @@ pub struct Context {
     pub runtime_duration_ms: f64,
     pub init_duration_ms: f64,
     pub start_time: i64,
+    pub enhanced_metric_data: Option<EnhancedMetricData>,
 }
 
 impl Context {
@@ -17,12 +19,14 @@ impl Context {
         runtime_duration_ms: f64,
         init_duration_ms: f64,
         start_time: i64,
+        enhanced_metric_data: Option<EnhancedMetricData>,
     ) -> Self {
         Context {
             request_id,
             runtime_duration_ms,
             init_duration_ms,
             start_time,
+            enhanced_metric_data,
         }
     }
 }
@@ -89,8 +93,13 @@ impl ContextBuffer {
             .find(|context| context.request_id == *request_id)
     }
 
-    /// Adds the init duration to a `Context` in the buffer. If the `Context` is not found, a new
-    /// `Context` is created and added to the buffer.
+    /// Creates a new `Context` and adds it to the buffer.
+    ///
+    pub fn create_context(&mut self, request_id: String) {
+        self.insert(Context::new(request_id, 0f64, 0f64, 0, None));
+    }
+
+    /// Adds the init duration to a `Context` in the buffer.
     ///
     pub fn add_init_duration(&mut self, request_id: &String, init_duration_ms: f64) {
         if let Some(context) = self
@@ -100,12 +109,11 @@ impl ContextBuffer {
         {
             context.init_duration_ms = init_duration_ms;
         } else {
-            self.insert(Context::new(request_id.clone(), 0.0, init_duration_ms, 0));
+            debug!("Could not add init duration - context not found");
         }
     }
 
-    /// Adds the start time to a `Context` in the buffer. If the `Context` is not found, a new
-    /// `Context` is created and added to the buffer.
+    /// Adds the start time to a `Context` in the buffer.
     ///
     pub fn add_start_time(&mut self, request_id: &String, start_time: i64) {
         if let Some(context) = self
@@ -115,12 +123,11 @@ impl ContextBuffer {
         {
             context.start_time = start_time;
         } else {
-            self.insert(Context::new(request_id.clone(), 0.0, 0.0, start_time));
+            debug!("Could not add start time - context not found");
         }
     }
 
-    /// Adds the runtime duration to a `Context` in the buffer. If the `Context` is not found, a new
-    /// `Context` is created and added to the buffer.
+    /// Adds the runtime duration to a `Context` in the buffer.
     ///
     pub fn add_runtime_duration(&mut self, request_id: &String, runtime_duration_ms: f64) {
         if let Some(context) = self
@@ -130,12 +137,25 @@ impl ContextBuffer {
         {
             context.runtime_duration_ms = runtime_duration_ms;
         } else {
-            self.insert(Context::new(
-                request_id.clone(),
-                runtime_duration_ms,
-                0.0,
-                0,
-            ));
+            debug!("Could not add runtime duration - context not found");
+        }
+    }
+
+    /// Adds the network offset to a `Context` in the buffer.
+    ///
+    pub fn add_enhanced_metric_data(
+        &mut self,
+        request_id: &String,
+        enhanced_metric_data: Option<EnhancedMetricData>,
+    ) {
+        if let Some(context) = self
+            .buffer
+            .iter_mut()
+            .find(|context| context.request_id == *request_id)
+        {
+            context.enhanced_metric_data = enhanced_metric_data;
+        } else {
+            debug!("Could not add network offset - context not found");
         }
     }
 
@@ -145,11 +165,22 @@ impl ContextBuffer {
     pub fn size(&self) -> usize {
         self.buffer.len()
     }
+
+    /// Returns if the buffer is empty.
+    ///
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.buffer.is_empty()
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    use crate::proc::{CPUData, NetworkData};
+    use std::collections::HashMap;
+    use tokio::sync::watch;
+
     use super::*;
 
     #[test]
@@ -157,20 +188,20 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
 
         // This should replace the first context
         let request_id_3 = String::from("3");
-        let context = Context::new(request_id_3.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_3.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_3).unwrap(), &context);
@@ -184,13 +215,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -211,13 +242,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -232,22 +263,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
-        buffer.add_init_duration(&request_id, 100.0);
-        assert_eq!(buffer.get(&request_id).unwrap().init_duration_ms, 100.0);
-
-        // Add init duration to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_init_duration(&unexistent_request_id, 200.0);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(
-            buffer.get(&unexistent_request_id).unwrap().init_duration_ms,
-            200.0
-        );
+        buffer.add_init_duration(&request_id, 100f64);
+        assert!((buffer.get(&request_id).unwrap().init_duration_ms - 100f64).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -255,19 +277,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         buffer.add_start_time(&request_id, 100);
         assert_eq!(buffer.get(&request_id).unwrap().start_time, 100);
-
-        // Add start time to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_start_time(&unexistent_request_id, 200);
-        assert_eq!(buffer.size(), 2);
-        assert_eq!(buffer.get(&unexistent_request_id).unwrap().start_time, 200);
     }
 
     #[test]
@@ -275,24 +291,58 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0.0, 0.0, 0);
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
-        buffer.add_runtime_duration(&request_id, 100.0);
-        assert_eq!(buffer.get(&request_id).unwrap().runtime_duration_ms, 100.0);
+        buffer.add_runtime_duration(&request_id, 100f64);
+        assert!(
+            (buffer.get(&request_id).unwrap().runtime_duration_ms - 100f64).abs() < f64::EPSILON
+        );
+    }
 
-        // Add runtime duration to a context that doesn't exist
-        let unexistent_request_id = String::from("unexistent");
-        buffer.add_runtime_duration(&unexistent_request_id, 200.0);
-        assert_eq!(buffer.size(), 2);
+    #[test]
+    fn test_add_enhanced_metric_data() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+
+        let request_id = String::from("1");
+        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        buffer.insert(context.clone());
+        assert_eq!(buffer.size(), 1);
+        assert_eq!(buffer.get(&request_id).unwrap(), &context);
+
+        let network_offset = Some(NetworkData {
+            rx_bytes: 180f64,
+            tx_bytes: 254.0,
+        });
+
+        let mut individual_cpu_idle_times = HashMap::new();
+        individual_cpu_idle_times.insert("cpu0".to_string(), 10f64);
+        individual_cpu_idle_times.insert("cpu1".to_string(), 20f64);
+        let cpu_offset = Some(CPUData {
+            total_user_time_ms: 100f64,
+            total_system_time_ms: 53.0,
+            total_idle_time_ms: 20f64,
+            individual_cpu_idle_times,
+        });
+
+        let uptime_offset = Some(50f64);
+        let (tmp_chan_tx, _) = watch::channel(());
+        let (process_chan_tx, _) = watch::channel(());
+
+        let enhanced_metric_data = Some(EnhancedMetricData {
+            network_offset,
+            cpu_offset,
+            uptime_offset,
+            tmp_chan_tx,
+            process_chan_tx,
+        });
+
+        buffer.add_enhanced_metric_data(&request_id, enhanced_metric_data.clone());
         assert_eq!(
-            buffer
-                .get(&unexistent_request_id)
-                .unwrap()
-                .runtime_duration_ms,
-            200.0
+            buffer.get(&request_id).unwrap().enhanced_metric_data,
+            enhanced_metric_data,
         );
     }
 }

@@ -1,31 +1,45 @@
 pub mod flush_strategy;
 pub mod log_level;
 pub mod processing_rule;
+pub mod service_mapping;
 pub mod trace_propagation_style;
 
+use std::collections::HashMap;
 use std::path::Path;
+use std::time::Instant;
 use std::vec;
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
 use serde::Deserialize;
+use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
-use crate::config::flush_strategy::FlushStrategy;
-use crate::config::log_level::{deserialize_log_level, LogLevel};
-use crate::config::processing_rule::{deserialize_processing_rules, ProcessingRule};
+use crate::config::{
+    flush_strategy::FlushStrategy,
+    log_level::{deserialize_log_level, LogLevel},
+    processing_rule::{deserialize_processing_rules, ProcessingRule},
+    service_mapping::deserialize_service_mapping,
+};
 
-/// `FailoverConfig` is a struct that represents fields that are not supported in the extension yet.
+/// `FallbackConfig` is a struct that represents fields that are not supported in the extension yet.
 ///
-/// `extension_version` is expected to be set to "next" to enable the optimized extension.
+/// If `extension_version` is set to `compatibility`, the Go extension will be launched.
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
-pub struct FailoverConfig {
+#[allow(clippy::struct_excessive_bools)]
+pub struct FallbackConfig {
     extension_version: Option<String>,
     serverless_appsec_enabled: bool,
     appsec_enabled: bool,
     profiling_enabled: bool,
+    // otel
+    trace_otel_enabled: bool,
+    otlp_config_receiver_protocols_http_endpoint: Option<String>,
+    otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
+    // YAML otel, we don't care about the content
+    otlp_config: Option<Value>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -64,7 +78,13 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
+    pub flush_timeout: u64,
     pub https_proxy: Option<String>,
+    pub capture_lambda_payload: bool,
+    pub capture_lambda_payload_max_depth: u32,
+    #[serde(deserialize_with = "deserialize_service_mapping")]
+    pub service_mapping: HashMap<String, String>,
+    pub serverless_logs_enabled: bool,
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -83,6 +103,7 @@ impl Default for Config {
             api_key_secret_arn: String::default(),
             kms_api_key: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
+            flush_timeout: 5,
             // Unified Tagging
             env: None,
             service: None,
@@ -93,8 +114,11 @@ impl Default for Config {
             logs_config_processing_rules: None,
             // Metrics
             enhanced_metrics: true,
-            // Failover
             https_proxy: None,
+            capture_lambda_payload: false,
+            capture_lambda_payload_max_depth: 10,
+            service_mapping: HashMap::new(),
+            serverless_logs_enabled: true,
             // Trace Propagation
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
@@ -114,45 +138,62 @@ pub enum ConfigError {
     UnsupportedField(String),
 }
 
-fn log_failover_reason(reason: &str) {
-    println!("{{\"DD_EXTENSION_FAILOVER_REASON\":\"{reason}\"}}");
+fn log_fallback_reason(reason: &str) {
+    println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
-fn failsover(figment: &Figment) -> Result<(), ConfigError> {
-    let failover_config: FailoverConfig = match figment.extract() {
-        Ok(failover_config) => failover_config,
+fn fallback(figment: &Figment) -> Result<(), ConfigError> {
+    let fallback_config: FallbackConfig = match figment.extract() {
+        Ok(fallback_config) => fallback_config,
         Err(err) => {
             println!("Failed to parse Datadog config: {err}");
             return Err(ConfigError::ParseError(err.to_string()));
         }
     };
 
-    let opted_in = match failover_config.extension_version.as_deref() {
-        Some("next") => true,
-        // Only log when the field is present but its not "next"
-        Some(_) => {
-            log_failover_reason("extension_version");
-            false
-        }
+    // Customer explicitly opted out of the Next Gen extension
+    let opted_out = match fallback_config.extension_version.as_deref() {
+        Some("compatibility") => true,
+        // We want customers using the `next` to not be affected
         _ => false,
     };
 
-    if !opted_in {
+    if opted_out {
+        log_fallback_reason("extension_version");
         return Err(ConfigError::UnsupportedField(
             "extension_version".to_string(),
         ));
     }
 
-    if failover_config.serverless_appsec_enabled || failover_config.appsec_enabled {
-        log_failover_reason("appsec_enabled");
+    if fallback_config.serverless_appsec_enabled || fallback_config.appsec_enabled {
+        log_fallback_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
 
-    if failover_config.profiling_enabled {
-        log_failover_reason("profiling_enabled");
+    if fallback_config.profiling_enabled {
+        log_fallback_reason("profiling_enabled");
         return Err(ConfigError::UnsupportedField(
             "profiling_enabled".to_string(),
         ));
+    }
+
+    // OTEL env
+    if fallback_config.trace_otel_enabled
+        || fallback_config
+            .otlp_config_receiver_protocols_http_endpoint
+            .is_some()
+        || fallback_config
+            .otlp_config_receiver_protocols_grpc_endpoint
+            .is_some()
+    {
+        log_fallback_reason("otel");
+        return Err(ConfigError::UnsupportedField("otel".to_string()));
+    }
+
+    // OTEL YAML
+    if fallback_config.otlp_config.is_some() {
+        log_fallback_reason("otel");
+        return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
 
     Ok(())
@@ -172,8 +213,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     // Get YAML nested fields
     let yaml_figment = Figment::from(Yaml::file(&path));
 
-    // Failover
-    failsover(&figment)?;
+    fallback(&figment)?;
 
     let (mut config, yaml_config): (Config, YamlConfig) =
         match (figment.extract(), yaml_figment.extract()) {
@@ -184,6 +224,11 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
             }
         };
 
+    // Prefer DD_PROXY_HTTPS over HTTPS_PROXY
+    // No else needed as HTTPS_PROXY is handled by reqwest and built into trace client
+    if let Ok(https_proxy) = std::env::var("DD_PROXY_HTTPS") {
+        config.https_proxy = Some(https_proxy);
+    }
     // Set site if empty
     if config.site.is_empty() {
         config.site = "datadoghq.com".to_string();
@@ -218,6 +263,7 @@ pub struct AwsConfig {
     pub aws_secret_access_key: String,
     pub aws_session_token: String,
     pub function_name: String,
+    pub sandbox_init_time: Instant,
 }
 
 #[cfg(test)]
@@ -228,9 +274,10 @@ pub mod tests {
     use crate::config::processing_rule;
 
     #[test]
-    fn test_reject_without_opt_in() {
+    fn test_reject_on_opted_out() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
+            jail.set_env("DD_EXTENSION_VERSION", "compatibility");
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
                 config,
@@ -241,10 +288,65 @@ pub mod tests {
     }
 
     #[test]
+    fn test_fallback_on_otel() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT",
+                "localhost:4138",
+            );
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_fallback_on_otel_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                otlp_config:
+                  receiver:
+                    protocols:
+                      http:
+                        endpoint: localhost:4138
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_fallback_on_otel_yaml_empty_section() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                otlp_config:
+                  receiver:
+                    protocols:
+                      http:
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
@@ -264,7 +366,6 @@ pub mod tests {
                 "datadog.yaml",
                 r"
                 site: datadoghq.eu,
-                extension_version: next
             ",
             )?;
             jail.set_env("DD_SITE", "datad0g.com");
@@ -281,7 +382,6 @@ pub mod tests {
             jail.create_file(
                 "datadog.yaml",
                 r"
-                extension_version: next
             ",
             )?;
             let config = get_config(Path::new("")).expect("should parse config");
@@ -295,7 +395,6 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SITE", "datadoghq.eu");
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.site, "datadoghq.eu");
             Ok(())
@@ -307,7 +406,6 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_LOG_LEVEL", "TRACE");
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.log_level, LogLevel::Trace);
             Ok(())
@@ -318,7 +416,6 @@ pub mod tests {
     fn test_parse_default() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
@@ -340,7 +437,6 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "end");
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::End);
             Ok(())
@@ -352,7 +448,6 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,100000");
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.serverless_flush_strategy,
@@ -367,7 +462,6 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "invalid_strategy");
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
             Ok(())
@@ -382,7 +476,6 @@ pub mod tests {
                 "DD_SERVERLESS_FLUSH_STRATEGY",
                 "periodically,invalid_interval",
             );
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
             Ok(())
@@ -408,7 +501,6 @@ pub mod tests {
                       pattern: exclude-me-yaml
             ",
             )?;
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.logs_config_processing_rules,
@@ -430,7 +522,6 @@ pub mod tests {
             jail.create_file(
                 "datadog.yaml",
                 r"
-                extension_version: next
                 site: datadoghq.com
                 logs_config:
                   processing_rules:
@@ -481,7 +572,6 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "datadog");
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new("")).expect("should parse config");
 
             assert_eq!(
@@ -507,7 +597,6 @@ pub mod tests {
                 "DD_APM_REPLACE_TAGS",
                 r#"[{"name":"resource.name","pattern":"(.*)/(foo[:%].+)","repl":"$1/{foo}"}]"#,
             );
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new(""));
             assert!(config.is_ok());
             Ok(())

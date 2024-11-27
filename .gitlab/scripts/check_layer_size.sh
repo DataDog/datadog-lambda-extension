@@ -14,8 +14,8 @@ if [ -z "$LAYER_FILE" ]; then
     exit 1
 fi
 
-MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 18 \* 1024) # 17 MB, amd64 is 17, while arm64 is 15
-MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 49 \* 1024) # 49 MB, amd is 49, while arm64 is 48
+MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 20 \* 1024) # 20 MB, amd64 is 19, while arm64 is 18
+MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 53 \* 1024) # 53 MB, amd is 53, while arm64 is 47
 
 LAYERS_DIR=".layers"
 

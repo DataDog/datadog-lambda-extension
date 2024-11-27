@@ -219,7 +219,6 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
     ) -> http::Result<Response<Body>> {
-        debug!("Received traces to process");
         let (parts, body) = req.into_parts();
 
         if let Some(response) = http_utils::verify_request_content_length(
