@@ -249,7 +249,7 @@ pub fn get_fd_use_data(pids: &[i64]) -> Result<f64, io::Error> {
 }
 
 fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
-    let mut fd_use = 0;
+    let mut fd_use = 0.0;
 
     for &pid in pids {
         let fd_path = format!("{path}/{pid}/fd");
@@ -259,11 +259,11 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error>
                 "File descriptor use data not found",
             ));
         };
-        let count = files.count();
+        let count = files.count() as f64;
         fd_use += count;
     }
 
-    Ok(fd_use as f64)
+    Ok(fd_use)
 }
 
 #[must_use]
@@ -307,18 +307,17 @@ fn get_threads_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::E
 
     for &pid in pids {
         let task_path = format!("{path}/{pid}/task");
-        let Ok(files) = fs::read_dir(task_path) else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Threads use data not found",
-            ));
+        match fs::read_dir(task_path) {
+            Ok(files) => {
+                threads_use += files.count();
+            }
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Threads use data not found",
+                ));
+            }
         };
-
-        threads_use += files
-            .flatten()
-            .filter_map(|dir_entry| dir_entry.file_type().ok())
-            .filter(fs::FileType::is_dir)
-            .count();
     }
 
     Ok(threads_use as f64)

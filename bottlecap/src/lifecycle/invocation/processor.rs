@@ -387,11 +387,11 @@ impl Processor {
             }
 
             // Set Network and CPU time metrics
-            if let Some(offsets) = context.enhanced_metric_data.clone() {
+            if let Some(offsets) = &context.enhanced_metric_data {
                 self.enhanced_metrics
-                    .set_network_enhanced_metrics(offsets.network_offset);
+                    .set_network_enhanced_metrics(offsets.network_offset.clone());
                 self.enhanced_metrics
-                    .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
+                    .set_cpu_time_enhanced_metrics(offsets.cpu_offset.clone());
             }
         }
     }
