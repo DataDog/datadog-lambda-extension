@@ -41,7 +41,10 @@ impl Default for ContextBuffer {
     ///
     fn default() -> Self {
         ContextBuffer {
-            buffer: VecDeque::<Context>::with_capacity(5),
+            // TODO(astuyve) - remove this and grow dynamically
+            // NOSHIP, as we can now add invocations infinitely
+            // until periodic flush
+            buffer: VecDeque::<Context>::with_capacity(5000),
         }
     }
 }
