@@ -13,6 +13,10 @@ use constants::{
 use regex::Regex;
 use tracing::debug;
 
+// #[cfg(target_os = "linux")]
+use procfs::process::{Process, all_processes};
+
+
 #[must_use]
 pub fn get_pid_list() -> Vec<i64> {
     get_pid_list_from_path(PROC_PATH)
@@ -322,6 +326,36 @@ fn get_threads_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::E
     }
 
     Ok(threads_use as f64)
+}
+
+#[cfg(target_os = "linux")]
+pub fn get_fd_and_threads_use_data_from_procfs() -> Result<(f64, f64), io::Error> {
+    let mut fd_use = 0;
+    let mut threads_use = 0;
+
+    // Get all processes from /proc
+    for process in all_processes().map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidData, "Failed to list processes")
+    })? {
+        if let Ok(proc) = process {
+            // Count file descriptors
+            if let Ok(fds) = proc.fd() {
+                fd_use += fds.count();
+            }
+
+            // Count threads (tasks)
+            if let Ok(tasks) = proc.tasks() {
+                threads_use += tasks.count();
+            }
+        }
+    }
+
+    Ok((fd_use as f64, threads_use as f64))
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn get_fd_and_threads_use_data_from_procfs() -> Result<(f64, f64), io::Error> {
+    Err(io::Error::new(io::ErrorKind::NotFound, "Failed to find process data"))
 }
 
 #[cfg(test)]

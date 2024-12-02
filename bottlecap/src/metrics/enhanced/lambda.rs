@@ -7,7 +7,7 @@ use crate::telemetry::events::ReportMetrics;
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator::Aggregator, metric::SortedTags};
-use std::{collections::HashMap, sync::mpsc, thread};
+use std::{collections::HashMap, thread};
 use std::env::consts::ARCH;
 use std::sync::{Arc, Mutex, mpsc::{Receiver, Sender}};
 use std::time::Duration;
@@ -415,7 +415,6 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_max metric: {}", e);
         }
-        println!("=== inserted tmp_max metric: {tmp_max} ===");
 
         let metric = Metric::new(
             constants::TMP_USED_METRIC.into(),
@@ -425,7 +424,6 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_used metric: {}", e);
         }
-        println!("=== inserted tmp_used metric: {tmp_used} ===");
 
         let tmp_free = tmp_max - tmp_used;
         let metric = Metric::new(
@@ -436,7 +434,6 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_free metric: {}", e);
         }
-        println!("=== inserted tmp_free metric: {tmp_free} ===");
     }
 
     pub fn set_tmp_enhanced_metrics(&self, send_metrics: Receiver<bool>) {
@@ -465,7 +462,7 @@ impl Lambda {
                 if matches!(send_metrics.try_recv(), Ok(true) | Err(std::sync::mpsc::TryRecvError::Disconnected)) {
                     let mut aggr: std::sync::MutexGuard<Aggregator> =
                         aggr.lock().expect("lock poisoned");
-                        Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr, tags);
+                    Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr, tags);
                     return;
                 }
                 // Otherwise keep monitoring file descriptor and thread usage periodically
@@ -496,19 +493,14 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert fd_max metric: {}", e);
         }
-        println!("=== inserted fd_max metric: {fd_max} ===");
 
-        // Check if fd_use value is valid before inserting metric
-        if fd_use > 0.0 {
-            let metric = Metric::new(
-                constants::FD_USE_METRIC.into(),
-                MetricValue::distribution(fd_use),
-                tags,
-            );
-            if let Err(e) = aggr.insert(metric) {
-                error!("Failed to insert fd_use metric: {}", e);
-            }
-            println!("=== inserted fd_use metric: {fd_use} ===");
+        let metric = Metric::new(
+            constants::FD_USE_METRIC.into(),
+            MetricValue::distribution(fd_use),
+            tags,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert fd_use metric: {}", e);
         }
     }
 
@@ -527,16 +519,13 @@ impl Lambda {
             error!("Failed to insert threads_max metric: {}", e);
         }
 
-        // Check if threads_use value is valid before inserting metric
-        if threads_use > 0.0 {
-            let metric = Metric::new(
-                constants::THREADS_USE_METRIC.into(),
-                MetricValue::distribution(threads_use),
-                tags,
-            );
-            if let Err(e) = aggr.insert(metric) {
-                error!("Failed to insert threads_use metric: {}", e);
-            }
+        let metric = Metric::new(
+            constants::THREADS_USE_METRIC.into(),
+            MetricValue::distribution(threads_use),
+            tags,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert threads_use metric: {}", e);
         }
     }
 
@@ -551,28 +540,18 @@ impl Lambda {
         thread::spawn(move || {
             // get list of all process ids
             let pids = proc::get_pid_list();
-
-            // Set fd_max and initial value for fd_use to -1
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = match proc::get_fd_use_data(&pids) {
-                Ok(fd_use) => fd_use,
-                Err(_) => {
-                    debug!("Could not get fd_use data");
-                    -1_f64
-                }
-            };
-
-            // Set threads_max and initial value for threads_use to -1
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = match proc::get_threads_use_data(&pids) {
-                Ok(threads_use) => threads_use,
+
+            let (mut fd_use, mut threads_use) = match proc::get_fd_and_threads_use_data_from_procfs() {
+                Ok(vals) => vals,
                 Err(_) => {
-                    debug!("Could not get threads_use data");
-                    -1_f64
+                    debug!("Could not get process use data");
+                    return;
                 }
             };
 
-            let mut interval = Duration::from_millis(10);
+            let interval = Duration::from_millis(1);
             loop {
                 // When the stop signal is received, generate final metrics
                 if matches!(send_metrics.try_recv(), Ok(true) | Err(std::sync::mpsc::TryRecvError::Disconnected)) {
@@ -583,16 +562,11 @@ impl Lambda {
                     return;
                 }
                 // Otherwise keep monitoring file descriptor and thread usage periodically
-                if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
-                    if fd_use_curr >= fd_use {
-                        fd_use = fd_use_curr;
-                        interval = Duration::from_millis(1);
-                    } else {
-                        interval = Duration::from_millis(10);
-                    }
-                }
-                if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
+                if let Ok((fd_use_curr, threads_use_curr))= proc::get_fd_and_threads_use_data_from_procfs() {
+                    fd_use = fd_use.max(fd_use_curr);
                     threads_use = threads_use.max(threads_use_curr);
+                } else {
+                    return;
                 }
                 thread::sleep(interval);
             }

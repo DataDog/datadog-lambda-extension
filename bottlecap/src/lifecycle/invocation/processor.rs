@@ -9,7 +9,7 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{json, Value};
-use tokio::sync::{mpsc::Sender, watch};
+use tokio::sync::mpsc::Sender;
 use tracing::debug;
 
 use crate::{

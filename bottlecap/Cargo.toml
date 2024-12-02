@@ -21,6 +21,7 @@ hyper = { version = "0.14", default-features = false, features = ["server"] }
 lazy_static = { version = "1.5", default-features = false }
 log = { version = "0.4", default-features = false }
 nix = { version = "0.26", default-features = false, features = ["feature", "fs"] }
+procfs = { version = "0.14", optional = true }
 protobuf = { version = "3.5", default-features = false }
 regex = { version = "1.10", default-features = false }
 reqwest = { version = "0.12", features = ["json", "http2", "rustls-tls"], default-features = false }
@@ -54,3 +55,6 @@ opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
 strip = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = "0.14"
