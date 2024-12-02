@@ -450,12 +450,7 @@ impl Lambda {
         }
     }
 
-    #[allow(unreachable_code)]
-    #[allow(unused_variables)]
-    #[allow(unused_mut)]
     pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        // Temporarily disabled
-        return;
         if !self.config.enhanced_metrics {
             return;
         }
@@ -517,17 +512,15 @@ impl Lambda {
             error!("Failed to insert fd_max metric: {}", e);
         }
 
-        // Check if fd_use value is valid before inserting metric
-        if fd_use > 0.0 {
-            let metric = Metric::new(
-                constants::FD_USE_METRIC.into(),
-                MetricValue::distribution(fd_use),
-                tags,
-            );
-            if let Err(e) = aggr.insert(metric) {
-                error!("Failed to insert fd_use metric: {}", e);
-            }
+        let metric = Metric::new(
+            constants::FD_USE_METRIC.into(),
+            MetricValue::distribution(fd_use),
+            tags,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert fd_use metric: {}", e);
         }
+        // print!("=== inserted fd_use metric: {fd_use} ===");
     }
 
     pub fn generate_threads_enhanced_metrics(
@@ -545,25 +538,18 @@ impl Lambda {
             error!("Failed to insert threads_max metric: {}", e);
         }
 
-        // Check if threads_use value is valid before inserting metric
-        if threads_use > 0.0 {
-            let metric = Metric::new(
-                constants::THREADS_USE_METRIC.into(),
-                MetricValue::distribution(threads_use),
-                tags,
-            );
-            if let Err(e) = aggr.insert(metric) {
-                error!("Failed to insert threads_use metric: {}", e);
-            }
+        let metric = Metric::new(
+            constants::THREADS_USE_METRIC.into(),
+            MetricValue::distribution(threads_use),
+            tags,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert threads_use metric: {}", e);
         }
+        // print!("=== inserted threads_use metric: {threads_use} ===");
     }
 
-    #[allow(unreachable_code)]
-    #[allow(unused_variables)]
-    #[allow(unused_mut)]
     pub fn set_process_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        // Temporarily disabled
-        return;
         if !self.config.enhanced_metrics {
             return;
         }
@@ -575,13 +561,25 @@ impl Lambda {
             // get list of all process ids
             let pids = proc::get_pid_list();
 
-            // Set fd_max and initial value for fd_use to -1
+            // Set fd_max and initial value for fd_use
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = -1_f64;
+            let mut fd_use = match proc::get_fd_use_data(&pids) {
+                Ok(fd_use) => fd_use,
+                Err(_) => {
+                    debug!("Could not get file descriptor use data.");
+                    return;
+                }
+            };
 
-            // Set threads_max and initial value for threads_use to -1
+            // Set threads_max and initial value for threads_use
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = -1_f64;
+            let mut threads_use = match proc::get_threads_use_data(&pids) {
+                Ok(threads_use) => threads_use,
+                Err(_) => {
+                    debug!("Could not get threads use data.");
+                    return;
+                }
+            };
 
             let mut interval = interval(Duration::from_millis(1));
             loop {
@@ -597,22 +595,16 @@ impl Lambda {
                     }
                     // Otherwise keep monitoring file descriptor and thread usage periodically
                     _ = interval.tick() => {
-                        match proc::get_fd_use_data(&pids) {
-                            Ok(fd_use_curr) => {
-                                fd_use = fd_use.max(fd_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update file descriptor use enhanced metric.");
-                            }
-                        };
-                        match proc::get_threads_use_data(&pids) {
-                            Ok(threads_use_curr) => {
-                                threads_use = threads_use.max(threads_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update threads use enhanced metric.");
-                            }
-                        };
+                        let (fd_result, threads_result) = tokio::join!(
+                            async { proc::get_fd_use_data(&pids) },
+                            async { proc::get_threads_use_data(&pids) }
+                        );
+                        if let Ok(fd_use_curr) = fd_result {
+                            fd_use = fd_use.max(fd_use_curr);
+                        }
+                        if let Ok(threads_use_curr) = threads_result {
+                            threads_use = threads_use.max(threads_use_curr);
+                        }
                     }
                 }
             }
