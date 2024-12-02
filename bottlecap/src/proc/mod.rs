@@ -11,6 +11,7 @@ use constants::{
     LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
 };
 use regex::Regex;
+use tokio::fs::metadata;
 use tracing::debug;
 
 #[must_use]
@@ -39,6 +40,23 @@ pub fn get_pid_list_from_path(path: &str) -> Vec<i64> {
     }));
 
     pids
+}
+
+pub async fn get_pid_list_tokiofs() -> Result<Vec<i64>, io::Error> {
+    get_pid_list_from_path_tokiofs(PROC_PATH).await
+}
+
+pub async fn get_pid_list_from_path_tokiofs(path: &str) -> Result<Vec<i64>, io::Error> {
+    let mut pids = Vec::<i64>::new();
+
+    let mut entries = tokio::fs::read_dir(path).await?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        if let Ok(pid) = entry.file_name().to_string_lossy().parse::<i64>() {
+            pids.push(pid);
+        }
+    }
+    Ok(pids)
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -266,6 +284,38 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error>
     Ok(fd_use as f64)
 }
 
+pub async fn get_fd_use_data_tokiofs(pids: &[i64]) -> Result<f64, io::Error> {
+    get_fd_use_data_from_path_tokiofs(PROC_PATH, pids).await
+}
+
+pub async fn get_fd_use_data_from_path_tokiofs(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
+    let mut fd_use = 0;
+
+    for &pid in pids {
+        let fd_path = format!("{path}/{pid}/fd");
+
+        let mut files = match tokio::fs::read_dir(&fd_path).await {
+            Ok(files) => files,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "File descriptor use data not found",
+                ));
+            }
+        };
+
+        // Count entries asynchronously
+        let mut count = 0;
+        while let Ok(Some(_)) = files.next_entry().await {
+            count += 1;
+        }
+
+        fd_use += count;
+    }
+
+    Ok(fd_use as f64)
+}
+
 #[must_use]
 pub fn get_threads_max_data(pids: &[i64]) -> f64 {
     get_threads_max_data_from_path(PROC_PATH, pids)
@@ -319,6 +369,34 @@ fn get_threads_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::E
             .filter_map(|dir_entry| dir_entry.file_type().ok())
             .filter(fs::FileType::is_dir)
             .count();
+    }
+
+    Ok(threads_use as f64)
+}
+
+pub async fn get_threads_use_data_tokiofs(pids: &[i64]) -> Result<f64, io::Error> {
+    get_threads_use_data_from_path_tokiofs(PROC_PATH, pids).await
+}
+
+async fn get_threads_use_data_from_path_tokiofs(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
+    let mut threads_use = 0;
+
+    for &pid in pids {
+        let task_path = format!("{path}/{pid}/task");
+        let mut files = match tokio::fs::read_dir(&task_path).await {
+            Ok(files) => files,
+            Err(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Threads use data not found",
+                ));
+            }
+        };
+
+        // Count the number of directories
+        while files.next_entry().await?.is_some() {
+            threads_use += 1;
+        }
     }
 
     Ok(threads_use as f64)

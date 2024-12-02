@@ -559,11 +559,17 @@ impl Lambda {
 
         tokio::spawn(async move {
             // get list of all process ids
-            let pids = proc::get_pid_list();
+            let pids = match proc::get_pid_list_tokiofs().await {
+                Ok(pids) => pids,
+                Err(_) => {
+                    debug!("Could not get process ids list");
+                    return;
+                }
+            };
 
             // Set fd_max and initial value for fd_use
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = match proc::get_fd_use_data(&pids) {
+            let mut fd_use = match proc::get_fd_use_data_tokiofs(&pids).await {
                 Ok(fd_use) => fd_use,
                 Err(_) => {
                     debug!("Could not get file descriptor use data.");
@@ -573,7 +579,7 @@ impl Lambda {
 
             // Set threads_max and initial value for threads_use
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = match proc::get_threads_use_data(&pids) {
+            let mut threads_use = match proc::get_threads_use_data_tokiofs(&pids).await {
                 Ok(threads_use) => threads_use,
                 Err(_) => {
                     debug!("Could not get threads use data.");
@@ -596,8 +602,8 @@ impl Lambda {
                     // Otherwise keep monitoring file descriptor and thread usage periodically
                     _ = interval.tick() => {
                         let (fd_result, threads_result) = tokio::join!(
-                            async { proc::get_fd_use_data(&pids) },
-                            async { proc::get_threads_use_data(&pids) }
+                            proc::get_fd_use_data_tokiofs(&pids),
+                            proc::get_threads_use_data_tokiofs(&pids)
                         );
                         if let Ok(fd_use_curr) = fd_result {
                             fd_use = fd_use.max(fd_use_curr);
