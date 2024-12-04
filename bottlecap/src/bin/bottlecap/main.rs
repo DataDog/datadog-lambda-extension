@@ -432,11 +432,12 @@ async fn extension_loop_active(
                                     request_id,
                                     status,
                                     metrics,
+                                    error_type,
                                     ..
                                 } => {
                                     debug!(
-                                        "Runtime done for request_id: {:?} with status: {:?}",
-                                        request_id, status
+                                        "Runtime done for request_id: {:?} with status: {:?} and error: {:?}",
+                                        request_id, status, error_type.unwrap_or("None".to_string())
                                     );
 
                                     let mut p = invocation_processor.lock().await;
@@ -474,11 +475,12 @@ async fn extension_loop_active(
                                     request_id,
                                     status,
                                     metrics,
+                                    error_type,
                                     ..
                                 } => {
                                     debug!(
-                                        "Platform report for request_id: {:?} with status: {:?}",
-                                        request_id, status
+                                        "Platform report for request_id: {:?} with status: {:?} and error: {:?}",
+                                        request_id, status, error_type.unwrap_or("None".to_string())
                                     );
                                     let mut p = invocation_processor.lock().await;
                                     p.on_platform_report(&request_id, metrics);
