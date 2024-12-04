@@ -115,20 +115,25 @@ impl Processor {
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
 
             // Start a channel for monitoring tmp enhanced data
-            let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
-            self.enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
+            // let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
+            // self.enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
+
+            let tmp_notify = Arc::new(tokio::sync::Notify::new());
+            self.enhanced_metrics.set_tmp_enhanced_metrics(Arc::clone(&tmp_notify));
 
             // Start a channel for monitoring file descriptor and thread count
-            let (process_chan_tx, process_chan_rx) = watch::channel(());
-            self.enhanced_metrics
-                .set_process_enhanced_metrics(process_chan_rx);
+            // let (process_chan_tx, process_chan_rx) = watch::channel(());
+            // self.enhanced_metrics
+            //     .set_process_enhanced_metrics(process_chan_rx);
+            let process_notify = Arc::new(tokio::sync::Notify::new());
+            self.enhanced_metrics.set_process_enhanced_metrics(Arc::clone(&process_notify));
 
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
-                tmp_chan_tx,
-                process_chan_tx,
+                tmp_notify: Arc::clone(&tmp_notify),
+                process_notify: Arc::clone(&process_notify),
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -305,9 +310,12 @@ impl Processor {
                     offsets.uptime_offset,
                 );
                 // Send the signal to stop monitoring tmp
-                _ = offsets.tmp_chan_tx.send(());
+                // _ = offsets.tmp_chan_tx.send(());
                 // Send the signal to stop monitoring file descriptors and threads
-                _ = offsets.process_chan_tx.send(());
+                // _ = offsets.process_chan_tx.send(());
+
+                offsets.tmp_notify.notify_one();
+                offsets.process_notify.notify_one();
             }
         }
 

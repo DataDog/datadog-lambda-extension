@@ -17,6 +17,7 @@ use tokio::{
 };
 use tracing::debug;
 use tracing::error;
+use tokio::sync::Notify;
 
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
@@ -450,12 +451,7 @@ impl Lambda {
         }
     }
 
-    #[allow(unreachable_code)]
-    #[allow(unused_variables)]
-    #[allow(unused_mut)]
-    pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        // Temporarily disabled
-        return;
+    pub fn set_tmp_enhanced_metrics(&self, send_metrics: Arc<Notify>) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -480,7 +476,7 @@ impl Lambda {
                 tokio::select! {
                     biased;
                     // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
+                    _ = send_metrics.notified() => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
                         Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &mut aggr, tags);
@@ -518,15 +514,13 @@ impl Lambda {
         }
 
         // Check if fd_use value is valid before inserting metric
-        if fd_use > 0.0 {
-            let metric = Metric::new(
-                constants::FD_USE_METRIC.into(),
-                MetricValue::distribution(fd_use),
-                tags,
-            );
-            if let Err(e) = aggr.insert(metric) {
-                error!("Failed to insert fd_use metric: {}", e);
-            }
+        let metric = Metric::new(
+            constants::FD_USE_METRIC.into(),
+            MetricValue::distribution(fd_use),
+            tags,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert fd_use metric: {}", e);
         }
     }
 
@@ -546,24 +540,17 @@ impl Lambda {
         }
 
         // Check if threads_use value is valid before inserting metric
-        if threads_use > 0.0 {
-            let metric = Metric::new(
-                constants::THREADS_USE_METRIC.into(),
-                MetricValue::distribution(threads_use),
-                tags,
-            );
-            if let Err(e) = aggr.insert(metric) {
-                error!("Failed to insert threads_use metric: {}", e);
-            }
+        let metric = Metric::new(
+            constants::THREADS_USE_METRIC.into(),
+            MetricValue::distribution(threads_use),
+            tags,
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert threads_use metric: {}", e);
         }
     }
 
-    #[allow(unreachable_code)]
-    #[allow(unused_variables)]
-    #[allow(unused_mut)]
-    pub fn set_process_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        // Temporarily disabled
-        return;
+    pub fn set_process_enhanced_metrics(&self, send_metrics: Arc<Notify>) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -575,20 +562,33 @@ impl Lambda {
             // get list of all process ids
             let pids = proc::get_pid_list();
 
-            // Set fd_max and initial value for fd_use to -1
+            // Set fd_max and initial value for fd_use
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = -1_f64;
+            let mut fd_use = match proc::get_fd_use_data(&pids) {
+                Ok(fd_use) => fd_use,
+                Err(_) => {
+                    debug!("Could not get file descriptor use data.");
+                    return;
+                }
+            };
 
-            // Set threads_max and initial value for threads_use to -1
+            // Set threads_max and initial value for threads_use
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = -1_f64;
+            let mut threads_use = match proc::get_threads_use_data(&pids) {
+                Ok(threads_use) => threads_use,
+                Err(_) => {
+                    debug!("Could not get threads use data.");
+                    return;
+                }
+            };
 
             let mut interval = interval(Duration::from_millis(1));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
                     biased;
                     // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
+                    _ = send_metrics.notified() => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
                         Self::generate_fd_enhanced_metrics(fd_max, fd_use, &mut aggr, tags.clone());
@@ -597,22 +597,13 @@ impl Lambda {
                     }
                     // Otherwise keep monitoring file descriptor and thread usage periodically
                     _ = interval.tick() => {
-                        match proc::get_fd_use_data(&pids) {
-                            Ok(fd_use_curr) => {
-                                fd_use = fd_use.max(fd_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update file descriptor use enhanced metric.");
-                            }
-                        };
-                        match proc::get_threads_use_data(&pids) {
-                            Ok(threads_use_curr) => {
-                                threads_use = threads_use.max(threads_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update threads use enhanced metric.");
-                            }
-                        };
+                        let pids = proc::get_pid_list();
+                        if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
+                            fd_use = fd_use.max(fd_use_curr);
+                        }
+                        if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
+                            threads_use = threads_use.max(threads_use_curr);
+                        }
                     }
                 }
             }
@@ -692,8 +683,8 @@ pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
-    pub tmp_chan_tx: Sender<()>,
-    pub process_chan_tx: Sender<()>,
+    pub tmp_notify: Arc<Notify>,
+    pub process_notify: Arc<Notify>,
 }
 
 impl PartialEq for EnhancedMetricData {
