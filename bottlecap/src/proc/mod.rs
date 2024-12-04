@@ -250,7 +250,6 @@ pub fn get_fd_use_data(pids: &[i64]) -> Result<f64, io::Error> {
 }
 
 fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
-    let start = Instant::now();
     let mut fd_use = 0;
 
     for &pid in pids {
@@ -264,9 +263,6 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error>
         let count = files.count();
         fd_use += count;
     }
-
-    let duration = start.elapsed();
-    println!("** time taken to get fd_use: {:?} **", duration);
 
     Ok(fd_use as f64)
 }
