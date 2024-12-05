@@ -11,7 +11,7 @@ use std::vec;
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
@@ -70,6 +70,7 @@ pub struct Config {
     pub kms_api_key: String,
     pub env: Option<String>,
     pub service: Option<String>,
+    #[serde(deserialize_with = "deserialize_string_or_int")]
     pub version: Option<String>,
     pub tags: Option<String>,
     #[serde(deserialize_with = "deserialize_log_level")]
@@ -253,6 +254,24 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     }
 
     Ok(config)
+}
+
+fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::String(s) => {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(s))
+            }
+        }
+        Value::Number(n) => Ok(Some(n.to_string())),
+        _ => Err(serde::de::Error::custom("expected a string or an integer")),
+    }
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -478,6 +497,17 @@ pub mod tests {
             );
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn parse_dd_version() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_VERSION", "123");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(config.version.expect("failed to parse DD_VERSION"), "123");
             Ok(())
         });
     }
