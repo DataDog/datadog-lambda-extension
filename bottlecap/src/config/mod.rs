@@ -42,7 +42,7 @@ pub struct FallbackConfig {
     url: Option<String>,
     dd_url: Option<String>,
     logs_config_logs_dd_url: Option<String>,
-    // APM, as opposed to logs, do not use the `apm_config` prefix for env vars
+    // APM, as opposed to logs, does not use the `apm_config` prefix for env vars
     apm_dd_url: Option<String>,
 }
 
