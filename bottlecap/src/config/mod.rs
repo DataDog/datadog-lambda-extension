@@ -42,7 +42,8 @@ pub struct FallbackConfig {
     url: Option<String>,
     dd_url: Option<String>,
     logs_config_logs_dd_url: Option<String>,
-    apm_config_apm_dd_url: Option<String>,
+    // APM, as opposed to logs, do not use the `apm_config` prefix for env vars
+    apm_dd_url: Option<String>,
 }
 
 /// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
@@ -210,7 +211,7 @@ fn fallback(figment: &Figment, yaml_figment: &Figment) -> Result<(), ConfigError
     if config.url.is_some()
         || config.dd_url.is_some()
         || config.logs_config_logs_dd_url.is_some()
-        || config.apm_config_apm_dd_url.is_some()
+        || config.apm_dd_url.is_some()
         || yaml_config
             .logs_config
             .is_some_and(|c| c.get("logs_dd_url").is_some())
@@ -391,7 +392,7 @@ pub mod tests {
     fn test_fallback_on_intake_urls() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_APM_CONFIG_APM_DD_URL", "some_url");
+            jail.set_env("DD_APM_DD_URL", "some_url");
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
