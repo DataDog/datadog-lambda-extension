@@ -62,6 +62,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
+use std::time::Duration;
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
@@ -289,6 +290,7 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
         build_fqdn_metrics(config.site.clone()),
         config.https_proxy.clone(),
+        Duration::from_secs(config.flush_timeout),
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
