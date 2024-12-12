@@ -9,7 +9,7 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{json, Value};
-use tokio::sync::{mpsc::Sender, watch};
+use tokio::sync::{mpsc::Sender, watch, RwLock};
 use tracing::debug;
 
 use crate::{
@@ -18,7 +18,7 @@ use crate::{
         base64_to_string, context::ContextBuffer, create_empty_span, generate_span_id,
         span_inferrer::SpanInferrer, tag_span_from_value,
     },
-    metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
+    metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics, UsageMetrics},
     proc::{
         self,
         constants::{ETC_PATH, PROC_PATH},
@@ -259,6 +259,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
+        usage_metrics: Arc<RwLock<UsageMetrics>>,
     ) {
         self.context_buffer
             .add_runtime_duration(request_id, duration_ms);
@@ -304,10 +305,17 @@ impl Processor {
                     offsets.cpu_offset.clone(),
                     offsets.uptime_offset,
                 );
-                // Send the signal to stop monitoring tmp
-                _ = offsets.tmp_chan_tx.send(());
-                // Send the signal to stop monitoring file descriptors and threads
-                _ = offsets.process_chan_tx.send(());
+                // // Send the signal to stop monitoring tmp
+                // _ = offsets.tmp_chan_tx.send(());
+                // // Send the signal to stop monitoring file descriptors and threads
+                // _ = offsets.process_chan_tx.send(());
+
+                let metrics_guard = usage_metrics.read().await;
+                let fd_use = metrics_guard.fd_use;
+                let threads_use = metrics_guard.threads_use;
+                self.enhanced_metrics.set_fd_enhanced_metrics(fd_use);
+                self.enhanced_metrics.set_threads_enhanced_metrics(threads_use);
+                drop(metrics_guard);
             }
         }
 

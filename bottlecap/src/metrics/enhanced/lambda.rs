@@ -18,6 +18,70 @@ use tokio::{
 use tracing::debug;
 use tracing::error;
 
+// == testing single continuous monitoring thread ===
+use tokio::sync::RwLock;
+#[derive(Clone, Copy, Debug)]
+pub struct UsageMetrics {
+    pub fd_use: f64,
+    pub threads_use: f64,
+}
+
+impl UsageMetrics {
+    pub fn new() -> Self {
+        UsageMetrics {
+            fd_use: -1.0,
+            threads_use: -1.0,
+        }
+    }
+
+    fn reset(&mut self) {
+        self.fd_use = -1.0;
+        self.threads_use = -1.0;
+    }
+}
+
+pub fn start_monitoring_task(
+    metrics: Arc<RwLock<UsageMetrics>>,
+    mut reset_signal: tokio::sync::watch::Receiver<()>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = interval(Duration::from_millis(1)); // Adjust as needed
+
+        loop {
+            tokio::select! {
+                _ = reset_signal.changed() => {
+                    // The main loop signaled a reset
+                    let mut metrics_guard = metrics.write().await;
+                    metrics_guard.reset();
+                    drop(metrics_guard);
+                }
+                _ = interval.tick() => {
+                    let pids = proc::get_pid_list();
+                    
+                    // Update fd_use
+                    if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
+                        let mut metrics_guard = metrics.write().await;
+                        if fd_use_curr > metrics_guard.fd_use {
+                            metrics_guard.fd_use = fd_use_curr;
+                        }
+                        drop(metrics_guard);
+                    }
+
+                    // Update threads_use
+                    if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
+                        let mut metrics_guard = metrics.write().await;
+                        if threads_use_curr > metrics_guard.threads_use {
+                            metrics_guard.threads_use = threads_use_curr;
+                        }
+                        drop(metrics_guard);
+                    }
+                }
+            }
+        }
+    })
+}
+// ===================================================
+
 pub struct Lambda {
     pub aggregator: Arc<Mutex<Aggregator>>,
     pub config: Arc<crate::config::Config>,
@@ -530,6 +594,20 @@ impl Lambda {
         }
     }
 
+    pub fn set_fd_enhanced_metrics(&self, fd_use: f64) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let pids = proc::get_pid_list();
+        let fd_max = proc::get_fd_max_data(&pids);
+
+        let aggr = Arc::clone(&self.aggregator);
+        let mut aggr: std::sync::MutexGuard<Aggregator> = aggr.lock().expect("lock poisoned");
+
+        Self::generate_fd_enhanced_metrics(fd_max, fd_use, &mut aggr, self.get_dynamic_value_tags());
+    }
+
     pub fn generate_threads_enhanced_metrics(
         threads_max: f64,
         threads_use: f64,
@@ -558,6 +636,20 @@ impl Lambda {
         }
     }
 
+    pub fn set_threads_enhanced_metrics(&self, threads_use: f64) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let pids = proc::get_pid_list();
+        let threads_max = proc::get_threads_max_data(&pids);
+
+        let aggr = Arc::clone(&self.aggregator);
+        let mut aggr: std::sync::MutexGuard<Aggregator> = aggr.lock().expect("lock poisoned");
+        
+        Self::generate_threads_enhanced_metrics(threads_max, threads_use, &mut aggr, self.get_dynamic_value_tags());
+    }
+
     #[allow(unreachable_code)]
     #[allow(unused_variables)]
     #[allow(unused_mut)]
@@ -583,7 +675,7 @@ impl Lambda {
             let threads_max = proc::get_threads_max_data(&pids);
             let mut threads_use = -1_f64;
 
-            let mut interval = interval(Duration::from_millis(1));
+            let mut interval = interval(Duration::from_millis(50));
             loop {
                 tokio::select! {
                     biased;
@@ -685,6 +777,7 @@ impl Lambda {
             error!("failed to insert estimated cost metric: {}", e);
         }
     }
+
 }
 
 #[derive(Clone, Debug)]

@@ -10,36 +10,23 @@
 #![deny(missing_debug_implementations)]
 
 use bottlecap::{
-    base_url,
-    config::{self, flush_strategy::FlushStrategy, AwsConfig, Config},
-    event_bus::bus::EventBus,
-    events::Event,
-    lifecycle::{
+    base_url, config::{self, flush_strategy::FlushStrategy, AwsConfig, Config}, event_bus::bus::EventBus, events::Event, lifecycle::{
         flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
-    },
-    logger,
-    logs::{
+    }, logger, logs::{
         agent::LogsAgent,
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    },
-    secrets::decrypt,
-    tags::{lambda, provider::Provider as TagProvider},
-    telemetry::{
+    }, metrics, secrets::decrypt, tags::{lambda, provider::Provider as TagProvider}, telemetry::{
         self,
         client::TelemetryApiClient,
         events::{Status, TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
-    },
-    traces::{
+    }, traces::{
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
-    },
-    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
-    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
-    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    }, DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE, LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
@@ -63,11 +50,14 @@ use std::{
     time::Instant,
 };
 use telemetry::listener::TelemetryListenerConfig;
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, RwLock};
 use tokio::sync::Mutex as TokioMutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+
+use tokio::sync::watch;
+use metrics::enhanced::lambda::UsageMetrics;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -362,6 +352,13 @@ async fn extension_loop_active(
     let mut flush_interval = flush_control.get_flush_interval();
     flush_interval.tick().await; // discard first tick, which is instantaneous
 
+    // Create a watch channel for reset signals
+    let (reset_signal_tx, reset_signal_rx) = watch::channel(());
+    let usage_metrics = Arc::new(RwLock::new(UsageMetrics::new()));
+
+    // Start the monitoring task with the reset signal receiver
+    let monitoring_handle = metrics::enhanced::lambda::start_monitoring_task(usage_metrics.clone(), reset_signal_rx);
+
     loop {
         let evt = next_event(client, &r.extension_id).await;
         match evt {
@@ -374,6 +371,10 @@ async fn extension_loop_active(
                     "Invoke event {}; deadline: {}, invoked_function_arn: {}",
                     request_id, deadline_ms, invoked_function_arn
                 );
+
+                // Reset the metrics at the start of the invocation
+                reset_signal_tx.send(()).unwrap();
+
                 let mut p = invocation_processor.lock().await;
                 p.on_invoke_event(request_id);
                 drop(p);
@@ -449,7 +450,8 @@ async fn extension_loop_active(
                                             config.clone(),
                                             tags_provider.clone(),
                                             trace_processor.clone(),
-                                            trace_agent_tx.clone()
+                                            trace_agent_tx.clone(),
+                                            usage_metrics.clone(),
                                         ).await;
                                     }
                                     drop(p);
@@ -511,6 +513,8 @@ async fn extension_loop_active(
         }
 
         if shutdown {
+            monitoring_handle.abort();
+
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             tokio::join!(
