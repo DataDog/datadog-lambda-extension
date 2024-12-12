@@ -45,7 +45,8 @@ pub fn start_monitoring_task(
     mut reset_signal: tokio::sync::watch::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = interval(Duration::from_millis(1)); // Adjust as needed
+        let mut interval = interval(Duration::from_millis(1));
+        let mut pids = proc::get_pid_list();
 
         loop {
             tokio::select! {
@@ -54,27 +55,22 @@ pub fn start_monitoring_task(
                     let mut metrics_guard = metrics.write().await;
                     metrics_guard.reset();
                     drop(metrics_guard);
+
+                    pids = proc::get_pid_list();
                 }
                 _ = interval.tick() => {
-                    let pids = proc::get_pid_list();
-                    
                     // Update fd_use
-                    if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
-                        let mut metrics_guard = metrics.write().await;
-                        if fd_use_curr > metrics_guard.fd_use {
-                            metrics_guard.fd_use = fd_use_curr;
-                        }
-                        drop(metrics_guard);
-                    }
+                    let fd_use_curr = proc::get_fd_use_data(&pids).unwrap_or(-1.0);
+                    let threads_use_curr = proc::get_threads_use_data(&pids).unwrap_or(-1.0);
 
-                    // Update threads_use
-                    if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
-                        let mut metrics_guard = metrics.write().await;
-                        if threads_use_curr > metrics_guard.threads_use {
-                            metrics_guard.threads_use = threads_use_curr;
-                        }
-                        drop(metrics_guard);
+                    let mut metrics_guard = metrics.write().await;
+                    if fd_use_curr > metrics_guard.fd_use {
+                        metrics_guard.fd_use = fd_use_curr;
                     }
+                    if threads_use_curr > metrics_guard.threads_use {
+                        metrics_guard.threads_use = threads_use_curr;
+                    }
+                    drop(metrics_guard);
                 }
             }
         }
