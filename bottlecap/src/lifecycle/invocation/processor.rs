@@ -574,15 +574,31 @@ impl Processor {
             self.span.error = 1;
 
             if let Some(m) = message {
+                let decoded_message = match base64_to_string(m) {
+                    Ok(decoded) => decoded,
+                    Err(e) => {
+                        debug!("Failed to decode error message: {e}");
+                        m.to_string()
+                    }
+                };
+
                 self.span
                     .meta
-                    .insert(String::from("error.msg"), m.to_string());
+                    .insert(String::from("error.msg"), decoded_message);
             }
 
             if let Some(t) = r#type {
+                let decoded_type = match base64_to_string(t) {
+                    Ok(decoded) => decoded,
+                    Err(e) => {
+                        debug!("Failed to decode error type: {e}");
+                        t.to_string()
+                    }
+                };
+
                 self.span
                     .meta
-                    .insert(String::from("error.type"), t.to_string());
+                    .insert(String::from("error.type"), decoded_type);
             }
 
             if let Some(s) = stack {
