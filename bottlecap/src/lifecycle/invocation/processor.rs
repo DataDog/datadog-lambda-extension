@@ -574,25 +574,32 @@ impl Processor {
             self.span.error = 1;
 
             if let Some(m) = message {
+                let decoded_message = base64_to_string(m).unwrap_or_else(|_| {
+                    debug!("Error message header may not be encoded, setting as is");
+                    m.to_string()
+                });
+
                 self.span
                     .meta
-                    .insert(String::from("error.msg"), m.to_string());
+                    .insert(String::from("error.msg"), decoded_message);
             }
 
             if let Some(t) = r#type {
+                let decoded_type = base64_to_string(t).unwrap_or_else(|_| {
+                    debug!("Error type header may not be encoded, setting as is");
+                    t.to_string()
+                });
+
                 self.span
                     .meta
-                    .insert(String::from("error.type"), t.to_string());
+                    .insert(String::from("error.type"), decoded_type);
             }
 
             if let Some(s) = stack {
-                let decoded_stack = match base64_to_string(s) {
-                    Ok(decoded) => decoded,
-                    Err(e) => {
-                        debug!("Failed to decode error stack: {e}");
-                        s.to_string()
-                    }
-                };
+                let decoded_stack = base64_to_string(s).unwrap_or_else(|e| {
+                    debug!("Failed to decode error stack: {e}");
+                    s.to_string()
+                });
 
                 self.span
                     .meta
@@ -605,5 +612,104 @@ impl Processor {
 
     pub fn on_out_of_memory_error(&mut self) {
         self.enhanced_metrics.increment_oom_metric();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::LAMBDA_RUNTIME_SLUG;
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use dogstatsd::aggregator::Aggregator;
+    use dogstatsd::metric::EMPTY_TAGS;
+
+    fn setup() -> Processor {
+        let aws_config = AwsConfig {
+            region: "us-east-1".into(),
+            aws_access_key_id: "***".into(),
+            aws_secret_access_key: "***".into(),
+            aws_session_token: "***".into(),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+        };
+
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let metrics_aggregator = Arc::new(Mutex::new(
+            Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
+        ));
+
+        Processor::new(tags_provider, config, &aws_config, metrics_aggregator)
+    }
+
+    #[test]
+    fn test_set_span_error_from_base64_encoded_headers() {
+        let mut p = setup();
+        let mut headers = HashMap::<String, String>::new();
+
+        let error_message = "Error message";
+        let error_type = "System.Exception";
+        let error_stack =
+            "System.Exception: Error message \n at TestFunction.Handle(ILambdaContext context)";
+
+        headers.insert(DATADOG_INVOCATION_ERROR_KEY.into(), "true".into());
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_MESSAGE_KEY.into(),
+            STANDARD.encode(error_message),
+        );
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_TYPE_KEY.into(),
+            STANDARD.encode(error_type),
+        );
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_STACK_KEY.into(),
+            STANDARD.encode(error_stack),
+        );
+
+        p.set_span_error_from_headers(headers);
+
+        assert_eq!(p.span.error, 1);
+        assert_eq!(p.span.meta["error.msg"], error_message);
+        assert_eq!(p.span.meta["error.type"], error_type);
+        assert_eq!(p.span.meta["error.stack"], error_stack);
+    }
+
+    #[test]
+    fn test_set_span_error_from_non_encoded_headers() {
+        let mut p = setup();
+        let mut headers = HashMap::<String, String>::new();
+
+        let error_message = "Error message";
+        let error_type = "System.Exception";
+        let error_stack =
+            "System.Exception: Error message \n at TestFunction.Handle(ILambdaContext context)";
+
+        headers.insert(DATADOG_INVOCATION_ERROR_KEY.into(), "true".into());
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_MESSAGE_KEY.into(),
+            error_message.into(),
+        );
+        headers.insert(DATADOG_INVOCATION_ERROR_TYPE_KEY.into(), error_type.into());
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_STACK_KEY.into(),
+            error_stack.into(),
+        );
+
+        p.set_span_error_from_headers(headers);
+
+        assert_eq!(p.span.error, 1);
+        assert_eq!(p.span.meta["error.msg"], error_message);
+        assert_eq!(p.span.meta["error.type"], error_type);
+        assert_eq!(p.span.meta["error.stack"], error_stack);
     }
 }
