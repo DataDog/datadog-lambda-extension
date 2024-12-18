@@ -619,11 +619,9 @@ impl Processor {
 mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
-    use base64::Engine;
-    use dogstatsd::metric::EMPTY_TAGS;
+    use base64::{engine::general_purpose::STANDARD, Engine};
     use dogstatsd::aggregator::Aggregator;
-
-    use base64::engine::general_purpose::STANDARD;
+    use dogstatsd::metric::EMPTY_TAGS;
 
     fn setup() -> Processor {
         let aws_config = AwsConfig {
@@ -641,10 +639,11 @@ mod tests {
             ..config::Config::default()
         });
 
-        let tags_provider = Arc::new(
-            provider::Provider::new(Arc::clone(&config),
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
             LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
 
         let metrics_aggregator = Arc::new(Mutex::new(
             Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
@@ -660,13 +659,23 @@ mod tests {
 
         let error_message = "Error message";
         let error_type = "System.Exception";
-        let error_stack = "System.Exception: Error message \n at TestFunction.Handle(ILambdaContext context)";
+        let error_stack =
+            "System.Exception: Error message \n at TestFunction.Handle(ILambdaContext context)";
 
         headers.insert(DATADOG_INVOCATION_ERROR_KEY.into(), "true".into());
-        headers.insert(DATADOG_INVOCATION_ERROR_MESSAGE_KEY.into(), STANDARD.encode(error_message));
-        headers.insert(DATADOG_INVOCATION_ERROR_TYPE_KEY.into(), STANDARD.encode(error_type));
-        headers.insert(DATADOG_INVOCATION_ERROR_STACK_KEY.into(), STANDARD.encode(error_stack));
-        
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_MESSAGE_KEY.into(),
+            STANDARD.encode(error_message),
+        );
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_TYPE_KEY.into(),
+            STANDARD.encode(error_type),
+        );
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_STACK_KEY.into(),
+            STANDARD.encode(error_stack),
+        );
+
         p.set_span_error_from_headers(headers);
 
         assert_eq!(p.span.error, 1);
@@ -682,12 +691,19 @@ mod tests {
 
         let error_message = "Error message";
         let error_type = "System.Exception";
-        let error_stack = "System.Exception: Error message \n at TestFunction.Handle(ILambdaContext context)";
+        let error_stack =
+            "System.Exception: Error message \n at TestFunction.Handle(ILambdaContext context)";
 
         headers.insert(DATADOG_INVOCATION_ERROR_KEY.into(), "true".into());
-        headers.insert(DATADOG_INVOCATION_ERROR_MESSAGE_KEY.into(), error_message.into());
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_MESSAGE_KEY.into(),
+            error_message.into(),
+        );
         headers.insert(DATADOG_INVOCATION_ERROR_TYPE_KEY.into(), error_type.into());
-        headers.insert(DATADOG_INVOCATION_ERROR_STACK_KEY.into(), error_stack.into());
+        headers.insert(
+            DATADOG_INVOCATION_ERROR_STACK_KEY.into(),
+            error_stack.into(),
+        );
 
         p.set_span_error_from_headers(headers);
 
