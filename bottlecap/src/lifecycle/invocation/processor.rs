@@ -596,8 +596,8 @@ impl Processor {
             }
 
             if let Some(s) = stack {
-                let decoded_stack = base64_to_string(s).unwrap_or_else(|_| {
-                    debug!("Error stack header may not be encoded, setting as is");
+                let decoded_stack = base64_to_string(s).unwrap_or_else(|e| {
+                    debug!("Failed to decode error stack: {e}");
                     s.to_string()
                 });
 
