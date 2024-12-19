@@ -52,6 +52,7 @@ use dogstatsd::{
 };
 use reqwest::Client;
 use serde::Deserialize;
+use std::time::Duration;
 use std::{
     collections::{hash_map, HashMap},
     env,
@@ -62,7 +63,6 @@ use std::{
     sync::{Arc, Mutex},
     time::Instant,
 };
-use std::time::Duration;
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex as TokioMutex;
