@@ -52,6 +52,7 @@ use dogstatsd::{
 };
 use reqwest::Client;
 use serde::Deserialize;
+use std::time::Duration;
 use std::{
     collections::{hash_map, HashMap},
     env,
@@ -289,6 +290,7 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
         build_fqdn_metrics(config.site.clone()),
         config.https_proxy.clone(),
+        Duration::from_secs(config.flush_timeout),
     );
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {

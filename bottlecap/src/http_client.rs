@@ -11,6 +11,7 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
                 "Unable to parse proxy configuration: {}, no proxy will be used",
                 e
             );
+            //TODO this fallback doesn't respect the flush timeout
             reqwest::Client::new()
         }
     }
