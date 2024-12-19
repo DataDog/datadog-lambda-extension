@@ -93,7 +93,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
-    pub flush_timeout: u64,
+    pub flush_timeout: u64, //TODO go agent adds jitter too
     pub https_proxy: Option<String>,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
