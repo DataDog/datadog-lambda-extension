@@ -161,7 +161,6 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let (aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
