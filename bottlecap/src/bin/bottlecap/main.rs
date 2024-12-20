@@ -295,6 +295,7 @@ async fn extension_loop_active(
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),
+        config: Arc::clone(config),
     });
 
     // Lifecycle Invocation Processor

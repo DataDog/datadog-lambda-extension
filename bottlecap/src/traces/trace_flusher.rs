@@ -8,6 +8,8 @@ use tracing::{debug, error};
 
 use datadog_trace_utils::trace_utils::{self, SendData};
 
+use crate::config::Config;
+
 #[async_trait]
 pub trait TraceFlusher {
     /// Starts a trace flusher that listens for trace payloads sent to the tokio mpsc Receiver,
@@ -23,6 +25,7 @@ pub trait TraceFlusher {
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceFlusher {
     pub buffer: Arc<Mutex<Vec<SendData>>>,
+    pub config: Arc<Config>,
 }
 
 #[async_trait]
@@ -52,7 +55,11 @@ impl TraceFlusher for ServerlessTraceFlusher {
         debug!("Flushing {} traces", traces.len());
 
         for traces in trace_utils::coalesce_send_data(traces) {
-            match traces.send().await.last_result {
+            match traces
+                .send_proxy(self.config.https_proxy.as_deref())
+                .await
+                .last_result
+            {
                 Ok(_) => debug!("Successfully flushed traces"),
                 Err(e) => {
                     error!("Error sending trace: {e:?}");
