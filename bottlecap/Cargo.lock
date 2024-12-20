@@ -649,8 +649,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-mini-agent"
-version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
+version = "14.3.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -660,16 +660,16 @@ dependencies = [
  "datadog-trace-utils",
  "ddcommon",
  "hyper 0.14.31",
- "log",
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "datadog-trace-normalization"
-version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
+version = "14.3.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -677,8 +677,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-obfuscation"
-version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
+version = "14.3.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -694,8 +694,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-protobuf"
-version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
+version = "14.3.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -704,8 +704,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-utils"
-version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
+version = "14.3.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "anyhow",
  "bytes",
@@ -731,10 +731,11 @@ dependencies = [
 
 [[package]]
 name = "ddcommon"
-version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
+version = "14.3.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "anyhow",
+ "cc",
  "futures",
  "futures-core",
  "futures-util",
@@ -825,7 +826,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=7a0bdc9d29cced7c4bfc1135dc5cb6554c2c76b4#7a0bdc9d29cced7c4bfc1135dc5cb6554c2c76b4"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
@@ -3103,8 +3104,8 @@ dependencies = [
 
 [[package]]
 name = "tinybytes"
-version = "13.1.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=92272e90a7919f07178f3246ef8f82295513cfed#92272e90a7919f07178f3246ef8f82295513cfed"
+version = "14.3.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
 dependencies = [
  "serde",
 ]

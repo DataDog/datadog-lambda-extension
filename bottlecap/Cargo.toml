@@ -9,13 +9,13 @@ async-trait = { version = "0.1", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "92272e90a7919f07178f3246ef8f82295513cfed" }
-datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "92272e90a7919f07178f3246ef8f82295513cfed" }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "92272e90a7919f07178f3246ef8f82295513cfed" }
-datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "92272e90a7919f07178f3246ef8f82295513cfed" }
-datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "92272e90a7919f07178f3246ef8f82295513cfed" }
-datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "92272e90a7919f07178f3246ef8f82295513cfed" }
-dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "7a0bdc9d29cced7c4bfc1135dc5cb6554c2c76b4" }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
+datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
+dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
 lazy_static = { version = "1.5", default-features = false }
@@ -37,7 +37,7 @@ sha2 = { version = "0.10", default-features = false }
 hex = { version = "0.4", default-features = false, features = ["std"] }
 base64 = { version = "0.22", default-features = false }
 rmp-serde = { version = "1.3.0", default-features = false }
-rustls = { version = "0.23.12", default-features = false, features = ["aws-lc-rs"] }
+rustls = { version = "0.23.18", default-features = false, features = ["aws-lc-rs"] }
 rand = { version = "0.8", default-features = false }
 
 [dev-dependencies]

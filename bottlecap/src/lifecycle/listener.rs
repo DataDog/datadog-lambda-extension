@@ -6,6 +6,7 @@ use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use hyper::body::HttpBody;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, StatusCode};
 use serde_json::json;
@@ -89,9 +90,9 @@ impl Listener {
     ) -> http::Result<Response<Body>> {
         debug!("Received start invocation request");
         let (parts, body) = req.into_parts();
-        match hyper::body::to_bytes(body).await {
+        match body.collect().await {
             Ok(b) => {
-                let body = b.to_vec();
+                let body = b.to_bytes().to_vec();
                 let mut processor = invocation_processor.lock().await;
 
                 let headers = Self::headers_to_map(parts.headers);
@@ -141,9 +142,9 @@ impl Listener {
     ) -> http::Result<Response<Body>> {
         debug!("Received end invocation request");
         let (parts, body) = req.into_parts();
-        match hyper::body::to_bytes(body).await {
+        match body.collect().await {
             Ok(b) => {
-                let body = b.to_vec();
+                let body = b.to_bytes().to_vec();
                 let mut processor = invocation_processor.lock().await;
 
                 let headers = Self::headers_to_map(parts.headers);

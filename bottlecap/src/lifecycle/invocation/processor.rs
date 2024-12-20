@@ -351,6 +351,8 @@ impl Processor {
                 container_id: "",
                 client_computed_top_level: false,
                 client_computed_stats: false,
+                dropped_p0_traces: 0,
+                dropped_p0_spans: 0,
             };
 
             let send_data = trace_processor.process_traces(
