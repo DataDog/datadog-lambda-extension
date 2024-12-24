@@ -16,7 +16,7 @@ use crate::lifecycle::invocation::{
 pub struct APIGatewayHttpEvent {
     #[serde(rename = "routeKey")]
     pub route_key: String,
-    #[serde(serialize_with = "lowercase_key")]
+    #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
     #[serde(rename = "requestContext")]
     pub request_context: RequestContext,
