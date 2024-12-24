@@ -1,7 +1,7 @@
-use std::{collections::HashMap, hash::BuildHasher};
+use std::collections::HashMap;
 
 use datadog_trace_protobuf::pb::Span;
-use serde::{ser::SerializeMap, Serializer};
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
 pub mod api_gateway_http_event;
@@ -68,19 +68,16 @@ pub fn get_aws_partition_by_region(region: &str) -> String {
 
 /// Serialize a `HashMap` with lowercase keys
 ///
-pub fn lowercase_key<S, H>(
-    map: &HashMap<String, String, H>,
-    serializer: S,
-) -> Result<S::Ok, S::Error>
+pub fn lowercase_key<'de, D, V>(deserializer: D) -> Result<HashMap<String, V>, D::Error>
 where
-    S: Serializer,
-    H: BuildHasher,
+    D: Deserializer<'de>,
+    V: Deserialize<'de>,
 {
-    let mut map_serializer = serializer.serialize_map(Some(map.len()))?;
-    for (key, value) in map {
-        map_serializer.serialize_entry(&key.to_lowercase(), value)?;
-    }
-    map_serializer.end()
+    let map = HashMap::<String, V>::deserialize(deserializer)?;
+    Ok(map
+        .into_iter()
+        .map(|(key, value)| (key.to_lowercase(), value))
+        .collect())
 }
 
 #[cfg(test)]
