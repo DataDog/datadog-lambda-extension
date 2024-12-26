@@ -22,6 +22,7 @@ use crate::lifecycle::invocation::{
         Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
     },
 };
+use crate::span_pointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
 
 #[derive(Default)]
@@ -39,6 +40,8 @@ pub struct SpanInferrer {
     generated_span_context: Option<SpanContext>,
     // Tags generated from the trigger
     trigger_tags: Option<HashMap<String, String>>,
+    // Span pointers from S3 or DynamoDB streams
+    pub span_pointers: Vec<SpanPointer>,
 }
 
 impl SpanInferrer {
@@ -52,6 +55,7 @@ impl SpanInferrer {
             carrier: None,
             generated_span_context: None,
             trigger_tags: None,
+            span_pointers: vec![],
         }
     }
 
