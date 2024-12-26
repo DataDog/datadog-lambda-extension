@@ -191,6 +191,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
 #[cfg(test)]
 mod tests {
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+    use datadog_trace_utils::tracer_payload::TraceChunkProcessor;
     use std::{
         collections::HashMap,
         sync::Arc,
@@ -198,11 +199,13 @@ mod tests {
     };
 
     use crate::config::Config;
+    use crate::span_pointers::SpanPointer;
     use crate::tags::provider::Provider;
-    use crate::traces::trace_processor::{self, TraceProcessor};
+    use crate::traces::trace_processor::{self, ChunkProcessor, TraceProcessor};
     use crate::LAMBDA_RUNTIME_SLUG;
     use datadog_trace_protobuf::pb;
     use datadog_trace_utils::{tracer_header_tags, tracer_payload::TracerPayloadCollection};
+    use serde_json::json;
 
     fn get_current_timestamp_nanos() -> i64 {
         i64::try_from(
@@ -341,5 +344,136 @@ mod tests {
             expected_tracer_payload,
             received_payload.expect("no payload received")
         );
+    }
+
+    struct SpanPointerTestCase {
+        test_name: &'static str,
+        span_name: &'static str,
+        span_pointers: Option<Vec<SpanPointer>>,
+        expected_links: Option<serde_json::Value>,
+    }
+
+    #[test]
+    fn test_span_pointer_processing() {
+        let test_cases = vec![
+            SpanPointerTestCase {
+                test_name: "adds span links to lambda span",
+                span_name: "aws.lambda",
+                span_pointers: Some(vec![
+                    SpanPointer {
+                        hash: "hash1".to_string(),
+                        kind: "test.kind1".to_string(),
+                    },
+                    SpanPointer {
+                        hash: "hash2".to_string(),
+                        kind: "test.kind2".to_string(),
+                    },
+                ]),
+                expected_links: Some(json!([
+                    {
+                        "attributes": {
+                            "link.kind": "span-pointer",
+                            "ptr.dir": "u",
+                            "ptr.hash": "hash1",
+                            "ptr.kind": "test.kind1"
+                        },
+                        "span_id": "0",
+                        "trace_id": "0"
+                    },
+                    {
+                        "attributes": {
+                            "link.kind": "span-pointer",
+                            "ptr.dir": "u",
+                            "ptr.hash": "hash2",
+                            "ptr.kind": "test.kind2"
+                        },
+                        "span_id": "0",
+                        "trace_id": "0"
+                    }
+                ])),
+            },
+            SpanPointerTestCase {
+                test_name: "ignores non-lambda span",
+                span_name: "not.lambda",
+                span_pointers: Some(vec![SpanPointer {
+                    hash: "hash1".to_string(),
+                    kind: "test.kind1".to_string(),
+                }]),
+                expected_links: None,
+            },
+            SpanPointerTestCase {
+                test_name: "handles empty span pointers",
+                span_name: "aws.lambda",
+                span_pointers: Some(vec![]),
+                expected_links: None,
+            },
+            SpanPointerTestCase {
+                test_name: "handles none span pointers",
+                span_name: "aws.lambda",
+                span_pointers: None,
+                expected_links: None,
+            },
+        ];
+
+        for case in test_cases {
+            let tags_provider = create_tags_provider(create_test_config());
+
+            let span = pb::Span {
+                name: case.span_name.to_string(),
+                meta: HashMap::new(),
+                ..create_test_span(
+                    11,
+                    222,
+                    333,
+                    get_current_timestamp_nanos(),
+                    true,
+                    tags_provider.clone(),
+                )
+            };
+
+            let mut processor = ChunkProcessor {
+                obfuscation_config: Arc::new(
+                    ObfuscationConfig::new().expect("Failed to create ObfuscationConfig for test"),
+                ),
+                tags_provider,
+                span_pointers: case.span_pointers,
+            };
+
+            let mut chunk = pb::TraceChunk {
+                priority: 0,
+                origin: String::new(),
+                spans: vec![span],
+                tags: HashMap::new(),
+                dropped_trace: false,
+            };
+
+            processor.process(&mut chunk, 0);
+
+            match case.expected_links {
+                Some(expected) => {
+                    let span_links =
+                        chunk.spans[0]
+                            .meta
+                            .get("_dd.span_links")
+                            .unwrap_or_else(|| {
+                                panic!("[{}] Span links should be present", case.test_name)
+                            });
+                    let actual_links: serde_json::Value =
+                        serde_json::from_str(span_links).expect("Should be valid JSON");
+                    assert_eq!(
+                        actual_links, expected,
+                        "Failed test case: {}",
+                        case.test_name
+                    );
+                }
+                None => {
+                    assert!(
+                        !chunk.spans[0].meta.contains_key("_dd.span_links"),
+                        "Failed test case: {}",
+                        case.test_name
+                    );
+                }
+            }
+        }
     }
 }
