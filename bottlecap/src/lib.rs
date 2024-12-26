@@ -27,6 +27,7 @@ pub mod logs;
 pub mod metrics;
 pub mod proc;
 pub mod secrets;
+pub mod span_pointers;
 pub mod tags;
 pub mod telemetry;
 pub mod traces;
