@@ -10,6 +10,7 @@ use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
+use crate::span_pointers::{SpanPointer, generate_span_pointer_hash};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct S3Event {
@@ -120,6 +121,24 @@ impl Trigger for S3Record {
 
     fn is_async(&self) -> bool {
         true
+    }
+
+    fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
+        let bucket_name = &self.s3.bucket.name;
+        let key = &self.s3.object.key;
+        let e_tag = self.s3.object.e_tag.trim_matches('"');
+
+        if bucket_name.is_empty() || key.is_empty() || e_tag.is_empty() {
+            debug!("Unable to create span pointer because bucket name, key, or etag is missing.");
+            return None;
+        }
+
+        let hash = generate_span_pointer_hash(&[bucket_name, key, e_tag]);
+
+        Some(vec![SpanPointer {
+            hash,
+            kind: String::from("aws.s3.object")
+        }])
     }
 }
 
