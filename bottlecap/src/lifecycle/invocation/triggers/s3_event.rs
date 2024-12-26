@@ -133,6 +133,7 @@ impl Trigger for S3Record {
             return None;
         }
 
+        // https://github.com/DataDog/dd-span-pointer-rules/blob/main/AWS/S3/Object/README.md
         let hash = generate_span_pointer_hash(&[bucket_name, key, e_tag]);
 
         Some(vec![SpanPointer {
@@ -292,5 +293,52 @@ mod tests {
             event.resolve_service_name(&generic_service_mapping, "s3"),
             "generic-service"
         );
+    }
+
+    #[test]
+    fn test_get_span_pointers() {
+        let event = S3Record {
+            event_source: String::from("aws:s3"),
+            event_time: Utc::now(),
+            event_name: String::from("ObjectCreated:Put"),
+            s3: S3Entity {
+                bucket: S3Bucket {
+                    name: String::from("test-bucket"),
+                    arn: String::from("arn:aws:s3:::test-bucket"),
+                },
+                object: S3Object {
+                    key: String::from("test/key"),
+                    size: 1024,
+                    e_tag: String::from("0123456789abcdef0123456789abcdef"),
+                },
+            },
+        }; //
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.s3.object");
+        assert_eq!(span_pointers[0].hash, "40df87dbfdf59f32253a2668c23e51b4");
+    }
+
+    #[test]
+    fn test_get_span_pointers_missing_fields() {
+        let event = S3Record {
+            event_source: String::from("aws:s3"),
+            event_time: Utc::now(),
+            event_name: String::from("ObjectCreated:Put"),
+            s3: S3Entity {
+                bucket: S3Bucket {
+                    name: String::new(), // Empty bucket name
+                    arn: String::from("arn"),
+                },
+                object: S3Object {
+                    key: String::from("key"),
+                    size: 0,
+                    e_tag: String::from("etag"),
+                },
+            },
+        };
+
+        assert!(event.get_span_pointers().is_none());
     }
 }
