@@ -12,6 +12,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::config;
+use crate::span_pointers::SpanPointer;
 use crate::traces::{
     AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
     DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
@@ -22,7 +23,6 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
 use serde_json::{json, Value};
-use crate::span_pointers::SpanPointer;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -58,20 +58,21 @@ impl TraceChunkProcessor for ChunkProcessor {
                             .iter()
                             .map(|sp| {
                                 json!({
-                            "attributes": {
-                                "link.kind": "span-pointer",
-                                "ptr.dir": "u",
-                                "ptr.hash": sp.hash,
-                                "ptr.kind": sp.kind,
-                            },
-                            "span_id": "0",
-                            "trace_id": "0"
-                        })
+                                    "attributes": {
+                                        "link.kind": "span-pointer",
+                                        "ptr.dir": "u",
+                                        "ptr.hash": sp.hash,
+                                        "ptr.kind": sp.kind,
+                                    },
+                                    "span_id": "0",
+                                    "trace_id": "0"
+                                })
                             })
                             .collect();
 
                         if let Ok(span_links_json) = serde_json::to_string(&span_links) {
-                            span.meta.insert("_dd.span_links".to_string(), span_links_json);
+                            span.meta
+                                .insert("_dd.span_links".to_string(), span_links_json);
                         }
                     }
                 }
@@ -301,8 +302,14 @@ mod tests {
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
-        let tracer_payload =
-            trace_processor.process_traces(config, tags_provider.clone(), header_tags, traces, 100, None);
+        let tracer_payload = trace_processor.process_traces(
+            config,
+            tags_provider.clone(),
+            header_tags,
+            traces,
+            100,
+            None,
+        );
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),

@@ -10,7 +10,7 @@ use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
-use crate::span_pointers::{SpanPointer, generate_span_pointer_hash};
+use crate::span_pointers::{generate_span_pointer_hash, SpanPointer};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct S3Event {
@@ -137,7 +137,7 @@ impl Trigger for S3Record {
 
         Some(vec![SpanPointer {
             hash,
-            kind: String::from("aws.s3.object")
+            kind: String::from("aws.s3.object"),
         }])
     }
 }
