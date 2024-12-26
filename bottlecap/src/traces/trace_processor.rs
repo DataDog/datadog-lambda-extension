@@ -21,6 +21,8 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
+use serde_json::{json, Value};
+use crate::span_pointers::SpanPointer;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -32,6 +34,7 @@ pub struct ServerlessTraceProcessor {
 struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
+    span_pointers: Option<Vec<SpanPointer>>,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
@@ -45,6 +48,32 @@ impl TraceChunkProcessor for ChunkProcessor {
             if span.service == "aws.lambda" {
                 if let Some(service) = self.tags_provider.get_tags_map().get("service") {
                     span.service.clone_from(service);
+                }
+            }
+
+            if span.name == "aws.lambda" {
+                if let Some(span_pointers) = &self.span_pointers {
+                    if !span_pointers.is_empty() {
+                        let span_links: Vec<Value> = span_pointers
+                            .iter()
+                            .map(|sp| {
+                                json!({
+                            "attributes": {
+                                "link.kind": "span-pointer",
+                                "ptr.dir": "u",
+                                "ptr.hash": sp.hash,
+                                "ptr.kind": sp.kind,
+                            },
+                            "span_id": "0",
+                            "trace_id": "0"
+                        })
+                            })
+                            .collect();
+
+                        if let Ok(span_links_json) = serde_json::to_string(&span_links) {
+                            span.meta.insert("_dd.span_links".to_string(), span_links_json);
+                        }
+                    }
                 }
             }
 
@@ -116,6 +145,7 @@ pub trait TraceProcessor {
         header_tags: tracer_header_tags::TracerHeaderTags,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
+        span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData;
 }
 
@@ -127,6 +157,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         header_tags: tracer_header_tags::TracerHeaderTags,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
+        span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData {
         let payload = trace_utils::collect_trace_chunks(
             V07(traces),
@@ -134,6 +165,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             &mut ChunkProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
+                span_pointers,
             },
             true,
         );
@@ -270,7 +302,7 @@ mod tests {
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
         let tracer_payload =
-            trace_processor.process_traces(config, tags_provider.clone(), header_tags, traces, 100);
+            trace_processor.process_traces(config, tags_provider.clone(), header_tags, traces, 100, None);
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),

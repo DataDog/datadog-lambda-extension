@@ -359,6 +359,7 @@ impl Processor {
                 header_tags,
                 vec![traces],
                 body_size,
+                Some(self.inferrer.span_pointers.clone()),
             );
 
             if let Err(e) = trace_agent_tx.send(send_data).await {
