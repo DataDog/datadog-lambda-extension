@@ -562,22 +562,20 @@ impl Lambda {
 
             // Set fd_max and initial value for fd_use
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = match proc::get_fd_use_data(&pids) {
-                Ok(fd_use) => fd_use,
-                Err(_) => {
-                    debug!("Could not get file descriptor use.");
-                    -1_f64
-                }
+            let mut fd_use = if let Ok(fd_use) = proc::get_fd_use_data(&pids) {
+                fd_use
+            } else {
+                debug!("Could not get file descriptor use.");
+                -1_f64
             };
 
             // Set threads_max and initial value for threads_use
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = match proc::get_threads_use_data(&pids) {
-                Ok(threads_use) => threads_use,
-                Err(_) => {
-                    debug!("Could not get threads use.");
-                    -1_f64
-                }
+            let mut threads_use = if let Ok(threads_use) = proc::get_threads_use_data(&pids) {
+                threads_use
+            } else {
+                debug!("Could not get threads use.");
+                -1_f64
             };
 
             let mut interval = interval(Duration::from_millis(1));
