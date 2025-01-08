@@ -184,7 +184,7 @@ jobs:
           # cache key contains current version of cargo-bundle-licenses
           # when upstream version is updated we can bump the cache key version,
           # to cache the latest version of the tool
-          key: "v1-2.0.0"
+          key: "v1-2.2.0"
       # cargo-bundle-licenses v2.0 doesn't understand path differences due to
       # sparse vs git index, so force git.
       - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
