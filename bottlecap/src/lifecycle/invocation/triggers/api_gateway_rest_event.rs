@@ -14,7 +14,7 @@ use crate::lifecycle::invocation::{
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct APIGatewayRestEvent {
-    #[serde(serialize_with = "lowercase_key")]
+    #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
     #[serde(rename = "requestContext")]
     pub request_context: RequestContext,
@@ -205,8 +205,8 @@ mod tests {
 
         let expected = APIGatewayRestEvent {
             headers: HashMap::from([
-                ("Header1".to_string(), "value1".to_string()),
-                ("Header2".to_string(), "value2".to_string()),
+                ("header1".to_string(), "value1".to_string()),
+                ("header2".to_string(), "value2".to_string()),
             ]),
             request_context: RequestContext {
                 stage: "$default".to_string(),

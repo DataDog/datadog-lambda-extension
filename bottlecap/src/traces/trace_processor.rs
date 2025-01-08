@@ -178,13 +178,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        SendData::new(
-            body_size,
-            payload,
-            header_tags,
-            &endpoint,
-            config.https_proxy.clone(),
-        )
+        SendData::new(body_size, payload, header_tags, &endpoint)
     }
 }
 
@@ -297,6 +291,8 @@ mod tests {
             container_id: "33",
             client_computed_top_level: false,
             client_computed_stats: false,
+            dropped_p0_traces: 0,
+            dropped_p0_spans: 0,
         };
 
         let trace_processor = trace_processor::ServerlessTraceProcessor {

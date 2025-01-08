@@ -41,6 +41,7 @@ async fn test_enhanced_metrics() {
         metrics_aggr.clone(),
         server.base_url(),
         None,
+        std::time::Duration::from_secs(5),
     );
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(&arc_config));

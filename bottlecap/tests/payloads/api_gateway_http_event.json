@@ -4,17 +4,17 @@
     "rawPath": "/httpapi/get",
     "rawQueryString": "",
     "headers": {
-        "accept": "*/*",
-        "content-length": "0",
-        "host": "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
-        "user-agent": "curl/7.64.1",
-        "x-amzn-trace-id": "Root=1-613a52fb-4c43cfc95e0241c1471bfa05",
-        "x-forwarded-for": "38.122.226.210",
-        "x-forwarded-port": "443",
-        "x-forwarded-proto": "https",
-        "x-datadog-trace-id": "12345",
-        "x-datadog-parent-id": "67890",
-        "x-datadog-sampling-priority": "2"
+        "Accept": "*/*",
+        "Content-Length": "0",
+        "Host": "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
+        "User-Agent": "curl/7.64.1",
+        "X-amzn-trace-id": "Root=1-613a52fb-4c43cfc95e0241c1471bfa05",
+        "X-forwarded-for": "38.122.226.210",
+        "X-forwarded-port": "443",
+        "X-forwarded-proto": "https",
+        "X-datadog-trace-id": "12345",
+        "X-datadog-parent-id": "67890",
+        "X-datadog-sampling-priority": "2"
     },
     "requestContext": {
         "accountId": "425362996713",
