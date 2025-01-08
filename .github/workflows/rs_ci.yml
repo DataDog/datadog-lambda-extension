@@ -189,7 +189,7 @@ jobs:
       # sparse vs git index, so force git.
       - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
         working-directory: bottlecap
-      - run: cargo install cargo-bundle-licenses
+      - run: cargo install --locked cargo-bundle-licenses
       - name: "Generate new LICENSE-3rdparty.yml and check against the previous"
         working-directory: bottlecap
         env:
