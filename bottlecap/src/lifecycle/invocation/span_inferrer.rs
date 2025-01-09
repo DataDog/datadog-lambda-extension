@@ -41,7 +41,7 @@ pub struct SpanInferrer {
     // Tags generated from the trigger
     trigger_tags: Option<HashMap<String, String>>,
     // Span pointers from S3 or DynamoDB streams
-    pub span_pointers: Vec<SpanPointer>,
+    pub span_pointers: Option<Vec<SpanPointer>>,
 }
 
 impl SpanInferrer {
@@ -55,7 +55,7 @@ impl SpanInferrer {
             carrier: None,
             generated_span_context: None,
             trigger_tags: None,
-            span_pointers: vec![],
+            span_pointers: None,
         }
     }
 
@@ -183,7 +183,7 @@ impl SpanInferrer {
             if let Some(t) = S3Record::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
                 if let Some(pointers) = t.get_span_pointers() {
-                    self.span_pointers = pointers;
+                    self.span_pointers = Some(pointers);
                 }
 
                 trigger = Some(Box::new(t));
