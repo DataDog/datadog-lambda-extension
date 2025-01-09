@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::tags::provider;
-use crate::traces::spanpointers::{attach_span_pointers_to_meta, SpanPointer};
+use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
