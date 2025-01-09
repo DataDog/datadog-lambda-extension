@@ -14,19 +14,18 @@ pub struct SpanPointer {
 }
 
 /// Returns the first 32 characters of the SHA-256 hash of the components joined by a '|'.
-/// Used by span pointers to uniquely & deterministically identify an S3 or DynamoDB stream.
-/// https://github.com/DataDog/dd-span-pointer-rules/blob/main/README.md#General%20Hashing%20Rules
+/// Used by span pointers to uniquely & deterministically identify an `S3` or `DynamoDB` stream.
+/// <https://github.com/DataDog/dd-span-pointer-rules/blob/main/README.md#General%20Hashing%20Rules>
 #[must_use]
 pub fn generate_span_pointer_hash(components: &[&str]) -> String {
-    let data_to_hash = components.join("|");
     let mut hasher = Sha256::new();
-    hasher.update(data_to_hash.as_bytes());
+    hasher.update(components.join("|").as_bytes());
     let result = hasher.finalize();
     hex::encode(result)[..SPAN_POINTER_HASH_LENGTH].to_string()
 }
 
-pub fn attach_span_pointers_to_meta(
-    meta: &mut HashMap<String, String>,
+pub fn attach_span_pointers_to_meta<S: ::std::hash::BuildHasher>(
+    meta: &mut HashMap<String, String, S>,
     span_pointers: &[SpanPointer],
 ) {
     if span_pointers.is_empty() {
