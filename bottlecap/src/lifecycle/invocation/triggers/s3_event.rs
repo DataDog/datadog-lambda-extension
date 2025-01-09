@@ -126,6 +126,7 @@ impl Trigger for S3Record {
     fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
         let bucket_name = &self.s3.bucket.name;
         let key = &self.s3.object.key;
+        // The AWS SDK sometimes wraps the S3 eTag in quotes, but sometimes doesn't.
         let e_tag = self.s3.object.e_tag.trim_matches('"');
 
         if bucket_name.is_empty() || key.is_empty() || e_tag.is_empty() {
