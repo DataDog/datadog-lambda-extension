@@ -122,8 +122,20 @@ impl Trigger for S3Record {
     fn is_async(&self) -> bool {
         true
     }
+}
 
-    fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
+impl ServiceNameResolver for S3Record {
+    fn get_specific_identifier(&self) -> String {
+        self.s3.bucket.name.clone()
+    }
+
+    fn get_generic_identifier(&self) -> &'static str {
+        "lambda_s3"
+    }
+}
+
+impl S3Record {
+    pub fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
         let bucket_name = &self.s3.bucket.name;
         let key = &self.s3.object.key;
         // The AWS SDK sometimes wraps the S3 eTag in quotes, but sometimes doesn't.
@@ -141,16 +153,6 @@ impl Trigger for S3Record {
             hash,
             kind: String::from("aws.s3.object"),
         }])
-    }
-}
-
-impl ServiceNameResolver for S3Record {
-    fn get_specific_identifier(&self) -> String {
-        self.s3.bucket.name.clone()
-    }
-
-    fn get_generic_identifier(&self) -> &'static str {
-        "lambda_s3"
     }
 }
 

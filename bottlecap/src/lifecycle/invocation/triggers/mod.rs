@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::traces::spanpointers::SpanPointer;
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
@@ -55,11 +54,6 @@ pub trait Trigger: ServiceNameResolver {
             .or_else(|| service_mapping.get(self.get_generic_identifier()))
             .unwrap_or(&fallback.to_string())
             .to_string()
-    }
-
-    /// Default implementation for adding span pointers
-    fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
-        None
     }
 }
 
