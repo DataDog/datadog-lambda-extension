@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::span_pointers::SpanPointer;
+use crate::traces::spanpointers::SpanPointer;
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;

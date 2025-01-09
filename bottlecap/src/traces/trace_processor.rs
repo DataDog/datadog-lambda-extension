@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::tags::provider;
+use crate::traces::spanpointers::SpanPointer;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
@@ -12,7 +13,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use crate::config;
-use crate::span_pointers::SpanPointer;
 use crate::traces::{
     AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
     DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
@@ -193,8 +193,8 @@ mod tests {
     };
 
     use crate::config::Config;
-    use crate::span_pointers::SpanPointer;
     use crate::tags::provider::Provider;
+    use crate::traces::spanpointers::SpanPointer;
     use crate::traces::trace_processor::{self, ChunkProcessor, TraceProcessor};
     use crate::LAMBDA_RUNTIME_SLUG;
     use datadog_trace_protobuf::pb;

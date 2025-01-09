@@ -10,7 +10,7 @@ use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
-use crate::span_pointers::{generate_span_pointer_hash, SpanPointer};
+use crate::traces::spanpointers::{generate_span_pointer_hash, SpanPointer};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct S3Event {

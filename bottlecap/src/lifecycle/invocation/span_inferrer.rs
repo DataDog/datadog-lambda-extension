@@ -22,7 +22,7 @@ use crate::lifecycle::invocation::{
         Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
     },
 };
-use crate::span_pointers::SpanPointer;
+use crate::traces::spanpointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
 
 #[derive(Default)]
