@@ -1,3 +1,6 @@
+// Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
+// SPDX-License-Identifier: Apache-2.0
+
 use sha2::{Digest, Sha256};
 
 const SPAN_POINTER_HASH_LENGTH: usize = 32;
