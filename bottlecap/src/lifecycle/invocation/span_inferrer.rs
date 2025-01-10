@@ -182,9 +182,7 @@ impl SpanInferrer {
         } else if S3Record::is_match(payload_value) {
             if let Some(t) = S3Record::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
-                if let Some(pointers) = t.get_span_pointers() {
-                    self.span_pointers = Some(pointers);
-                }
+                self.span_pointers = t.get_span_pointers();
 
                 trigger = Some(Box::new(t));
             }
