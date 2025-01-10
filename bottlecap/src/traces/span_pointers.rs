@@ -1,9 +1,9 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use datadog_trace_protobuf::pb::SpanLink;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use datadog_trace_protobuf::pb::SpanLink;
 
 const SPAN_POINTER_HASH_LENGTH: usize = 32;
 
@@ -96,33 +96,33 @@ mod tests {
                     },
                 ]),
                 expected_links: Some(json!([
-                {
-                    "attributes": {
-                        "link.kind": "span-pointer",
-                        "ptr.dir": "u",
-                        "ptr.hash": "hash1",
-                        "ptr.kind": "test.kind1"
+                    {
+                        "attributes": {
+                            "link.kind": "span-pointer",
+                            "ptr.dir": "u",
+                            "ptr.hash": "hash1",
+                            "ptr.kind": "test.kind1"
+                        },
+                        "span_id": 0,
+                        "trace_id": 0,
+                        "trace_id_high": 0,
+                        "tracestate": "",
+                        "flags": 0
                     },
-                    "span_id": 0,
-                    "trace_id": 0,
-                    "trace_id_high": 0,
-                    "tracestate": "",
-                    "flags": 0
-                },
-                {
-                    "attributes": {
-                        "link.kind": "span-pointer",
-                        "ptr.dir": "u",
-                        "ptr.hash": "hash2",
-                        "ptr.kind": "test.kind2"
-                    },
-                    "span_id": 0,
-                    "trace_id": 0,
-                    "trace_id_high": 0,
-                    "tracestate": "",
-                    "flags": 0
-                }
-            ])),
+                    {
+                        "attributes": {
+                            "link.kind": "span-pointer",
+                            "ptr.dir": "u",
+                            "ptr.hash": "hash2",
+                            "ptr.kind": "test.kind2"
+                        },
+                        "span_id": 0,
+                        "trace_id": 0,
+                        "trace_id_high": 0,
+                        "tracestate": "",
+                        "flags": 0
+                    }
+                ])),
             },
             SpanPointerTestCase {
                 test_name: "handles empty span pointers",
