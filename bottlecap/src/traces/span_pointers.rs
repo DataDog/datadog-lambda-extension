@@ -26,8 +26,12 @@ pub fn generate_span_pointer_hash(components: &[&str]) -> String {
 
 pub fn attach_span_pointers_to_meta<S: ::std::hash::BuildHasher>(
     meta: &mut HashMap<String, String, S>,
-    span_pointers: &[SpanPointer],
+    span_pointers_option: &Option<Vec<SpanPointer>>,
 ) {
+    let Some(span_pointers) = span_pointers_option else {
+        return;
+    };
+
     if span_pointers.is_empty() {
         return;
     }
@@ -113,6 +117,11 @@ mod tests {
                 span_pointers: Some(vec![]),
                 expected_links: None,
             },
+            SpanPointerTestCase {
+                test_name: "handles None span pointers",
+                span_pointers: None,
+                expected_links: None,
+            },
         ];
 
         for case in test_cases {
@@ -120,9 +129,7 @@ mod tests {
                 meta: HashMap::new(),
             };
 
-            if let Some(ref pointers) = case.span_pointers {
-                attach_span_pointers_to_meta(&mut test_span.meta, pointers);
-            }
+            attach_span_pointers_to_meta(&mut test_span.meta, &case.span_pointers);
 
             match case.expected_links {
                 Some(expected) => {

@@ -61,9 +61,7 @@ impl TraceChunkProcessor for ChunkProcessor {
         }
 
         if let Some(span) = chunk.spans.get_mut(root_span_index) {
-            if let Some(span_pointers) = &self.span_pointers {
-                attach_span_pointers_to_meta(&mut span.meta, span_pointers);
-            }
+            attach_span_pointers_to_meta(&mut span.meta, &self.span_pointers);
         }
     }
 }
