@@ -26,34 +26,29 @@ pub fn generate_span_pointer_hash(components: &[&str]) -> String {
 
 pub fn attach_span_pointers_to_meta<S: ::std::hash::BuildHasher>(
     meta: &mut HashMap<String, String, S>,
-    span_pointers_option: &Option<Vec<SpanPointer>>,
+    span_pointers: &Option<Vec<SpanPointer>>,
 ) {
-    let Some(span_pointers) = span_pointers_option else {
+    let Some(span_pointers) = span_pointers.as_ref().filter(|sp| !sp.is_empty()) else {
         return;
     };
-
-    if span_pointers.is_empty() {
-        return;
-    }
 
     let span_links: Vec<SpanLink> = span_pointers
         .iter()
         .map(|sp| {
-            let mut attributes = HashMap::new();
-            attributes.insert("link.kind".to_string(), "span-pointer".to_string());
-            attributes.insert("ptr.dir".to_string(), "u".to_string());
-            attributes.insert("ptr.hash".to_string(), sp.hash.clone());
-            attributes.insert("ptr.kind".to_string(), sp.kind.clone());
-
             SpanLink {
-                // We set trace_id and span_id to 0 since they're unknown; the frontend
+                // We set all these fields as 0 or empty since they're unknown; the frontend
                 // uses `ptr.hash` instead to find the opposite link if it exists.
                 trace_id: 0,
                 span_id: 0,
-                attributes,
                 trace_id_high: 0,
                 tracestate: String::new(),
                 flags: 0,
+                attributes: HashMap::from([
+                    ("link.kind".to_string(), "span-pointer".to_string()),
+                    ("ptr.dir".to_string(), "u".to_string()),
+                    ("ptr.hash".to_string(), sp.hash.clone()),
+                    ("ptr.kind".to_string(), sp.kind.clone()),
+                ]),
             }
         })
         .collect();
