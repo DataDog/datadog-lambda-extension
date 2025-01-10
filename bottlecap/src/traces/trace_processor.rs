@@ -37,7 +37,7 @@ struct ChunkProcessor {
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
-    fn process(&mut self, chunk: &mut pb::TraceChunk, _index: usize) {
+    fn process(&mut self, chunk: &mut pb::TraceChunk, root_span_index: usize) {
         chunk
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
@@ -50,12 +50,6 @@ impl TraceChunkProcessor for ChunkProcessor {
                 }
             }
 
-            if span.name == "aws.lambda" {
-                if let Some(span_pointers) = &self.span_pointers {
-                    attach_span_pointers_to_meta(&mut span.meta, span_pointers);
-                }
-            }
-
             self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                 span.meta.insert(k.clone(), v.clone());
             });
@@ -64,6 +58,12 @@ impl TraceChunkProcessor for ChunkProcessor {
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
             obfuscate_span(span, &self.obfuscation_config);
+        }
+
+        if let Some(span) = chunk.spans.get_mut(root_span_index) {
+            if let Some(span_pointers) = &self.span_pointers {
+                attach_span_pointers_to_meta(&mut span.meta, span_pointers);
+            }
         }
     }
 }
