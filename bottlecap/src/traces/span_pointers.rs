@@ -1,9 +1,9 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use datadog_trace_protobuf::pb::SpanLink;
 
 const SPAN_POINTER_HASH_LENGTH: usize = 32;
 
@@ -36,19 +36,25 @@ pub fn attach_span_pointers_to_meta<S: ::std::hash::BuildHasher>(
         return;
     }
 
-    let span_links: Vec<Value> = span_pointers
+    let span_links: Vec<SpanLink> = span_pointers
         .iter()
         .map(|sp| {
-            json!({
-                "attributes": {
-                    "link.kind": "span-pointer",
-                    "ptr.dir": "u",
-                    "ptr.hash": sp.hash,
-                    "ptr.kind": sp.kind,
-                },
-                "span_id": "0",
-                "trace_id": "0"
-            })
+            let mut attributes = HashMap::new();
+            attributes.insert("link.kind".to_string(), "span-pointer".to_string());
+            attributes.insert("ptr.dir".to_string(), "u".to_string());
+            attributes.insert("ptr.hash".to_string(), sp.hash.clone());
+            attributes.insert("ptr.kind".to_string(), sp.kind.clone());
+
+            SpanLink {
+                // We set trace_id and span_id to 0 since they're unknown; the frontend
+                // uses `ptr.hash` instead to find the opposite link if it exists.
+                trace_id: 0,
+                span_id: 0,
+                attributes,
+                trace_id_high: 0,
+                tracestate: String::new(),
+                flags: 0,
+            }
         })
         .collect();
 
@@ -90,27 +96,33 @@ mod tests {
                     },
                 ]),
                 expected_links: Some(json!([
-                    {
-                        "attributes": {
-                            "link.kind": "span-pointer",
-                            "ptr.dir": "u",
-                            "ptr.hash": "hash1",
-                            "ptr.kind": "test.kind1"
-                        },
-                        "span_id": "0",
-                        "trace_id": "0"
+                {
+                    "attributes": {
+                        "link.kind": "span-pointer",
+                        "ptr.dir": "u",
+                        "ptr.hash": "hash1",
+                        "ptr.kind": "test.kind1"
                     },
-                    {
-                        "attributes": {
-                            "link.kind": "span-pointer",
-                            "ptr.dir": "u",
-                            "ptr.hash": "hash2",
-                            "ptr.kind": "test.kind2"
-                        },
-                        "span_id": "0",
-                        "trace_id": "0"
-                    }
-                ])),
+                    "span_id": 0,
+                    "trace_id": 0,
+                    "trace_id_high": 0,
+                    "tracestate": "",
+                    "flags": 0
+                },
+                {
+                    "attributes": {
+                        "link.kind": "span-pointer",
+                        "ptr.dir": "u",
+                        "ptr.hash": "hash2",
+                        "ptr.kind": "test.kind2"
+                    },
+                    "span_id": 0,
+                    "trace_id": 0,
+                    "trace_id_high": 0,
+                    "tracestate": "",
+                    "flags": 0
+                }
+            ])),
             },
             SpanPointerTestCase {
                 test_name: "handles empty span pointers",
