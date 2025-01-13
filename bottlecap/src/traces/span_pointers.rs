@@ -76,6 +76,7 @@ mod tests {
 
     struct SpanPointerTestCase {
         test_name: &'static str,
+        existing_links: Option<serde_json::Value>,
         span_pointers: Option<Vec<SpanPointer>>,
         expected_links: Option<serde_json::Value>,
     }
@@ -85,6 +86,7 @@ mod tests {
         let test_cases = vec![
             SpanPointerTestCase {
                 test_name: "adds span links to span",
+                existing_links: None,
                 span_pointers: Some(vec![
                     SpanPointer {
                         hash: "hash1".to_string(),
@@ -126,13 +128,63 @@ mod tests {
             },
             SpanPointerTestCase {
                 test_name: "handles empty span pointers",
+                existing_links: None,
                 span_pointers: Some(vec![]),
                 expected_links: None,
             },
             SpanPointerTestCase {
                 test_name: "handles None span pointers",
+                existing_links: None,
                 span_pointers: None,
                 expected_links: None,
+            },
+            SpanPointerTestCase {
+                test_name: "appends to existing span links",
+                existing_links: Some(json!([{
+                    "attributes": {
+                        "link.kind": "span-pointer",
+                        "ptr.dir": "d",
+                        "ptr.hash": "hash1",
+                        "ptr.kind": "test.kind1"
+                    },
+                    "span_id": 123,
+                    "trace_id": 456,
+                    "trace_id_high": 0,
+                    "tracestate": "",
+                    "flags": 0
+                }])),
+                span_pointers: Some(vec![SpanPointer {
+                    hash: "hash2".to_string(),
+                    kind: "test.kind2".to_string(),
+                }]),
+                expected_links: Some(json!([
+                    {
+                        "attributes": {
+                            "link.kind": "span-pointer",
+                            "ptr.dir": "d",
+                            "ptr.hash": "hash1",
+                            "ptr.kind": "test.kind1"
+                        },
+                        "span_id": 123,
+                        "trace_id": 456,
+                        "trace_id_high": 0,
+                        "tracestate": "",
+                        "flags": 0
+                    },
+                    {
+                        "attributes": {
+                            "link.kind": "span-pointer",
+                            "ptr.dir": "u",
+                            "ptr.hash": "hash2",
+                            "ptr.kind": "test.kind2"
+                        },
+                        "span_id": 0,
+                        "trace_id": 0,
+                        "trace_id_high": 0,
+                        "tracestate": "",
+                        "flags": 0
+                    }
+                ])),
             },
         ];
 
@@ -140,6 +192,13 @@ mod tests {
             let mut test_span = TestSpan {
                 meta: HashMap::new(),
             };
+
+            // Set up existing links if any
+            if let Some(links) = case.existing_links {
+                test_span
+                    .meta
+                    .insert("_dd.span_links".to_string(), links.to_string());
+            }
 
             attach_span_pointers_to_meta(&mut test_span.meta, &case.span_pointers);
 
