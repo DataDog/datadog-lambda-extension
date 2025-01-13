@@ -470,7 +470,7 @@ impl Lambda {
             let tmp_max = bsize * blocks;
             let mut tmp_used = bsize * (blocks - bavail);
 
-            let mut interval = interval(Duration::from_millis(10));
+            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
             loop {
                 tokio::select! {
                     biased;
@@ -497,7 +497,7 @@ impl Lambda {
         });
     }
 
-    pub fn generate_process_enhanced_metrics(
+    pub fn generate_process_metrics(
         fd_max: f64,
         fd_use: f64,
         threads_max: f64,
@@ -524,6 +524,8 @@ impl Lambda {
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert fd_use metric: {}", e);
             }
+        } else {
+            debug!("Could not get file descriptor usage data.");
         }
 
         let metric = Metric::new(
@@ -545,6 +547,8 @@ impl Lambda {
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert threads_use metric: {}", e);
             }
+        } else {
+            debug!("Could not get thread usage data.");
         }
     }
 
@@ -562,23 +566,13 @@ impl Lambda {
 
             // Set fd_max and initial value for fd_use
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = if let Ok(fd_use) = proc::get_fd_use_data(&pids) {
-                fd_use
-            } else {
-                debug!("Could not get file descriptor use.");
-                -1_f64
-            };
+            let mut fd_use = proc::get_fd_use_data(&pids).unwrap_or_else(|_| -1_f64);
 
             // Set threads_max and initial value for threads_use
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = if let Ok(threads_use) = proc::get_threads_use_data(&pids) {
-                threads_use
-            } else {
-                debug!("Could not get threads use.");
-                -1_f64
-            };
+            let mut threads_use = proc::get_threads_use_data(&pids).unwrap_or_else(|_| -1_f64);
 
-            let mut interval = interval(Duration::from_millis(1));
+            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
             loop {
                 tokio::select! {
                     biased;
@@ -586,7 +580,7 @@ impl Lambda {
                     _ = send_metrics.changed() => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
-                        Self::generate_process_enhanced_metrics(fd_max, fd_use, threads_max, threads_use, &mut aggr, tags.clone());
+                        Self::generate_process_metrics(fd_max, fd_use, threads_max, threads_use, &mut aggr, tags.clone());
                         return;
                     }
                     // Otherwise keep monitoring file descriptor and thread usage periodically
@@ -1022,7 +1016,7 @@ mod tests {
         let threads_max = 1024.0;
         let threads_use = 40.0;
 
-        Lambda::generate_process_enhanced_metrics(
+        Lambda::generate_process_metrics(
             fd_max,
             fd_use,
             threads_max,
@@ -1047,7 +1041,7 @@ mod tests {
         let threads_max = 1024.0;
         let threads_use = -1.0;
 
-        Lambda::generate_process_enhanced_metrics(
+        Lambda::generate_process_metrics(
             fd_max,
             fd_use,
             threads_max,

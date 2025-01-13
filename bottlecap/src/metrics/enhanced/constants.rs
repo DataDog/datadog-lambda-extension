@@ -44,3 +44,6 @@ pub const THREADS_MAX_METRIC: &str = "aws.lambda.enhanced.threads_max";
 pub const THREADS_USE_METRIC: &str = "aws.lambda.enhanced.threads_use";
 //pub const ASM_INVOCATIONS_METRIC: &str = "aws.lambda.enhanced.asm.invocations";
 pub const ENHANCED_METRICS_ENV_VAR: &str = "DD_ENHANCED_METRICS";
+
+// Monitoring interval for tmp, fd, and threads metrics
+pub const MONITORING_INTERVAL: u64 = 10;
