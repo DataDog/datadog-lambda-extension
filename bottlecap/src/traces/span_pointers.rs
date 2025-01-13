@@ -32,7 +32,7 @@ pub fn attach_span_pointers_to_meta<S: ::std::hash::BuildHasher>(
         return;
     };
 
-    let span_links: Vec<SpanLink> = span_pointers
+    let new_span_links: Vec<SpanLink> = span_pointers
         .iter()
         .map(|sp| {
             SpanLink {
@@ -53,7 +53,13 @@ pub fn attach_span_pointers_to_meta<S: ::std::hash::BuildHasher>(
         })
         .collect();
 
-    let _ = serde_json::to_string(&span_links)
+    let mut all_span_links = meta
+        .get("_dd.span_links")
+        .and_then(|existing| serde_json::from_str::<Vec<SpanLink>>(existing).ok())
+        .unwrap_or_default();
+
+    all_span_links.extend(new_span_links);
+    let _ = serde_json::to_string(&all_span_links)
         .map(|json| meta.insert("_dd.span_links".to_string(), json));
 }
 
