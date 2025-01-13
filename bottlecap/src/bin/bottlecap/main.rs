@@ -156,7 +156,13 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
 }
 
 fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
-    format!("arn:aws:lambda:{region}:{account_id}:function:{function_name}")
+    let arn_prefix = if region.starts_with("cn-") {
+        "aws-ch"
+    } else {
+        "aws"
+    };
+
+    format!("arn:{arn_prefix}:lambda:{region}:{account_id}:function:{function_name}")
 }
 
 #[tokio::main]
