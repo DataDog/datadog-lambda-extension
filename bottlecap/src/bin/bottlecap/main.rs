@@ -391,6 +391,25 @@ async fn extension_loop_active(
                 return Err(err);
             }
         }
+        // NEW LOOP
+        // if periodic AND NOT flush
+        // Call /next immediately
+        // but continue processing events on event bus as long as we can, don't worry about
+        // break. Just keep working stuff off the bus.
+        // should be reentrant
+        // DO NOT flush data unless we do not call next - no HTTP calls
+        // When it's time to flush, DO NOT call next. Instead, wait until we receive the
+        // platfom.runtimeDone event which matches the very last request ID we received
+        // Then we can flush and call /next
+        // Also need to modify the invocation context processor to grow dynamically
+        //
+        // how to solve for long running, periodic flushing functions:
+        // block and do not call next until we receive platform.runtimeDone
+        // how to know?
+        // flush at end until adaptive strategy. Change periodic strategy behavior to be for long
+        // running jobs only
+        //
+        //
         // Block until we get something from the telemetry API
         // Check if flush logic says we should block and flush or not
         if flush_control.should_flush_end() || shutdown {
