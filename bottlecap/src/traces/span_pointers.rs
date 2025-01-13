@@ -53,9 +53,8 @@ pub fn attach_span_pointers_to_meta<S: ::std::hash::BuildHasher>(
         })
         .collect();
 
-    if let Ok(span_links_json) = serde_json::to_string(&span_links) {
-        meta.insert("_dd.span_links".to_string(), span_links_json);
-    }
+    let _ = serde_json::to_string(&span_links)
+        .map(|json| meta.insert("_dd.span_links".to_string(), json));
 }
 
 #[cfg(test)]
