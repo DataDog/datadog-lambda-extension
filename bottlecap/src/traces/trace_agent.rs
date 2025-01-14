@@ -258,6 +258,7 @@ impl TraceAgent {
             tracer_header_tags,
             traces,
             body_size,
+            None,
         );
 
         // send trace payload to our trace flusher

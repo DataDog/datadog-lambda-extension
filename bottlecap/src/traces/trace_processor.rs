@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::tags::provider;
+use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
@@ -32,10 +33,11 @@ pub struct ServerlessTraceProcessor {
 struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
+    span_pointers: Option<Vec<SpanPointer>>,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
-    fn process(&mut self, chunk: &mut pb::TraceChunk, _index: usize) {
+    fn process(&mut self, chunk: &mut pb::TraceChunk, root_span_index: usize) {
         chunk
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
@@ -56,6 +58,10 @@ impl TraceChunkProcessor for ChunkProcessor {
             span.meta
                 .insert("_dd.origin".to_string(), "lambda".to_string());
             obfuscate_span(span, &self.obfuscation_config);
+        }
+
+        if let Some(span) = chunk.spans.get_mut(root_span_index) {
+            attach_span_pointers_to_meta(&mut span.meta, &self.span_pointers);
         }
     }
 }
@@ -116,6 +122,7 @@ pub trait TraceProcessor {
         header_tags: tracer_header_tags::TracerHeaderTags,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
+        span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData;
 }
 
@@ -127,6 +134,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         header_tags: tracer_header_tags::TracerHeaderTags,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
+        span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData {
         let payload = trace_utils::collect_trace_chunks(
             V07(traces),
@@ -134,6 +142,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             &mut ChunkProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
+                span_pointers,
             },
             true,
         );
@@ -265,8 +274,14 @@ mod tests {
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
-        let tracer_payload =
-            trace_processor.process_traces(config, tags_provider.clone(), header_tags, traces, 100);
+        let tracer_payload = trace_processor.process_traces(
+            config,
+            tags_provider.clone(),
+            header_tags,
+            traces,
+            100,
+            None,
+        );
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),

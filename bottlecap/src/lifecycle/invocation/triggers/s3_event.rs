@@ -10,6 +10,7 @@ use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
+use crate::traces::span_pointers::{generate_span_pointer_hash, SpanPointer};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct S3Event {
@@ -130,6 +131,28 @@ impl ServiceNameResolver for S3Record {
 
     fn get_generic_identifier(&self) -> &'static str {
         "lambda_s3"
+    }
+}
+
+impl S3Record {
+    pub fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
+        let bucket_name = &self.s3.bucket.name;
+        let key = &self.s3.object.key;
+        // The AWS SDK sometimes wraps the S3 eTag in quotes, but sometimes doesn't.
+        let e_tag = self.s3.object.e_tag.trim_matches('"');
+
+        if bucket_name.is_empty() || key.is_empty() || e_tag.is_empty() {
+            debug!("Unable to create span pointer because bucket name, key, or etag is missing.");
+            return None;
+        }
+
+        // https://github.com/DataDog/dd-span-pointer-rules/blob/main/AWS/S3/Object/README.md
+        let hash = generate_span_pointer_hash(&[bucket_name, key, e_tag]);
+
+        Some(vec![SpanPointer {
+            hash,
+            kind: String::from("aws.s3.object"),
+        }])
     }
 }
 
@@ -273,5 +296,52 @@ mod tests {
             event.resolve_service_name(&generic_service_mapping, "s3"),
             "generic-service"
         );
+    }
+
+    #[test]
+    fn test_get_span_pointers() {
+        let event = S3Record {
+            event_source: String::from("aws:s3"),
+            event_time: Utc::now(),
+            event_name: String::from("ObjectCreated:Put"),
+            s3: S3Entity {
+                bucket: S3Bucket {
+                    name: String::from("test-bucket"),
+                    arn: String::from("arn:aws:s3:::test-bucket"),
+                },
+                object: S3Object {
+                    key: String::from("test/key"),
+                    size: 1024,
+                    e_tag: String::from("0123456789abcdef0123456789abcdef"),
+                },
+            },
+        }; //
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.s3.object");
+        assert_eq!(span_pointers[0].hash, "40df87dbfdf59f32253a2668c23e51b4");
+    }
+
+    #[test]
+    fn test_get_span_pointers_missing_fields() {
+        let event = S3Record {
+            event_source: String::from("aws:s3"),
+            event_time: Utc::now(),
+            event_name: String::from("ObjectCreated:Put"),
+            s3: S3Entity {
+                bucket: S3Bucket {
+                    name: String::new(), // Empty bucket name
+                    arn: String::from("arn"),
+                },
+                object: S3Object {
+                    key: String::from("key"),
+                    size: 0,
+                    e_tag: String::from("etag"),
+                },
+            },
+        };
+
+        assert!(event.get_span_pointers().is_none());
     }
 }

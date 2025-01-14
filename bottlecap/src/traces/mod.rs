@@ -3,6 +3,7 @@
 
 pub mod context;
 pub mod propagation;
+pub mod span_pointers;
 pub mod stats_flusher;
 pub mod stats_processor;
 pub mod trace_agent;
