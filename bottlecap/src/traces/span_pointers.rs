@@ -147,8 +147,8 @@ mod tests {
                         "ptr.hash": "hash1",
                         "ptr.kind": "test.kind1"
                     },
-                    "span_id": 123,
-                    "trace_id": 456,
+                    "span_id": 0,
+                    "trace_id": 0,
                     "trace_id_high": 0,
                     "tracestate": "",
                     "flags": 0
@@ -165,8 +165,8 @@ mod tests {
                             "ptr.hash": "hash1",
                             "ptr.kind": "test.kind1"
                         },
-                        "span_id": 123,
-                        "trace_id": 456,
+                        "span_id": 0,
+                        "trace_id": 0,
                         "trace_id_high": 0,
                         "tracestate": "",
                         "flags": 0
