@@ -450,12 +450,7 @@ impl Lambda {
         }
     }
 
-    #[allow(unreachable_code)]
-    #[allow(unused_variables)]
-    #[allow(unused_mut)]
     pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        // Temporarily disabled
-        return;
         if !self.config.enhanced_metrics {
             return;
         }
@@ -475,7 +470,7 @@ impl Lambda {
             let tmp_max = bsize * blocks;
             let mut tmp_used = bsize * (blocks - bavail);
 
-            let mut interval = interval(Duration::from_millis(10));
+            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
             loop {
                 tokio::select! {
                     biased;
@@ -502,9 +497,11 @@ impl Lambda {
         });
     }
 
-    pub fn generate_fd_enhanced_metrics(
+    pub fn generate_process_metrics(
         fd_max: f64,
         fd_use: f64,
+        threads_max: f64,
+        threads_use: f64,
         aggr: &mut std::sync::MutexGuard<Aggregator>,
         tags: Option<SortedTags>,
     ) {
@@ -522,20 +519,15 @@ impl Lambda {
             let metric = Metric::new(
                 constants::FD_USE_METRIC.into(),
                 MetricValue::distribution(fd_use),
-                tags,
+                tags.clone(),
             );
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert fd_use metric: {}", e);
             }
+        } else {
+            debug!("Could not get file descriptor usage data.");
         }
-    }
 
-    pub fn generate_threads_enhanced_metrics(
-        threads_max: f64,
-        threads_use: f64,
-        aggr: &mut std::sync::MutexGuard<Aggregator>,
-        tags: Option<SortedTags>,
-    ) {
         let metric = Metric::new(
             constants::THREADS_MAX_METRIC.into(),
             MetricValue::distribution(threads_max),
@@ -555,15 +547,12 @@ impl Lambda {
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert threads_use metric: {}", e);
             }
+        } else {
+            debug!("Could not get thread usage data.");
         }
     }
 
-    #[allow(unreachable_code)]
-    #[allow(unused_variables)]
-    #[allow(unused_mut)]
     pub fn set_process_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        // Temporarily disabled
-        return;
         if !self.config.enhanced_metrics {
             return;
         }
@@ -573,17 +562,17 @@ impl Lambda {
 
         tokio::spawn(async move {
             // get list of all process ids
-            let pids = proc::get_pid_list();
+            let mut pids = proc::get_pid_list();
 
-            // Set fd_max and initial value for fd_use to -1
+            // Set fd_max and initial value for fd_use
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = -1_f64;
+            let mut fd_use = proc::get_fd_use_data(&pids).unwrap_or_else(|_| -1_f64);
 
-            // Set threads_max and initial value for threads_use to -1
+            // Set threads_max and initial value for threads_use
             let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = -1_f64;
+            let mut threads_use = proc::get_threads_use_data(&pids).unwrap_or_else(|_| -1_f64);
 
-            let mut interval = interval(Duration::from_millis(1));
+            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
             loop {
                 tokio::select! {
                     biased;
@@ -591,28 +580,18 @@ impl Lambda {
                     _ = send_metrics.changed() => {
                         let mut aggr: std::sync::MutexGuard<Aggregator> =
                             aggr.lock().expect("lock poisoned");
-                        Self::generate_fd_enhanced_metrics(fd_max, fd_use, &mut aggr, tags.clone());
-                        Self::generate_threads_enhanced_metrics(threads_max, threads_use, &mut aggr, tags);
+                        Self::generate_process_metrics(fd_max, fd_use, threads_max, threads_use, &mut aggr, tags.clone());
                         return;
                     }
                     // Otherwise keep monitoring file descriptor and thread usage periodically
                     _ = interval.tick() => {
-                        match proc::get_fd_use_data(&pids) {
-                            Ok(fd_use_curr) => {
-                                fd_use = fd_use.max(fd_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update file descriptor use enhanced metric.");
-                            }
-                        };
-                        match proc::get_threads_use_data(&pids) {
-                            Ok(threads_use_curr) => {
-                                threads_use = threads_use.max(threads_use_curr);
-                            },
-                            Err(_) => {
-                                debug!("Could not update threads use enhanced metric.");
-                            }
-                        };
+                        pids = proc::get_pid_list();
+                        if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
+                            fd_use = fd_use.max(fd_use_curr);
+                        }
+                        if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
+                            threads_use = threads_use.max(threads_use_curr);
+                        }
                     }
                 }
             }
@@ -1028,84 +1007,56 @@ mod tests {
     }
 
     #[test]
-    fn test_set_fd_enhanced_metrics_valid_fd_use() {
+    fn test_set_process_enhanced_metrics_valid_use() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
 
         let fd_max = 1024.0;
         let fd_use = 175.0;
+        let threads_max = 1024.0;
+        let threads_use = 40.0;
 
-        Lambda::generate_fd_enhanced_metrics(
+        Lambda::generate_process_metrics(
             fd_max,
             fd_use,
+            threads_max,
+            threads_use,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
             None,
         );
 
         assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0);
         assert_sketch(&metrics_aggr, constants::FD_USE_METRIC, 175.0);
-    }
-
-    #[test]
-    fn test_set_fd_enhanced_metrics_invalid_fd_use() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
-        let fd_max = 1024.0;
-        let fd_use = -1.0;
-
-        Lambda::generate_fd_enhanced_metrics(
-            fd_max,
-            fd_use,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
-            None,
-        );
-
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0);
-
-        let aggr = lambda.aggregator.lock().expect("lock poisoned");
-        assert!(aggr
-            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None)
-            .is_none());
-    }
-
-    #[test]
-    fn test_set_threads_enhanced_metrics_valid_threads_use() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
-        let threads_max = 1024.0;
-        let threads_use = 40.0;
-
-        Lambda::generate_threads_enhanced_metrics(
-            threads_max,
-            threads_use,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
-            None,
-        );
-
         assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0);
         assert_sketch(&metrics_aggr, constants::THREADS_USE_METRIC, 40.0);
     }
 
     #[test]
-    fn test_set_threads_enhanced_metrics_invalid_threads_use() {
+    fn test_set_process_enhanced_metrics_invalid_use() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
 
+        let fd_max = 1024.0;
+        let fd_use = -1.0;
         let threads_max = 1024.0;
         let threads_use = -1.0;
 
-        Lambda::generate_threads_enhanced_metrics(
+        Lambda::generate_process_metrics(
+            fd_max,
+            fd_use,
             threads_max,
             threads_use,
             &mut lambda.aggregator.lock().expect("lock poisoned"),
             None,
         );
 
+        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0);
         assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0);
 
         let aggr = lambda.aggregator.lock().expect("lock poisoned");
+        assert!(aggr
+            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None)
+            .is_none());
         assert!(aggr
             .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None)
             .is_none());

@@ -11,7 +11,7 @@ use crate::lifecycle::invocation::{
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct LambdaFunctionUrlEvent {
-    #[serde(serialize_with = "lowercase_key")]
+    #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
     #[serde(rename = "requestContext")]
     pub request_context: RequestContext,

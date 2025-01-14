@@ -11,7 +11,7 @@ use std::vec;
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
@@ -38,10 +38,24 @@ pub struct FallbackConfig {
     trace_otel_enabled: bool,
     otlp_config_receiver_protocols_http_endpoint: Option<String>,
     otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
-    // YAML otel, we don't care about the content
-    otlp_config: Option<Value>,
+    // intake urls
+    url: Option<String>,
+    dd_url: Option<String>,
+    logs_config_logs_dd_url: Option<String>,
+    // APM, as opposed to logs, does not use the `apm_config` prefix for env vars
+    apm_dd_url: Option<String>,
 }
 
+/// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
+///
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct FallbackYamlConfig {
+    logs_config: Option<Value>,
+    apm_config: Option<Value>,
+    otlp_config: Option<Value>,
+}
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
@@ -70,6 +84,7 @@ pub struct Config {
     pub kms_api_key: String,
     pub env: Option<String>,
     pub service: Option<String>,
+    #[serde(deserialize_with = "deserialize_string_or_int")]
     pub version: Option<String>,
     pub tags: Option<String>,
     #[serde(deserialize_with = "deserialize_log_level")]
@@ -78,7 +93,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
-    pub flush_timeout: u64,
+    pub flush_timeout: u64, //TODO go agent adds jitter too
     pub https_proxy: Option<String>,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
@@ -142,17 +157,18 @@ fn log_fallback_reason(reason: &str) {
     println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
-fn fallback(figment: &Figment) -> Result<(), ConfigError> {
-    let fallback_config: FallbackConfig = match figment.extract() {
-        Ok(fallback_config) => fallback_config,
-        Err(err) => {
-            println!("Failed to parse Datadog config: {err}");
-            return Err(ConfigError::ParseError(err.to_string()));
-        }
-    };
+fn fallback(figment: &Figment, yaml_figment: &Figment) -> Result<(), ConfigError> {
+    let (config, yaml_config): (FallbackConfig, FallbackYamlConfig) =
+        match (figment.extract(), yaml_figment.extract()) {
+            (Ok(env_config), Ok(yaml_config)) => (env_config, yaml_config),
+            (_, Err(err)) | (Err(err), _) => {
+                println!("Failed to parse Datadog config: {err}");
+                return Err(ConfigError::ParseError(err.to_string()));
+            }
+        };
 
     // Customer explicitly opted out of the Next Gen extension
-    let opted_out = match fallback_config.extension_version.as_deref() {
+    let opted_out = match config.extension_version.as_deref() {
         Some("compatibility") => true,
         // We want customers using the `next` to not be affected
         _ => false,
@@ -165,12 +181,12 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
         ));
     }
 
-    if fallback_config.serverless_appsec_enabled || fallback_config.appsec_enabled {
+    if config.serverless_appsec_enabled || config.appsec_enabled {
         log_fallback_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
 
-    if fallback_config.profiling_enabled {
+    if config.profiling_enabled {
         log_fallback_reason("profiling_enabled");
         return Err(ConfigError::UnsupportedField(
             "profiling_enabled".to_string(),
@@ -178,22 +194,33 @@ fn fallback(figment: &Figment) -> Result<(), ConfigError> {
     }
 
     // OTEL env
-    if fallback_config.trace_otel_enabled
-        || fallback_config
+    if config.trace_otel_enabled
+        || config
             .otlp_config_receiver_protocols_http_endpoint
             .is_some()
-        || fallback_config
+        || config
             .otlp_config_receiver_protocols_grpc_endpoint
             .is_some()
+        || yaml_config.otlp_config.is_some()
     {
         log_fallback_reason("otel");
         return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
 
-    // OTEL YAML
-    if fallback_config.otlp_config.is_some() {
-        log_fallback_reason("otel");
-        return Err(ConfigError::UnsupportedField("otel".to_string()));
+    // Intake URLs
+    if config.url.is_some()
+        || config.dd_url.is_some()
+        || config.logs_config_logs_dd_url.is_some()
+        || config.apm_dd_url.is_some()
+        || yaml_config
+            .logs_config
+            .is_some_and(|c| c.get("logs_dd_url").is_some())
+        || yaml_config
+            .apm_config
+            .is_some_and(|c| c.get("apm_dd_url").is_some())
+    {
+        log_fallback_reason("intake_urls");
+        return Err(ConfigError::UnsupportedField("intake_urls".to_string()));
     }
 
     Ok(())
@@ -213,7 +240,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     // Get YAML nested fields
     let yaml_figment = Figment::from(Yaml::file(&path));
 
-    fallback(&figment)?;
+    fallback(&figment, &yaml_figment)?;
 
     let (mut config, yaml_config): (Config, YamlConfig) =
         match (figment.extract(), yaml_figment.extract()) {
@@ -253,6 +280,24 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     }
 
     Ok(config)
+}
+
+fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::String(s) => {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(s))
+            }
+        }
+        Value::Number(n) => Ok(Some(n.to_string())),
+        _ => Err(serde::de::Error::custom("expected a string or an integer")),
+    }
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -339,6 +384,42 @@ pub mod tests {
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_fallback_on_intake_urls() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_APM_DD_URL", "some_url");
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("intake_urls".to_string())
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_fallback_on_intake_urls_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                apm_config:
+                  apm_dd_url: some_url
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("intake_urls".to_string())
+            );
             Ok(())
         });
     }
@@ -478,6 +559,17 @@ pub mod tests {
             );
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn parse_dd_version() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_VERSION", "123");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(config.version.expect("failed to parse DD_VERSION"), "123");
             Ok(())
         });
     }

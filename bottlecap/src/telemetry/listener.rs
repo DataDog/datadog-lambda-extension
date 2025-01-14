@@ -1,5 +1,6 @@
 use crate::telemetry::events::TelemetryEvent;
 
+use hyper::body::HttpBody;
 use std::net::SocketAddr;
 use tokio::sync::mpsc::Sender;
 
@@ -47,9 +48,9 @@ impl TelemetryListener {
         req: Request<Body>,
         event_bus: Sender<TelemetryEvent>,
     ) -> Result<Response<Body>, hyper::Error> {
-        let whole_body = hyper::body::to_bytes(req.into_body()).await?;
+        let whole_body = req.into_body().collect().await?;
 
-        let body = whole_body.to_vec();
+        let body = whole_body.to_bytes().to_vec();
         let body = std::str::from_utf8(&body).expect("infallible");
 
         let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_str(body) {
