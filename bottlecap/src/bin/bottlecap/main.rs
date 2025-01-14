@@ -157,7 +157,7 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
 
 fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
     let arn_prefix = if region.starts_with("cn-") {
-        "aws-ch"
+        "aws-cn"
     } else {
         "aws"
     };
