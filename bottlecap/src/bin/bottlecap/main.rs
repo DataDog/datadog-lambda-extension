@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::config::get_aws_partition_by_region;
 use bottlecap::{
     base_url,
     config::{self, flush_strategy::FlushStrategy, AwsConfig, Config},
@@ -156,13 +157,8 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
 }
 
 fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
-    let arn_prefix = if region.starts_with("cn-") {
-        "aws-cn"
-    } else {
-        "aws"
-    };
-
-    format!("arn:{arn_prefix}:lambda:{region}:{account_id}:function:{function_name}")
+    let aws_partition = get_aws_partition_by_region(region);
+    format!("arn:{aws_partition}:lambda:{region}:{account_id}:function:{function_name}")
 }
 
 #[tokio::main]

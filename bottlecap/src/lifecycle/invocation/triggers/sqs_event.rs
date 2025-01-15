@@ -1,19 +1,18 @@
-use datadog_trace_protobuf::pb::Span;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
-use tracing::debug;
-
+use crate::config::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
         event_bridge_event::EventBridgeEvent,
-        get_aws_partition_by_region,
         sns_event::{SnsEntity, SnsRecord},
         ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
 use crate::traces::context::{Sampling, SpanContext};
+use datadog_trace_protobuf::pb::Span;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use tracing::debug;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct SqsEvent {
