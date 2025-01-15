@@ -311,6 +311,15 @@ pub struct AwsConfig {
     pub sandbox_init_time: Instant,
 }
 
+#[must_use]
+pub fn get_aws_partition_by_region(region: &str) -> String {
+    match region {
+        r if r.starts_with("us-gov-") => "aws-us-gov".to_string(),
+        r if r.starts_with("cn-") => "aws-cn".to_string(),
+        _ => "aws".to_string(),
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
