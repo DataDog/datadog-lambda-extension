@@ -57,15 +57,6 @@ pub trait Trigger: ServiceNameResolver {
     }
 }
 
-#[must_use]
-pub fn get_aws_partition_by_region(region: &str) -> String {
-    match region {
-        r if r.starts_with("us-gov-") => "aws-us-gov".to_string(),
-        r if r.starts_with("cn-") => "aws-cn".to_string(),
-        _ => "aws".to_string(),
-    }
-}
-
 /// Serialize a `HashMap` with lowercase keys
 ///
 pub fn lowercase_key<'de, D, V>(deserializer: D) -> Result<HashMap<String, V>, D::Error>

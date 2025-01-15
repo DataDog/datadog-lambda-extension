@@ -170,10 +170,14 @@ fn build_get_secret_signed_headers(
 ) -> Result<HeaderMap, Box<dyn std::error::Error>> {
     let amz_date = header_values.time.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = header_values.time.format("%Y%m%d").to_string();
-    let host = format!(
-        "{}.{}.amazonaws.com",
-        header_values.service, aws_config.region
-    );
+
+    let domain = if aws_config.region.starts_with("cn-") {
+        "amazonaws.com.cn"
+    } else {
+        "amazonaws.com"
+    };
+
+    let host = format!("{}.{}.{}", header_values.service, aws_config.region, domain);
 
     let canonical_uri = "/";
     let canonical_querystring = "";

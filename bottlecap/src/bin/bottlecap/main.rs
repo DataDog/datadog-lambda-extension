@@ -11,7 +11,7 @@
 
 use bottlecap::{
     base_url,
-    config::{self, flush_strategy::FlushStrategy, AwsConfig, Config},
+    config::{self, flush_strategy::FlushStrategy, get_aws_partition_by_region, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -43,16 +43,15 @@ use bottlecap::{
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
-use dogstatsd::metric::{SortedTags, EMPTY_TAGS};
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
+    metric::{SortedTags, EMPTY_TAGS},
 };
 use reqwest::Client;
 use serde::Deserialize;
-use std::time::Duration;
 use std::{
     collections::{hash_map, HashMap},
     env,
@@ -61,11 +60,11 @@ use std::{
     path::Path,
     process::Command,
     sync::{Arc, Mutex},
+    time::Duration,
     time::Instant,
 };
 use telemetry::listener::TelemetryListenerConfig;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -156,7 +155,8 @@ async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
 }
 
 fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
-    format!("arn:aws:lambda:{region}:{account_id}:function:{function_name}")
+    let aws_partition = get_aws_partition_by_region(region);
+    format!("arn:{aws_partition}:lambda:{region}:{account_id}:function:{function_name}")
 }
 
 #[tokio::main]
