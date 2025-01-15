@@ -1,13 +1,13 @@
-use datadog_trace_protobuf::pb::Span;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use std::collections::HashMap;
-use tracing::debug;
 use crate::config::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
+use datadog_trace_protobuf::pb::Span;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use tracing::debug;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct APIGatewayRestEvent {
