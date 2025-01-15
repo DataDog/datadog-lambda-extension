@@ -9,10 +9,15 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use bottlecap::config::get_aws_partition_by_region;
 use bottlecap::{
+    config::{
+        get_aws_partition_by_region,
+        self,
+        flush_strategy::FlushStrategy,
+        AwsConfig,
+        Config
+    },
     base_url,
-    config::{self, flush_strategy::FlushStrategy, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -44,17 +49,17 @@ use bottlecap::{
 };
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
-use dogstatsd::metric::{SortedTags, EMPTY_TAGS};
 use dogstatsd::{
+    metric::{SortedTags, EMPTY_TAGS},
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
     dogstatsd::{DogStatsD, DogStatsDConfig},
-    flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
+    flusher::{build_fqdn_metrics, Flusher as MetricsFlusher}
 };
 use reqwest::Client;
 use serde::Deserialize;
-use std::time::Duration;
 use std::{
+    time::Duration,
     collections::{hash_map, HashMap},
     env,
     io::{Error, Result},
@@ -62,11 +67,13 @@ use std::{
     path::Path,
     process::Command,
     sync::{Arc, Mutex},
-    time::Instant,
+    time::Instant
 };
 use telemetry::listener::TelemetryListenerConfig;
-use tokio::sync::mpsc::Sender;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::{
+    sync::mpsc::Sender,
+    sync::Mutex as TokioMutex
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
