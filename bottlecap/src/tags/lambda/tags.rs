@@ -44,6 +44,8 @@ const SERVICE_KEY: &str = "service";
 const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // ComputeStatsValue is the tag value indicating trace stats should be computed
 const COMPUTE_STATS_VALUE: &str = "1";
+// FunctionTagsKey is the tag key for a function's tags to be set on the top level tracepayload
+const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
@@ -248,6 +250,17 @@ impl Lambda {
     #[must_use]
     pub fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
         &self.tags_map
+    }
+
+    #[must_use]
+    pub fn get_function_tags_map(&self) -> hash_map::HashMap<String, String> {
+        let tags = self
+            .tags_map
+            .iter()
+            .map(|(k, v)| format!("{k}:{v}"))
+            .collect::<Vec<String>>()
+            .join(",");
+        hash_map::HashMap::from_iter([(FUNCTION_TAGS_KEY.to_string(), tags)])
     }
 }
 

@@ -56,6 +56,11 @@ impl Provider {
     pub fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
         self.tag_provider.get_tags_map()
     }
+
+    #[must_use]
+    pub fn get_function_tags_map(&self) -> hash_map::HashMap<String, String> {
+        self.tag_provider.get_function_tags_map()
+    }
 }
 
 trait GetTags {
@@ -63,6 +68,7 @@ trait GetTags {
     fn get_canonical_id(&self) -> Option<String>;
     fn get_canonical_resource_name(&self) -> Option<String>;
     fn get_tags_map(&self) -> &hash_map::HashMap<String, String>;
+    fn get_function_tags_map(&self) -> hash_map::HashMap<String, String>;
 }
 
 impl GetTags for TagProvider {
@@ -87,6 +93,12 @@ impl GetTags for TagProvider {
     fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
         match self {
             TagProvider::Lambda(lambda_tags) => lambda_tags.get_tags_map(),
+        }
+    }
+
+    fn get_function_tags_map(&self) -> hash_map::HashMap<String, String> {
+        match self {
+            TagProvider::Lambda(lambda_tags) => lambda_tags.get_function_tags_map(),
         }
     }
 }

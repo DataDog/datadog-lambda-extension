@@ -7,7 +7,9 @@ use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::config_utils::trace_intake_url;
 use datadog_trace_utils::tracer_header_tags;
-use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TraceCollection::V07};
+use datadog_trace_utils::tracer_payload::{
+    TraceChunkProcessor, TraceCollection::V07, TracerPayloadCollection,
+};
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -136,7 +138,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData {
-        let payload = trace_utils::collect_trace_chunks(
+        let mut payload = trace_utils::collect_trace_chunks(
             V07(traces),
             &header_tags,
             &mut ChunkProcessor {
@@ -146,6 +148,16 @@ impl TraceProcessor for ServerlessTraceProcessor {
             },
             true,
         );
+        match payload {
+            TracerPayloadCollection::V04(_) => {}
+            TracerPayloadCollection::V07(ref mut collection) => {
+                // add function tags to all payloads in this TracerPayloadCollection
+                let tags = tags_provider.get_function_tags_map();
+                for tracer_payload in collection.iter_mut() {
+                    tracer_payload.tags.extend(tags.clone());
+                }
+            }
+        }
         let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
@@ -296,7 +308,7 @@ mod tests {
                 tags: HashMap::new(),
                 dropped_trace: false,
             }],
-            tags: HashMap::new(),
+            tags: tags_provider.get_function_tags_map(),
             env: "test-env".to_string(),
             hostname: String::new(),
             app_version: String::new(),
