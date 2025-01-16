@@ -384,4 +384,43 @@ mod tests {
         fs::remove_file(path).unwrap();
         assert_eq!(runtime, "provided.al2023");
     }
+
+    #[test]
+    fn test_get_function_tags_map() {
+        let mut metadata = hash_map::HashMap::new();
+        metadata.insert(
+            FUNCTION_ARN_KEY.to_string(),
+            "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
+        );
+        let config = Arc::new(Config {
+            service: Some("my-service".to_string()),
+            tags: Some("key1:value1,key2:value2".to_string()),
+            env: Some("test".to_string()),
+            version: Some("1.0.0".to_string()),
+            ..Config::default()
+        });
+        let tags = Lambda::new_from_config(config, &metadata);
+        let function_tags = tags.get_function_tags_map();
+        assert_eq!(function_tags.len(), 1);
+        let fn_tags_map: hash_map::HashMap<String, String> = hash_map::HashMap::from_iter(
+            function_tags
+                .get(FUNCTION_TAGS_KEY)
+                .unwrap()
+                .split(',')
+                .map(|tag| {
+                    let parts = tag.split(':').collect::<Vec<&str>>();
+                    (parts[0].to_string(), parts[1].to_string())
+                }),
+        );
+        assert_eq!(fn_tags_map.len(), 14);
+        assert_eq!(fn_tags_map.get("key1").unwrap(), "value1");
+        assert_eq!(fn_tags_map.get("key2").unwrap(), "value2");
+        assert_eq!(fn_tags_map.get(ACCOUNT_ID_KEY).unwrap(), "123456789012");
+        assert_eq!(fn_tags_map.get(ENV_KEY).unwrap(), "test");
+        assert_eq!(fn_tags_map.get(FUNCTION_ARN_KEY).unwrap(), "arn");
+        assert_eq!(fn_tags_map.get(FUNCTION_NAME_KEY).unwrap(), "my-function");
+        assert_eq!(fn_tags_map.get(REGION_KEY).unwrap(), "us-west-2");
+        assert_eq!(fn_tags_map.get(SERVICE_KEY).unwrap(), "my-service");
+        assert_eq!(fn_tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
+    }
 }
