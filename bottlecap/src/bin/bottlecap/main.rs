@@ -46,8 +46,9 @@ use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
+    datadog::{DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride, Site},
     dogstatsd::{DogStatsD, DogStatsDConfig},
-    flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
+    flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
 };
 use reqwest::Client;
@@ -284,13 +285,27 @@ async fn extension_loop_active(
         )
         .expect("failed to create aggregator"),
     ));
-    let mut metrics_flusher = MetricsFlusher::new(
-        resolved_api_key.clone(),
-        Arc::clone(&metrics_aggr),
-        build_fqdn_metrics(config.site.clone()),
-        config.https_proxy.clone(),
-        Duration::from_secs(config.flush_timeout),
-    );
+    let metrics_intake_url_prefix = MetricsIntakeUrlPrefix::new(
+        Some(Site::new(config.site.clone()).expect("failed to create site")),
+        MetricsIntakeUrlPrefixOverride::maybe_new(
+            config
+                .url
+                .clone()
+                .map(|url| DdUrl::new(url).expect("failed to create dd url")),
+            config
+                .dd_url
+                .clone()
+                .map(|dd_url| DdDdUrl::new(dd_url).expect("failed to create dd dd url")),
+        ),
+    )
+    .expect("failed to create intake url prefix");
+    let mut metrics_flusher = MetricsFlusher::new(MetricsFlusherConfig {
+        api_key: resolved_api_key.clone(),
+        aggregator: Arc::clone(&metrics_aggr),
+        metrics_intake_url_prefix,
+        https_proxy: config.https_proxy.clone(),
+        timeout: Duration::from_secs(config.flush_timeout),
+    });
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),

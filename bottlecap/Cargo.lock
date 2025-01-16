@@ -624,7 +624,7 @@ dependencies = [
 [[package]]
 name = "datadog-protos"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751#3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751"
+source = "git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222#c89b58e5784b985819baf11f13f7d35876741222"
 dependencies = [
  "bytes",
  "prost 0.13.4",
@@ -650,7 +650,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-mini-agent"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -669,7 +669,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -678,7 +678,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -695,7 +695,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -705,7 +705,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -732,7 +732,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
  "anyhow",
  "cc",
@@ -761,10 +761,10 @@ dependencies = [
 [[package]]
 name = "ddsketch-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751#3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751"
+source = "git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222#c89b58e5784b985819baf11f13f7d35876741222"
 dependencies = [
- "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
- "float_eq",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
+ "float-cmp",
  "ordered-float",
  "smallvec",
 ]
@@ -778,6 +778,27 @@ dependencies = [
  "float-cmp",
  "ordered-float",
  "smallvec",
+]
+
+[[package]]
+name = "derive_more"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.90",
+ "unicode-xid",
 ]
 
 [[package]]
@@ -826,10 +847,11 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
- "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
- "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki-backport/?rev=3c5d87ab82dea4a1a98ef0c60fb3659ca35c2751)",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
+ "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
+ "derive_more",
  "fnv",
  "hashbrown 0.14.5",
  "lazy_static",
@@ -955,12 +977,6 @@ checksum = "b09cf3155332e944990140d967ff5eceb70df778b34f77d8075db46e4704e6d8"
 dependencies = [
  "num-traits",
 ]
-
-[[package]]
-name = "float_eq"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28a80e3145d8ad11ba0995949bbcf48b9df2be62772b3d351ef017dff6ecb853"
 
 [[package]]
 name = "fnv"
@@ -3105,7 +3121,7 @@ dependencies = [
 [[package]]
 name = "tinybytes"
 version = "14.3.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=dbc8869c6de4ccd78a770524d250420f397fc7b3#dbc8869c6de4ccd78a770524d250420f397fc7b3"
+source = "git+https://github.com/DataDog/libdatadog?rev=6e2d4462873e35e49a2c9befde958d96c4ed9de4#6e2d4462873e35e49a2c9befde958d96c4ed9de4"
 dependencies = [
  "serde",
 ]
