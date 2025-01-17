@@ -164,6 +164,41 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 async fn main() -> Result<()> {
     let (aws_config, config) = load_configs();
 
+    let site = Site::new(config.site.clone()).map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to parse DD_SITE: {e:?}"),
+        )
+    })?;
+    let dd_url = match config.url.clone() {
+        Some(dd_url) => Some(DdUrl::new(dd_url).map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse DD_URL: {e:?}"),
+            )
+        })?),
+        None => None,
+    };
+    let dd_dd_url = match config.dd_url.clone() {
+        Some(dd_dd_url) => Some(DdDdUrl::new(dd_dd_url).map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse DD_DD_URL: {e:?}"),
+            )
+        })?),
+        None => None,
+    };
+    let metrics_intake_url_prefix = MetricsIntakeUrlPrefix::new(
+        Some(site),
+        MetricsIntakeUrlPrefixOverride::maybe_new(dd_url, dd_dd_url),
+    )
+    .map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to create intake url prefix: {e:?}"),
+        )
+    })?;
+
     enable_logging_subsystem(&config);
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
@@ -177,7 +212,16 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
-        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
+        match extension_loop_active(
+            &aws_config,
+            &config,
+            &client,
+            &r,
+            resolved_api_key,
+            metrics_intake_url_prefix,
+        )
+        .await
+        {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
                 Ok(())
@@ -261,6 +305,7 @@ async fn extension_loop_active(
     client: &Client,
     r: &RegisterResponse,
     resolved_api_key: String,
+    metrics_intake_url_prefix: MetricsIntakeUrlPrefix,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
@@ -285,20 +330,6 @@ async fn extension_loop_active(
         )
         .expect("failed to create aggregator"),
     ));
-    let metrics_intake_url_prefix = MetricsIntakeUrlPrefix::new(
-        Some(Site::new(config.site.clone()).expect("failed to create site")),
-        MetricsIntakeUrlPrefixOverride::maybe_new(
-            config
-                .url
-                .clone()
-                .map(|url| DdUrl::new(url).expect("failed to create dd url")),
-            config
-                .dd_url
-                .clone()
-                .map(|dd_url| DdDdUrl::new(dd_url).expect("failed to create dd dd url")),
-        ),
-    )
-    .expect("failed to create intake url prefix");
     let mut metrics_flusher = MetricsFlusher::new(MetricsFlusherConfig {
         api_key: resolved_api_key.clone(),
         aggregator: Arc::clone(&metrics_aggr),
