@@ -39,8 +39,6 @@ pub struct FallbackConfig {
     otlp_config_receiver_protocols_http_endpoint: Option<String>,
     otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
     // intake urls
-    url: Option<String>,
-    dd_url: Option<String>,
     logs_config_logs_dd_url: Option<String>,
     // APM, as opposed to logs, does not use the `apm_config` prefix for env vars
     apm_dd_url: Option<String>,
@@ -107,6 +105,11 @@ pub struct Config {
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
+    // Intake URLs
+    // These two are for metrics intake. The official config is `DD_DD_URL` but `DD_URL` can also
+    // be used for backwards compatibility. `DD_DD_URL` takes precedence.
+    pub url: Option<String>,
+    pub dd_url: Option<String>,
 }
 
 impl Default for Config {
@@ -142,6 +145,9 @@ impl Default for Config {
             trace_propagation_style_extract: vec![],
             trace_propagation_extract_first: false,
             trace_propagation_http_baggage_enabled: false,
+            // Intake URLs
+            url: None,
+            dd_url: None,
         }
     }
 }
@@ -208,9 +214,7 @@ fn fallback(figment: &Figment, yaml_figment: &Figment) -> Result<(), ConfigError
     }
 
     // Intake URLs
-    if config.url.is_some()
-        || config.dd_url.is_some()
-        || config.logs_config_logs_dd_url.is_some()
+    if config.logs_config_logs_dd_url.is_some()
         || config.apm_dd_url.is_some()
         || yaml_config
             .logs_config
