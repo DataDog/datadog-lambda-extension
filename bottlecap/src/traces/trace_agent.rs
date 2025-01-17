@@ -14,7 +14,9 @@ use tracing::{debug, error};
 use crate::config;
 use crate::tags::provider;
 use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
-use datadog_trace_mini_agent::http_utils::{self, log_and_create_http_response};
+use datadog_trace_mini_agent::http_utils::{
+    self, log_and_create_http_response, log_and_create_traces_success_http_response,
+};
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
 
@@ -263,9 +265,9 @@ impl TraceAgent {
 
         // send trace payload to our trace flusher
         match trace_tx.send(send_data).await {
-            Ok(()) => log_and_create_http_response(
+            Ok(()) => log_and_create_traces_success_http_response(
                 "Successfully buffered traces to be flushed.",
-                StatusCode::ACCEPTED,
+                StatusCode::OK,
             ),
             Err(err) => log_and_create_http_response(
                 &format!("Error sending traces to the trace flusher: {err}"),
