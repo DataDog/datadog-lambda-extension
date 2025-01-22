@@ -12,6 +12,7 @@ regions:
   - code: "ap-southeast-3"
   - code: "ap-southeast-4"
   - code: "ap-southeast-5"
+  - code: "ap-southeast-7"
   - code: "ap-northeast-1"
   - code: "ap-northeast-2"
   - code: "ap-northeast-3"
@@ -28,4 +29,5 @@ regions:
   - code: "il-central-1"
   - code: "me-south-1"
   - code: "me-central-1"
+  - code: "mx-central-1"
   - code: "sa-east-1"
