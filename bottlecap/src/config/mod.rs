@@ -529,6 +529,33 @@ pub mod tests {
     }
 
     #[test]
+    fn test_proxy_config() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_PROXY_HTTPS", "my-proxy:3128");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(config.https_proxy, Some("my-proxy:3128".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_noproxy_config() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SITE", "datadoghq.eu");
+            jail.set_env("DD_PROXY_HTTPS", "my-proxy:3128");
+            jail.set_env(
+                "NO_PROXY",
+                "127.0.0.1,localhost,172.16.0.0/12,us-east-1.amazonaws.com,datadoghq.eu",
+            );
+            let config = get_config(Path::new("")).expect("should parse noproxy");
+            assert_eq!(config.https_proxy, None);
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_parse_flush_strategy_end() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
