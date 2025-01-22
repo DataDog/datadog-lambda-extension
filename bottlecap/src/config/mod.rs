@@ -14,6 +14,7 @@ use figment::{providers::Env, Figment};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
+use tracing::debug;
 
 use crate::config::{
     flush_strategy::FlushStrategy,
@@ -260,7 +261,12 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     if config.site.is_empty() {
         config.site = "datadoghq.com".to_string();
     }
-
+    if let Ok(no_proxy_string) = std::env::var("NO_PROXY") {
+        if no_proxy_string.contains(&config.site) {
+            debug!("NO_PROXY contains DD_SITE, disabling proxy");
+            config.https_proxy = None;
+        }
+    }
     // Merge YAML nested fields
     //
     // Set logs_config_processing_rules if not defined in env
