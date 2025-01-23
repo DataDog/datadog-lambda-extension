@@ -73,6 +73,15 @@ pub struct YamlLogsConfig {
 #[allow(clippy::module_name_repetitions)]
 pub struct YamlConfig {
     pub logs_config: YamlLogsConfig,
+    pub proxy: YamlProxyConfig,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct YamlProxyConfig {
+    pub https: Option<String>,
+    pub no_proxy: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Clone)]
