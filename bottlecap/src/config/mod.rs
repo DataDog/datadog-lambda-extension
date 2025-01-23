@@ -14,6 +14,7 @@ use figment::{providers::Env, Figment};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
+use tracing::debug;
 
 use crate::config::{
     flush_strategy::FlushStrategy,
@@ -260,7 +261,13 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     if config.site.is_empty() {
         config.site = "datadoghq.com".to_string();
     }
-
+    // TODO(astuyve)
+    // Bit of a hack as we're not checking individual privatelink setups
+    // potentially a user could use the proxy for logs and privatelink for APM
+    if std::env::var("NO_PROXY").map_or(false, |no_proxy| no_proxy.contains(&config.site)) {
+        debug!("NO_PROXY contains DD_SITE, disabling proxy");
+        config.https_proxy = None;
+    }
     // Merge YAML nested fields
     //
     // Set logs_config_processing_rules if not defined in env
@@ -518,6 +525,33 @@ pub mod tests {
                     ..Config::default()
                 }
             );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_proxy_config() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_PROXY_HTTPS", "my-proxy:3128");
+            let config = get_config(Path::new("")).expect("should parse config");
+            assert_eq!(config.https_proxy, Some("my-proxy:3128".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_noproxy_config() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SITE", "datadoghq.eu");
+            jail.set_env("DD_PROXY_HTTPS", "my-proxy:3128");
+            jail.set_env(
+                "NO_PROXY",
+                "127.0.0.1,localhost,172.16.0.0/12,us-east-1.amazonaws.com,datadoghq.eu",
+            );
+            let config = get_config(Path::new("")).expect("should parse noproxy");
+            assert_eq!(config.https_proxy, None);
             Ok(())
         });
     }
