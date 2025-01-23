@@ -270,11 +270,12 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     if config.site.is_empty() {
         config.site = "datadoghq.com".to_string();
     }
-    if let Ok(no_proxy_string) = std::env::var("NO_PROXY") {
-        if no_proxy_string.contains(&config.site) {
-            debug!("NO_PROXY contains DD_SITE, disabling proxy");
-            config.https_proxy = None;
-        }
+    // TODO(astuyve)
+    // Bit of a hack as we're not checking individual privatelink setups
+    // potentially a user could use the proxy for logs and privatelink for APM
+    if std::env::var("NO_PROXY").map_or(false, |no_proxy| no_proxy.contains(&config.site)) {
+        debug!("NO_PROXY contains DD_SITE, disabling proxy");
+        config.https_proxy = None;
     }
     // Merge YAML nested fields
     //
