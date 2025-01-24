@@ -14,7 +14,6 @@ use figment::{providers::Env, Figment};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
-use tracing::debug;
 
 use crate::config::{
     flush_strategy::FlushStrategy,
@@ -576,7 +575,6 @@ pub mod tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn test_proxy_yaml() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
@@ -618,8 +616,6 @@ pub mod tests {
     }
 
     #[test]
-=======
->>>>>>> main
     fn test_parse_flush_strategy_end() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
