@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:experimental
 
 FROM alpine:3.16 as bottlecap-builder
-ARG PLATFORM 
+ARG PLATFORM
 RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++
 
 SHELL ["/bin/bash", "-c"]
@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/root/.cargo/registry cargo +stable build --releas
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-musl/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
 # Zip Extension
-FROM ubuntu:latest as compresser
+FROM ubuntu:24.04 as compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
 ARG GO_AGENT_PATH
 
