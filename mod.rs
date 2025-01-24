@@ -14,7 +14,6 @@ use figment::{providers::Env, Figment};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
-use tracing::debug;
 
 use crate::config::{
     flush_strategy::FlushStrategy,
@@ -73,6 +72,15 @@ pub struct YamlLogsConfig {
 #[allow(clippy::module_name_repetitions)]
 pub struct YamlConfig {
     pub logs_config: YamlLogsConfig,
+    pub proxy: YamlProxyConfig,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct YamlProxyConfig {
+    pub https: Option<String>,
+    pub no_proxy: Option<Vec<String>>,
 }
 
 #[derive(Debug, PartialEq, Deserialize, Clone)]
@@ -251,23 +259,33 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
                 return Err(ConfigError::ParseError(err.to_string()));
             }
         };
-
-    // Prefer DD_PROXY_HTTPS over HTTPS_PROXY
-    // No else needed as HTTPS_PROXY is handled by reqwest and built into trace client
-    if let Ok(https_proxy) = std::env::var("DD_PROXY_HTTPS") {
-        config.https_proxy = Some(https_proxy);
-    }
     // Set site if empty
     if config.site.is_empty() {
         config.site = "datadoghq.com".to_string();
     }
-    // TODO(astuyve)
-    // Bit of a hack as we're not checking individual privatelink setups
-    // potentially a user could use the proxy for logs and privatelink for APM
-    if std::env::var("NO_PROXY").map_or(false, |no_proxy| no_proxy.contains(&config.site)) {
-        debug!("NO_PROXY contains DD_SITE, disabling proxy");
-        config.https_proxy = None;
+
+    // NOTE: Must happen after config.site is set
+    // Prefer DD_PROXY_HTTPS over HTTPS_PROXY
+    // No else needed as HTTPS_PROXY is handled by reqwest and built into trace client
+    if let Ok(https_proxy) = std::env::var("DD_PROXY_HTTPS").or_else(|_| {
+        yaml_config
+            .proxy
+            .https
+            .clone()
+            .ok_or(std::env::VarError::NotPresent)
+    }) {
+        if std::env::var("NO_PROXY").map_or(false, |no_proxy| no_proxy.contains(&config.site))
+            || yaml_config
+                .proxy
+                .no_proxy
+                .map_or(false, |no_proxy| no_proxy.contains(&config.site))
+        {
+            config.https_proxy = None;
+        } else {
+            config.https_proxy = Some(https_proxy);
+        }
     }
+
     // Merge YAML nested fields
     //
     // Set logs_config_processing_rules if not defined in env
@@ -552,6 +570,47 @@ pub mod tests {
             );
             let config = get_config(Path::new("")).expect("should parse noproxy");
             assert_eq!(config.https_proxy, None);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_proxy_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                proxy:
+                  https: my-proxy:3128
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect("should parse weird proxy config");
+            assert_eq!(config.https_proxy, Some("my-proxy:3128".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_no_proxy_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                proxy:
+                  https: my-proxy:3128
+                  no_proxy:
+                    - datadoghq.com
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect("should parse weird proxy config");
+            assert_eq!(config.https_proxy, None);
+            // Assertion to ensure config.site runs before proxy
+            // because we chenck that noproxy contains the site
+            assert_eq!(config.site, "datadoghq.com");
             Ok(())
         });
     }
