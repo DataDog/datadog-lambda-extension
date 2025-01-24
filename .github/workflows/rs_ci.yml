@@ -166,7 +166,7 @@ jobs:
   # If this job fails, you probably need to regenerate the license, e.g.
   # CARGO_HOME=/tmp/dd-cargo cargo bundle-licenses --format yaml --output LICENSE-3rdparty.yml
   license-3rdparty:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     name: "Valid LICENSE-3rdparty.yml"
     steps:
       - name: Checkout sources

@@ -1,7 +1,7 @@
 # syntax = docker/dockerfile:experimental
 
 FROM public.ecr.aws/lambda/provided:al2 as bottlecap-builder
-ARG PLATFORM 
+ARG PLATFORM
 RUN yum install -y curl gcc gcc-c++ make unzip
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
@@ -25,7 +25,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +stable build --re
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
 # Zip Extension
-FROM ubuntu:latest as compresser
+FROM ubuntu:24.04 as compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
 ARG GO_AGENT_PATH
 
