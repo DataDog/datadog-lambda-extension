@@ -259,7 +259,12 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
                 return Err(ConfigError::ParseError(err.to_string()));
             }
         };
+    // Set site if empty
+    if config.site.is_empty() {
+        config.site = "datadoghq.com".to_string();
+    }
 
+    // NOTE: Must happen after config.site is set
     // Prefer DD_PROXY_HTTPS over HTTPS_PROXY
     // No else needed as HTTPS_PROXY is handled by reqwest and built into trace client
     if let Ok(https_proxy) = std::env::var("DD_PROXY_HTTPS").or_else(|_| {
@@ -279,10 +284,6 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         } else {
             config.https_proxy = Some(https_proxy);
         }
-    }
-    // Set site if empty
-    if config.site.is_empty() {
-        config.site = "datadoghq.com".to_string();
     }
 
     // Merge YAML nested fields
@@ -569,6 +570,47 @@ pub mod tests {
             );
             let config = get_config(Path::new("")).expect("should parse noproxy");
             assert_eq!(config.https_proxy, None);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_proxy_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                proxy:
+                  https: my-proxy:3128
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect("should parse weird proxy config");
+            assert_eq!(config.https_proxy, Some("my-proxy:3128".to_string()));
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_no_proxy_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                proxy:
+                  https: my-proxy:3128
+                  no_proxy:
+                    - datadoghq.com
+            ",
+            )?;
+
+            let config = get_config(Path::new("")).expect("should parse weird proxy config");
+            assert_eq!(config.https_proxy, None);
+            // Assertion to ensure config.site runs before proxy
+            // because we chenck that noproxy contains the site
+            assert_eq!(config.site, "datadoghq.com");
             Ok(())
         });
     }
