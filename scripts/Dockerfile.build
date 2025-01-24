@@ -7,6 +7,7 @@ ARG CMD_PATH
 ARG BUILD_TAGS
 RUN mkdir -p /tmp/dd/datadog-agent
 
+ENV BUILDX_BAKE_ENTITLEMENTS_FS 0
 RUN yum install -y wget tar gzip gcc
 RUN arch="$(uname -m)"; \
     if [ "${arch}" = 'aarch64' ]; then \
