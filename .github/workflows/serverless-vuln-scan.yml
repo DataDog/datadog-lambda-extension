@@ -14,7 +14,7 @@ env:
 
 jobs:
   check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
 
       # scan latest released images
@@ -155,7 +155,7 @@ jobs:
   retry:
     needs: check
     if: failure() && fromJSON(github.run_attempt) < 2
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     permissions:
       actions: write
     steps:
@@ -168,7 +168,7 @@ jobs:
   notify:
     needs: check
     if: failure() && fromJSON(github.run_attempt) >= 2
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Notify
         env:

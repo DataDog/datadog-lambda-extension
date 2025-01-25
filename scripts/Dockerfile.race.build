@@ -36,7 +36,7 @@ RUN go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/ver
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension
-FROM ubuntu:24.04 as compresser
+FROM ubuntu:22.04 as compresser
 RUN apt-get update
 RUN apt-get install -y zip
 RUN mkdir /extensions
