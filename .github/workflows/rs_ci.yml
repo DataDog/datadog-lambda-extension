@@ -187,6 +187,7 @@ jobs:
           key: "v1-2.2.0"
       # cargo-bundle-licenses v2.0 doesn't understand path differences due to
       # sparse vs git index, so force git.
+      - run: sudo apt-get update && sudo apt-get upgrade
       - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
         working-directory: bottlecap
       - run: cargo install cargo-bundle-licenses
