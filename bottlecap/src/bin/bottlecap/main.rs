@@ -46,8 +46,9 @@ use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
+    datadog::{DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride, Site},
     dogstatsd::{DogStatsD, DogStatsDConfig},
-    flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
+    flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
 };
 use reqwest::Client;
@@ -163,6 +164,41 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 async fn main() -> Result<()> {
     let (aws_config, config) = load_configs();
 
+    let site = Site::new(config.site.clone()).map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to parse DD_SITE: {e:?}"),
+        )
+    })?;
+    let dd_url = match config.url.clone() {
+        Some(dd_url) => Some(DdUrl::new(dd_url).map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse DD_URL: {e:?}"),
+            )
+        })?),
+        None => None,
+    };
+    let dd_dd_url = match config.dd_url.clone() {
+        Some(dd_dd_url) => Some(DdDdUrl::new(dd_dd_url).map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse DD_DD_URL: {e:?}"),
+            )
+        })?),
+        None => None,
+    };
+    let metrics_intake_url_prefix = MetricsIntakeUrlPrefix::new(
+        Some(site),
+        MetricsIntakeUrlPrefixOverride::maybe_new(dd_url, dd_dd_url),
+    )
+    .map_err(|e| {
+        Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Failed to create intake url prefix: {e:?}"),
+        )
+    })?;
+
     enable_logging_subsystem(&config);
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
@@ -176,7 +212,16 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
-        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
+        match extension_loop_active(
+            &aws_config,
+            &config,
+            &client,
+            &r,
+            resolved_api_key,
+            metrics_intake_url_prefix,
+        )
+        .await
+        {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
                 Ok(())
@@ -260,6 +305,7 @@ async fn extension_loop_active(
     client: &Client,
     r: &RegisterResponse,
     resolved_api_key: String,
+    metrics_intake_url_prefix: MetricsIntakeUrlPrefix,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
@@ -284,13 +330,13 @@ async fn extension_loop_active(
         )
         .expect("failed to create aggregator"),
     ));
-    let mut metrics_flusher = MetricsFlusher::new(
-        resolved_api_key.clone(),
-        Arc::clone(&metrics_aggr),
-        build_fqdn_metrics(config.site.clone()),
-        config.https_proxy.clone(),
-        Duration::from_secs(config.flush_timeout),
-    );
+    let mut metrics_flusher = MetricsFlusher::new(MetricsFlusherConfig {
+        api_key: resolved_api_key.clone(),
+        aggregator: Arc::clone(&metrics_aggr),
+        metrics_intake_url_prefix,
+        https_proxy: config.https_proxy.clone(),
+        timeout: Duration::from_secs(config.flush_timeout),
+    });
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),

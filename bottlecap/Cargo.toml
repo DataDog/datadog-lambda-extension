@@ -9,13 +9,13 @@ async-trait = { version = "0.1", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
-datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
-datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
-datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
-datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
-dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "dbc8869c6de4ccd78a770524d250420f397fc7b3" }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "6e2d4462873e35e49a2c9befde958d96c4ed9de4" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "6e2d4462873e35e49a2c9befde958d96c4ed9de4" }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "6e2d4462873e35e49a2c9befde958d96c4ed9de4" }
+datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "6e2d4462873e35e49a2c9befde958d96c4ed9de4" }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "6e2d4462873e35e49a2c9befde958d96c4ed9de4" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "6e2d4462873e35e49a2c9befde958d96c4ed9de4" }
+dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "6e2d4462873e35e49a2c9befde958d96c4ed9de4" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
 lazy_static = { version = "1.5", default-features = false }
