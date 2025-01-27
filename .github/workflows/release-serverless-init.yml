@@ -35,6 +35,9 @@ env:
 jobs:
   release-serverless-init:
     runs-on: ubuntu-22.04
+    permissions:
+      packages: write
+      contents: write
     strategy:
       matrix:
         arrays: [
