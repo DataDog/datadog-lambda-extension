@@ -46,8 +46,9 @@ use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
+    datadog::{MetricsIntakeUrlPrefix, Site as MetricsSite},
     dogstatsd::{DogStatsD, DogStatsDConfig},
-    flusher::{build_fqdn_metrics, Flusher as MetricsFlusher},
+    flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
 };
 use reqwest::Client;
@@ -284,13 +285,17 @@ async fn extension_loop_active(
         )
         .expect("failed to create aggregator"),
     ));
-    let mut metrics_flusher = MetricsFlusher::new(
-        resolved_api_key.clone(),
-        Arc::clone(&metrics_aggr),
-        build_fqdn_metrics(config.site.clone()),
-        config.https_proxy.clone(),
-        Duration::from_secs(config.flush_timeout),
-    );
+
+    let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+    let flusher_config = MetricsFlusherConfig {
+        api_key: resolved_api_key.clone(),
+        aggregator: Arc::clone(&metrics_aggr),
+        metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+            .expect("can't parse metrics intake URL from site"),
+        https_proxy: config.https_proxy.clone(),
+        timeout: Duration::from_secs(config.flush_timeout),
+    };
+    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
 
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         buffer: Arc::new(TokioMutex::new(Vec::new())),
