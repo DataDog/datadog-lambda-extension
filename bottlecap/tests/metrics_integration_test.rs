@@ -1,7 +1,7 @@
 use bottlecap::config::Config;
 use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
-use dogstatsd::datadog::{MetricsIntakeUrlPrefix, Site as MetricsSite};
+use dogstatsd::datadog::{DdDdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride};
 use dogstatsd::flusher::Flusher as MetricsFlusher;
 use dogstatsd::flusher::FlusherConfig as MetricsFlusherConfig;
 use dogstatsd::metric::SortedTags;
@@ -38,11 +38,15 @@ async fn test_enhanced_metrics() {
         MetricsAggregator::new(SortedTags::parse("aTagKey:aTagValue").unwrap(), 1024)
             .expect("failed to create aggregator"),
     ));
-    let metrics_site = MetricsSite::new(server.base_url()).expect("can't parse site");
+    let metrics_site_override = MetricsIntakeUrlPrefixOverride::maybe_new(
+        None,
+        Some(DdDdUrl::new(server.base_url()).expect("failed to create dd url")),
+    )
+    .expect("failed to create metrics override");
     let flusher_config = MetricsFlusherConfig {
         api_key: dd_api_key.to_string(),
         aggregator: metrics_aggr.clone(),
-        metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+        metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(None, Some(metrics_site_override))
             .expect("can't parse metrics intake URL from site"),
         https_proxy: None,
         timeout: std::time::Duration::from_secs(5),
