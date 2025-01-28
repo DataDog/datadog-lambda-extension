@@ -1,7 +1,9 @@
 use bottlecap::config::Config;
 use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
+use dogstatsd::datadog::{MetricsIntakeUrlPrefix, Site as MetricsSite};
 use dogstatsd::flusher::Flusher as MetricsFlusher;
+use dogstatsd::flusher::FlusherConfig as MetricsFlusherConfig;
 use dogstatsd::metric::SortedTags;
 use httpmock::prelude::*;
 use std::sync::{Arc, Mutex};
@@ -36,13 +38,16 @@ async fn test_enhanced_metrics() {
         MetricsAggregator::new(SortedTags::parse("aTagKey:aTagValue").unwrap(), 1024)
             .expect("failed to create aggregator"),
     ));
-    let mut metrics_flusher = MetricsFlusher::new(
-        dd_api_key.to_string(),
-        metrics_aggr.clone(),
-        server.base_url(),
-        None,
-        std::time::Duration::from_secs(5),
-    );
+    let metrics_site = MetricsSite::new(server.base_url()).expect("can't parse site");
+    let flusher_config = MetricsFlusherConfig {
+        api_key: dd_api_key.to_string(),
+        aggregator: metrics_aggr.clone(),
+        metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+            .expect("can't parse metrics intake URL from site"),
+        https_proxy: None,
+        timeout: std::time::Duration::from_secs(5),
+    };
+    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(&arc_config));
 
