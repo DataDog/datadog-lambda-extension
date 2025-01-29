@@ -14,7 +14,7 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::tags::provider;
-use crate::traces::{aggregator, stats_flusher, stats_processor, trace_flusher, trace_processor};
+use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
@@ -33,10 +33,8 @@ pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
-    pub stats_aggregator: Arc<Mutex<aggregator::MessageAggregator<pb::ClientStatsPayload>>>,
+    pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator<pb::ClientStatsPayload>>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
-    pub stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
     tx: Sender<SendData>,
 }
@@ -49,33 +47,36 @@ pub enum ApiVersion {
 
 impl TraceAgent {
     #[must_use]
-    pub async fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
         config: Arc<config::Config>,
+        trace_aggregator: Arc<Mutex<trace_aggregator::TraceAggregator>>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
-        stats_aggregator: Arc<Mutex<aggregator::MessageAggregator<pb::ClientStatsPayload>>>,
+        stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator<pb::ClientStatsPayload>>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
-        stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace flusher.
-        let (trace_tx, trace_rx): (Sender<SendData>, Receiver<SendData>) =
+        let (trace_tx, mut trace_rx): (Sender<SendData>, Receiver<SendData>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
-        let trace_flusher = trace_flusher.clone();
-        trace_flusher.start_trace_flusher(trace_rx).await;
+
+        tokio::spawn(async move {
+            while let Some(tracer_payload) = trace_rx.recv().await {
+                let mut aggregator = trace_aggregator.lock().await;
+                aggregator.add(tracer_payload);
+            }
+        });
 
         TraceAgent {
             config,
             trace_processor,
-            trace_flusher,
             stats_aggregator,
             stats_processor,
-            stats_flusher,
             tags_provider,
             tx: trace_tx,
         }
