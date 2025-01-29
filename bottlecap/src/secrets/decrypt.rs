@@ -24,11 +24,39 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Opt
                     return None;
                 }
             };
+            let mut cloned_config = aws_config.clone();
+
+            if cloned_config.aws_secret_access_key.is_empty()
+                && cloned_config.aws_access_key_id.is_empty()
+                && !aws_config.aws_container_credentials_full_uri.is_empty()
+                && !aws_config.aws_container_authorization_token.is_empty()
+            {
+                // We're in Snap Start
+                let credentials = match get_snapstart_credentials(aws_config, &client).await {
+                    Ok(credentials) => credentials,
+                    Err(err) => {
+                        error!("Error getting Snap Start credentials: {}", err);
+                        return None;
+                    }
+                };
+                cloned_config.aws_access_key_id = credentials["AccessKeyId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                cloned_config.aws_secret_access_key = credentials["SecretAccessKey"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+                cloned_config.aws_session_token = credentials["Token"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
+            }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), &cloned_config).await
             } else {
-                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
+                decrypt_aws_kms(&client, config.kms_api_key.clone(), &cloned_config).await
             };
 
             debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
@@ -144,6 +172,24 @@ async fn decrypt_aws_sm(
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
     }
+}
+
+async fn get_snapstart_credentials(
+    aws_config: &AwsConfig,
+    client: &Client,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "Authorization",
+        HeaderValue::from_str(&aws_config.aws_container_authorization_token)?,
+    );
+
+    let req = client
+        .get(&aws_config.aws_container_credentials_full_uri)
+        .headers(headers);
+    let body = req.send().await?.text().await?;
+    let v: Value = serde_json::from_str(&body)?;
+    Ok(v)
 }
 
 async fn request(
@@ -283,11 +329,13 @@ mod tests {
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         let headers = build_get_secret_signed_headers(
-            &AwsConfig {
+            &AwsConfig{
                 region: "us-east-1".to_string(),
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
+                aws_container_authorization_token: "".to_string(),
+                aws_container_credentials_full_uri: "".to_string(),
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
             },
