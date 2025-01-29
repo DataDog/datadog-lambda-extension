@@ -632,6 +632,8 @@ mod tests {
             aws_access_key_id: "***".into(),
             aws_secret_access_key: "***".into(),
             aws_session_token: "***".into(),
+            aws_container_credentials_full_uri: "***".into(),
+            aws_container_authorization_token: "***".into(),
             function_name: "test-function".into(),
             sandbox_init_time: Instant::now(),
         };
