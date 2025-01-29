@@ -432,8 +432,8 @@ async fn extension_loop_active(
                                         tokio::join!(
                                             logs_flusher.flush(),
                                             metrics_flusher.flush(),
-                                            trace_flusher.manual_flush(),
-                                            stats_flusher.manual_flush()
+                                            trace_flusher.flush(),
+                                            stats_flusher.flush()
                                         );
                                     }
 
@@ -468,8 +468,8 @@ async fn extension_loop_active(
                     tokio::join!(
                         logs_flusher.flush(),
                         metrics_flusher.flush(),
-                        trace_flusher.manual_flush(),
-                        stats_flusher.manual_flush()
+                        trace_flusher.flush(),
+                        stats_flusher.flush()
                     );
                     if matches!(flush_control.flush_strategy, FlushStrategy::Periodically(_)) {
                         break;
@@ -484,8 +484,8 @@ async fn extension_loop_active(
             tokio::join!(
                 logs_flusher.flush(),
                 metrics_flusher.flush(),
-                trace_flusher.manual_flush(),
-                stats_flusher.manual_flush()
+                trace_flusher.flush(),
+                stats_flusher.flush()
             );
             return Ok(());
         }

@@ -4,24 +4,20 @@
 use async_trait::async_trait;
 use std::str::FromStr;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc::Receiver, Mutex};
 use tracing::{debug, error};
 
 use crate::config;
-use crate::traces::stats_aggregator::StatsAggregator;
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::{config_utils::trace_stats_url, stats_utils};
+use datadog_trace_utils::config_utils::trace_stats_url;
+use datadog_trace_utils::stats_utils;
 use ddcommon::Endpoint;
 
 #[async_trait]
 pub trait StatsFlusher {
-    fn new(
-        api_key: String,
-        aggregator: Arc<Mutex<StatsAggregator>>,
-        config: Arc<config::Config>,
-    ) -> Self
-    where
-        Self: Sized;
+    /// Starts a stats flusher that listens for stats payloads sent to the tokio mpsc Receiver,
+    /// implementing flushing logic that calls flush_stats.
+    async fn start_stats_flusher(&self, mut rx: Receiver<pb::ClientStatsPayload>);
     /// Flushes stats to the Datadog trace stats intake.
     async fn send(&self, traces: Vec<pb::ClientStatsPayload>);
 
@@ -31,43 +27,29 @@ pub trait StatsFlusher {
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
 pub struct ServerlessStatsFlusher {
-    // pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
-    aggregator: Arc<Mutex<StatsAggregator>>,
-    config: Arc<config::Config>,
-    endpoint: Endpoint,
+    pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
+    pub config: Arc<config::Config>,
+    pub resolved_api_key: String,
 }
 
 #[async_trait]
 impl StatsFlusher for ServerlessStatsFlusher {
-    fn new(
-        api_key: String,
-        aggregator: Arc<Mutex<StatsAggregator>>,
-        config: Arc<config::Config>,
-    ) -> Self {
-        let stats_url = trace_stats_url(&config.site);
+    async fn start_stats_flusher(&self, mut rx: Receiver<pb::ClientStatsPayload>) {
+        let buffer_producer = self.buffer.clone();
 
-        let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
-            api_key: Some(api_key.clone().into()),
-            timeout_ms: Endpoint::DEFAULT_TIMEOUT,
-            test_token: None,
-        };
-
-        ServerlessStatsFlusher {
-            aggregator,
-            config,
-            endpoint,
-        }
+        tokio::spawn(async move {
+            while let Some(stats_payload) = rx.recv().await {
+                let mut buffer = buffer_producer.lock().await;
+                buffer.push(stats_payload);
+            }
+        });
     }
 
     async fn flush(&self) {
-        let mut guard = self.aggregator.lock().await;
-
-        let mut stats = guard.get_batch();
-        while !stats.is_empty() {
-            self.send(stats).await;
-
-            stats = guard.get_batch();
+        let mut buffer = self.buffer.lock().await;
+        if !buffer.is_empty() {
+            self.send(buffer.to_vec()).await;
+            buffer.clear();
         }
     }
     async fn send(&self, stats: Vec<pb::ClientStatsPayload>) {
@@ -88,9 +70,18 @@ impl StatsFlusher for ServerlessStatsFlusher {
             }
         };
 
+        let stats_url = trace_stats_url(&self.config.site);
+
+        let endpoint = Endpoint {
+            url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
+            api_key: Some(self.resolved_api_key.clone().into()),
+            timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            test_token: None,
+        };
+
         match stats_utils::send_stats_payload(
             serialized_stats_payload,
-            &self.endpoint,
+            &endpoint,
             &self.config.api_key,
         )
         .await

@@ -3,19 +3,18 @@
 
 use async_trait::async_trait;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{mpsc::Receiver, Mutex};
 use tracing::{debug, error};
 
 use datadog_trace_utils::trace_utils::{self, SendData};
 
 use crate::config::Config;
-use crate::traces::trace_aggregator::TraceAggregator;
 
 #[async_trait]
 pub trait TraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self
-    where
-        Self: Sized;
+    /// Starts a trace flusher that listens for trace payloads sent to the tokio mpsc Receiver,
+    /// implementing flushing logic that calls flush_traces.
+    async fn start_trace_flusher(&self, mut rx: Receiver<SendData>);
     /// Flushes traces to the Datadog trace intake.
     async fn send(&self, traces: Vec<SendData>);
 
@@ -25,24 +24,27 @@ pub trait TraceFlusher {
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceFlusher {
-    pub aggregator: Arc<Mutex<TraceAggregator>>,
+    pub buffer: Arc<Mutex<Vec<SendData>>>,
     pub config: Arc<Config>,
 }
 
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self {
-        ServerlessTraceFlusher { aggregator, config }
+    async fn start_trace_flusher(&self, mut rx: Receiver<SendData>) {
+        let buffer_producer = self.buffer.clone();
+        tokio::spawn(async move {
+            while let Some(tracer_payload) = rx.recv().await {
+                let mut buffer = buffer_producer.lock().await;
+                buffer.push(tracer_payload);
+            }
+        });
     }
 
     async fn flush(&self) {
-        let mut guard = self.aggregator.lock().await;
-
-        let mut traces = guard.get_batch();
-        while !traces.is_empty() {
-            self.send(traces).await;
-
-            traces = guard.get_batch();
+        let mut buffer = self.buffer.lock().await;
+        if !buffer.is_empty() {
+            self.send(buffer.to_vec()).await;
+            buffer.clear();
         }
     }
 
