@@ -297,11 +297,6 @@ async fn extension_loop_active(
     };
     let mut metrics_flusher = MetricsFlusher::new(flusher_config);
 
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
-        buffer: Arc::new(TokioMutex::new(Vec::new())),
-        config: Arc::clone(config),
-    });
-
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -309,43 +304,9 @@ async fn extension_loop_active(
         aws_config,
         Arc::clone(&metrics_aggr),
     )));
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(
-            obfuscation_config::ObfuscationConfig::new()
-                .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?,
-        ),
-        resolved_api_key: resolved_api_key.clone(),
-    });
 
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
-        buffer: Arc::new(TokioMutex::new(Vec::new())),
-        config: Arc::clone(config),
-        resolved_api_key: resolved_api_key.clone(),
-    });
-    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
-
-    let trace_flusher_clone = trace_flusher.clone();
-    let stats_flusher_clone = stats_flusher.clone();
-
-    let trace_agent = Box::new(
-        trace_agent::TraceAgent::new(
-            Arc::clone(config),
-            trace_processor.clone(),
-            trace_flusher_clone,
-            stats_processor,
-            stats_flusher_clone,
-            Arc::clone(&tags_provider),
-        )
-        .await,
-    );
-    let trace_agent_tx = trace_agent.get_sender_copy();
-
-    tokio::spawn(async move {
-        let res = trace_agent.start().await;
-        if let Err(e) = res {
-            error!("Error starting trace agent: {e:?}");
-        }
-    });
+    let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) =
+        start_trace_agent(config, resolved_api_key.clone(), &tags_provider).await;
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -456,7 +417,7 @@ async fn extension_loop_active(
                                             config.clone(),
                                             tags_provider.clone(),
                                             trace_processor.clone(),
-                                            trace_agent_tx.clone()
+                                            trace_agent_channel.clone()
                                         ).await;
                                     }
                                     drop(p);
@@ -567,6 +528,67 @@ fn start_logs_agent(
         logs_agent.spin().await;
     });
     (logs_agent_channel, logs_flusher)
+}
+
+async fn start_trace_agent(
+    config: &Arc<Config>,
+    resolved_api_key: String,
+    tags_provider: &Arc<TagProvider>,
+) -> (
+    Sender<datadog_trace_utils::send_data::SendData>,
+    Arc<trace_flusher::ServerlessTraceFlusher>,
+    Arc<trace_processor::ServerlessTraceProcessor>,
+    Arc<stats_flusher::ServerlessStatsFlusher>,
+) {
+    // Stats
+    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
+        buffer: Arc::new(TokioMutex::new(Vec::new())),
+        config: Arc::clone(config),
+        resolved_api_key: resolved_api_key.clone(),
+    });
+    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
+
+    // Traces
+    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
+        buffer: Arc::new(TokioMutex::new(Vec::new())),
+        config: Arc::clone(config),
+    });
+
+    let obfuscation_config = obfuscation_config::ObfuscationConfig::new()
+        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+        .expect("Failed to create obfuscation config for Trace Agent");
+
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+        obfuscation_config: Arc::new(obfuscation_config),
+        resolved_api_key,
+    });
+
+    let trace_agent = Box::new(
+        trace_agent::TraceAgent::new(
+            Arc::clone(config),
+            trace_processor.clone(),
+            trace_flusher.clone(),
+            stats_processor,
+            stats_flusher.clone(),
+            Arc::clone(tags_provider),
+        )
+        .await,
+    );
+    let trace_agent_channel = trace_agent.get_sender_copy();
+
+    tokio::spawn(async move {
+        let res = trace_agent.start().await;
+        if let Err(e) = res {
+            error!("Error starting trace agent: {e:?}");
+        }
+    });
+
+    (
+        trace_agent_channel,
+        trace_flusher,
+        trace_processor,
+        stats_flusher,
+    )
 }
 
 async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {
