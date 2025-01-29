@@ -32,6 +32,8 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
+        self,
+        aggregator::MessageAggregator,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
@@ -42,6 +44,7 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_trace_obfuscation::obfuscation_config;
+use datadog_trace_protobuf::pb;
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
@@ -541,11 +544,15 @@ async fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
 ) {
     // Stats
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
-        buffer: Arc::new(TokioMutex::new(Vec::new())),
-        config: Arc::clone(config),
-        resolved_api_key: resolved_api_key.clone(),
-    });
+    let stats_aggregator = Arc::new(TokioMutex::new(
+        MessageAggregator::<pb::ClientStatsPayload>::new(traces::MAX_CONTENT_SIZE_BYTES),
+    ));
+    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
+        resolved_api_key.clone(),
+        stats_aggregator.clone(),
+        Arc::clone(config),
+    ));
+
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
@@ -568,6 +575,7 @@ async fn start_trace_agent(
             Arc::clone(config),
             trace_processor.clone(),
             trace_flusher.clone(),
+            stats_aggregator,
             stats_processor,
             stats_flusher.clone(),
             Arc::clone(tags_provider),
