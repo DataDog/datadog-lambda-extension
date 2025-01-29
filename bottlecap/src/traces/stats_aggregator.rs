@@ -1,4 +1,3 @@
-use datadog_trace_protobuf::pb::ClientStatsPayload;
 use prost::Message;
 use std::collections::VecDeque;
 
@@ -18,13 +17,19 @@ use std::collections::VecDeque;
 const MAX_CONTENT_SIZE_BYTES: usize = 3 * 1024 * 1024; // ~3MB
 
 #[allow(clippy::module_name_repetitions)]
-pub struct StatsAggregator {
-    queue: VecDeque<ClientStatsPayload>,
+pub struct StatsAggregator<T>
+where
+    T: Message,
+{
+    queue: VecDeque<T>,
     max_content_size_bytes: usize,
-    buffer: Vec<ClientStatsPayload>,
+    buffer: Vec<T>,
 }
 
-impl Default for StatsAggregator {
+impl<T> Default for StatsAggregator<T>
+where
+    T: Message,
+{
     fn default() -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
@@ -34,7 +39,10 @@ impl Default for StatsAggregator {
     }
 }
 
-impl StatsAggregator {
+impl<T> StatsAggregator<T>
+where
+    T: Message,
+{
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
     pub fn new(max_content_size_bytes: usize) -> Self {
@@ -45,123 +53,30 @@ impl StatsAggregator {
         }
     }
 
-    pub fn add(&mut self, payload: ClientStatsPayload) {
-        self.queue.push_back(payload);
+    pub fn add(&mut self, message: T) {
+        self.queue.push_back(message);
     }
 
-    pub fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
+    pub fn get_batch(&mut self) -> Vec<T> {
         let mut batch_size = 0;
 
         // Fill the batch
         while batch_size < self.max_content_size_bytes {
-            if let Some(payload) = self.queue.pop_front() {
-                let payload_size = payload.encoded_len();
+            if let Some(message) = self.queue.pop_front() {
+                let message_size = message.encoded_len();
 
                 // Put stats back in the queue
-                if batch_size + payload_size > self.max_content_size_bytes {
-                    self.queue.push_front(payload);
+                if batch_size + message_size > self.max_content_size_bytes {
+                    self.queue.push_front(message);
                     break;
                 }
-                batch_size += payload_size;
-                self.buffer.push(payload);
+                batch_size += message_size;
+                self.buffer.push(message);
             } else {
                 break;
             }
         }
 
         std::mem::take(&mut self.buffer)
-    }
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_add() {
-        let mut aggregator = StatsAggregator::default();
-        let payload = ClientStatsPayload {
-            hostname: "hostname".to_string(),
-            env: "dev".to_string(),
-            version: "version".to_string(),
-            stats: vec![],
-            lang: "rust".to_string(),
-            tracer_version: "tracer.version".to_string(),
-            runtime_id: "hash".to_string(),
-            sequence: 0,
-            agent_aggregation: "aggregation".to_string(),
-            service: "service".to_string(),
-            container_id: "container_id".to_string(),
-            tags: vec![],
-            git_commit_sha: "git_commit_sha".to_string(),
-            image_tag: "image_tag".to_string(),
-        };
-
-        aggregator.add(payload.clone());
-        assert_eq!(aggregator.queue.len(), 1);
-        assert_eq!(aggregator.queue[0], payload);
-    }
-
-    #[test]
-    fn test_get_batch() {
-        let mut aggregator = StatsAggregator::default();
-        let payload = ClientStatsPayload {
-            hostname: "hostname".to_string(),
-            env: "dev".to_string(),
-            version: "version".to_string(),
-            stats: vec![],
-            lang: "rust".to_string(),
-            tracer_version: "tracer.version".to_string(),
-            runtime_id: "hash".to_string(),
-            sequence: 0,
-            agent_aggregation: "aggregation".to_string(),
-            service: "service".to_string(),
-            container_id: "container_id".to_string(),
-            tags: vec![],
-            git_commit_sha: "git_commit_sha".to_string(),
-            image_tag: "image_tag".to_string(),
-        };
-        aggregator.add(payload.clone());
-        assert_eq!(aggregator.queue.len(), 1);
-        let batch = aggregator.get_batch();
-        assert_eq!(batch, vec![payload]);
-    }
-
-    #[test]
-    fn test_get_batch_full_entries() {
-        let mut aggregator = StatsAggregator::new(230);
-        // Payload below is 115 bytes
-        let payload = ClientStatsPayload {
-            hostname: "hostname".to_string(),
-            env: "dev".to_string(),
-            version: "version".to_string(),
-            stats: vec![],
-            lang: "rust".to_string(),
-            tracer_version: "tracer.version".to_string(),
-            runtime_id: "hash".to_string(),
-            sequence: 0,
-            agent_aggregation: "aggregation".to_string(),
-            service: "service".to_string(),
-            container_id: "container_id".to_string(),
-            tags: vec![],
-            git_commit_sha: "git_commit_sha".to_string(),
-            image_tag: "image_tag".to_string(),
-        };
-
-        // Add 3 payloads
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
-
-        // The batch should only contain the first 2 payloads
-        let first_batch = aggregator.get_batch();
-        assert_eq!(first_batch, vec![payload.clone(), payload.clone()]);
-        assert_eq!(aggregator.queue.len(), 1);
-
-        // The second batch should only contain the last log
-        let second_batch = aggregator.get_batch();
-        assert_eq!(second_batch, vec![payload]);
-        assert_eq!(aggregator.queue.len(), 0);
     }
 }

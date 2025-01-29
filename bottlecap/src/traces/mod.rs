@@ -1,7 +1,6 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-pub mod aggregator;
 pub mod context;
 pub mod propagation;
 pub mod span_pointers;
@@ -33,9 +32,3 @@ const AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX: &str = "169.254.79.129";
 
 // Name of the placeholder invocation span set by Java and Go tracers
 const INVOCATION_SPAN_RESOURCE: &str = "dd-tracer-serverless-span";
-
-/// Maximum content size per payload uncompressed in bytes,
-/// that the Datadog Trace API accepts. The value is 3.2 MB.
-///
-/// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
-pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
