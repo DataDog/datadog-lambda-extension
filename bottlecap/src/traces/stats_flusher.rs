@@ -8,10 +8,9 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::config;
-use crate::traces::aggregator::MessageAggregator as StatsAggregator;
+use crate::traces::stats_aggregator::StatsAggregator;
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::config_utils::trace_stats_url;
-use datadog_trace_utils::stats_utils;
+use datadog_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use ddcommon::Endpoint;
 
 #[async_trait]
