@@ -433,6 +433,7 @@ dependencies = [
  "log",
  "nix",
  "proptest",
+ "prost 0.11.9",
  "protobuf",
  "rand",
  "regex",
