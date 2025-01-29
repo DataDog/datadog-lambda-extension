@@ -32,9 +32,8 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-        stats_aggregator::StatsAggregator,
         stats_flusher::{self, StatsFlusher},
-        stats_processor, trace_agent, trace_aggregator,
+        stats_processor, trace_agent,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
     },
@@ -163,7 +162,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (mut aws_config, config) = load_configs();
+    let (aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
@@ -177,7 +176,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
+    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
         match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
@@ -203,10 +202,6 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").unwrap_or_default(),
         aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_default(),
         aws_session_token: env::var("AWS_SESSION_TOKEN").unwrap_or_default(),
-        aws_container_credentials_full_uri: env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI")
-            .unwrap_or_default(),
-        aws_container_authorization_token: env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN")
-            .unwrap_or_default(),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
         sandbox_init_time: Instant::now(),
     };
@@ -311,7 +306,7 @@ async fn extension_loop_active(
     )));
 
     let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) =
-        start_trace_agent(config, resolved_api_key.clone(), &tags_provider);
+        start_trace_agent(config, resolved_api_key.clone(), &tags_provider).await;
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -437,8 +432,8 @@ async fn extension_loop_active(
                                         tokio::join!(
                                             logs_flusher.flush(),
                                             metrics_flusher.flush(),
-                                            trace_flusher.flush(),
-                                            stats_flusher.flush()
+                                            trace_flusher.manual_flush(),
+                                            stats_flusher.manual_flush()
                                         );
                                     }
 
@@ -473,8 +468,8 @@ async fn extension_loop_active(
                     tokio::join!(
                         logs_flusher.flush(),
                         metrics_flusher.flush(),
-                        trace_flusher.flush(),
-                        stats_flusher.flush()
+                        trace_flusher.manual_flush(),
+                        stats_flusher.manual_flush()
                     );
                     if matches!(flush_control.flush_strategy, FlushStrategy::Periodically(_)) {
                         break;
@@ -489,8 +484,8 @@ async fn extension_loop_active(
             tokio::join!(
                 logs_flusher.flush(),
                 metrics_flusher.flush(),
-                trace_flusher.flush(),
-                stats_flusher.flush()
+                trace_flusher.manual_flush(),
+                stats_flusher.manual_flush()
             );
             return Ok(());
         }
@@ -535,7 +530,7 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-fn start_trace_agent(
+async fn start_trace_agent(
     config: &Arc<Config>,
     resolved_api_key: String,
     tags_provider: &Arc<TagProvider>,
@@ -546,19 +541,16 @@ fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
 ) {
     // Stats
-    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
-        resolved_api_key.clone(),
-        stats_aggregator.clone(),
-        Arc::clone(config),
-    ));
-
+    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher {
+        buffer: Arc::new(TokioMutex::new(Vec::new())),
+        config: Arc::clone(config),
+        resolved_api_key: resolved_api_key.clone(),
+    });
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
-        aggregator: trace_aggregator.clone(),
+        buffer: Arc::new(TokioMutex::new(Vec::new())),
         config: Arc::clone(config),
     });
 
@@ -571,14 +563,17 @@ fn start_trace_agent(
         resolved_api_key,
     });
 
-    let trace_agent = Box::new(trace_agent::TraceAgent::new(
-        Arc::clone(config),
-        trace_aggregator,
-        trace_processor.clone(),
-        stats_aggregator,
-        stats_processor,
-        Arc::clone(tags_provider),
-    ));
+    let trace_agent = Box::new(
+        trace_agent::TraceAgent::new(
+            Arc::clone(config),
+            trace_processor.clone(),
+            trace_flusher.clone(),
+            stats_processor,
+            stats_flusher.clone(),
+            Arc::clone(tags_provider),
+        )
+        .await,
+    );
     let trace_agent_channel = trace_agent.get_sender_copy();
 
     tokio::spawn(async move {
