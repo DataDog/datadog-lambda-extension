@@ -9,11 +9,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::config;
 use crate::tags::provider;
-use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
+use crate::traces::{aggregator, stats_flusher, stats_processor, trace_flusher, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
@@ -33,6 +34,7 @@ pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     pub trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
+    pub stats_aggregator: Arc<Mutex<aggregator::MessageAggregator<pb::ClientStatsPayload>>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
@@ -51,6 +53,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
+        stats_aggregator: Arc<Mutex<aggregator::MessageAggregator<pb::ClientStatsPayload>>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
@@ -70,6 +73,7 @@ impl TraceAgent {
             config,
             trace_processor,
             trace_flusher,
+            stats_aggregator,
             stats_processor,
             stats_flusher,
             tags_provider,
@@ -82,17 +86,18 @@ impl TraceAgent {
         let trace_tx = self.tx.clone();
 
         // channels to send processed stats to our stats flusher.
-        let (stats_tx, stats_rx): (
+        let (stats_tx, mut stats_rx): (
             Sender<pb::ClientStatsPayload>,
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        // start our stats flusher.
-        let stats_flusher = self.stats_flusher.clone();
-        // let stats_config = self.config.clone();
+        // Receive stats payload and send it to the aggregator
+        let stats_aggregator = self.stats_aggregator.clone();
         tokio::spawn(async move {
-            let stats_flusher = stats_flusher.clone();
-            stats_flusher.start_stats_flusher(stats_rx).await;
+            while let Some(stats_payload) = stats_rx.recv().await {
+                let mut aggregator = stats_aggregator.lock().await;
+                aggregator.add(stats_payload);
+            }
         });
 
         // setup our hyper http server, where the endpoint_handler handles incoming requests
