@@ -19,9 +19,9 @@ pub trait StatsFlusher {
     /// implementing flushing logic that calls flush_stats.
     async fn start_stats_flusher(&self, mut rx: Receiver<pb::ClientStatsPayload>);
     /// Flushes stats to the Datadog trace stats intake.
-    async fn flush_stats(&self, traces: Vec<pb::ClientStatsPayload>);
+    async fn send(&self, traces: Vec<pb::ClientStatsPayload>);
 
-    async fn manual_flush(&self);
+    async fn flush(&self);
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -45,14 +45,14 @@ impl StatsFlusher for ServerlessStatsFlusher {
         });
     }
 
-    async fn manual_flush(&self) {
+    async fn flush(&self) {
         let mut buffer = self.buffer.lock().await;
         if !buffer.is_empty() {
-            self.flush_stats(buffer.to_vec()).await;
+            self.send(buffer.to_vec()).await;
             buffer.clear();
         }
     }
-    async fn flush_stats(&self, stats: Vec<pb::ClientStatsPayload>) {
+    async fn send(&self, stats: Vec<pb::ClientStatsPayload>) {
         if stats.is_empty() {
             return;
         }

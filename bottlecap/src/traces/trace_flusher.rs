@@ -16,9 +16,9 @@ pub trait TraceFlusher {
     /// implementing flushing logic that calls flush_traces.
     async fn start_trace_flusher(&self, mut rx: Receiver<SendData>);
     /// Flushes traces to the Datadog trace intake.
-    async fn flush_traces(&self, traces: Vec<SendData>);
+    async fn send(&self, traces: Vec<SendData>);
 
-    async fn manual_flush(&self);
+    async fn flush(&self);
 }
 
 #[derive(Clone)]
@@ -40,15 +40,15 @@ impl TraceFlusher for ServerlessTraceFlusher {
         });
     }
 
-    async fn manual_flush(&self) {
+    async fn flush(&self) {
         let mut buffer = self.buffer.lock().await;
         if !buffer.is_empty() {
-            self.flush_traces(buffer.to_vec()).await;
+            self.send(buffer.to_vec()).await;
             buffer.clear();
         }
     }
 
-    async fn flush_traces(&self, traces: Vec<SendData>) {
+    async fn send(&self, traces: Vec<SendData>) {
         if traces.is_empty() {
             return;
         }
