@@ -32,10 +32,9 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-        self,
-        aggregator::MessageAggregator,
+        stats_aggregator::StatsAggregator,
         stats_flusher::{self, StatsFlusher},
-        stats_processor, trace_agent,
+        stats_processor, trace_agent, trace_aggregator,
         trace_flusher::{self, TraceFlusher},
         trace_processor,
     },
@@ -309,7 +308,7 @@ async fn extension_loop_active(
     )));
 
     let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) =
-        start_trace_agent(config, resolved_api_key.clone(), &tags_provider).await;
+        start_trace_agent(config, resolved_api_key.clone(), &tags_provider);
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -533,7 +532,7 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-async fn start_trace_agent(
+fn start_trace_agent(
     config: &Arc<Config>,
     resolved_api_key: String,
     tags_provider: &Arc<TagProvider>,
@@ -545,7 +544,7 @@ async fn start_trace_agent(
 ) {
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(
-        MessageAggregator::<pb::ClientStatsPayload>::new(traces::MAX_CONTENT_SIZE_BYTES),
+        StatsAggregator::<pb::ClientStatsPayload>::default(),
     ));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         resolved_api_key.clone(),
@@ -556,8 +555,9 @@ async fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
+    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
-        buffer: Arc::new(TokioMutex::new(Vec::new())),
+        aggregator: trace_aggregator.clone(),
         config: Arc::clone(config),
     });
 
@@ -570,18 +570,14 @@ async fn start_trace_agent(
         resolved_api_key,
     });
 
-    let trace_agent = Box::new(
-        trace_agent::TraceAgent::new(
-            Arc::clone(config),
-            trace_processor.clone(),
-            trace_flusher.clone(),
-            stats_aggregator,
-            stats_processor,
-            stats_flusher.clone(),
-            Arc::clone(tags_provider),
-        )
-        .await,
-    );
+    let trace_agent = Box::new(trace_agent::TraceAgent::new(
+        Arc::clone(config),
+        trace_aggregator,
+        trace_processor.clone(),
+        stats_aggregator,
+        stats_processor,
+        Arc::clone(tags_provider),
+    ));
     let trace_agent_channel = trace_agent.get_sender_copy();
 
     tokio::spawn(async move {
