@@ -1,8 +1,23 @@
 use prost::Message;
 use std::collections::VecDeque;
 
+/// Maximum number of entries in a stat payload.
+///
+/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
+// const MAX_BATCH_ENTRIES_SIZE: usize = 4000;
+
+/// Aproximate size an entry in a stat payload occupies
+///
+/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L33-L35>
+// const MAX_ENTRY_SIZE_BYTES: usize = 375;
+
+/// Maximum content size per payload in compressed bytes,
+///
+/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
+const MAX_CONTENT_SIZE_BYTES: usize = 3 * 1024 * 1024; // ~3MB
+
 #[allow(clippy::module_name_repetitions)]
-pub struct MessageAggregator<T>
+pub struct StatsAggregator<T>
 where
     T: Message,
 {
@@ -11,14 +26,27 @@ where
     buffer: Vec<T>,
 }
 
-impl<T> MessageAggregator<T>
+impl<T> Default for StatsAggregator<T>
+where
+    T: Message,
+{
+    fn default() -> Self {
+        StatsAggregator {
+            queue: VecDeque::new(),
+            max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
+            buffer: Vec::with_capacity(MAX_CONTENT_SIZE_BYTES),
+        }
+    }
+}
+
+impl<T> StatsAggregator<T>
 where
     T: Message,
 {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
     pub fn new(max_content_size_bytes: usize) -> Self {
-        MessageAggregator {
+        StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,
             buffer: Vec::with_capacity(max_content_size_bytes),
