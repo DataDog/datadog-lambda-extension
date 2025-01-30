@@ -334,6 +334,8 @@ pub struct AwsConfig {
     pub aws_session_token: String,
     pub function_name: String,
     pub sandbox_init_time: Instant,
+    pub aws_container_credentials_full_uri: String,
+    pub aws_container_authorization_token: String,
 }
 
 #[must_use]
