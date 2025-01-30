@@ -43,7 +43,6 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_trace_obfuscation::obfuscation_config;
-use datadog_trace_protobuf::pb;
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
@@ -543,9 +542,7 @@ fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
 ) {
     // Stats
-    let stats_aggregator = Arc::new(TokioMutex::new(
-        StatsAggregator::<pb::ClientStatsPayload>::default(),
-    ));
+    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         resolved_api_key.clone(),
         stats_aggregator.clone(),

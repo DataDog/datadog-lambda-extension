@@ -33,7 +33,7 @@ pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator<pb::ClientStatsPayload>>>,
+    pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
     tx: Sender<SendData>,
@@ -52,7 +52,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         trace_aggregator: Arc<Mutex<trace_aggregator::TraceAggregator>>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator<pb::ClientStatsPayload>>>,
+        stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
     ) -> TraceAgent {

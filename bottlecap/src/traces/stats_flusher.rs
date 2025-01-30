@@ -17,7 +17,7 @@ use ddcommon::Endpoint;
 pub trait StatsFlusher {
     fn new(
         api_key: String,
-        aggregator: Arc<Mutex<StatsAggregator<pb::ClientStatsPayload>>>,
+        aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
     ) -> Self
     where
@@ -32,7 +32,7 @@ pub trait StatsFlusher {
 #[derive(Clone)]
 pub struct ServerlessStatsFlusher {
     // pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
-    aggregator: Arc<Mutex<StatsAggregator<pb::ClientStatsPayload>>>,
+    aggregator: Arc<Mutex<StatsAggregator>>,
     config: Arc<config::Config>,
     endpoint: Endpoint,
 }
@@ -41,7 +41,7 @@ pub struct ServerlessStatsFlusher {
 impl StatsFlusher for ServerlessStatsFlusher {
     fn new(
         api_key: String,
-        aggregator: Arc<Mutex<StatsAggregator<pb::ClientStatsPayload>>>,
+        aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
         let stats_url = trace_stats_url(&config.site);

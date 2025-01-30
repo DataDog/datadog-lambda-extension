@@ -1,3 +1,4 @@
+use datadog_trace_protobuf::pb::ClientStatsPayload;
 use prost::Message;
 use std::collections::VecDeque;
 
@@ -17,19 +18,13 @@ use std::collections::VecDeque;
 const MAX_CONTENT_SIZE_BYTES: usize = 3 * 1024 * 1024; // ~3MB
 
 #[allow(clippy::module_name_repetitions)]
-pub struct StatsAggregator<T>
-where
-    T: Message,
-{
-    queue: VecDeque<T>,
+pub struct StatsAggregator {
+    queue: VecDeque<ClientStatsPayload>,
     max_content_size_bytes: usize,
-    buffer: Vec<T>,
+    buffer: Vec<ClientStatsPayload>,
 }
 
-impl<T> Default for StatsAggregator<T>
-where
-    T: Message,
-{
+impl Default for StatsAggregator {
     fn default() -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
@@ -39,10 +34,7 @@ where
     }
 }
 
-impl<T> StatsAggregator<T>
-where
-    T: Message,
-{
+impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
     pub fn new(max_content_size_bytes: usize) -> Self {
@@ -53,11 +45,11 @@ where
         }
     }
 
-    pub fn add(&mut self, message: T) {
+    pub fn add(&mut self, message: ClientStatsPayload) {
         self.queue.push_back(message);
     }
 
-    pub fn get_batch(&mut self) -> Vec<T> {
+    pub fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
         let mut batch_size = 0;
 
         // Fill the batch
