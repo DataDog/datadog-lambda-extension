@@ -162,7 +162,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (aws_config, config) = load_configs();
+    let (mut aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
@@ -176,7 +176,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config).await {
+    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
         match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
@@ -202,6 +202,10 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").unwrap_or_default(),
         aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_default(),
         aws_session_token: env::var("AWS_SESSION_TOKEN").unwrap_or_default(),
+        aws_container_credentials_full_uri: env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI")
+            .unwrap_or_default(),
+        aws_container_authorization_token: env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN")
+            .unwrap_or_default(),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
         sandbox_init_time: Instant::now(),
     };

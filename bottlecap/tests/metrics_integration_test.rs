@@ -10,9 +10,6 @@ use std::sync::{Arc, Mutex};
 
 mod common;
 
-// ASTUYVE ignoring as new changes to libdatadog require a valid DD_SITE to be set
-// which requires HTTPS, thus breaking this test
-#[ignore]
 #[tokio::test]
 async fn test_enhanced_metrics() {
     let dd_api_key = "my_test_key";

@@ -125,6 +125,30 @@ pub enum TelemetryRecord {
         /// Total size of the dropped records
         dropped_bytes: u64,
     },
+
+    /// Snapstart
+    #[serde(rename = "platform.restoreStart", rename_all = "camelCase")]
+    PlatformRestoreStart {
+        // function name and function version are here
+        // but we don't care about those
+        // https://docs.aws.amazon.com/lambda/latest/dg/telemetry-schema-reference.html#platform-restoreStart
+        // runtime version may be nice
+    },
+
+    #[serde(rename = "platform.restoreReport", rename_all = "camelCase")]
+    PlatformRestoreReport {
+        /// Status of the invocation
+        status: Status,
+        /// When unsuccessful, the `error_type` describes what kind of error occurred
+        error_type: Option<String>,
+    },
+    #[serde(rename = "platform.restoreRuntimeDone", rename_all = "camelCase")]
+    PlatformRestoreRuntimeDone {
+        /// Status of the invocation
+        status: Status,
+        /// When unsuccessful, the `error_type` describes what kind of error occurred
+        error_type: Option<String>,
+    },
 }
 
 /// Type of Initialization
