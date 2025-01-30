@@ -53,9 +53,9 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), &aws_config).await
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
             } else {
-                decrypt_aws_kms(&client, config.kms_api_key.clone(), &aws_config).await
+                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
             };
 
             debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
@@ -333,8 +333,8 @@ mod tests {
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
-                aws_container_authorization_token: "".to_string(),
-                aws_container_credentials_full_uri: "".to_string(),
+                aws_container_authorization_token: String::new(),
+                aws_container_credentials_full_uri: String::new(),
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
             },
