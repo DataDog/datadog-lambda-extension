@@ -6,7 +6,7 @@ use tokio::sync::mpsc::Sender;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
-use tracing::{debug, error};
+use tracing::debug;
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, Copy)]

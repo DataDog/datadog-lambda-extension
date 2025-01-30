@@ -12,7 +12,7 @@ use std::time::Instant;
 use tracing::debug;
 use tracing::error;
 
-pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Option<String> {
+pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) -> Option<String> {
     let api_key_candidate =
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
@@ -24,10 +24,9 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Opt
                     return None;
                 }
             };
-            let mut cloned_config = aws_config.clone();
 
-            if cloned_config.aws_secret_access_key.is_empty()
-                && cloned_config.aws_access_key_id.is_empty()
+            if aws_config.aws_secret_access_key.is_empty()
+                && aws_config.aws_access_key_id.is_empty()
                 && !aws_config.aws_container_credentials_full_uri.is_empty()
                 && !aws_config.aws_container_authorization_token.is_empty()
             {
@@ -39,24 +38,24 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig) -> Opt
                         return None;
                     }
                 };
-                cloned_config.aws_access_key_id = credentials["AccessKeyId"]
+                aws_config.aws_access_key_id = credentials["AccessKeyId"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                cloned_config.aws_secret_access_key = credentials["SecretAccessKey"]
+                aws_config.aws_secret_access_key = credentials["SecretAccessKey"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                cloned_config.aws_session_token = credentials["Token"]
+                aws_config.aws_session_token = credentials["Token"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), &cloned_config).await
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), &aws_config).await
             } else {
-                decrypt_aws_kms(&client, config.kms_api_key.clone(), &cloned_config).await
+                decrypt_aws_kms(&client, config.kms_api_key.clone(), &aws_config).await
             };
 
             debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
