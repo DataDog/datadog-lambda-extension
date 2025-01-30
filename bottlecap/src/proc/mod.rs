@@ -244,11 +244,11 @@ fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     fd_max
 }
 
-pub fn get_fd_use_data(pids: &[i64]) -> Result<f64, io::Error> {
+pub fn get_fd_use_data(pids: &[i64]) -> f64 {
     get_fd_use_data_from_path(PROC_PATH, pids)
 }
 
-fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
+fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut fd_use = 0;
 
     for &pid in pids {
@@ -265,7 +265,7 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error>
         fd_use += count;
     }
 
-    Ok(fd_use as f64)
+    return fd_use as f64;
 }
 
 #[must_use]
@@ -475,14 +475,8 @@ mod tests {
     fn test_get_fd_use_data() {
         let path = "./tests/proc/process/valid";
         let pids = get_pid_list_from_path(path_from_root(path).as_str());
-        let fd_use_result = get_fd_use_data_from_path(path, &pids);
-        assert!(fd_use_result.is_ok());
-        let fd_use = fd_use_result.unwrap();
+        let fd_use = get_fd_use_data_from_path(path, &pids);
         assert!((fd_use - 5.0).abs() < f64::EPSILON);
-
-        let path = "./tests/proc/process/invalid_missing";
-        let fd_use_result = get_fd_use_data_from_path(path, &pids);
-        assert!(fd_use_result.is_err());
     }
 
     #[test]
