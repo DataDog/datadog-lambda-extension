@@ -6,7 +6,7 @@ use tokio::sync::mpsc::Sender;
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Request, Response, Server};
-use tracing::{debug, error};
+use tracing::debug;
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, Copy)]
@@ -58,9 +58,10 @@ impl TelemetryListener {
             Err(e) => {
                 // If we can't parse the event, we will receive it again in a new batch
                 // causing an infinite loop and resource contention.
-                // Instead, log it as fatal and move on.
-                // This will result in a dropped payload.
-                error!("[FATAL] Failed to parse telemetry events: {:?}", e);
+                // Instead, log it and move on.
+                // This will result in a dropped payload, but may be from
+                // events we haven't added support for yet
+                debug!("Failed to parse telemetry events: {:?}", e);
                 return Ok(Response::builder()
                     .status(hyper::StatusCode::OK)
                     .body(Body::from("Failed to parse telemetry events"))
