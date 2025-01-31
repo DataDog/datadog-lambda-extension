@@ -244,6 +244,7 @@ fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     fd_max
 }
 
+#[must_use]
 pub fn get_fd_use_data(pids: &[i64]) -> f64 {
     get_fd_use_data_from_path(PROC_PATH, pids)
 }
@@ -265,7 +266,7 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
         fd_use += count;
     }
 
-    return fd_use as f64;
+    fd_use as f64
 }
 
 #[must_use]
