@@ -45,8 +45,8 @@ impl StatsAggregator {
         }
     }
 
-    pub fn add(&mut self, message: ClientStatsPayload) {
-        self.queue.push_back(message);
+    pub fn add(&mut self, payload: ClientStatsPayload) {
+        self.queue.push_back(payload);
     }
 
     pub fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
@@ -54,21 +54,114 @@ impl StatsAggregator {
 
         // Fill the batch
         while batch_size < self.max_content_size_bytes {
-            if let Some(message) = self.queue.pop_front() {
-                let message_size = message.encoded_len();
+            if let Some(payload) = self.queue.pop_front() {
+                let payload_size = payload.encoded_len();
 
                 // Put stats back in the queue
-                if batch_size + message_size > self.max_content_size_bytes {
-                    self.queue.push_front(message);
+                if batch_size + payload_size > self.max_content_size_bytes {
+                    self.queue.push_front(payload);
                     break;
                 }
-                batch_size += message_size;
-                self.buffer.push(message);
+                batch_size += payload_size;
+                self.buffer.push(payload);
             } else {
                 break;
             }
         }
 
         std::mem::take(&mut self.buffer)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_add() {
+        let mut aggregator = StatsAggregator::default();
+        let payload = ClientStatsPayload {
+            hostname: "hostname".to_string(),
+            env: "dev".to_string(),
+            version: "version".to_string(),
+            stats: vec![],
+            lang: "rust".to_string(),
+            tracer_version: "tracer.version".to_string(),
+            runtime_id: "hash".to_string(),
+            sequence: 0,
+            agent_aggregation: "aggregation".to_string(),
+            service: "service".to_string(),
+            container_id: "container_id".to_string(),
+            tags: vec![],
+            git_commit_sha: "git_commit_sha".to_string(),
+            image_tag: "image_tag".to_string(),
+        };
+
+        aggregator.add(payload.clone());
+        assert_eq!(aggregator.queue.len(), 1);
+        assert_eq!(aggregator.queue[0], payload);
+    }
+
+    #[test]
+    fn test_get_batch() {
+        let mut aggregator = StatsAggregator::default();
+        let payload = ClientStatsPayload {
+            hostname: "hostname".to_string(),
+            env: "dev".to_string(),
+            version: "version".to_string(),
+            stats: vec![],
+            lang: "rust".to_string(),
+            tracer_version: "tracer.version".to_string(),
+            runtime_id: "hash".to_string(),
+            sequence: 0,
+            agent_aggregation: "aggregation".to_string(),
+            service: "service".to_string(),
+            container_id: "container_id".to_string(),
+            tags: vec![],
+            git_commit_sha: "git_commit_sha".to_string(),
+            image_tag: "image_tag".to_string(),
+        };
+        aggregator.add(payload.clone());
+        assert_eq!(aggregator.queue.len(), 1);
+        let batch = aggregator.get_batch();
+        assert_eq!(batch, vec![payload]);
+    }
+
+    #[test]
+    fn test_get_batch_full_entries() {
+        let mut aggregator = StatsAggregator::new(230);
+        // Payload below is 115 bytes
+        let payload = ClientStatsPayload {
+            hostname: "hostname".to_string(),
+            env: "dev".to_string(),
+            version: "version".to_string(),
+            stats: vec![],
+            lang: "rust".to_string(),
+            tracer_version: "tracer.version".to_string(),
+            runtime_id: "hash".to_string(),
+            sequence: 0,
+            agent_aggregation: "aggregation".to_string(),
+            service: "service".to_string(),
+            container_id: "container_id".to_string(),
+            tags: vec![],
+            git_commit_sha: "git_commit_sha".to_string(),
+            image_tag: "image_tag".to_string(),
+        };
+
+        // Add 3 payloads
+        aggregator.add(payload.clone());
+        aggregator.add(payload.clone());
+        aggregator.add(payload.clone());
+
+        // The batch should only contain the first 2 payloads
+        let first_batch = aggregator.get_batch();
+        assert_eq!(first_batch, vec![payload.clone(), payload.clone()]);
+        assert_eq!(aggregator.queue.len(), 1);
+
+        // The second batch should only contain the last log
+        let second_batch = aggregator.get_batch();
+        assert_eq!(second_batch, vec![payload]);
+        assert_eq!(aggregator.queue.len(), 0);
     }
 }
