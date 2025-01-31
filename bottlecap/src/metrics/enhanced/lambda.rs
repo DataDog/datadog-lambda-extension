@@ -566,7 +566,7 @@ impl Lambda {
 
             // Set fd_max and initial value for fd_use
             let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = proc::get_fd_use_data(&pids).unwrap_or_else(|_| -1_f64);
+            let mut fd_use = proc::get_fd_use_data(&pids);
 
             // Set threads_max and initial value for threads_use
             let threads_max = proc::get_threads_max_data(&pids);
@@ -586,9 +586,8 @@ impl Lambda {
                     // Otherwise keep monitoring file descriptor and thread usage periodically
                     _ = interval.tick() => {
                         pids = proc::get_pid_list();
-                        if let Ok(fd_use_curr) = proc::get_fd_use_data(&pids) {
-                            fd_use = fd_use.max(fd_use_curr);
-                        }
+                        let fd_use_curr = proc::get_fd_use_data(&pids);
+                        fd_use = fd_use.max(fd_use_curr);
                         if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
                             threads_use = threads_use.max(threads_use_curr);
                         }
