@@ -11,7 +11,7 @@ use constants::{
     LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
 };
 use regex::Regex;
-use tracing::debug;
+use tracing::{debug, trace};
 
 #[must_use]
 pub fn get_pid_list() -> Vec<i64> {
@@ -244,26 +244,29 @@ fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     fd_max
 }
 
-pub fn get_fd_use_data(pids: &[i64]) -> Result<f64, io::Error> {
+#[must_use]
+pub fn get_fd_use_data(pids: &[i64]) -> f64 {
     get_fd_use_data_from_path(PROC_PATH, pids)
 }
 
-fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> Result<f64, io::Error> {
+fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut fd_use = 0;
 
     for &pid in pids {
         let fd_path = format!("{path}/{pid}/fd");
-        let Ok(files) = fs::read_dir(fd_path) else {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "File descriptor use data not found",
-            ));
+        let Ok(files) = fs::read_dir(&fd_path) else {
+            trace!(
+                "File descriptor use data not found in path {} with pid {}",
+                fd_path,
+                pid
+            );
+            continue;
         };
         let count = files.count();
         fd_use += count;
     }
 
-    Ok(fd_use as f64)
+    fd_use as f64
 }
 
 #[must_use]
@@ -473,14 +476,8 @@ mod tests {
     fn test_get_fd_use_data() {
         let path = "./tests/proc/process/valid";
         let pids = get_pid_list_from_path(path_from_root(path).as_str());
-        let fd_use_result = get_fd_use_data_from_path(path, &pids);
-        assert!(fd_use_result.is_ok());
-        let fd_use = fd_use_result.unwrap();
+        let fd_use = get_fd_use_data_from_path(path, &pids);
         assert!((fd_use - 5.0).abs() < f64::EPSILON);
-
-        let path = "./tests/proc/process/invalid_missing";
-        let fd_use_result = get_fd_use_data_from_path(path, &pids);
-        assert!(fd_use_result.is_err());
     }
 
     #[test]
