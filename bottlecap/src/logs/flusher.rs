@@ -120,16 +120,20 @@ impl Flusher {
             };
             let resp: Result<reqwest::Response, reqwest::Error> = req.body(body).send().await;
 
+            let elapsed = start.elapsed();
+
             match resp {
                 Ok(resp) => {
                     if resp.status() != 202 {
-                        debug!("Failed to send logs to datadog: {}", resp.status());
+                        debug!("Failed to send logs to datadog after {}ms: {}", elapsed.as_millis(), resp.status());
                     }
                 }
                 Err(e) => {
-                    error!("Failed to send logs to datadog: {}", e);
+                    error!("Failed to send logs to datadog after {}ms: {}", elapsed.as_millis(), e);
                 }
             }
+        } else {
+            debug!("No logs to send");
         }
     }
 }
