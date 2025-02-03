@@ -161,7 +161,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
-            timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
 
