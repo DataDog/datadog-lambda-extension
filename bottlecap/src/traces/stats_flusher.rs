@@ -88,17 +88,30 @@ impl StatsFlusher for ServerlessStatsFlusher {
             }
         };
 
+        let stats_url = trace_stats_url(&self.config.site);
+
+        let endpoint = Endpoint {
+            url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
+            api_key: Some(self.resolved_api_key.clone().into()),
+            timeout_ms: self.config.flush_timeout * 1_000,
+            test_token: None,
+        };
+
+        let start = std::time::Instant::now();
+
         match stats_utils::send_stats_payload(
             serialized_stats_payload,
             &self.endpoint,
             &self.config.api_key,
         )
-        .await
-        {
+            .await
+        let elapsed = start.elapsed();
+        debug!("Stats request to {} took {}ms", stats_url, elapsed.as_millis());
+        match  resp {
             Ok(()) => debug!("Successfully flushed stats"),
             Err(e) => {
                 error!("Error sending stats: {e:?}");
             }
-        }
+        };
     }
 }
