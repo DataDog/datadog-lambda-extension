@@ -104,10 +104,14 @@ impl StatsFlusher for ServerlessStatsFlusher {
             &self.endpoint,
             &self.config.api_key,
         )
-            .await
+        .await;
         let elapsed = start.elapsed();
-        debug!("Stats request to {} took {}ms", stats_url, elapsed.as_millis());
-        match  resp {
+        debug!(
+            "Stats request to {} took {}ms",
+            stats_url,
+            elapsed.as_millis()
+        );
+        match resp {
             Ok(()) => debug!("Successfully flushed stats"),
             Err(e) => {
                 error!("Error sending stats: {e:?}");
