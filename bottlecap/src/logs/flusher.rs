@@ -125,11 +125,19 @@ impl Flusher {
             match resp {
                 Ok(resp) => {
                     if resp.status() != 202 {
-                        debug!("Failed to send logs to datadog after {}ms: {}", elapsed.as_millis(), resp.status());
+                        debug!(
+                            "Failed to send logs to datadog after {}ms: {}",
+                            elapsed.as_millis(),
+                            resp.status()
+                        );
                     }
                 }
                 Err(e) => {
-                    error!("Failed to send logs to datadog after {}ms: {}", elapsed.as_millis(), e);
+                    error!(
+                        "Failed to send logs to datadog after {}ms: {}",
+                        elapsed.as_millis(),
+                        e
+                    );
                 }
             }
         } else {
