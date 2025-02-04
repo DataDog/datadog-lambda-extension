@@ -1,6 +1,7 @@
 use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
+use std::time::Instant;
 use std::{
     error::Error,
     io::Write,
@@ -85,13 +86,14 @@ impl Flusher {
         compression_enabled: bool,
         compression_level: i32,
     ) {
-        let url = format!("{fqdn}/api/v2/logs");
         if !data.is_empty() {
+            let url = format!("{fqdn}/api/v2/logs");
+            debug!("Sending logs to datadog");
+            let start = Instant::now();
             let body = if compression_enabled {
                 let result = (|| -> Result<Vec<u8>, Box<dyn Error>> {
                     let mut encoder = Encoder::new(Vec::new(), compression_level)
                         .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-
                     encoder
                         .write_all(&data)
                         .map_err(|e| Box::new(e) as Box<dyn Error>)?;
@@ -140,8 +142,6 @@ impl Flusher {
                     );
                 }
             }
-        } else {
-            debug!("No logs to send");
         }
     }
 }

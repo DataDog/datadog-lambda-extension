@@ -25,16 +25,6 @@ use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::config;
-use crate::traces::{
-    AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
-    DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
-    LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
-};
-use datadog_trace_obfuscation::obfuscate::obfuscate_span;
-use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::trace_utils::{self, SendData};
-
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {

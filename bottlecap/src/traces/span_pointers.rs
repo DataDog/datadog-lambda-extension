@@ -81,6 +81,7 @@ mod tests {
         expected_links: Option<serde_json::Value>,
     }
 
+    #[allow(clippy::too_many_lines)]
     #[test]
     #[allow(clippy::too_many_lines)]
     fn test_attach_span_pointers_to_span() {
