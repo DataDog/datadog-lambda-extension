@@ -31,7 +31,7 @@ use crate::{
         propagation::{
             text_map_propagator::{
                 DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SPAN_ID_KEY,
-                DATADOG_TRACE_ID_KEY,
+                DATADOG_TRACE_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY
             },
             DatadogCompositePropagator, Propagator,
         },
@@ -69,6 +69,8 @@ pub struct Processor {
     tracer_detected: bool,
     runtime: Option<String>,
     config: Arc<config::Config>,
+    // Sampling priority extracted from the tracer
+    pub sampling_priority: Option<i8>,
 }
 
 impl Processor {
@@ -98,6 +100,7 @@ impl Processor {
             tracer_detected: false,
             runtime: None,
             config: Arc::clone(&config),
+            sampling_priority: None,
         }
     }
 
@@ -362,6 +365,7 @@ impl Processor {
                 vec![traces],
                 body_size,
                 self.inferrer.span_pointers.clone(),
+                self.sampling_priority,
             );
 
             if let Err(e) = trace_agent_tx.send(send_data).await {
@@ -537,7 +541,12 @@ impl Processor {
                 parent_id = header.parse::<u64>().unwrap_or(0);
             }
 
-            // TODO: sampling priority extraction
+            if let Some(priority_str) = headers.get(DATADOG_SAMPLING_PRIORITY_KEY) {
+                if let Ok(priority_i8) = priority_str.parse::<i8>() {
+                    self.sampling_priority = Some(priority_i8);
+                    debug!("Extracted sampling priority from tracer: {priority_i8}");
+                }
+            }
 
             // Extract tags from headers
             // Used for 128 bit trace ids
