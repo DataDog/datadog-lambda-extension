@@ -30,8 +30,8 @@ use crate::{
         context::SpanContext,
         propagation::{
             text_map_propagator::{
-                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SPAN_ID_KEY,
-                DATADOG_TRACE_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY
+                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+                DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY,
             },
             DatadogCompositePropagator, Propagator,
         },
@@ -750,7 +750,10 @@ mod tests {
         let mut headers = HashMap::new();
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "888".to_string());
         headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "999".to_string());
-        headers.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), "not-a-number".to_string());
+        headers.insert(
+            DATADOG_SAMPLING_PRIORITY_KEY.to_string(),
+            "not-a-number".to_string(),
+        );
 
         p.update_span_context_from_headers(&headers);
 

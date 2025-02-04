@@ -358,11 +358,11 @@ mod tests {
 
         // Table of sampling priorities -> "expect sampled?".
         let test_cases: &[(Option<i8>, bool)] = &[
-            (Some(-1), false),  // User drop
-            (Some(0),  false),  // Sampler drop
-            (Some(1),  true),   // Sampler keep
-            (Some(2),  true),   // User keep
-            (None,     true),   // no sampling priority => keep
+            (Some(-1), false), // User drop
+            (Some(0), false),  // Sampler drop
+            (Some(1), true),   // Sampler keep
+            (Some(2), true),   // User keep
+            (None, true),      // no sampling priority => keep
         ];
 
         for (priority, expect_sampled) in test_cases {
