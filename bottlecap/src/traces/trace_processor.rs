@@ -35,10 +35,19 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
+    sampling_priority: Option<i8>,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
     fn process(&mut self, chunk: &mut pb::TraceChunk, root_span_index: usize) {
+        if let Some(priority_i8) = self.sampling_priority {
+            chunk.priority = priority_i8.into();
+            if priority_i8 <= 0 {
+                chunk.dropped_trace = true;
+                return;
+            }
+        }
+
         chunk
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
@@ -124,6 +133,7 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
+        sampling_priority: Option<i8>,
     ) -> SendData;
 }
 
@@ -136,6 +146,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
+        sampling_priority: Option<i8>,
     ) -> SendData {
         let mut payload = trace_utils::collect_trace_chunks(
             V07(traces),
@@ -144,6 +155,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
+                sampling_priority,
             },
             true,
         );
