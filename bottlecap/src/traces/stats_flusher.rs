@@ -5,13 +5,13 @@ use async_trait::async_trait;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error};
 
 use crate::config;
 use crate::traces::stats_aggregator::StatsAggregator;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use ddcommon::Endpoint;
+use tracing::{debug, error};
 
 #[async_trait]
 pub trait StatsFlusher {
@@ -49,7 +49,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
             api_key: Some(api_key.clone().into()),
-            timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
 
@@ -60,16 +60,6 @@ impl StatsFlusher for ServerlessStatsFlusher {
         }
     }
 
-    async fn flush(&self) {
-        let mut guard = self.aggregator.lock().await;
-
-        let mut stats = guard.get_batch();
-        while !stats.is_empty() {
-            self.send(stats).await;
-
-            stats = guard.get_batch();
-        }
-    }
     async fn send(&self, stats: Vec<pb::ClientStatsPayload>) {
         if stats.is_empty() {
             return;
@@ -90,16 +80,9 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let stats_url = trace_stats_url(&self.config.site);
 
-        let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
-            api_key: Some(self.resolved_api_key.clone().into()),
-            timeout_ms: self.config.flush_timeout * 1_000,
-            test_token: None,
-        };
-
         let start = std::time::Instant::now();
 
-        match stats_utils::send_stats_payload(
+        let resp = stats_utils::send_stats_payload(
             serialized_stats_payload,
             &self.endpoint,
             &self.config.api_key,
@@ -117,5 +100,15 @@ impl StatsFlusher for ServerlessStatsFlusher {
                 error!("Error sending stats: {e:?}");
             }
         };
+    }
+    async fn flush(&self) {
+        let mut guard = self.aggregator.lock().await;
+
+        let mut stats = guard.get_batch();
+        while !stats.is_empty() {
+            self.send(stats).await;
+
+            stats = guard.get_batch();
+        }
     }
 }

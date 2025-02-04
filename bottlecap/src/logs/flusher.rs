@@ -61,7 +61,9 @@ impl Flusher {
     async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
 
-        if !data.is_empty() {
+        if data.is_empty() {
+            debug!("No logs to send");
+        } else {
             debug!("Sending logs to datadog");
             let start = Instant::now();
 
@@ -94,8 +96,6 @@ impl Flusher {
                     );
                 }
             }
-        } else {
-            debug!("No logs to send");
         }
     }
 }
