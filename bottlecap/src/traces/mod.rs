@@ -4,9 +4,11 @@
 pub mod context;
 pub mod propagation;
 pub mod span_pointers;
+pub mod stats_aggregator;
 pub mod stats_flusher;
 pub mod stats_processor;
 pub mod trace_agent;
+pub mod trace_aggregator;
 pub mod trace_flusher;
 pub mod trace_processor;
 

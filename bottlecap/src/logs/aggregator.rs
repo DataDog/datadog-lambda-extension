@@ -36,7 +36,7 @@ impl Aggregator {
             max_batch_entries_size,
             max_content_size_bytes,
             max_log_size_bytes,
-            buffer: Vec::with_capacity(max_batch_entries_size),
+            buffer: Vec::with_capacity(max_content_size_bytes),
         }
     }
 

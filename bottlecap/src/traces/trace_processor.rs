@@ -22,8 +22,7 @@ use crate::traces::{
 };
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::trace_utils::SendData;
-use datadog_trace_utils::trace_utils::{self};
+use datadog_trace_utils::trace_utils::{self, SendData};
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]

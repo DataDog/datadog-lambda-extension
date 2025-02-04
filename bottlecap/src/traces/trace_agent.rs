@@ -9,11 +9,12 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::config;
 use crate::tags::provider;
-use crate::traces::{stats_flusher, stats_processor, trace_flusher, trace_processor};
+use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
@@ -32,9 +33,8 @@ pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
+    pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
-    pub stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
     tx: Sender<SendData>,
 }
@@ -47,31 +47,36 @@ pub enum ApiVersion {
 
 impl TraceAgent {
     #[must_use]
-    pub async fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
         config: Arc<config::Config>,
+        trace_aggregator: Arc<Mutex<trace_aggregator::TraceAggregator>>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_flusher: Arc<dyn trace_flusher::TraceFlusher + Send + Sync>,
+        stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
-        stats_flusher: Arc<dyn stats_flusher::StatsFlusher + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace flusher.
-        let (trace_tx, trace_rx): (Sender<SendData>, Receiver<SendData>) =
+        let (trace_tx, mut trace_rx): (Sender<SendData>, Receiver<SendData>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
-        let trace_flusher = trace_flusher.clone();
-        trace_flusher.start_trace_flusher(trace_rx).await;
+
+        tokio::spawn(async move {
+            while let Some(tracer_payload) = trace_rx.recv().await {
+                let mut aggregator = trace_aggregator.lock().await;
+                aggregator.add(tracer_payload);
+            }
+        });
 
         TraceAgent {
             config,
             trace_processor,
-            trace_flusher,
+            stats_aggregator,
             stats_processor,
-            stats_flusher,
             tags_provider,
             tx: trace_tx,
         }
@@ -82,17 +87,18 @@ impl TraceAgent {
         let trace_tx = self.tx.clone();
 
         // channels to send processed stats to our stats flusher.
-        let (stats_tx, stats_rx): (
+        let (stats_tx, mut stats_rx): (
             Sender<pb::ClientStatsPayload>,
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        // start our stats flusher.
-        let stats_flusher = self.stats_flusher.clone();
-        // let stats_config = self.config.clone();
+        // Receive stats payload and send it to the aggregator
+        let stats_aggregator = self.stats_aggregator.clone();
         tokio::spawn(async move {
-            let stats_flusher = stats_flusher.clone();
-            stats_flusher.start_stats_flusher(stats_rx).await;
+            while let Some(stats_payload) = stats_rx.recv().await {
+                let mut aggregator = stats_aggregator.lock().await;
+                aggregator.add(stats_payload);
+            }
         });
 
         // setup our hyper http server, where the endpoint_handler handles incoming requests
