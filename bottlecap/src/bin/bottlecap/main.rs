@@ -32,10 +32,7 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
-        stats_aggregator::StatsAggregator,
-        stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent, trace_aggregator,
-        trace_flusher::{self, TraceFlusher},
         trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -70,6 +67,8 @@ use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+use bottlecap::traces::trace_aggregator::{BatchAggregator, MAX_CONTENT_SIZE_BYTES_CPS, MAX_CONTENT_SIZE_BYTES_SD};
+use bottlecap::traces::trace_flusher::ServerlessBatchFlusher;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -541,14 +540,15 @@ fn start_trace_agent(
     tags_provider: &Arc<TagProvider>,
 ) -> (
     Sender<datadog_trace_utils::send_data::SendData>,
-    Arc<trace_flusher::ServerlessTraceFlusher>,
+    Arc<ServerlessBatchFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
-    Arc<stats_flusher::ServerlessStatsFlusher>,
+    Arc<ServerlessBatchFlusher>,
 ) {
     // Stats
-    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
-        resolved_api_key.clone(),
+    let stats_aggregator = Arc::new(TokioMutex::new(BatchAggregator::new(
+        MAX_CONTENT_SIZE_BYTES_CPS,
+    )));
+    let stats_flusher = Arc::new(ServerlessBatchFlusher::new(
         stats_aggregator.clone(),
         Arc::clone(config),
     ));
@@ -556,11 +556,13 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
-        aggregator: trace_aggregator.clone(),
-        config: Arc::clone(config),
-    });
+    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::BatchAggregator::new(
+        MAX_CONTENT_SIZE_BYTES_SD,
+    )));
+    let trace_flusher = Arc::new(ServerlessBatchFlusher::new (
+        trace_aggregator.clone(),
+        Arc::clone(config),
+    ));
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig::new()
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))

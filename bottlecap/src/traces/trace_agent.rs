@@ -14,12 +14,13 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::tags::provider;
-use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
+use crate::traces::{stats_processor, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
+use crate::traces::trace_aggregator::{BatchAggregator, BatchData};
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -33,7 +34,7 @@ pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
+    pub stats_aggregator: Arc<Mutex<BatchAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
     tx: Sender<SendData>,
@@ -50,9 +51,9 @@ impl TraceAgent {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Arc<config::Config>,
-        trace_aggregator: Arc<Mutex<trace_aggregator::TraceAggregator>>,
+        trace_aggregator: Arc<Mutex<BatchAggregator>>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
+        stats_aggregator: Arc<Mutex<BatchAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
     ) -> TraceAgent {
@@ -68,7 +69,7 @@ impl TraceAgent {
         tokio::spawn(async move {
             while let Some(tracer_payload) = trace_rx.recv().await {
                 let mut aggregator = trace_aggregator.lock().await;
-                aggregator.add(tracer_payload);
+                aggregator.add(BatchData::SD(tracer_payload));
             }
         });
 
@@ -97,7 +98,7 @@ impl TraceAgent {
         tokio::spawn(async move {
             while let Some(stats_payload) = stats_rx.recv().await {
                 let mut aggregator = stats_aggregator.lock().await;
-                aggregator.add(stats_payload);
+                aggregator.add(BatchData::CSP(stats_payload));
             }
         });
 
