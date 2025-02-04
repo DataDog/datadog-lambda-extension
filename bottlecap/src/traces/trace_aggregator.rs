@@ -1,45 +1,51 @@
+use prost::Message;
 use datadog_trace_utils::send_data::SendData;
 use std::collections::VecDeque;
+use datadog_trace_protobuf::pb::ClientStatsPayload;
+
+/// Maximum number of entries in a stat payload.
+///
+/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
+// const MAX_BATCH_ENTRIES_SIZE: usize = 4000;
+
+/// Aproximate size an entry in a stat payload occupies
+///
+/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L33-L35>
+// const MAX_ENTRY_SIZE_BYTES: usize = 375;
+
+/// Maximum content size per payload in compressed bytes,
+///
+/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
+pub const MAX_CONTENT_SIZE_BYTES_CPS: usize = 3 * 1024 * 1024; // ~3MB
 
 /// Maximum content size per payload uncompressed in bytes,
 /// that the Datadog Trace API accepts. The value is 3.2 MB.
 ///
 /// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
-pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
+pub const MAX_CONTENT_SIZE_BYTES_SD: usize = (32 * 1_024 * 1_024) / 10;
 
 #[allow(clippy::module_name_repetitions)]
-pub struct TraceAggregator {
-    queue: VecDeque<SendData>,
+pub struct BatchAggregator {
+    queue: VecDeque<BatchData>,
     max_content_size_bytes: usize,
-    buffer: Vec<SendData>,
+    buffer: Vec<BatchData>,
 }
 
-impl Default for TraceAggregator {
-    fn default() -> Self {
-        TraceAggregator {
-            queue: VecDeque::new(),
-            max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
-            buffer: Vec::with_capacity(MAX_CONTENT_SIZE_BYTES),
-        }
-    }
-}
-
-impl TraceAggregator {
+impl BatchAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
     pub fn new(max_content_size_bytes: usize) -> Self {
-        TraceAggregator {
+        BatchAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,
             buffer: Vec::with_capacity(max_content_size_bytes),
         }
     }
 
-    pub fn add(&mut self, p: SendData) {
+    pub fn add(&mut self, p: BatchData) {
         self.queue.push_back(p);
     }
-
-    pub fn get_batch(&mut self) -> Vec<SendData> {
+    pub fn get_batch(&mut self) -> Vec<BatchData> {
         let mut batch_size = 0;
 
         // Fill the batch
@@ -62,7 +68,30 @@ impl TraceAggregator {
 
         std::mem::take(&mut self.buffer)
     }
+
+
 }
+
+pub enum BatchData {
+    SD(SendData),
+    CSP(ClientStatsPayload)
+}
+
+impl BatchData {
+    fn len(&self) -> usize {
+        match self {
+            BatchData::SD(sd) => sd.len(),
+            BatchData::CSP(csp) => csp.encoded_len()
+        }
+    }
+    fn is_empty(&self) -> bool {
+        match self {
+            BatchData::SD(sd) => sd.is_empty(),
+            BatchData::CSP(csp) => csp.encoded_len() == 0,
+        }
+    }
+}
+
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
@@ -76,7 +105,9 @@ mod tests {
 
     #[test]
     fn test_add() {
-        let mut aggregator = TraceAggregator::default();
+        let mut aggregator = BatchAggregator::new(
+            MAX_CONTENT_SIZE_BYTES_SD,
+        );
         let tracer_header_tags = TracerHeaderTags {
             lang: "lang",
             lang_version: "lang_version",
@@ -96,14 +127,16 @@ mod tests {
             &Endpoint::from_slice("localhost"),
         );
 
-        aggregator.add(payload.clone());
+        aggregator.add(BatchData::SD(payload.clone()));
         assert_eq!(aggregator.queue.len(), 1);
         assert_eq!(aggregator.queue[0].is_empty(), payload.is_empty());
     }
 
     #[test]
     fn test_get_batch() {
-        let mut aggregator = TraceAggregator::default();
+        let mut aggregator = BatchAggregator::new(
+            MAX_CONTENT_SIZE_BYTES_SD,
+        );
         let tracer_header_tags = TracerHeaderTags {
             lang: "lang",
             lang_version: "lang_version",
@@ -123,7 +156,7 @@ mod tests {
             &Endpoint::from_slice("localhost"),
         );
 
-        aggregator.add(payload.clone());
+        aggregator.add(BatchData::SD(payload.clone()));
         assert_eq!(aggregator.queue.len(), 1);
         let batch = aggregator.get_batch();
         assert_eq!(batch.len(), 1);
@@ -131,7 +164,7 @@ mod tests {
 
     #[test]
     fn test_get_batch_full_entries() {
-        let mut aggregator = TraceAggregator::new(2);
+        let mut aggregator = BatchAggregator::new(2);
         let tracer_header_tags = TracerHeaderTags {
             lang: "lang",
             lang_version: "lang_version",
@@ -152,9 +185,9 @@ mod tests {
         );
 
         // Add 3 payloads
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
+        aggregator.add(BatchData::SD(payload.clone()));
+        aggregator.add(BatchData::SD(payload.clone()));
+        aggregator.add(BatchData::SD(payload.clone()));
 
         // The batch should only contain the first 2 payloads
         let first_batch = aggregator.get_batch();
