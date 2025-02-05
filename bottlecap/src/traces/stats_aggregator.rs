@@ -29,7 +29,7 @@ impl Default for StatsAggregator {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
-            buffer: Vec::with_capacity(MAX_CONTENT_SIZE_BYTES),
+            buffer: Vec::new(),
         }
     }
 }
@@ -41,7 +41,7 @@ impl StatsAggregator {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,
-            buffer: Vec::with_capacity(max_content_size_bytes),
+            buffer: Vec::new(),
         }
     }
 
