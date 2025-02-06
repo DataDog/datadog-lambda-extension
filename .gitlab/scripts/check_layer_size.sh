@@ -23,8 +23,14 @@ if [ -z "$LAYER_FILE" ]; then
     exit 1
 fi
 
+<<<<<<< HEAD
 MAX_LAYER_COMPRESSED_SIZE_KB=$(( 23 * 1024)) # 23 MB, amd64 is 22, while arm64 is 20
 MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(( 30 * 1024)) # 53 MB -> 30MB with UPX
+=======
+MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 20 \* 1024) # 20 MB, amd64 is 19, while arm64 is 18
+MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 30 \* 1024) # HACK: override this for now for fips build stuff
+MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 53 \* 1024) # 53 MB, amd is 53, while arm64 is 47
+>>>>>>> c44c2bf (bigger layer size limit for now)
 
 FILE=".layers"/$LAYER_FILE
 FILE_SIZE=$(stat --printf="%s" "$FILE")
