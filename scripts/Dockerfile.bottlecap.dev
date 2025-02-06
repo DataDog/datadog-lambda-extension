@@ -23,7 +23,7 @@ FROM ubuntu:22.04 as compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
 
 RUN apt-get update
-RUN apt-get install -y zip binutils curl xz-utils=5.2.5-2ubuntu1
+RUN apt-get install -y zip binutils curl=7.81.0-1ubuntu1.20 xz-utils=5.2.5-2ubuntu1
 COPY --from=public.ecr.aws/datadog/lambda-extension:64 /opt/datadog-agent-go  /datadog-agent-go
 RUN curl -LO https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz && tar xvf upx-4.2.4-amd64_linux.tar.xz
 RUN du -h /datadog-agent-go
