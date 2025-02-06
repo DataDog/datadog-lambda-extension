@@ -51,7 +51,7 @@ RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/dat
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 RUN /usr/local/go/bin/go tool nm datadog-agent
-RUN /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/interal/boring/sig.FIPSOnly' || \
+RUN /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly' || \
     (echo "boringcrypto not enabled" && exit 1)
 
 # zip the extension
