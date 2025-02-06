@@ -28,6 +28,10 @@ ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
 WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
 # add the current version number to the tags package before compilation
 
+# TODO: this will need to be done more correctly. let's just hack it for now
+ENV CGO_ENABLED=1
+ENV GOEXPERIMENT=boringcrypto
+
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     if [ -z "$AGENT_VERSION" ]; then \
@@ -43,6 +47,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 
 RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
+
+RUN /usr/local/go/bin/go tool nm datadog-agent | grep -i 'boring'
+RUN /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly' || \
+    (echo "boringcrypto not enabled" && exit 1)
 
 # zip the extension
 FROM ubuntu:22.04 as compresser

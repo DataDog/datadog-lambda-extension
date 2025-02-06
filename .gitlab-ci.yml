@@ -6,7 +6,7 @@ variables:
   VERSION: dev
   # Manual trigger variables
   AGENT_BRANCH:
-    description: "Branch of the datadog-agent repository to use."
+    description: "HACK: fips-only is only working on this branch for now. Branch of the datadog-agent repository to use."
     value: aleksandr.pasechnik/svls-6279-serverless-fips
   AGENT_VERSION:
     description: "Latest release version of the datadog-agent to tag the build with."
@@ -71,9 +71,9 @@ go-agent-only:
       - artifact: .gitlab/pipeline-go-agent.yaml
         job: generator
     strategy: depend
-  # rules:
-    # - if: $CI_PIPELINE_SOURCE == "web"
-    #   when: manual
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
   variables:
     AGENT_BRANCH: $AGENT_BRANCH
     LAYER_SUFFIX: $LAYER_SUFFIX
