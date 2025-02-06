@@ -37,7 +37,7 @@ RUN apt-get install -y zip binutils curl xz-utils
 COPY .layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
 RUN strip /datadog-agent-go
 RUN curl -LO https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz && tar xvf upx-4.2.4-amd64_linux.tar.xz
-RUN upx-4.2.4-amd64_linux/upx /datadog-agent-go
+RUN upx-4.2.4-amd64_linux/upx -1 /datadog-agent-go
 
 
 RUN mkdir /extensions
