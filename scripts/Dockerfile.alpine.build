@@ -55,7 +55,6 @@ WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
 RUN strip /extensions/datadog-agent
 
-
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
 RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER
