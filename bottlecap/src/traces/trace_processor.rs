@@ -42,10 +42,6 @@ impl TraceChunkProcessor for ChunkProcessor {
     fn process(&mut self, chunk: &mut pb::TraceChunk, root_span_index: usize) {
         if let Some(priority_i8) = self.sampling_priority {
             chunk.priority = priority_i8.into();
-            if priority_i8 <= 0 {
-                chunk.dropped_trace = true;
-                return;
-            }
         }
 
         chunk
@@ -337,69 +333,5 @@ mod tests {
             expected_tracer_payload,
             received_payload.expect("no payload received")
         );
-    }
-
-    #[tokio::test]
-    async fn test_process_traces_sampling_priority() {
-        use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-        use std::sync::Arc;
-
-        let obfuscation_config = Arc::new(ObfuscationConfig::new().unwrap());
-        let trace_proc = ServerlessTraceProcessor {
-            obfuscation_config,
-            resolved_api_key: "foo".to_string(),
-        };
-
-        let config = create_test_config();
-        let tags_provider = create_tags_provider(config.clone());
-
-        let start = get_current_timestamp_nanos();
-        let span = create_test_span(10, 20, 30, start, true, tags_provider.clone());
-
-        // Table of sampling priorities -> "expect sampled?".
-        let test_cases: &[(Option<i8>, bool)] = &[
-            (Some(-1), false), // User drop
-            (Some(0), false),  // Sampler drop
-            (Some(1), true),   // Sampler keep
-            (Some(2), true),   // User keep
-            (None, true),      // no sampling priority => keep
-        ];
-
-        for (priority, expect_sampled) in test_cases {
-            let traces = vec![vec![span.clone()]];
-            let header_tags = tracer_header_tags::TracerHeaderTags::default();
-            let send_data = trace_proc.process_traces(
-                config.clone(),
-                tags_provider.clone(),
-                header_tags.clone(),
-                traces,
-                123,
-                None,
-                *priority,
-            );
-
-            let payloads = send_data.get_payloads();
-            if let TracerPayloadCollection::V07(collection) = payloads {
-                let chunk = &collection[0].chunks[0];
-
-                // If we "expect_sampled = true", then chunk.dropped_trace should be false.
-                // If false, chunk.dropped_trace should be true => it got dropped.
-                if *expect_sampled {
-                    assert!(
-                        !chunk.dropped_trace,
-                        "Priority {:?} => expected keep, but got dropped",
-                        priority
-                    );
-                } else {
-                    assert!(
-                        chunk.dropped_trace,
-                        "Priority {:?} => expected drop, but got kept",
-                        priority
-                    );
-                }
-            } else {
-                panic!("Expected a V07 tracer payload");
-            }
-        }
     }
 }
