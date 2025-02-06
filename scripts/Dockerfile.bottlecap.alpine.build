@@ -32,12 +32,11 @@ ARG DATADOG_WRAPPER=datadog_wrapper
 ARG GO_AGENT_PATH
 
 RUN apt-get update
-RUN apt-get install -y zip binutils curl=7.81.0-1ubuntu1.20 xz-utils=5.2.5-2ubuntu1
+RUN apt-get install -y zip binutils upx
 
 COPY .layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
 RUN strip /datadog-agent-go
-RUN curl -LO https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz && tar xvf upx-4.2.4-amd64_linux.tar.xz
-RUN upx-4.2.4-amd64_linux/upx -1 /datadog-agent-go
+RUN upx -1 /datadog-agent-go
 
 
 RUN mkdir /extensions
