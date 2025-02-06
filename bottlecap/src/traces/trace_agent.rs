@@ -7,12 +7,14 @@ use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex as SyncMutex;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::config;
+use crate::lifecycle::invocation::context::ContextBuffer;
 use crate::tags::provider;
 use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
@@ -36,6 +38,7 @@ pub struct TraceAgent {
     pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
+    pub context_buffer: Arc<SyncMutex<ContextBuffer>>,
     tx: Sender<SendData>,
 }
 
@@ -55,6 +58,7 @@ impl TraceAgent {
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
+        context_buffer: Arc<SyncMutex<ContextBuffer>>,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -78,6 +82,7 @@ impl TraceAgent {
             stats_aggregator,
             stats_processor,
             tags_provider,
+            context_buffer,
             tx: trace_tx,
         }
     }
@@ -106,6 +111,7 @@ impl TraceAgent {
         let stats_processor = self.stats_processor.clone();
         let endpoint_config = self.config.clone();
         let tags_provider = self.tags_provider.clone();
+        let context_buffer = self.context_buffer.clone();
 
         let make_svc = make_service_fn(move |_| {
             let trace_processor = trace_processor.clone();
@@ -116,8 +122,9 @@ impl TraceAgent {
 
             let endpoint_config = endpoint_config.clone();
             let tags_provider = tags_provider.clone();
+            let context_buffer = context_buffer.clone();
 
-            let service = service_fn(move |req| {
+            let service = service_fn(move |req: Request<Body>| {
                 TraceAgent::trace_endpoint_handler(
                     endpoint_config.clone(),
                     req,
@@ -126,6 +133,7 @@ impl TraceAgent {
                     stats_processor.clone(),
                     stats_tx.clone(),
                     tags_provider.clone(),
+                    context_buffer.clone(),
                 )
             });
 
@@ -153,6 +161,7 @@ impl TraceAgent {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn trace_endpoint_handler(
         config: Arc<config::Config>,
         req: Request<Body>,
@@ -161,6 +170,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
         tags_provider: Arc<provider::Provider>,
+        context_buffer: Arc<SyncMutex<ContextBuffer>>,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
@@ -170,6 +180,7 @@ impl TraceAgent {
                 trace_tx,
                 tags_provider,
                 ApiVersion::V04,
+                context_buffer.clone(),
             )
             .await
             {
@@ -186,6 +197,7 @@ impl TraceAgent {
                 trace_tx,
                 tags_provider,
                 ApiVersion::V05,
+                context_buffer.clone(),
             )
             .await
             {
@@ -226,6 +238,7 @@ impl TraceAgent {
         trace_tx: Sender<SendData>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
+        context_buffer: Arc<SyncMutex<ContextBuffer>>,
     ) -> http::Result<Response<Body>> {
         let (parts, body) = req.into_parts();
 
@@ -267,6 +280,7 @@ impl TraceAgent {
             traces,
             body_size,
             None,
+            context_buffer,
         );
 
         // send trace payload to our trace flusher
