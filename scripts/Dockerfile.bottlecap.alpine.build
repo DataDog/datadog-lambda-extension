@@ -32,7 +32,7 @@ ARG DATADOG_WRAPPER=datadog_wrapper
 ARG GO_AGENT_PATH
 
 RUN apt-get update
-RUN apt-get install -y zip binutils curl xz-utils
+RUN apt-get install -y zip binutils curl xz-utils=5.2.5-2ubuntu1
 
 COPY .layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
 RUN strip /datadog-agent-go
