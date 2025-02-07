@@ -47,6 +47,7 @@ pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-err
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
+const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
     // Buffer containing context of the previous 5 invocations
@@ -541,7 +542,7 @@ impl Processor {
                 if let Ok(priority) = priority_str.parse::<f64>() {
                     self.span
                         .metrics
-                        .insert("_sampling_priority_v1".to_string(), priority);
+                        .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
                     debug!("Extracted sampling priority from tracer: {priority}");
                 }
             }
@@ -738,7 +739,7 @@ mod tests {
 
         assert_eq!(p.span.trace_id, 999);
         assert_eq!(p.span.parent_id, 1000);
-        let priority = p.span.metrics.get("_sampling_priority_v1").cloned();
+        let priority = p.span.metrics.get(TAG_SAMPLING_PRIORITY).cloned();
         assert_eq!(priority, Some(-1.0));
     }
 
@@ -756,7 +757,7 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(p.span.metrics.get("_sampling_priority_v1").is_none());
+        assert!(p.span.metrics.get(TAG_SAMPLING_PRIORITY).is_none());
         assert_eq!(p.span.trace_id, 888);
         assert_eq!(p.span.parent_id, 999);
     }
@@ -771,7 +772,7 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(p.span.metrics.get("_sampling_priority_v1").is_none());
+        assert!(p.span.metrics.get(TAG_SAMPLING_PRIORITY).is_none());
         assert_eq!(p.span.trace_id, 111);
         assert_eq!(p.span.parent_id, 222);
     }
