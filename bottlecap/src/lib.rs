@@ -16,7 +16,6 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::needless_pass_by_value)]
-#![allow(clippy::too_many_arguments)]
 
 pub mod config;
 pub mod event_bus;
