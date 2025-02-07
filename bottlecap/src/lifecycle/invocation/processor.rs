@@ -543,7 +543,6 @@ impl Processor {
                     self.span
                         .metrics
                         .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
-                    debug!("Extracted sampling priority from tracer: {priority}");
                 }
             }
 
