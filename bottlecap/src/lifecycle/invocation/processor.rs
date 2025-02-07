@@ -69,8 +69,6 @@ pub struct Processor {
     tracer_detected: bool,
     runtime: Option<String>,
     config: Arc<config::Config>,
-    // Sampling priority extracted from the tracer
-    pub sampling_priority: Option<i8>,
 }
 
 impl Processor {
@@ -100,7 +98,6 @@ impl Processor {
             tracer_detected: false,
             runtime: None,
             config: Arc::clone(&config),
-            sampling_priority: None,
         }
     }
 
@@ -365,7 +362,6 @@ impl Processor {
                 vec![traces],
                 body_size,
                 self.inferrer.span_pointers.clone(),
-                self.sampling_priority,
             );
 
             if let Err(e) = trace_agent_tx.send(send_data).await {
@@ -542,9 +538,11 @@ impl Processor {
             }
 
             if let Some(priority_str) = headers.get(DATADOG_SAMPLING_PRIORITY_KEY) {
-                if let Ok(priority_i8) = priority_str.parse::<i8>() {
-                    self.sampling_priority = Some(priority_i8);
-                    debug!("Extracted sampling priority from tracer: {priority_i8}");
+                if let Ok(priority) = priority_str.parse::<f64>() {
+                    self.span
+                        .metrics
+                        .insert("_sampling_priority_v1".to_string(), priority);
+                    debug!("Extracted sampling priority from tracer: {priority}");
                 }
             }
 

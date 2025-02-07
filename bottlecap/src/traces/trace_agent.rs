@@ -267,7 +267,6 @@ impl TraceAgent {
             traces,
             body_size,
             None,
-            None,
         );
 
         // send trace payload to our trace flusher
