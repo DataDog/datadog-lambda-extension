@@ -728,9 +728,8 @@ mod tests {
     #[test]
     fn test_update_span_context_with_sampling_priority() {
         let mut p = setup();
-        assert_eq!(p.sampling_priority, None);
-
         let mut headers = HashMap::new();
+
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "999".to_string());
         headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "1000".to_string());
         headers.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), "-1".to_string());
@@ -739,13 +738,15 @@ mod tests {
 
         assert_eq!(p.span.trace_id, 999);
         assert_eq!(p.span.parent_id, 1000);
-        assert_eq!(p.sampling_priority, Some(-1));
+        let priority = p.span.metrics.get("_sampling_priority_v1").cloned();
+        assert_eq!(priority, Some(-1.0));
     }
 
     #[test]
     fn test_update_span_context_with_invalid_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
+
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "888".to_string());
         headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "999".to_string());
         headers.insert(
@@ -755,7 +756,7 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert_eq!(p.sampling_priority, None);
+        assert!(p.span.metrics.get("_sampling_priority_v1").is_none());
         assert_eq!(p.span.trace_id, 888);
         assert_eq!(p.span.parent_id, 999);
     }
@@ -764,12 +765,13 @@ mod tests {
     fn test_update_span_context_no_sampling_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
+
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "111".to_string());
         headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "222".to_string());
 
         p.update_span_context_from_headers(&headers);
 
-        assert_eq!(p.sampling_priority, None);
+        assert!(p.span.metrics.get("_sampling_priority_v1").is_none());
         assert_eq!(p.span.trace_id, 111);
         assert_eq!(p.span.parent_id, 222);
     }
