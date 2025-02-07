@@ -9,31 +9,35 @@
 
 set -e
 
+validate_size() {
+  local max_size=$1
+  local file_size=$2
+    if [ "$file_size" -gt "$max_size" ]; then
+        echo "Size $file_size exceeded limit $max_size kb"
+        exit 1
+    fi
+}
+
 if [ -z "$LAYER_FILE" ]; then
     echo "[ERROR]: LAYER_FILE not specified"
     exit 1
 fi
 
-MAX_LAYER_COMPRESSED_SIZE_KB=$(expr 20 \* 1024) # 20 MB, amd64 is 19, while arm64 is 18
-MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(expr 53 \* 1024) # 53 MB, amd is 53, while arm64 is 47
+MAX_LAYER_COMPRESSED_SIZE_KB=$(( 23 * 1024)) # 23 MB, amd64 is 22, while arm64 is 20
+MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(( 30 * 1024)) # 53 MB -> 30MB with UPX
 
-LAYERS_DIR=".layers"
-
-FILE=$LAYERS_DIR/$LAYER_FILE
-FILE_SIZE=$(stat --printf="%s" $FILE)
+FILE=".layers"/$LAYER_FILE
+FILE_SIZE=$(stat --printf="%s" "$FILE")
 FILE_SIZE_KB="$(( ${FILE_SIZE%% *} / 1024))"
-echo "Layer file ${FILE} has zipped size ${FILE_SIZE_KB} kb"
-if [ "$FILE_SIZE_KB" -gt "$MAX_LAYER_COMPRESSED_SIZE_KB" ]; then
-    echo "Zipped size exceeded limit $MAX_LAYER_COMPRESSED_SIZE_KB kb"
-    exit 1
-fi
+
 mkdir tmp
-unzip -q $FILE -d tmp
+unzip -q "$FILE" -d tmp
 UNZIPPED_FILE_SIZE=$(du -shb tmp/ | cut -f1)
 UNZIPPED_FILE_SIZE_KB="$(( ${UNZIPPED_FILE_SIZE%% *} / 1024))"
 rm -rf tmp
+
+echo "Layer file ${FILE} has zipped size ${FILE_SIZE_KB} kb"
 echo "Layer file ${FILE} has unzipped size ${UNZIPPED_FILE_SIZE_KB} kb"
-if [ "$UNZIPPED_FILE_SIZE_KB" -gt "$MAX_LAYER_UNCOMPRESSED_SIZE_KB" ]; then
-    echo "Unzipped size exceeded limit $MAX_LAYER_UNCOMPRESSED_SIZE_KB kb"
-    exit 1
-fi
+
+validate_size "$MAX_LAYER_COMPRESSED_SIZE_KB" $FILE_SIZE_KB
+validate_size "$MAX_LAYER_UNCOMPRESSED_SIZE_KB" $UNZIPPED_FILE_SIZE_KB
