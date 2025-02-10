@@ -7,7 +7,7 @@ pub mod trace_propagation_style;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
-use std::vec;
+use std::{env, vec};
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
@@ -177,16 +177,29 @@ fn fallback(figment: &Figment, yaml_figment: &Figment) -> Result<(), ConfigError
         };
 
     // Customer explicitly opted out of the Next Gen extension
-    let opted_out = match config.extension_version.as_deref() {
+    let is_compatibility = match config.extension_version.as_deref() {
         Some("compatibility") => true,
         // We want customers using the `next` to not be affected
         _ => false,
     };
 
+    // Check for us-gov region
+    let region = env::var("AWS_REGION").ok();
+    let is_gov_region = region
+        .as_ref()
+        .map(|region| region.starts_with("us-gov-"))
+        .unwrap_or(false);
+
+    let opted_out = is_compatibility || is_gov_region;
+
     if opted_out {
-        log_fallback_reason("extension_version");
+        log_fallback_reason(if is_compatibility { "extension_version" } else { "gov_region" });
         return Err(ConfigError::UnsupportedField(
-            "extension_version".to_string(),
+            if is_compatibility {
+                "extension_version".to_string()
+            } else {
+                "gov_region".to_string()
+            }
         ));
     }
 
