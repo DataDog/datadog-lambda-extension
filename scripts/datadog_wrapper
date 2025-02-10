@@ -86,11 +86,17 @@ then
   export CORECLR_PROFILER="${CORECLR_PROFILER:-"{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"}"
   export DD_DOTNET_TRACER_HOME="${DD_DOTNET_TRACER_HOME:-"/opt/datadog"}"
 
+  # Disable some .NET library features by default
+  export DD_TRACE_STARTUP_LOGS="${DD_TRACE_STARTUP_LOGS:-"0"}"     # we can't completely disable all logs to disk, but we can at least disable startup logs
+  export DD_CIVISIBILITY_ENABLED="${DD_CIVISIBILITY_ENABLED:-"0"}" # disable CI Visibility's auto-detect mechanism
+
   # log the environment variables for troubleshooting
   debug_log "CORECLR_PROFILER_PATH: $CORECLR_PROFILER_PATH"
   debug_log "CORECLR_ENABLE_PROFILING: $CORECLR_ENABLE_PROFILING"
   debug_log "CORECLR_PROFILER: $CORECLR_PROFILER"
   debug_log "DD_DOTNET_TRACER_HOME: $DD_DOTNET_TRACER_HOME"
+  debug_log "DD_TRACE_STARTUP_LOGS: $DD_TRACE_STARTUP_LOGS"
+  debug_log "DD_CIVISIBILITY_ENABLED: $DD_CIVISIBILITY_ENABLED"
 fi # .NET
 
 # if it is java
