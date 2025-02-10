@@ -53,7 +53,7 @@ fi
 
 # Allow override build tags
 if [ -z "$BUILD_TAGS" ]; then
-    BUILD_TAGS="serverless otlp"
+    BUILD_TAGS="serverless otlp serverlessfips"
 fi
 
 # Allow override agent path
