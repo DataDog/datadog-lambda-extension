@@ -19,13 +19,15 @@ WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +stable build --release --target $PLATFORM-unknown-linux-gnu
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
-# zip the extension
 FROM ubuntu:22.04 as compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
 
 RUN apt-get update
-RUN apt-get install -y zip binutils
+RUN apt-get install -y zip binutils upx
 COPY --from=public.ecr.aws/datadog/lambda-extension:64 /opt/datadog-agent-go  /datadog-agent-go
+RUN du -h /datadog-agent-go
+RUN upx -1 /datadog-agent-go
+RUN du -h /datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 

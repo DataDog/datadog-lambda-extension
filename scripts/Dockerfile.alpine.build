@@ -7,7 +7,7 @@ ARG CMD_PATH
 ARG BUILD_TAGS
 
 RUN apk add --no-cache git make musl-dev gcc
-COPY --from=golang:1.23.2-alpine /usr/local/go/ /usr/lib/go
+COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
 
 ENV GOROOT /usr/lib/go
 ENV GOPATH /go
@@ -54,7 +54,6 @@ RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
 RUN strip /extensions/datadog-agent
-
 
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
