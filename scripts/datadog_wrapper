@@ -44,25 +44,25 @@ fi
 
 debug_log "The runtime is $AWS_EXECUTION_ENV"
 
-# if it is .Net
+# if it is .NET
 if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]
 then
   debug_log "Configuring for the .NET runtime!"
-  # Handle the CORECLR_PROFILER_PATH:
-  # Try to load the library from these paths, in order:
+
+  # Handle CORECLR_PROFILER_PATH: try to load the library from these paths, in order:
   PROFILER_PATHS=(
-    # use the shared loader if it's present (it was removed from the dotnet
-    # layer, this lines keep forwards compatibility if it's added back)
+    # use the shared loader if it's present
     "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
     "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
-    # if shared loader is not found,
-    # use the tracer library directly
+    # if shared loader is not found, use the tracer library directly (not recommended)
     "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
     "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
-    # keep this as a fallback for backwards compatibility
+    # keep this as a fallback for backwards compatibility with older .NET layers
     "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
   )
+
   PROFILER_FOUND=false
+
   ## Search from all possible places
   for PROFILER_PATH in "${PROFILER_PATHS[@]}"
   do
@@ -73,15 +73,17 @@ then
     break
   fi
   done
+
   if [ $PROFILER_FOUND == false ]
   then
-    echo ".NET CLR Profiler file not found. APM instrumentation may not work correctly."
+    echo ".NET library not found. APM instrumentation may not work correctly."
   fi
-  # Other env variables for .NET
+
+  # Required environment variables for .NET library
   export CORECLR_ENABLE_PROFILING="1"
   export CORECLR_PROFILER="{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"
   export DD_DOTNET_TRACER_HOME="/opt/datadog"
-fi
+fi # .NET
 
 # if it is java
 DD_Agent_Jar=/opt/java/lib/dd-java-agent.jar
@@ -93,9 +95,9 @@ then
   export DD_REMOTE_CONFIG_ENABLED="false"
   export DD_APPSEC_ENABLED="false"
 
-  # Removes the -XX:-TieredCompilation flag from the java command passed 
+  # Removes the -XX:-TieredCompilation flag from the java command passed
   # through from the Lambda runtime. Allows the JVM to use the C1 compiler
-  # and Interpreter, which is much faster on cold start and 
+  # and Interpreter, which is much faster on cold start and
   # uses less memory.
   START_COMMAND=${args[0]}
   REMAINDER_ARGS=("${args[@]:1}")
