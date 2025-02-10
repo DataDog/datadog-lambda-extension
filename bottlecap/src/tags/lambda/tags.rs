@@ -402,16 +402,15 @@ mod tests {
         let tags = Lambda::new_from_config(config, &metadata);
         let function_tags = tags.get_function_tags_map();
         assert_eq!(function_tags.len(), 1);
-        let fn_tags_map: hash_map::HashMap<String, String> = hash_map::HashMap::from_iter(
-            function_tags
-                .get(FUNCTION_TAGS_KEY)
-                .unwrap()
-                .split(',')
-                .map(|tag| {
-                    let parts = tag.split(':').collect::<Vec<&str>>();
-                    (parts[0].to_string(), parts[1].to_string())
-                }),
-        );
+        let fn_tags_map: hash_map::HashMap<String, String> = function_tags
+            .get(FUNCTION_TAGS_KEY)
+            .unwrap()
+            .split(',')
+            .map(|tag| {
+                let parts = tag.split(':').collect::<Vec<&str>>();
+                (parts[0].to_string(), parts[1].to_string())
+            })
+            .collect();
         assert_eq!(fn_tags_map.len(), 14);
         assert_eq!(fn_tags_map.get("key1").unwrap(), "value1");
         assert_eq!(fn_tags_map.get("key2").unwrap(), "value2");
