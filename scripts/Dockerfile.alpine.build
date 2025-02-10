@@ -48,7 +48,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
-RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -i 'boring'
 RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly' || \
     (echo "boringcrypto not enabled" && exit 1)
 
