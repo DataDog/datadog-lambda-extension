@@ -381,6 +381,19 @@ pub mod tests {
             Ok(())
         });
     }
+    #[test]
+    fn test_reject_on_gov_region() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("AWS_REGION", "us-gov-east-1");
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("gov_region".to_string())
+            );
+            Ok(())
+        });
+    }
 
     #[test]
     fn test_fallback_on_otel() {
