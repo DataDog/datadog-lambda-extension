@@ -80,9 +80,9 @@ then
   fi
 
   # Required environment variables for .NET library
-  export CORECLR_ENABLE_PROFILING="1"
-  export CORECLR_PROFILER="{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"
-  export DD_DOTNET_TRACER_HOME="/opt/datadog"
+  export CORECLR_ENABLE_PROFILING="${CORECLR_ENABLE_PROFILING:-"1"}"
+  export CORECLR_PROFILER="${CORECLR_PROFILER:-"{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"}"
+  export DD_DOTNET_TRACER_HOME="${DD_DOTNET_TRACER_HOME:-"/opt/datadog"}"
 fi # .NET
 
 # if it is java
