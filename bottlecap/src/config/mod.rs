@@ -7,7 +7,7 @@ pub mod trace_propagation_style;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
-use std::{env, vec};
+use std::vec;
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
@@ -44,6 +44,7 @@ pub struct FallbackConfig {
     logs_config_logs_dd_url: Option<String>,
     // APM, as opposed to logs, does not use the `apm_config` prefix for env vars
     apm_dd_url: Option<String>,
+    aws_region: Option<String>,
 }
 
 /// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
@@ -184,8 +185,8 @@ fn fallback(figment: &Figment, yaml_figment: &Figment) -> Result<(), ConfigError
     };
 
     // Check for us-gov region
-    let region = env::var("AWS_REGION").ok();
-    let is_gov_region = region
+    let is_gov_region = config
+        .aws_region
         .as_ref()
         .is_some_and(|region| region.starts_with("us-gov-"));
 
@@ -258,7 +259,7 @@ pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
         .merge(Yaml::file(&path))
         .merge(Env::prefixed("DATADOG_"))
         .merge(Env::prefixed("DD_"))
-        .merge(Env::raw().only(&["HTTPS_PROXY"]));
+        .merge(Env::raw().only(&["HTTPS_PROXY", "AWS_REGION"]));
 
     // Get YAML nested fields
     let yaml_figment = Figment::from(Yaml::file(&path));
