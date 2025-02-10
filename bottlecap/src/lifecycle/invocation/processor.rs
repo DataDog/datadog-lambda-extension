@@ -406,10 +406,7 @@ impl Processor {
     pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
 
-        let payload_value = match serde_json::from_slice::<Value>(&payload) {
-            Ok(value) => value,
-            Err(_) => json!({}),
-        };
+        let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
@@ -474,10 +471,7 @@ impl Processor {
     /// Given trace context information, set it to the current span.
     ///
     pub fn on_invocation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
-        let payload_value = match serde_json::from_slice::<Value>(&payload) {
-            Ok(value) => value,
-            Err(_) => json!({}),
-        };
+        let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
@@ -490,17 +484,19 @@ impl Processor {
             );
         }
 
-        if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_str) {
-            self.span
-                .meta
-                .insert("http.status_code".to_string(), status_code.to_string());
+        if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_i64) {
+            let status_code_as_string = status_code.to_string();
+            self.span.meta.insert(
+                "http.status_code".to_string(),
+                status_code_as_string.clone(),
+            );
 
-            if status_code.len() == 3 && status_code.starts_with('5') {
+            if status_code_as_string.len() == 3 && status_code_as_string.starts_with('5') {
                 self.span.error = 1;
             }
 
             // If we have an inferred span, set the status code to it
-            self.inferrer.set_status_code(status_code.to_string());
+            self.inferrer.set_status_code(status_code_as_string);
         }
 
         self.update_span_context_from_headers(&headers);
@@ -738,7 +734,7 @@ mod tests {
 
         assert_eq!(p.span.trace_id, 999);
         assert_eq!(p.span.parent_id, 1000);
-        let priority = p.span.metrics.get(TAG_SAMPLING_PRIORITY).cloned();
+        let priority = p.span.metrics.get(TAG_SAMPLING_PRIORITY).copied();
         assert_eq!(priority, Some(-1.0));
     }
 
@@ -756,7 +752,7 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(p.span.metrics.get(TAG_SAMPLING_PRIORITY).is_none());
+        assert!(!p.span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
         assert_eq!(p.span.trace_id, 888);
         assert_eq!(p.span.parent_id, 999);
     }
@@ -771,8 +767,37 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(p.span.metrics.get(TAG_SAMPLING_PRIORITY).is_none());
+        assert!(!p.span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
         assert_eq!(p.span.trace_id, 111);
         assert_eq!(p.span.parent_id, 222);
+    }
+
+    #[test]
+    fn parsing_status_code() {
+        let mut p = setup();
+
+        let response = r#"
+       {
+           "statusCode": 200,
+           "headers": {
+               "Content-Type": "application/json"
+           },
+           "isBase64Encoded": false,
+           "multiValueHeaders": {
+               "X-Custom-Header": ["My value", "My other value"]
+           },
+           "body": "{\n  \"TotalCodeSize\": 104330022,\n  \"FunctionCount\": 26\n}"
+       }
+       "#;
+
+        p.on_invocation_end(HashMap::new(), response.as_bytes().to_vec());
+
+        assert_eq!(
+            p.span
+                .meta
+                .get("http.status_code")
+                .expect("Status code not parsed!"),
+            "200"
+        );
     }
 }
