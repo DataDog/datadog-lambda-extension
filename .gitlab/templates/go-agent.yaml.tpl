@@ -28,7 +28,7 @@ build layer ({{ $architecture.name }}):
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
-    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git revparse HEAD && cd .. && cd datadog-lambda-extension
+    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd .. && cd datadog-lambda-extension
     - .gitlab/scripts/build_go_agent.sh
 
 check layer size ({{ $architecture.name }}):
