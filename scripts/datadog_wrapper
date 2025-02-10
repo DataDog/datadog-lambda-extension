@@ -84,6 +84,13 @@ then
   export CORECLR_ENABLE_PROFILING="1"
   export CORECLR_PROFILER="{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"
   export DD_DOTNET_TRACER_HOME="/opt/datadog"
+
+  # Disabled .NET library features
+  export DD_TRACE_STARTUP_LOGS=0
+  export DD_INSTRUMENTATION_TELEMETRY_ENABLED="${DD_INSTRUMENTATION_TELEMETRY_ENABLED:-false}" # disable telemetry, unless it was already enabled above
+  export DD_CIVISIBILITY_ENABLED=0 # disable CI Visibility's auto-detect mechanism
+  export DD_APPSEC_ENABLED=0 # not supported in Lambda yet
+  export DD_PROFILING_ENABLED=0 # not supported in Lambda yet
 fi # .NET
 
 # if it is java
