@@ -1,11 +1,22 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::config;
 use crate::tags::provider;
 use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
+use crate::traces::{
+    AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
+    DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
+    LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
+};
+use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
+use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::config_utils::trace_intake_url;
+use datadog_trace_utils::send_data::{RetryBackoffType, RetryStrategy};
+use datadog_trace_utils::trace_utils::SendData;
+use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{
     TraceChunkProcessor, TraceCollection::V07, TracerPayloadCollection,
@@ -13,16 +24,6 @@ use datadog_trace_utils::tracer_payload::{
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
-
-use crate::config;
-use crate::traces::{
-    AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
-    DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
-    LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
-};
-use datadog_trace_obfuscation::obfuscate::obfuscate_span;
-use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::trace_utils::{self, SendData};
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -161,11 +162,18 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
-            timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
 
-        SendData::new(body_size, payload, header_tags, &endpoint)
+        let mut send_data = SendData::new(body_size, payload, header_tags, &endpoint);
+        send_data.set_retry_strategy(RetryStrategy::new(
+            1,
+            100,
+            RetryBackoffType::Exponential,
+            None,
+        ));
+        send_data
     }
 }
 

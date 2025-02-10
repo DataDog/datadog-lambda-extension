@@ -2,6 +2,7 @@ use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 
@@ -60,7 +61,12 @@ impl Flusher {
     async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
 
-        if !data.is_empty() {
+        if data.is_empty() {
+            debug!("No logs to send");
+        } else {
+            debug!("Sending logs to datadog");
+            let start = Instant::now();
+
             let resp: Result<reqwest::Response, reqwest::Error> = client
                 .post(&url)
                 .header("DD-API-KEY", api_key)
@@ -70,14 +76,24 @@ impl Flusher {
                 .send()
                 .await;
 
+            let elapsed = start.elapsed();
+
             match resp {
                 Ok(resp) => {
                     if resp.status() != 202 {
-                        debug!("Failed to send logs to datadog: {}", resp.status());
+                        debug!(
+                            "Failed to send logs to datadog after {}ms: {}",
+                            elapsed.as_millis(),
+                            resp.status()
+                        );
                     }
                 }
                 Err(e) => {
-                    error!("Failed to send logs to datadog: {}", e);
+                    error!(
+                        "Failed to send logs to datadog after {}ms: {}",
+                        elapsed.as_millis(),
+                        e
+                    );
                 }
             }
         }

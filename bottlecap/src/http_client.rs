@@ -3,18 +3,16 @@ use core::time::Duration;
 use std::sync::Arc;
 use tracing::error;
 
+#[must_use]
 pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
-    match build_client(config) {
-        Ok(client) => client,
-        Err(e) => {
-            error!(
-                "Unable to parse proxy configuration: {}, no proxy will be used",
-                e
-            );
-            //TODO this fallback doesn't respect the flush timeout
-            reqwest::Client::new()
-        }
-    }
+    build_client(config).unwrap_or_else(|e| {
+        error!(
+            "Unable to parse proxy configuration: {}, no proxy will be used",
+            e
+        );
+        //TODO this fallback doesn't respect the flush timeout
+        reqwest::Client::new()
+    })
 }
 
 fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest::Error> {
