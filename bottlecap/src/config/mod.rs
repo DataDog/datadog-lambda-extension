@@ -187,20 +187,21 @@ fn fallback(figment: &Figment, yaml_figment: &Figment) -> Result<(), ConfigError
     let region = env::var("AWS_REGION").ok();
     let is_gov_region = region
         .as_ref()
-        .map(|region| region.starts_with("us-gov-"))
-        .unwrap_or(false);
+        .is_some_and(|region| region.starts_with("us-gov-"));
 
     let opted_out = is_compatibility || is_gov_region;
 
     if opted_out {
-        log_fallback_reason(if is_compatibility { "extension_version" } else { "gov_region" });
-        return Err(ConfigError::UnsupportedField(
-            if is_compatibility {
-                "extension_version".to_string()
-            } else {
-                "gov_region".to_string()
-            }
-        ));
+        log_fallback_reason(if is_compatibility {
+            "extension_version"
+        } else {
+            "gov_region"
+        });
+        return Err(ConfigError::UnsupportedField(if is_compatibility {
+            "extension_version".to_string()
+        } else {
+            "gov_region".to_string()
+        }));
     }
 
     if config.serverless_appsec_enabled || config.appsec_enabled {
