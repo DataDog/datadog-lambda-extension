@@ -30,8 +30,8 @@ use crate::{
         context::SpanContext,
         propagation::{
             text_map_propagator::{
-                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-                DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY,
+                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SPAN_ID_KEY,
+                DATADOG_TRACE_ID_KEY,
             },
             DatadogCompositePropagator, Propagator,
         },
@@ -47,7 +47,6 @@ pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-err
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
-const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
     // Buffer containing context of the previous 5 invocations
@@ -538,13 +537,7 @@ impl Processor {
                 parent_id = header.parse::<u64>().unwrap_or(0);
             }
 
-            if let Some(priority_str) = headers.get(DATADOG_SAMPLING_PRIORITY_KEY) {
-                if let Ok(priority) = priority_str.parse::<f64>() {
-                    self.span
-                        .metrics
-                        .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
-                }
-            }
+            // TODO: sampling priority extraction
 
             // Extract tags from headers
             // Used for 128 bit trace ids
@@ -723,56 +716,5 @@ mod tests {
         assert_eq!(p.span.meta["error.msg"], error_message);
         assert_eq!(p.span.meta["error.type"], error_type);
         assert_eq!(p.span.meta["error.stack"], error_stack);
-    }
-
-    #[test]
-    fn test_update_span_context_with_sampling_priority() {
-        let mut p = setup();
-        let mut headers = HashMap::new();
-
-        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "999".to_string());
-        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "1000".to_string());
-        headers.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), "-1".to_string());
-
-        p.update_span_context_from_headers(&headers);
-
-        assert_eq!(p.span.trace_id, 999);
-        assert_eq!(p.span.parent_id, 1000);
-        let priority = p.span.metrics.get(TAG_SAMPLING_PRIORITY).cloned();
-        assert_eq!(priority, Some(-1.0));
-    }
-
-    #[test]
-    fn test_update_span_context_with_invalid_priority() {
-        let mut p = setup();
-        let mut headers = HashMap::new();
-
-        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "888".to_string());
-        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "999".to_string());
-        headers.insert(
-            DATADOG_SAMPLING_PRIORITY_KEY.to_string(),
-            "not-a-number".to_string(),
-        );
-
-        p.update_span_context_from_headers(&headers);
-
-        assert!(p.span.metrics.get(TAG_SAMPLING_PRIORITY).is_none());
-        assert_eq!(p.span.trace_id, 888);
-        assert_eq!(p.span.parent_id, 999);
-    }
-
-    #[test]
-    fn test_update_span_context_no_sampling_priority() {
-        let mut p = setup();
-        let mut headers = HashMap::new();
-
-        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "111".to_string());
-        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "222".to_string());
-
-        p.update_span_context_from_headers(&headers);
-
-        assert!(p.span.metrics.get(TAG_SAMPLING_PRIORITY).is_none());
-        assert_eq!(p.span.trace_id, 111);
-        assert_eq!(p.span.parent_id, 222);
     }
 }
