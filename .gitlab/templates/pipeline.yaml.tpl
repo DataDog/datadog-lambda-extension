@@ -1,4 +1,5 @@
 stages:
+  - check code
   - build
   - test
   - sign
@@ -15,6 +16,30 @@ variables:
   CI_DOCKER_TARGET_VERSION: latest
 
 {{ range $architecture := (ds "architectures").architectures }}
+
+fmt ({{ $architecture.name }}):
+  stage: check code
+  tags: ["arch:{{ $architecture.name }}"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - cd bottlecap && cargo fmt
+
+check ({{ $architecture.name }}):
+  stage: check code
+  tags: ["arch:{{ $architecture.name }}"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - cd bottlecap && cargo check
+
+clippy ({{ $architecture.name }}):
+  stage: check code
+  tags: ["arch:{{ $architecture.name }}"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - cd bottlecap && cargo clippy --all-features
 
 build go agent ({{ $architecture.name }}):
   stage: build
@@ -100,30 +125,6 @@ check layer size ({{ $architecture.name }}):
     LAYER_FILE: datadog_bottlecap-{{ $architecture.name }}.zip
   script:
     - .gitlab/scripts/check_layer_size.sh
-
-fmt ({{ $architecture.name }}):
-  stage: test
-  tags: ["arch:{{ $architecture.name }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo fmt
-
-check ({{ $architecture.name }}):
-  stage: test
-  tags: ["arch:{{ $architecture.name }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo check
-
-clippy ({{ $architecture.name }}):
-  stage: test
-  tags: ["arch:{{ $architecture.name }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo clippy --all-features
 
 {{ range $environment := (ds "environments").environments }}
 
