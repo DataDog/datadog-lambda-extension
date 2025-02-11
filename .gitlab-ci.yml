@@ -18,7 +18,7 @@ variables:
 stages:
   - prepare image
   - generate
-  - build
+  - run generated pipeline
 
 ci image:
   stage: prepare image
@@ -54,7 +54,7 @@ generator:
     - gomplate --config .gitlab/config.yaml
 
 generated pipeline:
-  stage: build
+  stage: run generated pipeline
   trigger:
     include:
       - artifact: .gitlab/pipeline.yaml
