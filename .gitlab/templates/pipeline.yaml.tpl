@@ -17,7 +17,7 @@ variables:
 
 {{ range $architecture := (ds "architectures").architectures }}
 
-fmt ({{ $architecture.name }}):
+cargo fmt ({{ $architecture.name }}):
   stage: check code
   tags: ["arch:{{ $architecture.name }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -25,7 +25,7 @@ fmt ({{ $architecture.name }}):
   script:
     - cd bottlecap && cargo fmt
 
-check ({{ $architecture.name }}):
+cargo check ({{ $architecture.name }}):
   stage: check code
   tags: ["arch:{{ $architecture.name }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -33,7 +33,7 @@ check ({{ $architecture.name }}):
   script:
     - cd bottlecap && cargo check
 
-clippy ({{ $architecture.name }}):
+cargo clippy ({{ $architecture.name }}):
   stage: check code
   tags: ["arch:{{ $architecture.name }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -139,9 +139,9 @@ sign layer ({{ $architecture.name }}):
   needs:
     - build bottlecap ({{ $architecture.name }})
     - check layer size ({{ $architecture.name }})
-    - fmt ({{ $architecture.name }})
-    - check ({{ $architecture.name }})
-    - clippy ({{ $architecture.name }})
+    - cargo fmt ({{ $architecture.name }})
+    - cargo check ({{ $architecture.name }})
+    - cargo clippy ({{ $architecture.name }})
   dependencies:
     - build bottlecap ({{ $architecture.name }})
   artifacts: # Re specify artifacts so the modified signed file is passed
@@ -171,9 +171,9 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
 {{ else }}
       - build bottlecap ({{ $architecture.name }})
       - check layer size ({{ $architecture.name }})
-      - fmt ({{ $architecture.name }})
-      - check ({{ $architecture.name }})
-      - clippy ({{ $architecture.name }})
+      - cargo fmt ({{ $architecture.name }})
+      - cargo check ({{ $architecture.name }})
+      - cargo clippy ({{ $architecture.name }})
 {{ end }}
   dependencies:
 {{ if or (eq $environment.name "prod") }}
