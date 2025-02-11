@@ -28,6 +28,7 @@ build go agent ({{ $architecture.name }}):
   variables:
     ARCHITECTURE: {{ $architecture.name }}
   script:
+    - echo "Building go agent based on $AGENT_BRANCH"
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
     - .gitlab/scripts/build_go_agent.sh
 
@@ -63,6 +64,7 @@ build go agent ({{ $architecture.name }}, alpine):
     ARCHITECTURE: {{ $architecture.name }}
     ALPINE: 1
   script:
+    - echo "Building go agent based on $AGENT_BRANCH"
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
     - .gitlab/scripts/build_go_agent.sh
 
