@@ -15,15 +15,24 @@ variables:
   CI_DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   CI_DOCKER_TARGET_VERSION: latest
 
-{{ range $architecture := (ds "architectures").architectures }}
+{{ range $flavor := (ds "flavors").flavors }}
 
-cargo fmt ({{ $architecture.name }}):
+
+cargo fmt ({{ $flavor.name }}):
   stage: check code
-  tags: ["arch:{{ $architecture.name }}"]
+  tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: {{ $flavor.needs_code_checks }}
   needs: []
   script:
     - cd bottlecap && cargo fmt
+
+
+{{ end }}  # end flavors
+
+
+{{ range $architecture := (ds "architectures").architectures }}
 
 cargo check ({{ $architecture.name }}):
   stage: check code

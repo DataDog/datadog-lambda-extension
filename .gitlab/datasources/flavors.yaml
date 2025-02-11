@@ -1,0 +1,16 @@
+flavors:
+  - name: amd64
+    arch: amd64
+    needs_code_checks: true
+
+  - name: arm64
+    arch: arm64
+    needs_code_checks: true
+
+  - name: amd64, alpine
+    arch: amd64
+    needs_code_checks: false
+
+  - name: arm64, alpine
+    arch: arm64
+    needs_code_checks: false
