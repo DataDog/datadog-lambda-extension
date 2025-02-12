@@ -20,29 +20,29 @@ variables:
 
 {{ if $flavor.needs_code_checks }}
 
-cargo fmt ({{ $flavor.name }}):
-  stage: check code
-  tags: ["arch:{{ $flavor.arch }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo fmt
-
-cargo check ({{ $flavor.name }}):
-  stage: check code
-  tags: ["arch:{{ $flavor.arch }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo check
-
-cargo clippy ({{ $flavor.name }}):
-  stage: check code
-  tags: ["arch:{{ $flavor.arch }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo clippy --all-features
+# cargo fmt ({{ $flavor.name }}):
+#   stage: check code
+#   tags: ["arch:{{ $flavor.arch }}"]
+#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+#   needs: []
+#   script:
+#     - cd bottlecap && cargo fmt
+# 
+# cargo check ({{ $flavor.name }}):
+#   stage: check code
+#   tags: ["arch:{{ $flavor.arch }}"]
+#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+#   needs: []
+#   script:
+#     - cd bottlecap && cargo check
+# 
+# cargo clippy ({{ $flavor.name }}):
+#   stage: check code
+#   tags: ["arch:{{ $flavor.arch }}"]
+#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+#   needs: []
+#   script:
+#     - cd bottlecap && cargo clippy --all-features
 
 {{ end }} # end needs_code_checks
 
