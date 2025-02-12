@@ -47,7 +47,7 @@ cargo clippy ({{ $flavor.name }}):
 
 {{ end }} # end needs_code_checks
 
-compile go agent ({{ $flavor.name }}):
+go agent ({{ $flavor.name }}):
   stage: compile
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
@@ -67,6 +67,23 @@ compile go agent ({{ $flavor.name }}):
     # between different runs of the various compile jobs, for example)
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd ../datadog-lambda-extension
     - .gitlab/scripts/compile_go_agent.sh
+
+
+bottlecap ({{ $flavor.name }}):
+  stage: compile
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  needs: []
+  artifacts:
+    expire_in: 1 hr
+    paths:
+      - .binaries/bottlecap-{{ $flavor.suffix }}
+  variables:
+    ARCHITECTURE: {{ $flavor.arch }}
+    ALPINE: {{ $flavor.alpine }}
+    SUFFIX: {{ $flavor.suffix }}
+  script:
+    - .gitlab/scripts/compile_bottlecap.sh
 
 {{ end }}  # end flavors
 
