@@ -20,29 +20,29 @@ variables:
 
 {{ if $flavor.needs_code_checks }}
 
-# cargo fmt ({{ $flavor.name }}):
-#   stage: check code
-#   tags: ["arch:{{ $flavor.arch }}"]
-#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-#   needs: []
-#   script:
-#     - cd bottlecap && cargo fmt
-# 
-# cargo check ({{ $flavor.name }}):
-#   stage: check code
-#   tags: ["arch:{{ $flavor.arch }}"]
-#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-#   needs: []
-#   script:
-#     - cd bottlecap && cargo check
-# 
-# cargo clippy ({{ $flavor.name }}):
-#   stage: check code
-#   tags: ["arch:{{ $flavor.arch }}"]
-#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-#   needs: []
-#   script:
-#     - cd bottlecap && cargo clippy --all-features
+cargo fmt ({{ $flavor.name }}):
+  stage: check code
+  tags: ["arch:{{ $flavor.arch }}"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - cd bottlecap && cargo fmt
+
+cargo check ({{ $flavor.name }}):
+  stage: check code
+  tags: ["arch:{{ $flavor.arch }}"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - cd bottlecap && cargo check
+
+cargo clippy ({{ $flavor.name }}):
+  stage: check code
+  tags: ["arch:{{ $flavor.arch }}"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - cd bottlecap && cargo clippy --all-features
 
 {{ end }} # end needs_code_checks
 
@@ -63,7 +63,7 @@ compile go agent ({{ $flavor.name }}):
     # TODO: do this clone once in a separate job so that we can make sure that
     # we're using the same exact code for all of the builds (main can move
     # between different runs of the various compile jobs, for example)
-    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd datadog-lambda-extension
+    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd ../datadog-lambda-extension
     - ./gitlab/scripts/compile_go_agent.sh
 
 {{ end }}  # end flavors
