@@ -120,6 +120,49 @@ check layer size ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/check_layer_size.sh
 
+{{ range $environment := (ds "environments").environments }}
+
+publish layer {{ $environment.name }} ({{ $flavor.name }}):
+  stage: publish
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
+      when: manual
+      allow_failure: true
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+
+  needs:
+    - check layer size ({{ $flavor.name }})
+{{ if or (eq $environment.name "prod") }}
+    - sign layer ({{ $flavor.name }})
+{{ else }}
+    - layer ({{ $flavor.name }})
+{{ end }} #end if prod
+
+  dependencies:
+{{ if or (eq $environment.name "prod") }}
+      - sign layer ({{ $flavor.name }})
+{{ else }}
+      - layer ({{ $flavor.name }})
+{{ end }} #end if prod
+
+  parallel:
+    matrix:
+      - REGION: {{ range (ds "regions").regions }}
+          - {{ .code }}
+        {{- end}}
+  variables:
+    ARCHITECTURE: {{ $flavor.arch }}
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
+    STAGE: {{ $environment.name }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/publish_layers.sh
+
+{{ end }} # end environments
+
 {{ end }} # end needs_layer_publish
 
 {{ end }}  # end flavors
@@ -155,45 +198,6 @@ sign layer ({{ $architecture.name }}):
   script:
     - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
 {{ end }}
-
-publish layer {{ $environment.name }} ({{ $architecture.name }}):
-  stage: publish
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  rules:
-    - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
-      when: manual
-      allow_failure: true
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-  needs:
-{{ if or (eq $environment.name "prod") }}
-      - sign layer ({{ $architecture.name }})
-{{ else }}
-      - layer ({{ $architecture.name }})
-      - check layer size ({{ $architecture.name }})
-      - cargo fmt ({{ $architecture.name }})
-      - cargo check ({{ $architecture.name }})
-      - cargo clippy ({{ $architecture.name }})
-{{ end }}
-  dependencies:
-{{ if or (eq $environment.name "prod") }}
-      - sign layer ({{ $architecture.name }})
-{{ else }}
-      - layer ({{ $architecture.name }})
-{{ end }}
-  parallel:
-    matrix:
-      - REGION: {{ range (ds "regions").regions }}
-          - {{ .code }}
-        {{- end}}
-  variables:
-    ARCHITECTURE: {{ $architecture.name }}
-    LAYER_FILE: datadog_bottlecap-{{ $architecture.name }}.zip
-    STAGE: {{ $environment.name }}
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  script:
-    - .gitlab/scripts/publish_layers.sh
 
 {{ if or (eq $environment.name "sandbox") }}
 publish private images:
