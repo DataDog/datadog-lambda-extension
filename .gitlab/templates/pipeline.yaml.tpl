@@ -20,7 +20,7 @@ variables:
 
 {{ if $flavor.needs_code_checks }}
 
-cargo fmt ({{ $flavor.name }}):
+cargo fmt ({{ $flavor.arch }}):
   stage: check code
   tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -28,7 +28,7 @@ cargo fmt ({{ $flavor.name }}):
   script:
     - cd bottlecap && cargo fmt
 
-cargo check ({{ $flavor.name }}):
+cargo check ({{ $flavor.arch }}):
   stage: check code
   tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -36,7 +36,7 @@ cargo check ({{ $flavor.name }}):
   script:
     - cd bottlecap && cargo check
 
-cargo clippy ({{ $flavor.name }}):
+cargo clippy ({{ $flavor.arch }}):
   stage: check code
   tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -90,6 +90,9 @@ layer ({{ $flavor.name }}):
   needs:
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
+    - cargo fmt ({{ $flavor.arch }})
+    - cargo check ({{ $flavor.arch }})
+    - cargo clippy ({{ $flavor.arch }})
   dependencies:
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
@@ -162,7 +165,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
 
 {{ if eq $environment.name "sandbox" }}
 
-publish self-monitoring layer ({{ $flavor.name }}):
+publish self-monitoring sandbox layer ({{ $flavor.name }}):
   stage: publish
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
@@ -210,9 +213,6 @@ sign layer ({{ $architecture.name }}):
   needs:
     - layer ({{ $architecture.name }})
     - check layer size ({{ $architecture.name }})
-    - cargo fmt ({{ $architecture.name }})
-    - cargo check ({{ $architecture.name }})
-    - cargo clippy ({{ $architecture.name }})
   dependencies:
     - layer ({{ $architecture.name }})
   artifacts: # Re specify artifacts so the modified signed file is passed
