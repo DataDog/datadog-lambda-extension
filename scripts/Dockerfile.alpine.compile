@@ -3,7 +3,6 @@
 FROM alpine:3.16 as compiler
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
-ARG CMD_PATH
 ARG BUILD_TAGS
 
 RUN apk add --no-cache git make musl-dev gcc
@@ -25,7 +24,7 @@ WORKDIR /tmp/dd/datadog-agent
 ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
 
 # build the extension
-WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
+WORKDIR /tmp/dd/datadog-agent/serverless
 # add the current version number to the tags package before compilation
 
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -48,7 +47,6 @@ RUN strip datadog-agent
 
 # keep the smallest possible docker image
 FROM scratch
-ARG CMD_PATH
-COPY --from=compiler /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /
+COPY --from=compiler /tmp/dd/datadog-agent/serverless/datadog-agent /
 ENTRYPOINT ["/datadog-agent"]
 

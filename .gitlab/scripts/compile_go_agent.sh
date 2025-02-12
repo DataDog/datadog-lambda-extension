@@ -37,15 +37,6 @@ else
 fi
 
 
-if [ -z "$SERVERLESS_INIT" ]; then
-    printf "Compiling Datadog Lambda Extension\n"
-    CMD_PATH="cmd/serverless"
-else
-    printf "Compiling Serverless Init\n"
-    CMD_PATH="cmd/serverless-init"
-fi
-
-
 if [ -z "$ALPINE" ]; then
     COMPILE_FILE=Dockerfile.compile
 else
@@ -94,7 +85,6 @@ function docker_compile {
         -f ${MAIN_DIR}/scripts/${file} \
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
-        --build-arg CMD_PATH="${CMD_PATH}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \
         . -o $TARGET_DIR/compiled-datadog-agent-${SUFFIX}
 
