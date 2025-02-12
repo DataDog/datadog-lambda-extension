@@ -1,7 +1,8 @@
 stages:
   # TODO: swap these back once we're happy with the compile speed
-  - compile
+  - compile binaries
   - check code
+  - build layers
   - build
   - test
   - sign
@@ -48,7 +49,7 @@ cargo clippy ({{ $flavor.name }}):
 {{ end }} # end needs_code_checks
 
 go agent ({{ $flavor.name }}):
-  stage: compile
+  stage: compile binaries
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs: []
@@ -68,9 +69,8 @@ go agent ({{ $flavor.name }}):
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd ../datadog-lambda-extension
     - .gitlab/scripts/compile_go_agent.sh
 
-
 bottlecap ({{ $flavor.name }}):
-  stage: compile
+  stage: compile binaries
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs: []
@@ -84,6 +84,30 @@ bottlecap ({{ $flavor.name }}):
     SUFFIX: {{ $flavor.suffix }}
   script:
     - .gitlab/scripts/compile_bottlecap.sh
+
+layer ({{ $flavor.name }}):
+  stage: build layers
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  needs:
+    - go agent ({{ $flavor.name }})
+    - bottlecap ({{ $flavor.name }})
+  dependencies:
+    - go agent ({{ $flavor.name })
+    - bottlecap ({{ $flavor.name }})
+  artifacts:
+    expire_in: 1 hr
+    paths:
+      - .layers/datadog_extension-{{ $flavor.suffix }}.zip
+      - .layers/datadog_extension-{{ $flavor.suffix }}/*
+  variables:
+    ARCHITECTURE: {{ $flavor.arch }}
+    ALPINE: {{ $flavor.alpine }}
+    SUFFIX: {{ $flavor.suffix }}
+  script:
+    - .gitlab/scripts/build_layer.sh
+
+{{ if $flavor.alpine }}
 
 {{ end }}  # end flavors
 
