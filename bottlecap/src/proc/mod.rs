@@ -6,6 +6,7 @@ use std::{
     fs::{self, File},
     io::{self, BufRead},
 };
+use std::os::unix::fs::FileTypeExt;
 
 use constants::{
     LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
@@ -251,7 +252,10 @@ pub fn get_fd_use_data(pids: &[i64]) -> f64 {
 
 fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut fd_use = 0;
-
+    let tcp_ports = parse_proc_net("/proc/net/tcp");
+    let udp_ports = parse_proc_net("/proc/net/udp");
+    let tcp6_ports = parse_proc_net("/proc/net/tcp6");
+    let udp6_ports = parse_proc_net("/proc/net/udp6");
     for &pid in pids {
         let fd_path = format!("{path}/{pid}/fd");
         let Ok(files) = fs::read_dir(&fd_path) else {
@@ -262,11 +266,94 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
             );
             continue;
         };
-        let count = files.count();
+        let mut count = 0;
+        println!("=== Process ID: {} ===", pid);
+        
+        for entry in files {
+            count += 1;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let fd = entry.file_name().to_string_lossy().into_owned();
+            let fd_path = entry.path();
+
+            // Skip non-numeric FD entries
+            if !fd.chars().all(|c| c.is_ascii_digit()) {
+                continue;
+            }
+
+            // Get symbolic link target
+            match fs::read_link(&fd_path) {
+                Ok(target) => {
+                    let target_str = target.to_string_lossy();
+                    let file_type = entry.file_type().unwrap();
+                    let fd_type = if file_type.is_socket() { "socket" } else { "other" };
+
+                    // Extract socket inode
+                    let port = if let Some(stripped) = target_str.strip_prefix("socket:[") {
+                        let inode_str = stripped.strip_suffix(']').unwrap_or(stripped);
+                        if let Ok(inode) = inode_str.parse::<u64>() {
+                            // Check all socket tables for this inode
+                            tcp_ports.get(&inode)
+                                .or_else(|| udp_ports.get(&inode))
+                                .or_else(|| tcp6_ports.get(&inode))
+                                .or_else(|| udp6_ports.get(&inode))
+                                .map(|p| format!("Port: {}", p))
+                                .unwrap_or_else(|| "Port: unknown".to_string())
+                        } else {
+                            "Invalid inode".to_string()
+                        }
+                    } else {
+                        String::new()
+                    };
+
+                    println!("{:<6} -> {} ({}) {}", fd, target_str, fd_type, port);
+                }
+                Err(e) => {
+                    println!("{:<6} [Error reading link: {}]", fd, e);
+                }
+            }
+        }
+        println!("Total file descriptors for pid {}: {}", pid, count);
         fd_use += count;
     }
-
+    let my_path = format!("{path}/self/fd");
+    let Ok(files) = fs::read_dir(&my_path) else {
+        trace!("File descriptor use data not found in path {}", my_path);
+        return fd_use as f64;
+    };
+    for file in files {
+        let file_name = file.unwrap().file_name();
+        debug!("SELF {}", file_name.to_string_lossy());
+    }
     fd_use as f64
+}
+
+fn parse_proc_net(net_file: &str) -> HashMap<u64, u16> {
+    let mut inode_to_port = HashMap::new();
+    if let Ok(data) = fs::read_to_string(net_file) {
+        for line in data.lines().skip(1) { // Skip header
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 10 { continue; }
+
+            // Extract local address (hex IP:hex port)
+            let local_addr = fields[1];
+            let addr_parts: Vec<&str> = local_addr.split(':').collect();
+            if addr_parts.len() != 2 { continue; }
+
+            // Convert hex port to decimal
+            if let Ok(port_hex) = u32::from_str_radix(addr_parts[1], 16) {
+                let port = port_hex as u16;
+                let inode = fields[9].parse::<u64>().unwrap_or(0);
+                if inode > 0 {
+                    inode_to_port.insert(inode, port);
+                }
+            }
+        }
+    }
+    inode_to_port
 }
 
 #[must_use]

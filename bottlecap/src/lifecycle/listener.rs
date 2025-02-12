@@ -70,6 +70,7 @@ impl Listener {
                         error!("Failed to end invocation {e}");
                         Ok(Response::builder()
                             .status(500)
+                            .header("Connection", "close")
                             .body(Body::empty())
                             .expect("no body"))
                     }
@@ -153,6 +154,7 @@ impl Listener {
 
                 Response::builder()
                     .status(200)
+                    .header("Connection", "close")
                     .body(Body::from(json!({}).to_string()))
             }
             Err(e) => {
