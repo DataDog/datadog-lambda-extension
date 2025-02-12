@@ -24,7 +24,7 @@ WORKDIR /tmp/dd/datadog-agent
 ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
 
 # build the extension
-WORKDIR /tmp/dd/datadog-agent/serverless
+WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 # add the current version number to the tags package before compilation
 
 RUN --mount=type=cache,target=/root/go/pkg/mod \
@@ -47,6 +47,6 @@ RUN strip datadog-agent
 
 # keep the smallest possible docker imag
 FROM scratch
-COPY --from=compiler /tmp/dd/datadog-agent/serverless/datadog-agent /
+COPY --from=compiler /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /
 ENTRYPOINT ["/datadog-agent"]
 

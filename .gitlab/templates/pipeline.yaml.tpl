@@ -51,6 +51,7 @@ compile go agent ({{ $flavor.name }}):
   stage: compile
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
+  needs: []
   artifacts:
     expire_in: 1 hr
     paths:
