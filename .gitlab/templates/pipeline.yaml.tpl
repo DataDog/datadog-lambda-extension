@@ -110,88 +110,16 @@ layer ({{ $flavor.name }}):
 
 {{ range $architecture := (ds "architectures").architectures }}
 
-build go agent ({{ $architecture.name }}):
-  stage: build
-  image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:amd64"]
-  artifacts:
-    expire_in: 1 hr
-    paths:
-      - .layers/datadog_extension-{{ $architecture.name }}.zip
-      - .layers/datadog_extension-{{ $architecture.name }}/*
-  variables:
-    ARCHITECTURE: {{ $architecture.name }}
-  script:
-    - echo "Building go agent based on $AGENT_BRANCH"
-    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
-    - .gitlab/scripts/build_go_agent.sh
-
-build bottlecap ({{ $architecture.name }}):
-  stage: build
-  image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:amd64"]
-  needs:
-    - build go agent ({{ $architecture.name }})
-  dependencies:
-    - build go agent ({{ $architecture.name }})
-  artifacts:
-    expire_in: 1 hr
-    paths:
-      - .layers/datadog_bottlecap-{{ $architecture.name }}.zip
-      - .layers/datadog_bottlecap-{{ $architecture.name }}/*
-  variables:
-    ARCHITECTURE: {{ $architecture.name }}
-  script:
-    - .gitlab/scripts/build_bottlecap.sh
-
-# Alpine
-build go agent ({{ $architecture.name }}, alpine):
-  stage: build
-  image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:amd64"]
-  artifacts:
-    expire_in: 1 hr
-    paths:
-      - .layers/datadog_extension-{{ $architecture.name }}-alpine.zip
-      - .layers/datadog_extension-{{ $architecture.name }}-alpine/*
-  variables:
-    ARCHITECTURE: {{ $architecture.name }}
-    ALPINE: 1
-  script:
-    - echo "Building go agent based on $AGENT_BRANCH"
-    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-lambda-extension
-    - .gitlab/scripts/build_go_agent.sh
-
-build bottlecap ({{ $architecture.name }}, alpine):
-  stage: build
-  image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:amd64"]
-  needs:
-    - build go agent ({{ $architecture.name }}, alpine)
-  dependencies:
-    - build go agent ({{ $architecture.name }}, alpine)
-  artifacts:
-    expire_in: 1 hr
-    paths:
-      - .layers/datadog_bottlecap-{{ $architecture.name }}-alpine.zip
-      - .layers/datadog_bottlecap-{{ $architecture.name }}-alpine/*
-  variables:
-    ARCHITECTURE: {{ $architecture.name }}
-    ALPINE: 1
-  script:
-    - .gitlab/scripts/build_bottlecap.sh
-# Alpine end
-
 check layer size ({{ $architecture.name }}):
   stage: test
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs:
-    - build bottlecap ({{ $architecture.name }})
+    - layer ({{ $architecture.name }})
   dependencies:
-    - build bottlecap ({{ $architecture.name }})
+    - layer ({{ $architecture.name }})
   variables:
-    LAYER_FILE: datadog_bottlecap-{{ $architecture.name }}.zip
+    LAYER_FILE: datadog_extension-{{ $architecture.name }}.zip
   script:
     - .gitlab/scripts/check_layer_size.sh
 
@@ -206,13 +134,13 @@ sign layer ({{ $architecture.name }}):
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
       when: manual
   needs:
-    - build bottlecap ({{ $architecture.name }})
+    - layer ({{ $architecture.name }})
     - check layer size ({{ $architecture.name }})
     - cargo fmt ({{ $architecture.name }})
     - cargo check ({{ $architecture.name }})
     - cargo clippy ({{ $architecture.name }})
   dependencies:
-    - build bottlecap ({{ $architecture.name }})
+    - layer ({{ $architecture.name }})
   artifacts: # Re specify artifacts so the modified signed file is passed
     expire_in: 1 day # Signed layers should expire after 1 day
     paths:
@@ -238,7 +166,7 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
 {{ if or (eq $environment.name "prod") }}
       - sign layer ({{ $architecture.name }})
 {{ else }}
-      - build bottlecap ({{ $architecture.name }})
+      - layer ({{ $architecture.name }})
       - check layer size ({{ $architecture.name }})
       - cargo fmt ({{ $architecture.name }})
       - cargo check ({{ $architecture.name }})
@@ -248,7 +176,7 @@ publish layer {{ $environment.name }} ({{ $architecture.name }}):
 {{ if or (eq $environment.name "prod") }}
       - sign layer ({{ $architecture.name }})
 {{ else }}
-      - build bottlecap ({{ $architecture.name }})
+      - layer ({{ $architecture.name }})
 {{ end }}
   parallel:
     matrix:
@@ -270,12 +198,12 @@ publish private images:
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs:
-    - build bottlecap (arm64)
-    - build bottlecap (amd64)
+    - layer (arm64)
+    - layer (amd64)
   when: manual
   dependencies:
-    - build bottlecap (arm64)
-    - build bottlecap (amd64)
+    - layer (arm64)
+    - layer (amd64)
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
@@ -286,12 +214,12 @@ publish private images (alpine):
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs:
-    - build bottlecap (arm64, alpine)
-    - build bottlecap (amd64, alpine)
+    - layer (arm64, alpine)
+    - layer (amd64, alpine)
   when: manual
   dependencies:
-    - build bottlecap (arm64, alpine)
-    - build bottlecap (amd64, alpine)
+    - layer (arm64, alpine)
+    - layer (amd64, alpine)
   variables:
     ALPINE: 1
   before_script:
@@ -311,11 +239,11 @@ build images:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
-    - build bottlecap (arm64)
-    - build bottlecap (amd64)
+    - layer (arm64)
+    - layer (amd64)
   dependencies:
-    - build bottlecap (arm64)
-    - build bottlecap (amd64)
+    - layer (arm64)
+    - layer (amd64)
   script:
     - .gitlab/scripts/build_image.sh
 
@@ -326,11 +254,11 @@ build images (alpine):
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
-    - build bottlecap (arm64, alpine)
-    - build bottlecap (amd64, alpine)
+    - layer (arm64, alpine)
+    - layer (amd64, alpine)
   dependencies:
-    - build bottlecap (arm64, alpine)
-    - build bottlecap (amd64, alpine)
+    - layer (arm64, alpine)
+    - layer (amd64, alpine)
   variables:
     ALPINE: 1
   script:
