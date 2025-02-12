@@ -27,27 +27,27 @@ cargo fmt ({{ $flavor.name }}):
   script:
     - cd bottlecap && cargo fmt
 
-{{ end }} # end needs_code_checks
-
-{{ end }}  # end flavors
-
-{{ range $architecture := (ds "architectures").architectures }}
-
-cargo check ({{ $architecture.name }}):
+cargo check ({{ $flavor.name }}):
   stage: check code
-  tags: ["arch:{{ $architecture.name }}"]
+  tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo check
 
-cargo clippy ({{ $architecture.name }}):
+cargo clippy ({{ $flavor.name }}):
   stage: check code
-  tags: ["arch:{{ $architecture.name }}"]
+  tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo clippy --all-features
+
+{{ end }} # end needs_code_checks
+
+{{ end }}  # end flavors
+
+{{ range $architecture := (ds "architectures").architectures }}
 
 build go agent ({{ $architecture.name }}):
   stage: build
