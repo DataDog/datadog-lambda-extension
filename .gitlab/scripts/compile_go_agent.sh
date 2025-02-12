@@ -37,7 +37,7 @@ else
 fi
 
 
-if [ -z "$ALPINE" ]; then
+if [ "$ALPINE" = "0" ]; then
     COMPILE_FILE=Dockerfile.compile
 else
     printf "Compiling for alpine\n"

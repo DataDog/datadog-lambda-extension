@@ -1,4 +1,4 @@
-FROM public.ecr.aws/lambda/provided:al2 as compiler
+FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG BUILD_TAGS
