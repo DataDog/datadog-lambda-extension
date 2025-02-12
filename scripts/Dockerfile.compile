@@ -1,5 +1,3 @@
-# syntax = docker/dockerfile:experimental
-
 FROM public.ecr.aws/lambda/provided:al2 as compiler
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
