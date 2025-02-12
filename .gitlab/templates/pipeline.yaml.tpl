@@ -124,6 +124,33 @@ check layer size ({{ $flavor.name }}):
 
 {{ range $environment := (ds "environments").environments }}
 
+{{ if or (eq $environment.name "prod") }}
+
+sign layer ({{ $flavor.name }}):
+  stage: sign
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+      when: manual
+  needs:
+    - layer ({{ $flavor.name }})
+    - check layer size ({{ $flavor.name }})
+  dependencies:
+    - layer ({{ $flavor.name }})
+  artifacts: # Re specify artifacts so the modified signed file is passed
+    expire_in: 1 day # Signed layers should expire after 1 day
+    paths:
+      - .layers/datadog_extension-{{ $flavor.suffix }}.zip
+  variables:
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
+
+{{ end }} # if prod
+
 publish layer {{ $environment.name }} ({{ $flavor.name }}):
   stage: publish
   tags: ["arch:amd64"]
@@ -222,39 +249,6 @@ publish private images ({{ $flavor.name }}):
 {{ end }} # end environments
 
 {{ end }}  # end flavors
-
-{{ range $architecture := (ds "architectures").architectures }}
-
-{{ range $environment := (ds "environments").environments }}
-
-{{ if or (eq $environment.name "prod") }}
-sign layer ({{ $architecture.name }}):
-  stage: sign
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-      when: manual
-  needs:
-    - layer ({{ $architecture.name }})
-    - check layer size ({{ $architecture.name }})
-  dependencies:
-    - layer ({{ $architecture.name }})
-  artifacts: # Re specify artifacts so the modified signed file is passed
-    expire_in: 1 day # Signed layers should expire after 1 day
-    paths:
-      - .layers/datadog_bottlecap-{{ $architecture.name }}.zip
-  variables:
-    LAYER_FILE: datadog_bottlecap-{{ $architecture.name }}.zip
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  script:
-    - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
-{{ end }}
-
-{{- end }} # environments end
-
-{{- end }} # architectures end
 
 build images:
   stage: build
