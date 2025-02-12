@@ -102,7 +102,6 @@ layer ({{ $flavor.name }}):
       - .layers/datadog_extension-{{ $flavor.suffix }}/*
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
-    ALPINE: {{ $flavor.alpine }}
     SUFFIX: {{ $flavor.suffix }}
   script:
     - .gitlab/scripts/build_layer.sh

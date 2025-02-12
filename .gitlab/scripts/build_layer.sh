@@ -12,11 +12,6 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-if [ -z "$ALPINE" ]; then
-    printf "[ERROR]: ALPINE not specified\n"
-    exit 1
-fi
-
 prepare_folders() {
     # Move into the root directory, so this script can be called from any directory
     SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
