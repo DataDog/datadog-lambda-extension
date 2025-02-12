@@ -50,6 +50,7 @@ RUN strip datadog-agent
 
 # keep the smallest possible docker imag
 FROM scratch
+ARG CMD_PATH
 COPY --from=compiler /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /
 ENTRYPOINT ["/datadog-agent"]
 
