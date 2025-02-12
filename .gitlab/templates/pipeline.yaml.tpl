@@ -17,20 +17,19 @@ variables:
 
 {{ range $flavor := (ds "flavors").flavors }}
 
+{{ if $flavor.needs_code_checks }}
 
 cargo fmt ({{ $flavor.name }}):
   stage: check code
   tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  rules:
-    - if: {{ $flavor.needs_code_checks }}
   needs: []
   script:
     - cd bottlecap && cargo fmt
 
+{{ end }} # end needs_code_checks
 
 {{ end }}  # end flavors
-
 
 {{ range $architecture := (ds "architectures").architectures }}
 
