@@ -2,9 +2,8 @@ stages:
   # TODO: swap these back once we're happy with the compile speed
   - compile binaries
   - check code
-  - build layers
   - build
-  - test
+  - check layers
   - sign
   - publish
 
@@ -86,7 +85,7 @@ bottlecap ({{ $flavor.name }}):
     - .gitlab/scripts/compile_bottlecap.sh
 
 layer ({{ $flavor.name }}):
-  stage: build layers
+  stage: build
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs:
@@ -106,22 +105,26 @@ layer ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/build_layer.sh
 
-{{ end }}  # end flavors
+{{ if $flavor.needs_layer_publish }}
 
-{{ range $architecture := (ds "architectures").architectures }}
-
-check layer size ({{ $architecture.name }}):
-  stage: test
+check layer size ({{ $flavor.name }}):
+  stage: check layers
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs:
-    - layer ({{ $architecture.name }})
+    - layer ({{ $flavor.name }})
   dependencies:
-    - layer ({{ $architecture.name }})
+    - layer ({{ $flavor.name }})
   variables:
-    LAYER_FILE: datadog_extension-{{ $architecture.name }}.zip
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
   script:
     - .gitlab/scripts/check_layer_size.sh
+
+{{ end }} # end needs_layer_publish
+
+{{ end }}  # end flavors
+
+{{ range $architecture := (ds "architectures").architectures }}
 
 {{ range $environment := (ds "environments").environments }}
 
