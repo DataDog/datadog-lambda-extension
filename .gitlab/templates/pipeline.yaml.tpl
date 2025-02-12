@@ -3,7 +3,6 @@ stages:
   - compile binaries
   - check code
   - build
-  - check layers
   - sign
   - publish
 
@@ -108,7 +107,7 @@ layer ({{ $flavor.name }}):
 {{ if $flavor.needs_layer_publish }}
 
 check layer size ({{ $flavor.name }}):
-  stage: check layers
+  stage: build
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs:
@@ -160,6 +159,35 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/publish_layers.sh
+
+{{ if eq $environment.name "sandbox" }}
+
+publish self-monitoring layer ({{ $flavor.name }}):
+  stage: publish
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - when: manual
+      allow_failure: true
+
+  needs:
+    - check layer size ({{ $flavor.name }})
+    - layer ({{ $flavor.name }})
+
+  dependencies:
+    - layer ({{ $flavor.name }})
+
+  variables:
+    REGION: us-east-1
+    ARCHITECTURE: {{ $flavor.arch }}
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
+    STAGE: {{ $environment.name }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/publish_layers.sh
+
+{{ end }} # if environment sandbox
 
 {{ end }} # end environments
 
