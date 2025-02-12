@@ -1,5 +1,6 @@
 stages:
   - check code
+  - compile
   - build
   - test
   - sign
@@ -44,6 +45,26 @@ cargo clippy ({{ $flavor.name }}):
     - cd bottlecap && cargo clippy --all-features
 
 {{ end }} # end needs_code_checks
+
+compile go agent ({{ $flavor.name }}):
+  stage: compile
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  artifacts:
+    expire_in: 1 hr
+    paths:
+      - .binaries/datadog-agent-{{ $flavor.suffix }}
+  variables:
+    ARCHITECTURE: {{ $flavor.arch }}
+    ALPINE: {{ $flavor.alpine }}
+    SUFFIX: {{ $flavor.suffix }}
+  script:
+    - echo "Building go agent based on $AGENT_BRANCH"
+    # TODO: do this clone once in a separate job so that we can make sure that
+    # we're using the same exact code for all of the builds (main can move
+    # between different runs of the various compile jobs, for example)
+    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd datadog-lambda-extension
+    - ./gitlab/scripts/compile_go_agent.sh
 
 {{ end }}  # end flavors
 

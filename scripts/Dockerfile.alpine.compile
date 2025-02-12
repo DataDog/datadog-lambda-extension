@@ -1,0 +1,53 @@
+# syntax = docker/dockerfile:experimental
+
+FROM alpine:3.16 as compiler
+ARG EXTENSION_VERSION
+ARG AGENT_VERSION
+ARG CMD_PATH
+ARG BUILD_TAGS
+
+RUN apk add --no-cache git make musl-dev gcc
+COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
+
+ENV GOROOT /usr/lib/go
+ENV GOPATH /go
+ENV PATH /go/bin:$PATH
+
+RUN mkdir -p ${GOPATH}/src ${GOPATH}/bin
+RUN mkdir -p /tmp/dd/datadog-agent
+
+# cache dependencies
+COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
+COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
+WORKDIR /tmp/dd/datadog-agent
+
+# copy source files (/tgz gets unzip automatically by Docker)
+ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
+
+# build the extension
+WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
+# add the current version number to the tags package before compilation
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    if [ -z "$AGENT_VERSION" ]; then \
+        /usr/lib/go/bin/go build -ldflags="-w -extldflags '-static' \
+        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
+        -tags "${BUILD_TAGS}" -o datadog-agent; \
+    else \
+        /usr/lib/go/bin/go build -ldflags="-w  -extldflags '-static' \
+        -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION \
+        -X github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault=$AGENT_VERSION" \
+        -tags "${BUILD_TAGS}" -o datadog-agent; \
+    fi
+
+RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
+    (echo "agentVersionDefault variable doesn't exist" && exit 1)
+
+RUN strip datadog-agent
+
+# keep the smallest possible docker image
+FROM scratch
+COPY --from=compiler /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /
+ENTRYPOINT ["/datadog-agent"]
+

@@ -2,15 +2,23 @@ flavors:
   - name: amd64
     arch: amd64
     needs_code_checks: true
+    suffix: amd64
+    alpine: 0
 
   - name: arm64
     arch: arm64
     needs_code_checks: true
+    suffix: arm64
+    alpine: 0
 
   - name: amd64, alpine
     arch: amd64
     needs_code_checks: false
+    suffix: amd64-alpine
+    alpine: 1
 
   - name: arm64, alpine
     arch: arm64
     needs_code_checks: false
+    suffix: arm64-alpine
+    alpine: 1
