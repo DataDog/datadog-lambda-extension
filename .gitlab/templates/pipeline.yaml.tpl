@@ -1,6 +1,7 @@
 stages:
-  - check code
+  # TODO: swap these back once we're happy with the compile speed
   - compile
+  - check code
   - build
   - test
   - sign
@@ -64,7 +65,7 @@ compile go agent ({{ $flavor.name }}):
     # we're using the same exact code for all of the builds (main can move
     # between different runs of the various compile jobs, for example)
     - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd ../datadog-lambda-extension
-    - ./gitlab/scripts/compile_go_agent.sh
+    - .gitlab/scripts/compile_go_agent.sh
 
 {{ end }}  # end flavors
 
