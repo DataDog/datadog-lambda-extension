@@ -190,6 +190,16 @@ publish self-monitoring sandbox layer ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/publish_layers.sh
 
+{{ end }} # if environment sandbox
+
+{{ end }} # end environments
+
+{{ end }} # end needs_layer_publish
+
+{{ range $environment := (ds "environments").environments }}
+
+{{ if eq $environment.name "sandbox" }}
+
 publish private images ({{ $flavor.name }}):
   stage: publish
   tags: ["arch:amd64"]
@@ -207,11 +217,9 @@ publish private images ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/build_private_image.sh
 
-{{ end }} # if environment sandbox
+{{ end }} # end if environment sandbox
 
 {{ end }} # end environments
-
-{{ end }} # end needs_layer_publish
 
 {{ end }}  # end flavors
 
