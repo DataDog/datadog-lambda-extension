@@ -93,7 +93,7 @@ layer ({{ $flavor.name }}):
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
   dependencies:
-    - go agent ({{ $flavor.name })
+    - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
   artifacts:
     expire_in: 1 hr
@@ -105,8 +105,6 @@ layer ({{ $flavor.name }}):
     SUFFIX: {{ $flavor.suffix }}
   script:
     - .gitlab/scripts/build_layer.sh
-
-{{ if $flavor.alpine }}
 
 {{ end }}  # end flavors
 
