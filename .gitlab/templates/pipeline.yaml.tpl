@@ -190,6 +190,23 @@ publish self-monitoring sandbox layer ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/publish_layers.sh
 
+publish private images ({{ $flavor.name }}):
+  stage: publish
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs:
+    - layer ({{ $flavor.name }})
+  when: manual
+  dependencies:
+    - layer ({{ $flavor.name }})
+  variables:
+    ARCHITECTURE: {{ $flavor.arch }}
+    SUFFIX: {{ $flavor.suffix }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/build_private_image.sh
+
 {{ end }} # if environment sandbox
 
 {{ end }} # end environments
@@ -225,42 +242,6 @@ sign layer ({{ $architecture.name }}):
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
-{{ end }}
-
-{{ if or (eq $environment.name "sandbox") }}
-publish private images:
-  stage: publish
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs:
-    - layer (arm64)
-    - layer (amd64)
-  when: manual
-  dependencies:
-    - layer (arm64)
-    - layer (amd64)
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  script:
-    - .gitlab/scripts/build_private_image.sh  
-
-publish private images (alpine):
-  stage: publish
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs:
-    - layer (arm64, alpine)
-    - layer (amd64, alpine)
-  when: manual
-  dependencies:
-    - layer (arm64, alpine)
-    - layer (amd64, alpine)
-  variables:
-    ALPINE: 1
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  script:
-    - .gitlab/scripts/build_private_image.sh  
 {{ end }}
 
 {{- end }} # environments end
