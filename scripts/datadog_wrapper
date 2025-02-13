@@ -48,28 +48,43 @@ debug_log "The runtime is $AWS_EXECUTION_ENV"
 if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]
 then
   debug_log "Configuring for the .NET runtime!"
+  LIBRARY_FOUND=false
 
-  # Handle the CORECLR_PROFILER_PATH:
   # Try to load the library from these paths, in order:
-  PROFILER_PATHS=(
+  LIBRARY_PATHS_X64=(
     # use the shared loader if it's present
     "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
-    "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
-    # if shared loader is not found, use the tracer library directly (not recommended)
+    # if shared loader is not found, use the tracer library directly (deprecated)
     "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
+    # keep this as a fallback for backwards compatibility
+    "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
+  )
+
+  LIBRARY_PATHS_ARM64=(
+    # use the shared loader if it's present
+    "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
+    # if shared loader is not found, use the tracer library directly (deprecated)
     "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
     # keep this as a fallback for backwards compatibility
     "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
   )
 
-  PROFILER_FOUND=false
+  for LIBRARY_PATH_X64 in "${LIBRARY_PATHS_X64[@]}"
+  do
+  if [ -f "$LIBRARY_PATH_X64" ]
+  then
+    export CORECLR_PROFILER_PATH_64="$LIBRARY_PATH_X64"
+    PROFILER_FOUND=true
+    break
+  fi
+  done
 
   ## Search from all possible places
-  for PROFILER_PATH in "${PROFILER_PATHS[@]}"
+  for LIBRARY_PATH_ARM64 in "${LIBRARY_PATHS_ARM64[@]}"
   do
-  if [ -f "$PROFILER_PATH" ]
+  if [ -f "$LIBRARY_PATH_ARM64" ]
   then
-    export CORECLR_PROFILER_PATH="$PROFILER_PATH"
+    export CORECLR_PROFILER_PATH_ARM64="$LIBRARY_PATH_ARM64"
     PROFILER_FOUND=true
     break
   fi
