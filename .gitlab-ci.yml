@@ -65,3 +65,8 @@ generated pipeline:
       artifacts: true
   rules:
     - when: on_success
+  variables:
+    VERSION: $VERSION
+    AGENT_BRANCH: $AGENT_BRANCH
+    LAYER_SUFFIX: $LAYER_SUFFIX
+    AGENT_VERSION: $AGENT_VERSION
