@@ -62,6 +62,9 @@ generated pipeline:
     strategy: depend
     forward:
       yaml_variables: true
+      # Without this pipeline_variables: true bit the pipeline we trigger will
+      # not get the variables that we set as part of our release process in our
+      # manual pipeline runs.
       pipeline_variables: true
   needs:
     - job: generator
