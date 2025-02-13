@@ -47,6 +47,7 @@ docker buildx build \
     -f .gitlab/scripts/${TARGET_IMAGE} \
     --tag "$DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX}" \
     --tag "$DOCKER_TARGET_IMAGE:${VERSION}${SUFFIX}" \
-    --push .
+    .
+    # --push .
 
-printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX} for arm64 and amd64\n"
+# printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX} for arm64 and amd64\n"
