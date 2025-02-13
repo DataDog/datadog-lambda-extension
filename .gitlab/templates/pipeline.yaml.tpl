@@ -1,9 +1,9 @@
 stages:
-  - check code
-  - compile binaries
+  - test
+  - compile
   - build
   - sign
-  - dev self-monitoring
+  - self-monitoring
   - publish
 
 default:
@@ -21,7 +21,7 @@ variables:
 {{ if $flavor.needs_code_checks }}
 
 cargo fmt ({{ $flavor.arch }}):
-  stage: check code
+  stage: test
   tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
@@ -29,7 +29,7 @@ cargo fmt ({{ $flavor.arch }}):
     - cd bottlecap && cargo fmt
 
 cargo check ({{ $flavor.arch }}):
-  stage: check code
+  stage: test
   tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
@@ -37,7 +37,7 @@ cargo check ({{ $flavor.arch }}):
     - cd bottlecap && cargo check
 
 cargo clippy ({{ $flavor.arch }}):
-  stage: check code
+  stage: test
   tags: ["arch:{{ $flavor.arch }}"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
@@ -47,7 +47,7 @@ cargo clippy ({{ $flavor.arch }}):
 {{ end }} # end needs_code_checks
 
 go agent ({{ $flavor.name }}):
-  stage: compile binaries
+  stage: compile
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs: []
@@ -68,7 +68,7 @@ go agent ({{ $flavor.name }}):
     - .gitlab/scripts/compile_go_agent.sh
 
 bottlecap ({{ $flavor.name }}):
-  stage: compile binaries
+  stage: compile
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs: []
@@ -193,7 +193,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
 {{ if eq $environment.name "sandbox" }}
 
 publish self-monitoring sandbox layer ({{ $flavor.name }}):
-  stage: dev self-monitoring
+  stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
@@ -232,7 +232,7 @@ publish self-monitoring sandbox layer ({{ $flavor.name }}):
 {{ if eq $environment.name "sandbox" }}
 
 publish private images ({{ $multi_arch_image_flavor.name }}):
-  stage: dev self-monitoring
+  stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   when: manual

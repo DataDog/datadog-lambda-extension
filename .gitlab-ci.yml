@@ -16,12 +16,12 @@ variables:
     value: ""
 
 stages:
-  - prepare image
+  - prepare
   - generate
-  - run generated pipeline
+  - run
 
 ci image:
-  stage: prepare image
+  stage: prepare
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:arm64"]
   rules:
@@ -54,7 +54,7 @@ generator:
     - gomplate --config .gitlab/config.yaml
 
 generated pipeline:
-  stage: run generated pipeline
+  stage: run
   trigger:
     include:
       - artifact: .gitlab/pipeline.yaml
