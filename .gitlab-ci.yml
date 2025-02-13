@@ -60,6 +60,9 @@ generated pipeline:
       - artifact: .gitlab/pipeline.yaml
         job: generator
     strategy: depend
+    forward:
+      yaml_variables: true
+      pipeline_variables: true
   needs:
     - job: generator
       artifacts: true
