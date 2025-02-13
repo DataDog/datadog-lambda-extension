@@ -223,22 +223,31 @@ publish self-monitoring sandbox layer ({{ $flavor.name }}):
 
 {{ end }} # end needs_layer_publish
 
+{{ end }}  # end flavors
+
+{{ range $multi_arch_image_flavor := (ds "flavors").multi_arch_image_flavors }}
+
 {{ range $environment := (ds "environments").environments }}
 
 {{ if eq $environment.name "sandbox" }}
 
-publish private images ({{ $flavor.name }}):
+publish private images ({{ $multi_arch_image_flavor.name }}):
   stage: publish
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs:
-    - layer ({{ $flavor.name }})
   when: manual
+  needs:
+    {{ range $multi_arch_image_flavor.dependency_names }}
+    - layer ({{ . }})
+    {{ end }} # end dependency_names
   dependencies:
-    - layer ({{ $flavor.name }})
+    {{ range $multi_arch_image_flavor.dependency_names }}
+    - layer ({{ . }})
+    {{ end }} # end dependency_names
   variables:
-    ARCHITECTURE: {{ $flavor.arch }}
-    SUFFIX: {{ $flavor.suffix }}
+    ALPINE: {{ $multi_arch_image_flavor.alpine }}
+    SUFFIX: {{ $multi_arch_image_flavor.suffix }}
+    PLATFORM: {{ $multi_arch_image_flavor.platform }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
@@ -248,7 +257,7 @@ publish private images ({{ $flavor.name }}):
 
 {{ end }} # end environments
 
-{{ end }}  # end flavors
+{{ end }} # end multi_arch_image_flavors
 
 build images:
   stage: build

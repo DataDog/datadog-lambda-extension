@@ -26,3 +26,18 @@ flavors:
     suffix: arm64-alpine
     alpine: 1
     needs_layer_publish: false
+
+# Unfortunately our mutli-arch images don't fit nicely into the flavors
+# structure above.
+multi_arch_image_flavors:
+  - name: basic
+    dependency_names: [amd64, arm64]
+    platform: linux/amd64,linux/arm64
+    alpine: 0
+    suffix: ""
+
+  - name: alpine
+    dependency_names: ["amd64, alpine", "arm64, alpine"]
+    platform: linux/amd64,linux/arm64
+    alpine: 1
+    suffix: "-alpine"
