@@ -160,7 +160,6 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
       when: manual
       allow_failure: true
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
-      when: manual
 
   needs:
 {{ if eq $environment.name "prod" }}
@@ -278,21 +277,21 @@ build images ({{ $multi_arch_image_flavor.name }}):
   script:
     - .gitlab/scripts/build_image.sh
 
-# publish images ({{ $multi_arch_image_flavor.name }}):
-#   stage: publish
-#   rules:
-#     - if: '$CI_COMMIT_TAG =~ /^v.*/'
-#   needs:
-#     - build images ({{ $multi_arch_image_flavor.name }})
-#   when: manual
-#   trigger:
-#     project: DataDog/public-images
-#     branch: main
-#     strategy: depend
-#   variables:
-#     IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}{{ $multi_arch_image_flavor.suffix }}
-#     IMG_DESTINATIONS: lambda-extension:${VERSION}{{ $multi_arch_image_flavor.suffix }},lambda-extension:latest{{ $multi_arch_image_flavor.suffix }}
-#     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
-#     IMG_SIGNING: false
+publish images ({{ $multi_arch_image_flavor.name }}):
+  stage: publish
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    - build images ({{ $multi_arch_image_flavor.name }})
+  when: manual
+  trigger:
+    project: DataDog/public-images
+    branch: main
+    strategy: depend
+  variables:
+    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}{{ $multi_arch_image_flavor.suffix }}
+    IMG_DESTINATIONS: lambda-extension:${VERSION}{{ $multi_arch_image_flavor.suffix }},lambda-extension:latest{{ $multi_arch_image_flavor.suffix }}
+    IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+    IMG_SIGNING: false
 
 {{ end }} # end multi_arch_image_flavors
