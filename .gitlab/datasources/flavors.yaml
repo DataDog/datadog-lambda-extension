@@ -1,43 +1,43 @@
 flavors:
   - name: amd64
     arch: amd64
-    needs_code_checks: true
-    suffix: amd64
     alpine: 0
+    needs_code_checks: true
     needs_layer_publish: true
+    suffix: amd64
 
   - name: arm64
     arch: arm64
-    needs_code_checks: true
-    suffix: arm64
     alpine: 0
+    needs_code_checks: true
     needs_layer_publish: true
+    suffix: arm64
 
   - name: amd64, alpine
     arch: amd64
-    needs_code_checks: false
-    suffix: amd64-alpine
     alpine: 1
+    needs_code_checks: false
     needs_layer_publish: false
+    suffix: amd64-alpine
 
   - name: arm64, alpine
     arch: arm64
-    needs_code_checks: false
-    suffix: arm64-alpine
     alpine: 1
+    needs_code_checks: false
     needs_layer_publish: false
+    suffix: arm64-alpine
 
 # Unfortunately our mutli-arch images don't fit nicely into the flavors
 # structure above.
 multi_arch_image_flavors:
   - name: basic
-    dependency_names: [amd64, arm64]
-    platform: linux/amd64,linux/arm64
     alpine: 0
+    platform: linux/amd64,linux/arm64
+    dependency_names: [amd64, arm64]
     suffix: ""
 
   - name: alpine
-    dependency_names: ["amd64, alpine", "arm64, alpine"]
-    platform: linux/amd64,linux/arm64
     alpine: 1
+    platform: linux/amd64,linux/arm64
+    dependency_names: ["amd64, alpine", "arm64, alpine"]
     suffix: "-alpine"

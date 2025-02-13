@@ -2,8 +2,8 @@ stages:
   - test
   - compile
   - build
-  - sign
   - self-monitoring
+  - sign
   - publish
 
 default:
@@ -256,7 +256,7 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
 
 {{ end }} # end environments
 
-build images ({{ $multi_arch_image_flavor.name }}):
+image ({{ $multi_arch_image_flavor.name }}):
   stage: build
   tags: ["arch:amd64"]
   image: registry.ddbuild.io/images/docker:20.10
@@ -277,12 +277,12 @@ build images ({{ $multi_arch_image_flavor.name }}):
   script:
     - .gitlab/scripts/build_image.sh
 
-publish images ({{ $multi_arch_image_flavor.name }}):
+publish image ({{ $multi_arch_image_flavor.name }}):
   stage: publish
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
-    - build images ({{ $multi_arch_image_flavor.name }})
+    - image ({{ $multi_arch_image_flavor.name }})
   when: manual
   trigger:
     project: DataDog/public-images
