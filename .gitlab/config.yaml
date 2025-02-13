@@ -7,9 +7,6 @@ outputFiles:
   - .gitlab/pipeline.yaml
 
 datasources:
-  architectures:
-    url: .gitlab/datasources/architectures.yaml
-
   flavors:
     url: .gitlab/datasources/flavors.yaml
   
