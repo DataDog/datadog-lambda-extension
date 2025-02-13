@@ -4,6 +4,7 @@ stages:
   - check code
   - build
   - sign
+  - sandbox
   - publish
 
 default:
@@ -193,7 +194,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
 {{ if eq $environment.name "sandbox" }}
 
 publish self-monitoring sandbox layer ({{ $flavor.name }}):
-  stage: publish
+  stage: sandbox
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
@@ -232,7 +233,7 @@ publish self-monitoring sandbox layer ({{ $flavor.name }}):
 {{ if eq $environment.name "sandbox" }}
 
 publish private images ({{ $multi_arch_image_flavor.name }}):
-  stage: publish
+  stage: sandbox
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   when: manual
