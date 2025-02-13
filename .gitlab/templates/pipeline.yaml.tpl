@@ -162,8 +162,8 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
 
   needs:
+{{ if eq $environment.name "prod" }}
     - check layer size ({{ $flavor.name }})
-{{ if or (eq $environment.name "prod") }}
     - sign layer ({{ $flavor.name }})
 {{ else }}
     - layer ({{ $flavor.name }})
@@ -201,7 +201,6 @@ publish self-monitoring sandbox layer ({{ $flavor.name }}):
       allow_failure: true
 
   needs:
-    - check layer size ({{ $flavor.name }})
     - layer ({{ $flavor.name }})
 
   dependencies:
