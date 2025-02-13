@@ -257,71 +257,42 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
 
 {{ end }} # end environments
 
+build images ({{ $multi_arch_image_flavor.name }}):
+  stage: build
+  tags: ["arch:amd64"]
+  image: registry.ddbuild.io/images/docker:20.10
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    {{ range $multi_arch_image_flavor.dependency_names }}
+    - layer ({{ . }})
+    {{ end }} # end dependency_names
+  dependencies:
+    {{ range $multi_arch_image_flavor.dependency_names }}
+    - layer ({{ . }})
+    {{ end }} # end dependency_names
+  variables:
+    ALPINE: {{ $multi_arch_image_flavor.alpine }}
+    SUFFIX: {{ $multi_arch_image_flavor.suffix }}
+    PLATFORM: {{ $multi_arch_image_flavor.platform }}
+  script:
+    - .gitlab/scripts/build_image.sh
+
+publish images ({{ $multi_arch_image_flavor.name }}):
+  stage: publish
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    - build images ({{ $multi_arch_image_flavor.name }})
+  when: manual
+  trigger:
+    project: DataDog/public-images
+    branch: main
+    strategy: depend
+  variables:
+    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}{{ $multi_arch_image_flavor.suffix }}
+    IMG_DESTINATIONS: lambda-extension:${VERSION}{{ $multi_arch_image_flavor.suffix }},lambda-extension:latest{{ $multi_arch_image_flavor.suffix }}
+    IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
+    IMG_SIGNING: false
+
 {{ end }} # end multi_arch_image_flavors
-
-build images:
-  stage: build
-  tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-  needs:
-    - layer (arm64)
-    - layer (amd64)
-  dependencies:
-    - layer (arm64)
-    - layer (amd64)
-  script:
-    - .gitlab/scripts/build_image.sh
-
-build images (alpine):
-  stage: build
-  tags: ["arch:amd64"]
-  image: registry.ddbuild.io/images/docker:20.10
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-  needs:
-    - layer (arm64, alpine)
-    - layer (amd64, alpine)
-  dependencies:
-    - layer (arm64, alpine)
-    - layer (amd64, alpine)
-  variables:
-    ALPINE: 1
-  script:
-    - .gitlab/scripts/build_image.sh
-
-publish images:
-  stage: publish
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-  needs:
-    - build images
-  when: manual
-  trigger:
-    project: DataDog/public-images
-    branch: main
-    strategy: depend
-  variables:
-    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}
-    IMG_DESTINATIONS: lambda-extension:${VERSION},lambda-extension:latest
-    IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
-    IMG_SIGNING: false
-
-publish images (alpine):
-  stage: publish
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^v.*/'
-  needs:
-    - build images (alpine)
-  when: manual
-  trigger:
-    project: DataDog/public-images
-    branch: main
-    strategy: depend
-  variables:
-    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}-alpine
-    IMG_DESTINATIONS: lambda-extension:${VERSION}-alpine,lambda-extension:latest-alpine
-    IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
-    IMG_SIGNING: false
-
