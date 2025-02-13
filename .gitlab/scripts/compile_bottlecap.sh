@@ -56,7 +56,7 @@ docker_build() {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/compile-bottlecap-${SUFFIX} \
-        -f ./scripts/${file} \
+        -f .gitlab/scripts/${file} \
         --build-arg PLATFORM=$PLATFORM \
         . -o $TARGET_DIR/compiled-bottlecap-${SUFFIX}
 

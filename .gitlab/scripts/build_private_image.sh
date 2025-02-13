@@ -23,10 +23,10 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS --pa
 
 if [ "$ALPINE" = "0" ]; then
     printf "Building image\n"
-    TARGET_IMAGE="Dockerfile"
+    TARGET_IMAGE="Dockerfile.extension_image"
 else
     printf "Building image for alpine\n"
-    TARGET_IMAGE="Dockerfile.alpine"
+    TARGET_IMAGE="Dockerfile.extension_image.alpine"
 fi
 
 LAYER_NAME="Datadog-Extension$SUFFIX"
@@ -44,7 +44,7 @@ printf "Tagging container image with version: $VERSION and latest\n"
 
 docker buildx build \
     --platform $PLATFORM \
-    -f ./scripts/${TARGET_IMAGE} \
+    -f .gitlab/scripts/${TARGET_IMAGE} \
     --tag "$DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX}" \
     --tag "$DOCKER_TARGET_IMAGE:${VERSION}${SUFFIX}" \
     --push .

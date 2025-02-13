@@ -38,10 +38,10 @@ fi
 
 
 if [ "$ALPINE" = "0" ]; then
-    COMPILE_FILE=Dockerfile.compile
+    COMPILE_FILE=Dockerfile.go_agent.compile
 else
     printf "Compiling for alpine\n"
-    COMPILE_FILE=Dockerfile.alpine.compile
+    COMPILE_FILE=Dockerfile.go_agent.alpine.compile
 fi
 
 # Allow override build tags
@@ -82,7 +82,7 @@ function docker_compile {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/compile-go-agent-${SUFFIX}:${VERSION} \
-        -f ${MAIN_DIR}/scripts/${file} \
+        -f ${MAIN_DIR}/.gitlab/scripts/${file} \
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \

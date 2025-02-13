@@ -1,10 +1,9 @@
 stages:
-  # TODO: swap these back once we're happy with the compile speed
-  - compile binaries
   - check code
+  - compile binaries
   - build
   - sign
-  - sandbox
+  - dev self-monitoring
   - publish
 
 default:
@@ -194,7 +193,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
 {{ if eq $environment.name "sandbox" }}
 
 publish self-monitoring sandbox layer ({{ $flavor.name }}):
-  stage: sandbox
+  stage: dev self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
@@ -233,7 +232,7 @@ publish self-monitoring sandbox layer ({{ $flavor.name }}):
 {{ if eq $environment.name "sandbox" }}
 
 publish private images ({{ $multi_arch_image_flavor.name }}):
-  stage: sandbox
+  stage: dev self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   when: manual

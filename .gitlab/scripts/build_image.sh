@@ -32,15 +32,15 @@ fi
 
 if [ "$ALPINE" = "0" ]; then
     printf "Building image\n"
-    TARGET_IMAGE="Dockerfile"
+    TARGET_IMAGE="Dockerfile.extension_image"
 else
     printf "Building image for alpine\n"
-    TARGET_IMAGE="Dockerfile.alpine"
+    TARGET_IMAGE="Dockerfile.extension_image.alpine"
 fi
 
 docker buildx build \
     --platform $PLATFORM \
-    -f ./scripts/${TARGET_IMAGE} \
+    -f .gitlab/scripts/${TARGET_IMAGE} \
     --tag "$DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${SUFFIX}" \
     --push .
 printf "Image built and pushed to $DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${SUFFIX} for $PLATFORM\n"
