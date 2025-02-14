@@ -26,6 +26,13 @@ else
     printf "Alpine compile requested: ${ALPINE}\n"
 fi
 
+if [ -z "$FIPS" ]; then
+    printf "[ERROR]: FIPS not specified\n"
+    exit 1
+else
+    printf "Fips compile requested: ${FIPS}\n"
+fi
+
 if [ -z "$CI_COMMIT_TAG" ]; then
     # Running on dev
     printf "Running on dev environment\n"
@@ -44,9 +51,10 @@ else
     COMPILE_FILE=Dockerfile.go_agent.alpine.compile
 fi
 
-# Allow override build tags
-if [ -z "$BUILD_TAGS" ]; then
+if [ "$FIPS" = "0" ]; then
     BUILD_TAGS="serverless otlp"
+else
+    BUILD_TAGS="serverless otlp serverlessfips"
 fi
 
 # Allow override agent path
@@ -86,6 +94,7 @@ function docker_compile {
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \
+        --build-arg FIPS="${FIPS}" \
         . -o $TARGET_DIR/compiled-datadog-agent-${SUFFIX}
 
     cp $TARGET_DIR/compiled-datadog-agent-${SUFFIX}/datadog-agent $TARGET_DIR/datadog-agent-${SUFFIX}

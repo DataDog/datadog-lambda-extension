@@ -58,6 +58,7 @@ go agent ({{ $flavor.name }}):
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
+    FIPS: {{ $flavor.fips }}
     SUFFIX: {{ $flavor.suffix }}
   script:
     - echo "Building go agent based on $AGENT_BRANCH"
@@ -79,6 +80,7 @@ bottlecap ({{ $flavor.name }}):
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
+    FIPS: {{ $flavor.fips }}
     SUFFIX: {{ $flavor.suffix }}
   script:
     - .gitlab/scripts/compile_bottlecap.sh
