@@ -7,15 +7,6 @@
 
 # This script automatically opens a PR to the Documentation repo for lambda layer deploys
 
-if [ -z "$I_KNOW_WHAT_I_AM_DOING" ]; then
-    # This script differs from our most recent updates to the gitlab build
-    # pipelines. We are going to fix it, but you can help! Either you know what
-    # you are doing and can let this script know, or you could update the
-    # script yourself, or at least let us know that you want it to be updated!
-    echo "Please set I_KNOW_WHAT_I_AM_DOING to 'true' to run this script"
-    exit 1
-fi
-
 GREEN="\033[0;32m"
 NC="\033[0;0m"
 DOCUMENTATION_REPO_PATH=$HOME/go/src/github.com/DataDog/documentation
