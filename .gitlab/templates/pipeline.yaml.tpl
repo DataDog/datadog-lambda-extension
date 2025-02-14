@@ -126,7 +126,7 @@ check layer size ({{ $flavor.name }}):
 
 {{ range $environment := (ds "environments").environments }}
 
-{{ if or (eq $environment.name "prod") }}
+{{ if eq $environment.name "prod" }}
 
 sign layer ({{ $flavor.name }}):
   stage: sign
@@ -184,6 +184,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
           - {{ .code }}
         {{- end}}
   variables:
+    LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
     STAGE: {{ $environment.name }}
@@ -209,6 +210,7 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
     - layer ({{ $flavor.name }})
 
   variables:
+    LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     REGION: us-east-1
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip

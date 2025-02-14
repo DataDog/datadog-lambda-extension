@@ -11,7 +11,7 @@ variables:
   AGENT_VERSION:
     description: "Latest release version of the datadog-agent to tag the build with."
     value: "7.61.0"
-  LAYER_SUFFIX:
+  WORKFLOW_LAYER_SUFFIX:
     description: "Suffix to be appended to the layer name (default empty)."
     value: ""
 

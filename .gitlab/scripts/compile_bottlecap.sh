@@ -24,11 +24,18 @@ else
     printf "Alpine compile requested: ${ALPINE}\n"
 fi
 
+if [ -z "$FIPS" ]; then
+    printf "[ERROR]: FIPS not specified\n"
+    exit 1
+else
+    printf "Fips compile requested: ${FIPS}\n"
+fi
+
 if [ "$ALPINE" = "0" ]; then
-    COMPILE_IMAGE=Dockerfile.bottlecap.compile
+    COMPILE_FILE=Dockerfile.bottlecap.compile
 else
     printf "Compiling for alpine\n"
-    COMPILE_IMAGE=Dockerfile.bottlecap.alpine.compile
+    COMPILE_FILE=Dockerfile.bottlecap.alpine.compile
 fi
 
 
@@ -58,6 +65,7 @@ docker_build() {
         -t datadog/compile-bottlecap \
         -f ./images/${file} \
         --build-arg PLATFORM=$PLATFORM \
+        --build-arg FIPS="${FIPS}" \
         . -o $BINARY_PATH
 
     # Copy the compiled binary to the target directory with the expected name

@@ -6,6 +6,7 @@ flavors:
     needs_code_checks: true
     needs_layer_publish: true
     suffix: amd64
+    layer_name_base_suffix: ""
 
   - name: arm64
     arch: arm64
@@ -14,6 +15,7 @@ flavors:
     needs_code_checks: true
     needs_layer_publish: true
     suffix: arm64
+    layer_name_base_suffix: "-ARM"
 
   - name: amd64, alpine
     arch: amd64
@@ -38,6 +40,7 @@ flavors:
     needs_code_checks: false
     needs_layer_publish: true
     suffix: amd64-fips
+    layer_name_base_suffix: "-FIPS"
 
   - name: arm64, fips
     arch: arm64
@@ -46,6 +49,7 @@ flavors:
     needs_code_checks: false
     needs_layer_publish: true
     suffix: arm64-fips
+    layer_name_base_suffix: "-FIPS-ARM"
 
   - name: amd64, fips, alpine
     arch: amd64
@@ -64,7 +68,8 @@ flavors:
     suffix: arm64-fips-alpine
 
 # Unfortunately our mutli-arch images don't fit nicely into the flavors
-# structure above.
+# structure above. Since we are making multi-arch images, the suffixes here
+# omit the "arch" component and only include the alpine/fips bits.
 multi_arch_image_flavors:
   - name: basic
     alpine: 0
