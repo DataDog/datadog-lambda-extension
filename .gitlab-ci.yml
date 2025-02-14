@@ -6,8 +6,8 @@ variables:
   VERSION: dev
   # Manual trigger variables
   AGENT_BRANCH:
-    description: "Branch of the datadog-agent repository to use."
-    value: main
+    description: "HACK: use the fips branch for now. Branch of the datadog-agent repository to use."
+    value: aleksandr.pasechnik/svls-6279-serverless-fips
   AGENT_VERSION:
     description: "Latest release version of the datadog-agent to tag the build with."
     value: "7.61.0"
