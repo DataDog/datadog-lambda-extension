@@ -2,6 +2,9 @@ FROM alpine:3.16 AS compiler
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG BUILD_TAGS
+ARG CGO_ENABLED
+ARG GOEXPERIMENT
+ARG FIPS
 
 # Install dependencies
 RUN apk add --no-cache git make musl-dev gcc
@@ -10,6 +13,9 @@ COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
 ENV GOROOT=/usr/lib/go
 ENV GOPATH=/go
 ENV PATH=/go/bin:$PATH
+
+ENV CGO_ENABLED=${FIPS:+1}
+ENV GOEXPERIMENT=${FIPS:+boringcrypto}
 
 RUN mkdir -p ${GOPATH}/src ${GOPATH}/bin
 RUN mkdir -p /tmp/dd/datadog-agent
@@ -44,6 +50,11 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # Ensure that the `agentVersionDefault` variable exists in the binary.
 RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
+
+RUN if [ "$FIPS" = "1" ]; then \
+    /usr/lib/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly' || \
+    (echo "boringcrypto not enabled" && exit 1); \
+    fi;
 
 # Strip the binary to reduce size
 RUN strip datadog-agent
