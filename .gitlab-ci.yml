@@ -16,11 +16,12 @@ variables:
     value: ""
 
 stages:
+  - prepare
   - generate
-  - build
+  - run
 
 ci image:
-  stage: build
+  stage: prepare
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:arm64"]
   rules:
@@ -44,9 +45,7 @@ generator:
   cache: *go-cache
   artifacts:
     paths:
-      - .gitlab/pipeline-bottlecap.yaml
-      - .gitlab/pipeline-go-agent.yaml
-      - .gitlab/pipeline-lambda-extension.yaml
+      - .gitlab/pipeline.yaml
     reports:
       dotenv: .env
   script:
@@ -54,45 +53,21 @@ generator:
     - apk add --no-cache gomplate
     - gomplate --config .gitlab/config.yaml
 
-bottlecap-only:
-  stage: build
+generated pipeline:
+  stage: run
   trigger:
     include:
-      - artifact: .gitlab/pipeline-bottlecap.yaml
+      - artifact: .gitlab/pipeline.yaml
         job: generator
     strategy: depend
-  rules:
-    - when: on_success
-
-go-agent-only:
-  stage: build
-  trigger:
-    include:
-      - artifact: .gitlab/pipeline-go-agent.yaml
-        job: generator
-    strategy: depend
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
-      when: manual
-  variables:
-    AGENT_BRANCH: $AGENT_BRANCH
-    LAYER_SUFFIX: $LAYER_SUFFIX
-    AGENT_VERSION: $AGENT_VERSION
-
-lambda-extension:
-  stage: build
-  trigger:
-    include:
-      - artifact: .gitlab/pipeline-lambda-extension.yaml
-        job: generator
-    strategy: depend
+    forward:
+      yaml_variables: true
+      # Without this pipeline_variables: true bit the pipeline we trigger will
+      # not get the variables that we set as part of our release process in our
+      # manual pipeline runs.
+      pipeline_variables: true
   needs:
     - job: generator
       artifacts: true
   rules:
-    - if: $CI_PIPELINE_SOURCE == "web"
-  variables:
-    VERSION: $VERSION
-    AGENT_BRANCH: $AGENT_BRANCH
-    LAYER_SUFFIX: $LAYER_SUFFIX
-    AGENT_VERSION: $AGENT_VERSION
+    - when: on_success

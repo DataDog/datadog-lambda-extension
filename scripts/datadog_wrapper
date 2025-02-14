@@ -1,4 +1,9 @@
 #!/bin/bash
+
+# This is a wrapper script that is intended be used in conjunction with the
+# AWS_LAMBDA_EXEC_WRAPPER environment variable on an AWS Lambda function. It
+# enables universal instrumentation support for our Java and .NET runtimes.
+
 args=("$@")
 
 # lowercase DD_LOG_LEVEL

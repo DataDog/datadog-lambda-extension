@@ -1,0 +1,26 @@
+FROM ubuntu:22.04 as compresser
+ARG DATADOG_WRAPPER=datadog_wrapper
+ARG SUFFIX
+
+RUN apt-get update
+RUN apt-get install -y zip binutils upx
+
+COPY .binaries/datadog-agent-$SUFFIX /datadog-agent-go
+RUN strip /datadog-agent-go
+RUN upx -1 /datadog-agent-go
+
+RUN mkdir /extensions
+WORKDIR /extensions
+
+COPY .binaries/bottlecap-$SUFFIX /extensions/datadog-agent
+
+COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
+RUN chmod +x /$DATADOG_WRAPPER
+
+RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent-go
+
+# keep the smallest possible docker image
+FROM scratch
+COPY --from=compresser /extensions/datadog_extension.zip /
+ENTRYPOINT ["/datadog_extension.zip"]
+
