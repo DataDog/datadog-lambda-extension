@@ -45,6 +45,12 @@ if [ -z "$ARCHITECTURE" ]; then
 fi
 
 
+if [ -z "$LAYER_NAME_BASE_SUFFIX" ]; then
+    printf "[ERROR]: LAYER_NAME_BASE_SUFFIX not specified."
+    exit 1
+fi
+
+
 if [ -z "$LAYER_FILE" ]; then
     printf "[ERROR]: LAYER_FILE not specified."
     exit 1
@@ -57,15 +63,13 @@ if [ ! -f $LAYER_PATH  ]; then
     exit 1
 fi
 
-if [ "$ARCHITECTURE" == "amd64" ]; then
-    LAYER_NAME="Datadog-Extension"
-else
-    LAYER_NAME="Datadog-Extension-ARM"
-fi
+LAYER_NAME="Datadog-Extension${LAYER_NAME_BASE_SUFFIX}"
 
-if [ -z "$LAYER_NAME" ]; then
-    printf "[ERROR]: LAYER_NAME not specified."
-    exit 1
+if [ -z "$WORKFLOW_LAYER_SUFFIX" ]; then
+    printf "[$REGION] Deploying layers without suffix\n"
+else
+    printf "[$REGION] Deploying layers with specified suffix: ${WORKFLOW_LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${WORKFLOW_LAYER_SUFFIX}"
 fi
 
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
@@ -87,13 +91,6 @@ if [ -z "$STAGE" ]; then
 fi
 
 printf "[$REGION] Starting publishing layers...\n"
-
-if [ -z "$LAYER_SUFFIX" ]; then
-    printf "[$REGION] Deploying layers without suffix\n"
-else
-    printf "[$REGION] Deploying layers with specified suffix: ${LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}"
-fi
 
 if [[ "$STAGE" =~ ^(staging|sandbox)$ ]]; then
     # Deploy latest version

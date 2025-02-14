@@ -1,5 +1,8 @@
 FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
+# FIPS is not used for now.
+ARG FIPS
+
 RUN yum install -y curl gcc gcc-c++ make unzip
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
