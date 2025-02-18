@@ -8,7 +8,8 @@ use std::{
 };
 
 use constants::{
-    LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
+    LAMBDA_NETWORK_INTERFACE, LAMBDA_RUNTIME_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH,
+    PROC_STAT_PATH, PROC_UPTIME_PATH,
 };
 use regex::Regex;
 use tracing::{debug, trace};
@@ -60,7 +61,8 @@ fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
         let mut values = line.split_whitespace();
 
         if values.next().map_or(false, |interface_name| {
-            interface_name.starts_with(LAMDBA_NETWORK_INTERFACE)
+            interface_name.starts_with(LAMBDA_NETWORK_INTERFACE)
+                || interface_name.starts_with(LAMBDA_RUNTIME_NETWORK_INTERFACE)
         }) {
             // Read the value for received bytes if present
             let rx_bytes: Option<f64> = values.next().and_then(|s| s.parse().ok());

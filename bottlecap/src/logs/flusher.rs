@@ -1,9 +1,13 @@
 use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
-use std::sync::{Arc, Mutex};
+use std::{
+    io::Write,
+    sync::{Arc, Mutex},
+};
 use tokio::task::JoinSet;
 use tracing::{debug, error};
+use zstd::stream::write::Encoder;
 
 pub struct Flusher {
     api_key: String,
@@ -59,6 +63,9 @@ impl Flusher {
 
     async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
+        let mut encoder = Encoder::new(Vec::new(), 0).unwrap();
+        encoder.write_all(&data).unwrap();
+        let body = encoder.finish().unwrap();
 
         if !data.is_empty() {
             let resp: Result<reqwest::Response, reqwest::Error> = client
@@ -66,7 +73,8 @@ impl Flusher {
                 .header("DD-API-KEY", api_key)
                 .header("DD-PROTOCOL", "agent-json")
                 .header("Content-Type", "application/json")
-                .body(data)
+                .header("Content-Encoding", "zstd")
+                .body(body)
                 .send()
                 .await;
 
