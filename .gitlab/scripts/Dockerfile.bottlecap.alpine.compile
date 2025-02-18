@@ -1,0 +1,31 @@
+FROM alpine:3.16 AS compiler
+ARG PLATFORM
+RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++
+
+SHELL ["/bin/bash", "-c"]
+
+# Install Protocol Buffers, from package instead of manually
+RUN apk add --no-cache protoc
+
+# Install Rust Toolchain
+RUN curl https://sh.rustup.rs -sSf | \
+    sh -s -- --profile minimal --default-toolchain stable-$PLATFORM-unknown-linux-musl -y
+ENV PATH=/root/.cargo/bin:$PATH
+RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-musl
+
+# Build Bottlecap
+RUN mkdir -p /tmp/dd
+COPY ./bottlecap/src /tmp/dd/bottlecap/src
+COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
+COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
+# Added `-C link-arg=-lgcc` for alpine.
+ENV RUSTFLAGS="-C panic=abort -C link-arg=-lgcc"
+WORKDIR /tmp/dd/bottlecap
+RUN --mount=type=cache,target=/root/.cargo/registry cargo +stable build --release --target $PLATFORM-unknown-linux-musl
+RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-musl/release/bottlecap /tmp/dd/bottlecap/bottlecap
+
+# keep the smallest possible docker image
+FROM scratch
+COPY --from=compiler /tmp/dd/bottlecap/bottlecap /
+ENTRYPOINT ["/bottlecap"]
+

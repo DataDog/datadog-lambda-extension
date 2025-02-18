@@ -12,6 +12,13 @@ set -e
 DOCKER_TARGET_IMAGE="registry.ddbuild.io/ci/datadog-lambda-extension"
 EXTENSION_DIR=".layers"
 
+if [ -z "$ALPINE" ]; then
+    printf "[ERROR]: ALPINE not specified\n"
+    exit 1
+else
+    printf "Alpine build requested: ${ALPINE}\n"
+fi
+
 if [ -z "$CI_COMMIT_TAG" ]; then
     # Running on dev
     printf "Running on dev environment\n"
@@ -23,19 +30,17 @@ else
 fi
 
 
-if [ -z "$ALPINE" ]; then
+if [ "$ALPINE" = "0" ]; then
     printf "Building image\n"
-    TARGET_IMAGE="Dockerfile"
+    TARGET_IMAGE="Dockerfile.extension_image"
 else
     printf "Building image for alpine\n"
-    TARGET_IMAGE="Dockerfile.alpine"
-    BUILD_SUFFIX="-alpine"
+    TARGET_IMAGE="Dockerfile.extension_image.alpine"
 fi
 
 docker buildx build \
-    --platform linux/amd64,linux/arm64 \
-    -f ./scripts/${TARGET_IMAGE} \
-    --tag "$DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${BUILD_SUFFIX}" \
+    --platform $PLATFORM \
+    -f .gitlab/scripts/${TARGET_IMAGE} \
+    --tag "$DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${SUFFIX}" \
     --push .
-
-printf "Image built and pushed to $DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${BUILD_SUFFIX} for arm64 and amd64\n"
+printf "Image built and pushed to $DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${SUFFIX} for $PLATFORM\n"

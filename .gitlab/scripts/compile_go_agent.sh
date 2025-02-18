@@ -5,9 +5,6 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2024 Datadog, Inc.
 
-# Usage
-# ARCHITECTURE=arm64 ./scripts/build_go_agent.sh
-
 set -e
 
 if [ -z "$ARCHITECTURE" ]; then
@@ -19,8 +16,14 @@ if [ -z "$AGENT_VERSION" ]; then
     printf "[ERROR]: AGENT_VERSION not specified\n"
     exit 1
 else
-    printf "Building agent with version: ${AGENT_VERSION}\n"
+    printf "Compiling agent with version: ${AGENT_VERSION}\n"
+fi
 
+if [ -z "$ALPINE" ]; then
+    printf "[ERROR]: ALPINE not specified\n"
+    exit 1
+else
+    printf "Alpine compile requested: ${ALPINE}\n"
 fi
 
 if [ -z "$CI_COMMIT_TAG" ]; then
@@ -34,21 +37,11 @@ else
 fi
 
 
-if [ -z "$SERVERLESS_INIT" ]; then
-    printf "Building Datadog Lambda Extension\n"
-    CMD_PATH="cmd/serverless"
+if [ "$ALPINE" = "0" ]; then
+    COMPILE_FILE=Dockerfile.go_agent.compile
 else
-    printf "Building Serverless Init\n"
-    CMD_PATH="cmd/serverless-init"
-fi
-
-
-if [ -z "$ALPINE" ]; then
-    BUILD_FILE=Dockerfile.build
-else
-    printf "Building for alpine\n"
-    BUILD_FILE=Dockerfile.alpine.build
-    BUILD_SUFFIX="-alpine"
+    printf "Compiling for alpine\n"
+    COMPILE_FILE=Dockerfile.go_agent.alpine.compile
 fi
 
 # Allow override build tags
@@ -63,13 +56,13 @@ fi
 
 MAIN_DIR=$(pwd) # datadog-lambda-extension
 
-EXTENSION_DIR=".layers"
-TARGET_DIR=$MAIN_DIR/$EXTENSION_DIR
+BINARY_DIR=".binaries"
+TARGET_DIR=$MAIN_DIR/$BINARY_DIR
 
 # Make sure the folder does not exist
-rm -rf $EXTENSION_DIR 2>/dev/null
+rm -rf $BINARY_DIR 2>/dev/null
 
-mkdir -p $EXTENSION_DIR
+mkdir -p $BINARY_DIR
 
 # Prepare folder with only *mod and *sum files to enable Docker caching capabilities
 mkdir -p $MAIN_DIR/scripts/.src $MAIN_DIR/scripts/.cache
@@ -83,23 +76,20 @@ cd $AGENT_PATH/..
 tar --exclude=.git -czf $MAIN_DIR/scripts/.src/datadog-agent.tgz datadog-agent
 cd $MAIN_DIR
 
-function docker_build {
+function docker_compile {
     arch=$1
     file=$2
 
     docker buildx build --platform linux/${arch} \
-        -t datadog/build-go-agent-${arch}:${VERSION} \
-        -f ${MAIN_DIR}/scripts/${file} \
+        -t datadog/compile-go-agent-${SUFFIX}:${VERSION} \
+        -f ${MAIN_DIR}/.gitlab/scripts/${file} \
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
-        --build-arg CMD_PATH="${CMD_PATH}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \
-        . -o $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}
-    
-    cp $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}/datadog_extension.zip $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}.zip
-    unzip $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}
-    rm -rf $TARGET_DIR/datadog_extension-${arch}${BUILD_SUFFIX}/datadog_extension.zip
+        . -o $TARGET_DIR/compiled-datadog-agent-${SUFFIX}
+
+    cp $TARGET_DIR/compiled-datadog-agent-${SUFFIX}/datadog-agent $TARGET_DIR/datadog-agent-${SUFFIX}
 }
 
-docker_build $ARCHITECTURE $BUILD_FILE
+docker_compile $ARCHITECTURE $COMPILE_FILE
 
