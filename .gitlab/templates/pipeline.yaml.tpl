@@ -192,7 +192,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
 
 {{ if eq $environment.name "sandbox" }}
 
-publish self-monitoring sandbox layer ({{ $flavor.name }}):
+publish layer sandbox [us-east-1] ({{ $flavor.name }}):
   stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
