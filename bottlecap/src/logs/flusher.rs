@@ -61,6 +61,7 @@ impl Flusher {
         }
     }
 
+    #[allow(clippy::unwrap_used)]
     async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>) {
         let url = format!("{fqdn}/api/v2/logs");
         let mut encoder = Encoder::new(Vec::new(), 0).unwrap();
