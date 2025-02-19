@@ -25,10 +25,10 @@ ARG DATADOG_WRAPPER=datadog_wrapper
 ARG GO_AGENT_PATH
 
 RUN apt-get update
-RUN apt-get install -y zip binutils upx
+RUN apt-get install -y zip binutils
 COPY .layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
 RUN strip /datadog-agent-go
-RUN upx -1 /datadog-agent-go
+RUN if [ "$PLATFORM" = "x86_64" ]; then apt-get install -y upx && upx -1 /datadog-agent-go; fi
 
 
 RUN mkdir /extensions
