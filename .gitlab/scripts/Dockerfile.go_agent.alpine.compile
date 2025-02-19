@@ -49,7 +49,7 @@ RUN arch="$(uname -m)"; \
     if [ "${arch}" = 'x86_64' ]; then \
     arch='amd64'; \
     fi; \
-    apt-get install -y upx && upx -1 /datadog-agent-go;
+    apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent-go;
 
 # keep the smallest possible docker image
 FROM scratch
