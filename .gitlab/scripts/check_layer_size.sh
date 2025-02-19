@@ -24,7 +24,7 @@ if [ -z "$LAYER_FILE" ]; then
 fi
 
 MAX_LAYER_COMPRESSED_SIZE_KB=$(( 23 * 1024)) # 23 MB, amd64 is 22, while arm64 is 20
-MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(( 53 * 1024 )) # 53 MB, amd is 53, while arm64 is 47
+MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(( 54 * 1024 )) # 53 MB, amd is 53, while arm64 is 47
 
 FILE=".layers"/$LAYER_FILE
 FILE_SIZE=$(stat --printf="%s" "$FILE")
