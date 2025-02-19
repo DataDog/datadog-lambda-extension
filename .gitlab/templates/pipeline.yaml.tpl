@@ -1,4 +1,5 @@
 stages:
+  - govthing
   - test
   - compile
   - build
@@ -299,3 +300,12 @@ publish image ({{ $multi_arch_image_flavor.name }}):
     IMG_SIGNING: false
 
 {{ end }} # end multi_arch_image_flavors
+
+restricted manual job:
+  stage: govthing
+  tags: ["arch:amd64"]
+  image: registry.ddbuild.io/images/docker:20.10
+  when: manual
+  script:
+    - .gitlab/scripts/check_itar.sh
+    - echo "ok"
