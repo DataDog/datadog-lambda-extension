@@ -43,13 +43,13 @@ RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datad
 
 RUN strip datadog-agent
 RUN arch="$(uname -m)"; \
-    if [ "${arch}" = 'aarch64' ]; then \
+  if [ "${arch}" = 'aarch64' ]; then \
     arch='arm64'; \
     fi; \
     if [ "${arch}" = 'x86_64' ]; then \
     arch='amd64'; \
     fi; \
-    apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent-go;
+  apk add --no-cache upx=3.96-r0 && upx -1 /datadog-agent-go;
 
 # keep the smallest possible docker image
 FROM scratch
