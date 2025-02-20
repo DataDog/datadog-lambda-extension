@@ -88,6 +88,7 @@ impl Flusher {
         let url = format!("{fqdn}/api/v2/logs");
         if !data.is_empty() {
             let body = if compression_enabled {
+                let compression_time = std::time::Instant::now();
                 let result = (|| -> Result<Vec<u8>, Box<dyn Error>> {
                     let mut encoder = Encoder::new(Vec::new(), compression_level)
                         .map_err(|e| Box::new(e) as Box<dyn Error>)?;
@@ -99,7 +100,11 @@ impl Flusher {
                     encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
                 })();
 
-                if let Ok(compressed_data) = result { compressed_data } else {
+                let compression_time = compression_time.elapsed();
+                println!("Compression time: {:?}", compression_time);
+                if let Ok(compressed_data) = result {
+                    compressed_data
+                } else {
                     debug!("Failed to compress data, sending uncompressed data");
                     data
                 }
@@ -116,12 +121,17 @@ impl Flusher {
             } else {
                 req
             };
+            let post_time = std::time::Instant::now();
             let resp: Result<reqwest::Response, reqwest::Error> = req.body(body).send().await;
+            let post_time = post_time.elapsed();
+            println!("Post time: {:?}", post_time);
 
             match resp {
                 Ok(resp) => {
-                    if resp.status() != 202 {
-                        debug!("Failed to send logs to datadog: {}", resp.status());
+                    let status = resp.status();
+                    let _ = resp.text().await;
+                    if status != 202 {
+                        debug!("Failed to send logs to datadog: {}", status);
                     }
                 }
                 Err(e) => {
