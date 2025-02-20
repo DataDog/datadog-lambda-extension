@@ -7,6 +7,33 @@
 
 set -e
 
+
+if [ -z "$ADD_PERMISSIONS" ]; then
+    printf "[ERROR]: ADD_PERMISSIONS not specified."
+    exit 1
+fi
+
+if [ -z "$AUTOMATICALLY_BUMP_VERSION" ]; then
+    printf "[ERROR]: AUTOMATICALLY_BUMP_VERSION not specified."
+    exit 1
+fi
+
+if [ -z "$ARCHITECTURE" ]; then
+    printf "[ERROR]: ARCHITECTURE not specified."
+    exit 1
+fi
+
+if [ -z "$LAYER_NAME_BASE_SUFFIX" ]; then
+    printf "[ERROR]: LAYER_NAME_BASE_SUFFIX not specified."
+    exit 1
+fi
+
+if [ -z "$LAYER_FILE" ]; then
+    printf "[ERROR]: LAYER_FILE not specified."
+    exit 1
+fi
+
+
 LAYER_DIR=".layers"
 VALID_ACCOUNTS=("sandbox" "prod")
 
@@ -25,7 +52,7 @@ publish_layer() {
     )
 
     # Add permissions only for prod
-    if [ "$STAGE" == "prod" ]; then
+    if [ "$ADD_PERMISSIONS" = "1" ]; then
         permission=$(aws lambda add-layer-version-permission --layer-name $layer \
             --version-number $version_nbr \
             --statement-id "release-$version_nbr" \
@@ -39,22 +66,6 @@ publish_layer() {
 }
 
 
-if [ -z "$ARCHITECTURE" ]; then
-    printf "[ERROR]: ARCHITECTURE not specified."
-    exit 1
-fi
-
-
-if [ -z "$LAYER_NAME_BASE_SUFFIX" ]; then
-    printf "[ERROR]: LAYER_NAME_BASE_SUFFIX not specified."
-    exit 1
-fi
-
-
-if [ -z "$LAYER_FILE" ]; then
-    printf "[ERROR]: LAYER_FILE not specified."
-    exit 1
-fi
 
 LAYER_PATH="${LAYER_DIR}/${LAYER_FILE}"
 # Check that the layer files exist
@@ -85,28 +96,26 @@ else
     fi
 fi
 
-if [ -z "$STAGE" ]; then
-    printf "[ERROR]: STAGE not specified.\n"
-    exit 1
-fi
-
 printf "[$REGION] Starting publishing layers...\n"
 
-if [[ "$STAGE" =~ ^(staging|sandbox)$ ]]; then
-    # Deploy latest version
+if [ "$AUTOMATICALLY_BUMP_VERSION" = "1" ]; then
     latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
     VERSION=$(($latest_version + 1))
+
 else
-    # Running on prod
     if [ -z "$CI_COMMIT_TAG" ]; then
-        printf "[ERROR]: No CI_COMMIT_TAG found.\n"
-        printf "Exiting script...\n"
-        exit 1
+        if (( VERSION )); then
+            printf "VERSION is numeric so we should be okay to continue\n"
+        else
+            printf "[ERROR]: No CI_COMMIT_TAG found and VERSION is not nuymeric.\n"
+            printf "Exiting script...\n"
+            exit 1
+        fi
     else
         printf "Tag found in environment: $CI_COMMIT_TAG\n"
-    fi
 
-    VERSION="${CI_COMMIT_TAG//[!0-9]/}"
+        VERSION="${CI_COMMIT_TAG//[!0-9]/}"
+    fi
     printf "Version: ${VERSION}\n"
 fi
 
