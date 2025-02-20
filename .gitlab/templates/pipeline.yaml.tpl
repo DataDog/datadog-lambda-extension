@@ -301,3 +301,29 @@ publish image ({{ $multi_arch_image_flavor.name }}):
     IMG_SIGNING: false
 
 {{ end }} # end multi_arch_image_flavors
+
+layer bundle:
+  stage: build
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  needs:
+    {{ range (ds "flavors").flavors }}
+    {{ if .needs_layer_publish }}
+    - layer ({{ .name }})
+    {{ end }} # end needs_layer_publish
+    {{ end }} # end flavors
+  dependencies:
+    {{ range (ds "flavors").flavors }}
+    {{ if .needs_layer_publish }}
+    - layer ({{ .name }})
+    {{ end }} # end needs_layer_publish
+    {{ end }} # end flavors
+  artifacts:
+    expire_in: 1 hr
+    paths:
+      - datadog_extension-bundle-${CI_JOB_ID}/
+    name: datadog_extension-bundle-${CI_JOB_ID}
+  script:
+    - rm -rf datadog_extension-bundle-${CI_JOB_ID}
+    - mkdir -p datadog_extension-bundle-${CI_JOB_ID}
+    - cp .layers/datadog_extension-*.zip datadog_extension-bundle-${CI_JOB_ID}
