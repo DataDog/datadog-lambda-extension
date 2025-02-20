@@ -1,12 +1,13 @@
 FROM ubuntu:22.04 as compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
 ARG SUFFIX
+ARG UPX
 
 RUN apt-get update
 RUN apt-get install -y zip binutils
 
 COPY .binaries/datadog-agent-$SUFFIX /datadog-agent-go
-RUN if [ "$PLATFORM" = "x86_64" ]; then apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent-go; fi
+RUN if [ "$UPX" = "true" ]; then apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent-go; fi
 
 RUN mkdir /extensions
 WORKDIR /extensions

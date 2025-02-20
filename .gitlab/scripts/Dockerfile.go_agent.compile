@@ -44,7 +44,6 @@ RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/dat
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 RUN strip datadog-agent
-RUN if [ "$arch" = "x86_64" ]; then apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent; fi
 
 # keep the smallest possible docker imag
 FROM scratch
