@@ -350,41 +350,16 @@ async fn extension_loop_active(
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
-    let mut shutdown = false;
 
     let mut flush_interval = flush_control.get_flush_interval();
     flush_interval.tick().await; // discard first tick, which is instantaneous
 
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
-    match next_lambda_response {
-        Ok(NextEventResponse::Invoke {
-            request_id,
-            deadline_ms,
-            invoked_function_arn,
-        }) => {
-            debug!(
-                "Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                request_id, deadline_ms, invoked_function_arn
-            );
-            let mut p = invocation_processor.lock().await;
-            p.on_invoke_event(request_id);
-            drop(p);
-        }
-        Ok(NextEventResponse::Shutdown {
-            shutdown_reason,
-            deadline_ms,
-        }) => {
-            println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
-            shutdown = true;
-        }
-        Err(err) => {
-            eprintln!("Error: {err:?}");
-            println!("Exiting");
-            return Err(err);
-        }
-    }
-    'outer: loop {
+
+    handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+    loop {
+        let shutdown;
         // Don't await! Pin it and check in the tokio loop
         // Tokio select! drops whatever task does not complete first
         // but the state machine API in Lambda will give us an invalid error
@@ -500,35 +475,9 @@ async fn extension_loop_active(
                 stats_flusher.flush()
             );
             let next_lambda_response = next_event(client, &r.extension_id).await;
-            match next_lambda_response {
-                Ok(NextEventResponse::Invoke {
-                    request_id,
-                    deadline_ms,
-                    invoked_function_arn,
-                }) => {
-                    debug!(
-                        "Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                        request_id, deadline_ms, invoked_function_arn
-                    );
-                    let mut p = invocation_processor.lock().await;
-                    p.on_invoke_event(request_id);
-                    drop(p);
-                }
-                Ok(NextEventResponse::Shutdown {
-                    shutdown_reason,
-                    deadline_ms,
-                }) => {
-                    println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
-                    shutdown = true;
-                }
-                Err(err) => {
-                    eprintln!("Error: {err:?}");
-                    println!("Exiting");
-                    return Err(err);
-                }
-            }
-        }
-        else {
+
+            shutdown = handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+        } else {
             debug!("astuyve - WAITING FOR NEXT AND PERIODIC TICK");
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
@@ -620,33 +569,7 @@ async fn extension_loop_active(
                             }
                         }
                     next_response = &mut next_lambda_response => {
-                        match next_response {
-                                    Ok(NextEventResponse::Invoke {
-                                        request_id,
-                                        deadline_ms,
-                                        invoked_function_arn,
-                                    }) => {
-                                        debug!(
-                                            "Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                                            request_id, deadline_ms, invoked_function_arn
-                                        );
-                                        let mut p = invocation_processor.lock().await;
-                                        p.on_invoke_event(request_id);
-                                        drop(p);
-                                    }
-                                    Ok(NextEventResponse::Shutdown {
-                                        shutdown_reason,
-                                        deadline_ms,
-                                    }) => {
-                                        println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
-                                        shutdown = true;
-                                    }
-                                    Err(err) => {
-                                        eprintln!("Error: {err:?}");
-                                        println!("Exiting");
-                                        return Err(err);
-                                    }
-                                }
+                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
                         break 'inner;
                     }
@@ -672,6 +595,37 @@ async fn extension_loop_active(
                 stats_flusher.flush()
             );
             return Ok(());
+        }
+    }
+}
+
+async fn handle_next_invocation(next_response: Result<NextEventResponse>, invocation_processor: Arc<TokioMutex<InvocationProcessor>>) -> bool {
+    match next_response {
+        Ok(NextEventResponse::Invoke {
+            request_id,
+            deadline_ms,
+            invoked_function_arn,
+        }) => {
+            debug!(
+                "Invoke event {}; deadline: {}, invoked_function_arn: {}",
+                request_id, deadline_ms, invoked_function_arn
+            );
+            let mut p = invocation_processor.lock().await;
+            p.on_invoke_event(request_id);
+            drop(p);
+            false
+        }
+        Ok(NextEventResponse::Shutdown {
+            shutdown_reason,
+            deadline_ms,
+        }) => {
+            println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
+            true
+        }
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            println!("Exiting");
+            true
         }
     }
 }
