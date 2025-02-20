@@ -50,8 +50,8 @@ impl Flusher {
             let api_key = self.api_key.clone();
             let site = self.fqdn_site.clone();
             let cloned_client = self.client.clone();
-            let cloned_use_compression = self.config.logs_config_use_compression.clone();
-            let cloned_compression_level = self.config.logs_config_compression_level.clone();
+            let cloned_use_compression = self.config.logs_config_use_compression;
+            let cloned_compression_level = self.config.logs_config_compression_level;
             set.spawn(async move {
                 Self::send(
                     cloned_client,
@@ -61,7 +61,7 @@ impl Flusher {
                     cloned_use_compression,
                     cloned_compression_level,
                 )
-                .await
+                .await;
             });
             logs = guard.get_batch();
         }
@@ -99,12 +99,9 @@ impl Flusher {
                     encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
                 })();
 
-                match result {
-                    Ok(compressed_data) => compressed_data,
-                    Err(_) => {
-                        debug!("Failed to compress data, sending uncompressed data");
-                        data
-                    }
+                if let Ok(compressed_data) = result { compressed_data } else {
+                    debug!("Failed to compress data, sending uncompressed data");
+                    data
                 }
             } else {
                 data
