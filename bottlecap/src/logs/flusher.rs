@@ -1,6 +1,7 @@
 use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
+use std::time::Instant;
 use std::{
     error::Error,
     io::Write,
@@ -85,13 +86,13 @@ impl Flusher {
         compression_enabled: bool,
         compression_level: i32,
     ) {
-        let url = format!("{fqdn}/api/v2/logs");
         if !data.is_empty() {
+            let url = format!("{fqdn}/api/v2/logs");
+            let start = Instant::now();
             let body = if compression_enabled {
                 let result = (|| -> Result<Vec<u8>, Box<dyn Error>> {
                     let mut encoder = Encoder::new(Vec::new(), compression_level)
                         .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-
                     encoder
                         .write_all(&data)
                         .map_err(|e| Box::new(e) as Box<dyn Error>)?;
@@ -120,14 +121,24 @@ impl Flusher {
             };
             let resp: Result<reqwest::Response, reqwest::Error> = req.body(body).send().await;
 
+            let elapsed = start.elapsed();
+
             match resp {
                 Ok(resp) => {
                     if resp.status() != 202 {
-                        debug!("Failed to send logs to datadog: {}", resp.status());
+                        debug!(
+                            "Failed to send logs to datadog after {}ms: {}",
+                            elapsed.as_millis(),
+                            resp.status()
+                        );
                     }
                 }
                 Err(e) => {
-                    error!("Failed to send logs to datadog: {}", e);
+                    error!(
+                        "Failed to send logs to datadog after {}ms: {}",
+                        elapsed.as_millis(),
+                        e
+                    );
                 }
             }
         }
