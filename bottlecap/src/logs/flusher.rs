@@ -4,6 +4,7 @@ use crate::logs::aggregator::Aggregator;
 use std::{
     error::Error,
     io::Write,
+    time::Instant,
     sync::{Arc, Mutex},
 };
 use tokio::task::JoinSet;
@@ -42,10 +43,15 @@ impl Flusher {
         }
     }
     pub async fn flush(&self) {
+        let lock_time = Instant::now();
         let mut guard = self.aggregator.lock().expect("lock poisoned");
+        println!("lock time {:?}", lock_time.elapsed());
         let mut set = JoinSet::new();
 
+        let batch_time = Instant::now();
         let mut logs = guard.get_batch();
+        println!("batch time {:?}", batch_time.elapsed());
+        let spawn_time = Instant::now();
         while !logs.is_empty() {
             let api_key = self.api_key.clone();
             let site = self.fqdn_site.clone();
@@ -65,7 +71,9 @@ impl Flusher {
             });
             logs = guard.get_batch();
         }
+        println!("spawn time {:?}", spawn_time.elapsed());
         drop(guard);
+        let wait_time = Instant::now();
         while let Some(res) = set.join_next().await {
             match res {
                 Ok(()) => (),
@@ -74,6 +82,7 @@ impl Flusher {
                 }
             }
         }
+        println!("log POST time {:?}", wait_time.elapsed());
     }
 
     #[allow(clippy::unwrap_used)]
