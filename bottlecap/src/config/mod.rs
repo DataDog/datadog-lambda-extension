@@ -100,6 +100,8 @@ pub struct Config {
     pub log_level: LogLevel,
     #[serde(deserialize_with = "deserialize_processing_rules")]
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
+    pub logs_config_use_compression: bool,
+    pub logs_config_compression_level: i32,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
     pub flush_timeout: u64, //TODO go agent adds jitter too
@@ -136,6 +138,8 @@ impl Default for Config {
             // Logs
             log_level: LogLevel::default(),
             logs_config_processing_rules: None,
+            logs_config_use_compression: true,
+            logs_config_compression_level: 6,
             // Metrics
             enhanced_metrics: true,
             https_proxy: None,
