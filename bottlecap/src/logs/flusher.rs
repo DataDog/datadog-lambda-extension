@@ -92,12 +92,17 @@ impl Flusher {
             } else {
                 data
             };
-            let resp: Result<reqwest::Response, reqwest::Error> = client
+            let req = client
                 .post(&url)
                 .header("DD-API-KEY", api_key)
                 .header("DD-PROTOCOL", "agent-json")
-                .header("Content-Type", "application/json")
-                .header("Content-Encoding", "zstd")
+                .header("Content-Type", "application/json");
+            let req = if compression_enabled {
+                req.header("Content-Encoding", "zstd")
+            } else {
+                req
+            };
+            let resp: Result<reqwest::Response, reqwest::Error> = req 
                 .body(body)
                 .send()
                 .await;
