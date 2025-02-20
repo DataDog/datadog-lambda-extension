@@ -88,7 +88,6 @@ impl Flusher {
     ) {
         if !data.is_empty() {
             let url = format!("{fqdn}/api/v2/logs");
-            debug!("Sending logs to datadog");
             let start = Instant::now();
             let body = if compression_enabled {
                 let result = (|| -> Result<Vec<u8>, Box<dyn Error>> {
