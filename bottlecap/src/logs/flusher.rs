@@ -77,6 +77,8 @@ impl Flusher {
             batches
         };
 
+        println!("Flushing {} logs batches", logs_batches.len());
+
         let futures = logs_batches.into_iter().filter(|b| !b.is_empty()).map(|b| {
             let req = self.create_request(b);
             Self::send(req)
@@ -104,14 +106,17 @@ impl Flusher {
         let time = Instant::now();
         let resp = req.send().await;
         let elapsed = time.elapsed();
+        println!("Log Flush time: {:?}", elapsed);
 
         match resp {
             Ok(resp) => {
-                if resp.status() != 202 {
+                let status = resp.status();
+                _ = resp.text().await;
+                if status != 202 {
                     debug!(
                         "Failed to send logs to datadog after {}ms: {}",
                         elapsed.as_millis(),
-                        resp.status()
+                        status
                     );
                 }
             }

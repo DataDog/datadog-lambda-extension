@@ -25,7 +25,8 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest:
         // Set maximum idle connections per host
         .pool_max_idle_per_host(32)
         // Enable TCP keepalive
-        .tcp_keepalive(Some(Duration::from_secs(60)));
+        .tcp_keepalive(Some(Duration::from_secs(60)))
+        .connection_verbose(true);
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
     if let Some(https_uri) = &config.https_proxy {
         let proxy = reqwest::Proxy::https(https_uri.clone())?;

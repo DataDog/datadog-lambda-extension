@@ -371,7 +371,6 @@ async fn extension_loop_active(
             // call next
             // optionally flush after tick for long running invos
             'inner: loop {
-                debug!("astuyve - should flush end");
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
@@ -391,11 +390,16 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
+                        let flush_at_end_race_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
                             metrics_flusher.flush(),
                             trace_flusher.flush(),
                             stats_flusher.flush()
+                        );
+                        println!(
+                            "RACE FLUSH at end data in {}ms",
+                            flush_at_end_race_time.elapsed().as_millis()
                         );
                     }
                 }
@@ -417,7 +421,6 @@ async fn extension_loop_active(
             shutdown =
                 handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
         } else {
-            debug!("astuyve - WAITING FOR NEXT AND PERIODIC TICK");
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
             // If we get platform.runtimeDone or platform.runtimeReport
@@ -449,11 +452,16 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
+                        let race_flush_no_flush_start_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
                             metrics_flusher.flush(),
                             trace_flusher.flush(),
                             stats_flusher.flush()
+                        );
+                        println!(
+                            "RACE FLUSH data in {}ms",
+                            race_flush_no_flush_start_time.elapsed().as_millis()
                         );
                     }
                 }
