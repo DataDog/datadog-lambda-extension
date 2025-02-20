@@ -15,7 +15,7 @@ datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "b5
 datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
-dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
+dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "2bf6b4ca3ea2c718b11b087d7d4a8f5174147578" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
 lazy_static = { version = "1.5", default-features = false }
