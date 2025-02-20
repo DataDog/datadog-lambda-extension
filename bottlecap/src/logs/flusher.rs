@@ -38,7 +38,7 @@ impl Flusher {
             fqdn_site: site,
             client,
             aggregator,
-            config
+            config,
         }
     }
     pub async fn flush(&self) {
@@ -52,7 +52,17 @@ impl Flusher {
             let cloned_client = self.client.clone();
             let cloned_use_compression = self.config.logs_config_use_compression.clone();
             let cloned_compression_level = self.config.logs_config_compression_level.clone();
-            set.spawn(async move { Self::send(cloned_client, api_key, site, logs, cloned_use_compression, cloned_compression_level).await });
+            set.spawn(async move {
+                Self::send(
+                    cloned_client,
+                    api_key,
+                    site,
+                    logs,
+                    cloned_use_compression,
+                    cloned_compression_level,
+                )
+                .await
+            });
             logs = guard.get_batch();
         }
         drop(guard);
@@ -67,19 +77,26 @@ impl Flusher {
     }
 
     #[allow(clippy::unwrap_used)]
-    async fn send(client: reqwest::Client, api_key: String, fqdn: String, data: Vec<u8>, compression_enabled: bool, compression_level: i32) {
+    async fn send(
+        client: reqwest::Client,
+        api_key: String,
+        fqdn: String,
+        data: Vec<u8>,
+        compression_enabled: bool,
+        compression_level: i32,
+    ) {
         let url = format!("{fqdn}/api/v2/logs");
         if !data.is_empty() {
             let body = if compression_enabled {
                 let result = (|| -> Result<Vec<u8>, Box<dyn Error>> {
                     let mut encoder = Encoder::new(Vec::new(), compression_level)
                         .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-                    
-                    encoder.write_all(&data)
+
+                    encoder
+                        .write_all(&data)
                         .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-                    
-                    encoder.finish()
-                        .map_err(|e| Box::new(e) as Box<dyn Error>)
+
+                    encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
                 })();
 
                 match result {
@@ -102,10 +119,7 @@ impl Flusher {
             } else {
                 req
             };
-            let resp: Result<reqwest::Response, reqwest::Error> = req 
-                .body(body)
-                .send()
-                .await;
+            let resp: Result<reqwest::Response, reqwest::Error> = req.body(body).send().await;
 
             match resp {
                 Ok(resp) => {
