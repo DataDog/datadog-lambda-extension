@@ -1,6 +1,7 @@
 use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
+use futures::future::join_all;
 use reqwest::header::HeaderMap;
 use std::time::Instant;
 use std::{
@@ -8,7 +9,6 @@ use std::{
     io::Write,
     sync::{Arc, Mutex},
 };
-use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -78,24 +78,16 @@ impl Flusher {
             batches
         };
 
-        let mut set = JoinSet::new();
-        for batch in logs_batches {
-            if batch.is_empty() {
-                continue;
-            }
+        let futures = logs_batches.into_iter().filter(|b| !b.is_empty()).map(|b| {
+            let req = self.create_request(b);
+            Self::send(req)
+        });
 
-            let req = self.create_request(batch);
-            set.spawn(async {
-                Self::send(req).await;
-            });
-        }
+        let results = join_all(futures).await;
 
-        while let Some(res) = set.join_next().await {
-            match res {
-                Ok(()) => (),
-                Err(e) => {
-                    error!("Failed to wait for request sending {}", e);
-                }
+        for result in results {
+            if let Err(e) = result {
+                debug!("Failed to send logs: {}", e);
             }
         }
     }
@@ -109,10 +101,11 @@ impl Flusher {
             .body(body)
     }
 
-    async fn send(req: reqwest::RequestBuilder) {
+    async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error>> {
         let time = Instant::now();
         let resp = req.send().await;
         let elapsed = time.elapsed();
+
         match resp {
             Ok(resp) => {
                 if resp.status() != 202 {
@@ -129,8 +122,12 @@ impl Flusher {
                     elapsed.as_millis(),
                     e
                 );
+
+                return Err(Box::new(e));
             }
         }
+
+        Ok(())
     }
 
     fn compress(&self, data: Vec<u8>) -> Vec<u8> {
