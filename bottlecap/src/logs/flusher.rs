@@ -2,6 +2,7 @@ use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
 use reqwest::header::HeaderMap;
+use std::time::Instant;
 use std::{
     error::Error,
     io::Write,
@@ -109,14 +110,25 @@ impl Flusher {
     }
 
     async fn send(req: reqwest::RequestBuilder) {
-        match req.send().await {
+        let time = Instant::now();
+        let resp = req.send().await;
+        let elapsed = time.elapsed();
+        match resp {
             Ok(resp) => {
                 if resp.status() != 202 {
-                    debug!("Failed to send logs to datadog: {}", resp.status());
+                    debug!(
+                        "Failed to send logs to datadog after {}ms: {}",
+                        elapsed.as_millis(),
+                        resp.status()
+                    );
                 }
             }
             Err(e) => {
-                error!("Failed to send logs to datadog: {}", e);
+                error!(
+                    "Failed to send logs to datadog after {}ms: {}",
+                    elapsed.as_millis(),
+                    e
+                );
             }
         }
     }

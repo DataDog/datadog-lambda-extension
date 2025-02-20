@@ -1,5 +1,5 @@
 use crate::config;
-use std::collections::hash_map;
+use std::collections::HashMap;
 use std::env::consts::ARCH;
 use std::fs;
 use std::sync::Arc;
@@ -66,7 +66,7 @@ const RESOURCE_KEY: &str = "resource";
 
 #[derive(Debug, Clone)]
 pub struct Lambda {
-    tags_map: hash_map::HashMap<String, String>,
+    tags_map: HashMap<String, String>,
 }
 
 fn arch_to_platform<'a>() -> &'a str {
@@ -77,10 +77,10 @@ fn arch_to_platform<'a>() -> &'a str {
 }
 
 fn tags_from_env(
-    mut tags_map: hash_map::HashMap<String, String>,
+    mut tags_map: HashMap<String, String>,
     config: Arc<config::Config>,
-    metadata: &hash_map::HashMap<String, String>,
-) -> hash_map::HashMap<String, String> {
+    metadata: &HashMap<String, String>,
+) -> HashMap<String, String> {
     if metadata.contains_key(FUNCTION_ARN_KEY) {
         let parts = metadata[FUNCTION_ARN_KEY].split(':').collect::<Vec<&str>>();
         if parts.len() > 6 {
@@ -222,10 +222,10 @@ impl Lambda {
     #[must_use]
     pub fn new_from_config(
         config: Arc<config::Config>,
-        metadata: &hash_map::HashMap<String, String>,
+        metadata: &HashMap<String, String>,
     ) -> Self {
         Lambda {
-            tags_map: tags_from_env(hash_map::HashMap::new(), config, metadata),
+            tags_map: tags_from_env(HashMap::new(), config, metadata),
         }
     }
 
@@ -248,19 +248,19 @@ impl Lambda {
     }
 
     #[must_use]
-    pub fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
+    pub fn get_tags_map(&self) -> &HashMap<String, String> {
         &self.tags_map
     }
 
     #[must_use]
-    pub fn get_function_tags_map(&self) -> hash_map::HashMap<String, String> {
+    pub fn get_function_tags_map(&self) -> HashMap<String, String> {
         let tags = self
             .tags_map
             .iter()
             .map(|(k, v)| format!("{k}:{v}"))
             .collect::<Vec<String>>()
             .join(",");
-        hash_map::HashMap::from_iter([(FUNCTION_TAGS_KEY.to_string(), tags)])
+        HashMap::from_iter([(FUNCTION_TAGS_KEY.to_string(), tags)])
     }
 }
 
@@ -270,13 +270,14 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use serial_test::serial;
+    use std::collections::HashMap;
     use std::fs::File;
     use std::io::Write;
     use std::path::Path;
 
     #[test]
     fn test_new_from_config() {
-        let metadata = hash_map::HashMap::new();
+        let metadata = HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
         assert_eq!(tags.tags_map.len(), 3);
         assert_eq!(
@@ -297,7 +298,7 @@ mod tests {
 
     #[test]
     fn test_new_with_function_arn_metadata() {
-        let mut metadata = hash_map::HashMap::new();
+        let mut metadata = HashMap::new();
         metadata.insert(
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
@@ -317,7 +318,7 @@ mod tests {
     #[test]
     #[serial] //run test serially since it sets and unsets env vars
     fn test_with_lambda_env_vars() {
-        let mut metadata = hash_map::HashMap::new();
+        let mut metadata = HashMap::new();
         metadata.insert(
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:My-function".to_string(),
@@ -387,7 +388,7 @@ mod tests {
 
     #[test]
     fn test_get_function_tags_map() {
-        let mut metadata = hash_map::HashMap::new();
+        let mut metadata = HashMap::new();
         metadata.insert(
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
@@ -402,7 +403,7 @@ mod tests {
         let tags = Lambda::new_from_config(config, &metadata);
         let function_tags = tags.get_function_tags_map();
         assert_eq!(function_tags.len(), 1);
-        let fn_tags_map: hash_map::HashMap<String, String> = function_tags
+        let fn_tags_map: HashMap<String, String> = function_tags
             .get(FUNCTION_TAGS_KEY)
             .unwrap()
             .split(',')
