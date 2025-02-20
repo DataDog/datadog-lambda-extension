@@ -24,7 +24,6 @@ pub fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
 }
 
-#[allow(clippy::await_holding_lock)]
 impl Flusher {
     pub fn new(
         api_key: String,
@@ -42,11 +41,21 @@ impl Flusher {
         }
     }
     pub async fn flush(&self) {
-        let mut guard = self.aggregator.lock().expect("lock poisoned");
-        let mut set = JoinSet::new();
+        let logs_batches = {
+            let mut guard = self.aggregator.lock().expect("lock poisoned");
+            let mut batches = Vec::new();
+            let mut current_batch = guard.get_batch();
 
-        let mut logs = guard.get_batch();
-        while !logs.is_empty() {
+            while !current_batch.is_empty() {
+                batches.push(current_batch);
+                current_batch = guard.get_batch();
+            }
+
+            batches
+        };
+
+        let mut set = JoinSet::new();
+        for batch in logs_batches {
             let api_key = self.api_key.clone();
             let site = self.fqdn_site.clone();
             let cloned_client = self.client.clone();
@@ -57,15 +66,14 @@ impl Flusher {
                     cloned_client,
                     api_key,
                     site,
-                    logs,
+                    batch,
                     cloned_use_compression,
                     cloned_compression_level,
                 )
                 .await;
             });
-            logs = guard.get_batch();
         }
-        drop(guard);
+
         while let Some(res) = set.join_next().await {
             match res {
                 Ok(()) => (),
