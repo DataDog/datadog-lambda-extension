@@ -99,7 +99,9 @@ impl Flusher {
                     encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
                 })();
 
-                if let Ok(compressed_data) = result { compressed_data } else {
+                if let Ok(compressed_data) = result {
+                    compressed_data
+                } else {
                     debug!("Failed to compress data, sending uncompressed data");
                     data
                 }
