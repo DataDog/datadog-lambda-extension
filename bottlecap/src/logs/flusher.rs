@@ -1,6 +1,7 @@
 use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
+use reqwest::header::HeaderMap;
 use std::{
     error::Error,
     io::Write,
@@ -10,12 +11,13 @@ use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
+#[derive(Debug, Clone)]
 pub struct Flusher {
-    api_key: String,
     fqdn_site: String,
     client: reqwest::Client,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
+    headers: HeaderMap,
 }
 
 #[inline]
@@ -32,12 +34,33 @@ impl Flusher {
         config: Arc<config::Config>,
     ) -> Self {
         let client = http_client::get_client(config.clone());
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "DD-API-KEY",
+            api_key.clone().parse().expect("failed to parse header"),
+        );
+        headers.insert(
+            "DD-PROTOCOL",
+            "agent-json".parse().expect("failed to parse header"),
+        );
+        headers.insert(
+            "Content-Type",
+            "application/json".parse().expect("failed to parse header"),
+        );
+
+        if config.logs_config_use_compression {
+            headers.insert(
+                "Content-Encoding",
+                "zstd".parse().expect("failed to parse header"),
+            );
+        }
+
         Flusher {
-            api_key,
             fqdn_site: site,
             client,
             aggregator,
             config,
+            headers,
         }
     }
     pub async fn flush(&self) {
@@ -56,21 +79,13 @@ impl Flusher {
 
         let mut set = JoinSet::new();
         for batch in logs_batches {
-            let api_key = self.api_key.clone();
-            let site = self.fqdn_site.clone();
-            let cloned_client = self.client.clone();
-            let cloned_use_compression = self.config.logs_config_use_compression;
-            let cloned_compression_level = self.config.logs_config_compression_level;
-            set.spawn(async move {
-                Self::send(
-                    cloned_client,
-                    api_key,
-                    site,
-                    batch,
-                    cloned_use_compression,
-                    cloned_compression_level,
-                )
-                .await;
+            if batch.is_empty() {
+                continue;
+            }
+
+            let req = self.create_request(batch);
+            set.spawn(async {
+                Self::send(req).await;
             });
         }
 
@@ -84,60 +99,45 @@ impl Flusher {
         }
     }
 
-    #[allow(clippy::unwrap_used)]
-    async fn send(
-        client: reqwest::Client,
-        api_key: String,
-        fqdn: String,
-        data: Vec<u8>,
-        compression_enabled: bool,
-        compression_level: i32,
-    ) {
-        let url = format!("{fqdn}/api/v2/logs");
-        if !data.is_empty() {
-            let body = if compression_enabled {
-                let result = (|| -> Result<Vec<u8>, Box<dyn Error>> {
-                    let mut encoder = Encoder::new(Vec::new(), compression_level)
-                        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
+    fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
+        let url = format!("{}/api/v2/logs", self.fqdn_site);
+        let body = self.compress(data);
+        self.client
+            .post(&url)
+            .headers(self.headers.clone())
+            .body(body)
+    }
 
-                    encoder
-                        .write_all(&data)
-                        .map_err(|e| Box::new(e) as Box<dyn Error>)?;
-
-                    encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
-                })();
-
-                if let Ok(compressed_data) = result {
-                    compressed_data
-                } else {
-                    debug!("Failed to compress data, sending uncompressed data");
-                    data
-                }
-            } else {
-                data
-            };
-            let req = client
-                .post(&url)
-                .header("DD-API-KEY", api_key)
-                .header("DD-PROTOCOL", "agent-json")
-                .header("Content-Type", "application/json");
-            let req = if compression_enabled {
-                req.header("Content-Encoding", "zstd")
-            } else {
-                req
-            };
-            let resp: Result<reqwest::Response, reqwest::Error> = req.body(body).send().await;
-
-            match resp {
-                Ok(resp) => {
-                    if resp.status() != 202 {
-                        debug!("Failed to send logs to datadog: {}", resp.status());
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to send logs to datadog: {}", e);
+    async fn send(req: reqwest::RequestBuilder) {
+        match req.send().await {
+            Ok(resp) => {
+                if resp.status() != 202 {
+                    debug!("Failed to send logs to datadog: {}", resp.status());
                 }
             }
+            Err(e) => {
+                error!("Failed to send logs to datadog: {}", e);
+            }
         }
+    }
+
+    fn compress(&self, data: Vec<u8>) -> Vec<u8> {
+        if !self.config.logs_config_use_compression {
+            return data;
+        }
+
+        match self.encode(&data) {
+            Ok(compressed_data) => compressed_data,
+            Err(e) => {
+                debug!("Failed to compress data: {}", e);
+                data
+            }
+        }
+    }
+
+    fn encode(&self, data: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
+        encoder.write_all(data)?;
+        encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
     }
 }
