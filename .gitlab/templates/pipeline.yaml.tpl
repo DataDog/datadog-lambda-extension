@@ -187,11 +187,12 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    STAGE: {{ $environment.name }}
+    ADD_PERMISSIONS: {{ $environment.add_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
-    - .gitlab/scripts/publish_layers.sh
+    - .gitlab/scripts/publish_layer.sh
 
 {{ if eq $environment.name "sandbox" }}
 
@@ -214,11 +215,12 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
     REGION: us-east-1
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    STAGE: {{ $environment.name }}
+    ADD_PERMISSIONS: {{ $environment.add_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
-    - .gitlab/scripts/publish_layers.sh
+    - .gitlab/scripts/publish_layer.sh
 
 {{ end }} # if environment sandbox
 
