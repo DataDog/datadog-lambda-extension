@@ -104,6 +104,7 @@ pub struct Config {
     pub logs_config_compression_level: i32,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
+    //flush timeout in seconds
     pub flush_timeout: u64, //TODO go agent adds jitter too
     pub https_proxy: Option<String>,
     pub capture_lambda_payload: bool,

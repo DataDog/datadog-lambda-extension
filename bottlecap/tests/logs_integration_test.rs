@@ -37,7 +37,10 @@ async fn test_logs() {
         then.status(reqwest::StatusCode::ACCEPTED.as_u16());
     });
 
-    let arc_conf = Arc::new(Config::default());
+    let arc_conf = Arc::new(Config {
+        logs_config_use_compression: false,
+        ..Config::default()
+    });
     let tags_provider = Arc::new(Provider::new(
         Arc::clone(&arc_conf),
         LAMBDA_RUNTIME_SLUG.to_string(),
