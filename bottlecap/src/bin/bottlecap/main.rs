@@ -11,7 +11,7 @@
 
 use bottlecap::{
     base_url,
-    config::{self, flush_strategy::FlushStrategy, get_aws_partition_by_region, AwsConfig, Config},
+    config::{self, get_aws_partition_by_region, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -400,6 +400,7 @@ async fn extension_loop_active(
                     }
                 }
             }
+            let flush_start_time = Instant::now();
             // flush
             tokio::join!(
                 logs_flusher.flush(),
@@ -407,9 +408,14 @@ async fn extension_loop_active(
                 trace_flusher.flush(),
                 stats_flusher.flush()
             );
+            println!(
+                "Flushed all data in {}ms",
+                flush_start_time.elapsed().as_millis()
+            );
             let next_lambda_response = next_event(client, &r.extension_id).await;
 
-            shutdown = handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+            shutdown =
+                handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
         } else {
             debug!("astuyve - WAITING FOR NEXT AND PERIODIC TICK");
             // NO FLUSH SCENARIO
@@ -420,8 +426,13 @@ async fn extension_loop_active(
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
             'inner: loop {
-                tokio::select!{
-                   biased;
+                tokio::select! {
+                biased;
+                    next_response = &mut next_lambda_response => {
+                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                        // Need to break here to re-call next
+                        break 'inner;
+                    }
                     Some(event) = event_bus.rx.recv() => {
                         if let Some(runtime_done_meta) = handle_event_bus_event(event, invocation_processor.clone()).await {
                             let mut p = invocation_processor.lock().await;
@@ -436,11 +447,6 @@ async fn extension_loop_active(
                             ).await;
                             drop(p);
                         }
-                    }
-                    next_response = &mut next_lambda_response => {
-                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
-                        // Need to break here to re-call next
-                        break 'inner;
                     }
                     _ = flush_interval.tick() => {
                         tokio::join!(
@@ -474,89 +480,98 @@ struct RuntimeDoneMeta {
     metrics: RuntimeDoneMetrics,
 }
 
-async fn handle_event_bus_event(event: Event, invocation_processor: Arc<TokioMutex<InvocationProcessor>>) -> Option<RuntimeDoneMeta> {
+async fn handle_event_bus_event(
+    event: Event,
+    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+) -> Option<RuntimeDoneMeta> {
     match event {
         Event::Metric(event) => {
             debug!("Metric event: {:?}", event);
             None
-        },
+        }
         Event::OutOfMemory => {
             let mut p = invocation_processor.lock().await;
             p.on_out_of_memory_error();
             drop(p);
             None
-        },
-        Event::Telemetry(event) =>
-            match event.record {
-                TelemetryRecord::PlatformInitStart { .. } => {
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_init_start(event.time);
-                    drop(p);
-                    None
-                }
-                TelemetryRecord::PlatformInitReport {
-                    initialization_type,
-                    phase,
-                    metrics,
-                } => {
-                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_init_report(metrics.duration_ms);
-                    drop(p);
-                    None
-                }
-                TelemetryRecord::PlatformStart { request_id, .. } => {
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_start(request_id, event.time);
-                    drop(p);
-                    None
-                }
-                TelemetryRecord::PlatformRuntimeDone {
-                    request_id,
-                    status,
-                    metrics,
-                    error_type,
-                    ..
-                } => {
-                    debug!(
-                        "Runtime done for request_id: {:?} with status: {:?} and error: {:?}",
-                        request_id, status, error_type.unwrap_or("None".to_string())
-                    );
-
-                    if let Some(metrics) = metrics {
-                        return Some(RuntimeDoneMeta {
-                            request_id,
-                            status,
-                            metrics,
-                        });
-                    }
-                    None
-                }
-                TelemetryRecord::PlatformReport {
-                    request_id,
-                    status,
-                    metrics,
-                    error_type,
-                    ..
-                } => {
-                    debug!(
-                        "Platform report for request_id: {:?} with status: {:?} and error: {:?}",
-                        request_id, status, error_type.unwrap_or("None".to_string())
-                    );
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_report(&request_id, metrics);
-                    drop(p);
-                    None
-                }
-                _ => {
-                    debug!("Unforwarded Telemetry event: {:?}", event);
-                    None
-                }
+        }
+        Event::Telemetry(event) => match event.record {
+            TelemetryRecord::PlatformInitStart { .. } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_init_start(event.time);
+                drop(p);
+                None
             }
+            TelemetryRecord::PlatformInitReport {
+                initialization_type,
+                phase,
+                metrics,
+            } => {
+                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_init_report(metrics.duration_ms);
+                drop(p);
+                None
+            }
+            TelemetryRecord::PlatformStart { request_id, .. } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_start(request_id, event.time);
+                drop(p);
+                None
+            }
+            TelemetryRecord::PlatformRuntimeDone {
+                request_id,
+                status,
+                metrics,
+                error_type,
+                ..
+            } => {
+                debug!(
+                    "Runtime done for request_id: {:?} with status: {:?} and error: {:?}",
+                    request_id,
+                    status,
+                    error_type.unwrap_or("None".to_string())
+                );
+
+                if let Some(metrics) = metrics {
+                    return Some(RuntimeDoneMeta {
+                        request_id,
+                        status,
+                        metrics,
+                    });
+                }
+                None
+            }
+            TelemetryRecord::PlatformReport {
+                request_id,
+                status,
+                metrics,
+                error_type,
+                ..
+            } => {
+                debug!(
+                    "Platform report for request_id: {:?} with status: {:?} and error: {:?}",
+                    request_id,
+                    status,
+                    error_type.unwrap_or("None".to_string())
+                );
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_report(&request_id, metrics);
+                drop(p);
+                None
+            }
+            _ => {
+                debug!("Unforwarded Telemetry event: {:?}", event);
+                None
+            }
+        },
     }
 }
 
-async fn handle_next_invocation(next_response: Result<NextEventResponse>, invocation_processor: Arc<TokioMutex<InvocationProcessor>>) -> bool {
+async fn handle_next_invocation(
+    next_response: Result<NextEventResponse>,
+    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+) -> bool {
     match next_response {
         Ok(NextEventResponse::Invoke {
             request_id,
