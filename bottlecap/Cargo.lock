@@ -425,6 +425,7 @@ dependencies = [
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/)",
  "dogstatsd",
  "figment",
+ "futures",
  "hex",
  "hmac",
  "httpmock",
