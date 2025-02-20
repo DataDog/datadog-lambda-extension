@@ -1,7 +1,6 @@
 use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
-use futures::future::join_all;
 use reqwest::header::HeaderMap;
 use std::time::Instant;
 use std::{
@@ -9,6 +8,7 @@ use std::{
     io::Write,
     sync::{Arc, Mutex},
 };
+use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -79,14 +79,16 @@ impl Flusher {
 
         println!("Flushing {} logs batches", logs_batches.len());
 
-        let futures = logs_batches.into_iter().filter(|b| !b.is_empty()).map(|b| {
-            let req = self.create_request(b);
-            Self::send(req)
-        });
+        let mut set = JoinSet::new();
+        for batch in &logs_batches {
+            if batch.is_empty() {
+                continue;
+            }
+            let req = self.create_request(batch.clone());
+            set.spawn(async move { Self::send(req).await });
+        }
 
-        let results = join_all(futures).await;
-
-        for result in results {
+        for result in set.join_all().await {
             if let Err(e) = result {
                 debug!("Failed to send logs: {}", e);
             }
@@ -102,11 +104,11 @@ impl Flusher {
             .body(body)
     }
 
-    async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error>> {
+    async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
         let time = Instant::now();
         let resp = req.send().await;
         let elapsed = time.elapsed();
-        println!("Log Flush time: {:?}", elapsed);
+        println!("Log Flush time: {elapsed:?}");
 
         match resp {
             Ok(resp) => {
