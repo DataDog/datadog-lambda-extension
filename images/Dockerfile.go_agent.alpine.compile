@@ -14,9 +14,6 @@ ENV GOROOT=/usr/lib/go
 ENV GOPATH=/go
 ENV PATH=/go/bin:$PATH
 
-ENV CGO_ENABLED=${FIPS:+1}
-ENV GOEXPERIMENT=${FIPS:+boringcrypto}
-
 RUN mkdir -p ${GOPATH}/src ${GOPATH}/bin
 RUN mkdir -p /tmp/dd/datadog-agent
 
@@ -36,6 +33,12 @@ WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    if [ "$FIPS" = "1" ]; then \
+        export CGO_ENABLED=1; \
+        export GOEXPERIMENT=boringcrypto; \
+    fi; \
+    echo CGO_ENABLED=$CGO_ENABLED; \
+    echo GOEXPERIMENT=$GOEXPERIMENT; \
     if [ -z "$AGENT_VERSION" ]; then \
         /usr/lib/go/bin/go build -ldflags="-w -extldflags '-static' \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \

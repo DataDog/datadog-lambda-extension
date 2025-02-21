@@ -4,9 +4,6 @@ ARG AGENT_VERSION
 ARG BUILD_TAGS
 ARG FIPS
 
-ENV CGO_ENABLED=${FIPS:+1}
-ENV GOEXPERIMENT=${FIPS:+boringcrypto}
-
 RUN mkdir -p /tmp/dd/datadog-agent
 
 # Install dependencies
@@ -37,6 +34,12 @@ WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    if [ "$FIPS" = "1" ]; then \
+        export CGO_ENABLED=1; \
+        export GOEXPERIMENT=boringcrypto; \
+    fi; \
+    echo CGO_ENABLED=$CGO_ENABLED; \
+    echo GOEXPERIMENT=$GOEXPERIMENT; \
     if [ -z "$AGENT_VERSION" ]; then \
         /usr/local/go/bin/go build -ldflags="-w \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
