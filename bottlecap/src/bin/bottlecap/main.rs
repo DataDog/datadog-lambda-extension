@@ -416,6 +416,7 @@ async fn extension_loop_active(
                 "Flushed all data in {}ms",
                 flush_start_time.elapsed().as_millis()
             );
+            flush_interval.reset();
             let next_lambda_response = next_event(client, &r.extension_id).await;
 
             shutdown =
@@ -459,6 +460,7 @@ async fn extension_loop_active(
                             trace_flusher.flush(),
                             stats_flusher.flush()
                         );
+                        flush_interval.reset();
                         println!(
                             "RACE FLUSH data in {}ms",
                             race_flush_no_flush_start_time.elapsed().as_millis()

@@ -48,7 +48,7 @@ impl FlushControl {
             FlushStrategy::Periodically(_) => false,
             FlushStrategy::Default => {
                 if self.invocation_times.should_adapt_to_periodic(now) {
-                    let should_periodic_flush = self.should_periodic_flush(now, TWENTY_SECONDS);
+                    let should_periodic_flush = self.should_periodic_flush(now, DEFAULT_FLUSH_INTERVAL);
                     debug!(
                         "Adapting over to periodic flush strategy. should_periodic_flush: {}",
                         should_periodic_flush
