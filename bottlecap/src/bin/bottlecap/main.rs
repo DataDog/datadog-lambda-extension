@@ -390,7 +390,7 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
-                        let flush_at_end_race_time = Instant::now();
+                        let race_flush_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
                             metrics_flusher.flush(),
@@ -399,7 +399,7 @@ async fn extension_loop_active(
                         );
                         println!(
                             "RACE FLUSH at end data in {}ms",
-                            flush_at_end_race_time.elapsed().as_millis()
+                            race_flush_time.elapsed().as_millis()
                         );
                     }
                 }
@@ -416,6 +416,7 @@ async fn extension_loop_active(
                 "Flushed all data in {}ms",
                 flush_start_time.elapsed().as_millis()
             );
+ 
             flush_interval.reset();
             let next_lambda_response = next_event(client, &r.extension_id).await;
 
@@ -433,6 +434,14 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
+                        // Dear reader this is important, you may be tempted to remove this
+                        // after all, why reset the flush interval if we're not flushing?
+                        // It's because the flush_interval is only for the RACE FLUSH
+                        // For long-running txns. The call to `flush_control.should_flush_end()`
+                        // has its own interval which is not reset here.
+                        flush_interval.reset();
+                        // Thank you for not removing flush_interval.reset();
+
                         shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
                         break 'inner;
@@ -462,7 +471,7 @@ async fn extension_loop_active(
                         );
                         flush_interval.reset();
                         println!(
-                            "RACE FLUSH data in {}ms",
+                            "RACE NO FLUSH in {}ms",
                             race_flush_no_flush_start_time.elapsed().as_millis()
                         );
                     }
