@@ -77,8 +77,6 @@ impl Flusher {
             batches
         };
 
-        println!("Flushing {} logs batches", logs_batches.len());
-
         let mut set = JoinSet::new();
         for batch in &logs_batches {
             if batch.is_empty() {
@@ -108,7 +106,7 @@ impl Flusher {
         let time = Instant::now();
         let resp = req.send().await;
         let elapsed = time.elapsed();
-        println!("Log Flush time: {elapsed:?}");
+        debug!("Sent logs to datadog in {}ms", elapsed.as_millis());
 
         match resp {
             Ok(resp) => {
