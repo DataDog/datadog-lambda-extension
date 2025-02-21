@@ -35,7 +35,6 @@ fi
 
 
 LAYER_DIR=".layers"
-VALID_ACCOUNTS=("sandbox" "prod")
 
 publish_layer() {
     region=$1
