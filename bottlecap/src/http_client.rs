@@ -18,6 +18,8 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
 fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest::Error> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(config.flush_timeout))
+        .http1_only()
+        .tcp_nodelay(true)
         // Temporarily not force http2
         // Enable HTTP/2 for better multiplexing
         //.http2_prior_knowledge()
@@ -29,7 +31,7 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest:
         // Set keep-alive timeout
         .pool_idle_timeout(Some(Duration::from_secs(90)))
         // Set maximum idle connections per host
-        .pool_max_idle_per_host(4)
+        .pool_max_idle_per_host(8)
         // Enable TCP keepalive
         .tcp_keepalive(Some(Duration::from_secs(120)));
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
