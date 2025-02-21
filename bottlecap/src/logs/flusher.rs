@@ -1,8 +1,7 @@
 use crate::config;
-use crate::http_client;
 use crate::logs::aggregator::Aggregator;
-use reqwest::header::HeaderMap;
-use std::time::Instant;
+use hyper::{client::ResponseFuture, Body, Client, HeaderMap, Method, Request};
+use std::time::{Duration, Instant};
 use std::{
     error::Error,
     io::Write,
@@ -15,7 +14,7 @@ use zstd::stream::write::Encoder;
 #[derive(Debug, Clone)]
 pub struct Flusher {
     fqdn_site: String,
-    client: reqwest::Client,
+    client: hyper::Client<hyper::client::HttpConnector>,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
     headers: HeaderMap,
@@ -34,7 +33,13 @@ impl Flusher {
         site: String,
         config: Arc<config::Config>,
     ) -> Self {
-        let client = http_client::get_client(config.clone());
+        // let client = http_client::get_client(config.clone());
+        let client = Client::builder()
+            .pool_idle_timeout(Duration::from_secs(90))
+            .pool_max_idle_per_host(8)
+            .http2_only(true)
+            .http2_keep_alive_while_idle(true)
+            .build_http();
         let mut headers = HeaderMap::new();
         headers.insert(
             "DD-API-KEY",
@@ -95,25 +100,29 @@ impl Flusher {
         }
     }
 
-    fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
+    fn create_request(&self, data: Vec<u8>) -> ResponseFuture {
         let url = format!("{}/api/v2/logs", self.fqdn_site);
         let body = self.compress(data);
-        self.client
-            .post(&url)
-            .headers(self.headers.clone())
-            .body(body)
+
+        let mut req = Request::builder()
+            .method(Method::POST)
+            .uri(url)
+            .body(Body::from(body))
+            .expect("failed to build request");
+        req.headers_mut().extend(self.headers.clone());
+
+        self.client.request(req)
     }
 
-    async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
+    async fn send(req: ResponseFuture) -> Result<(), Box<dyn Error + Send>> {
         let time = Instant::now();
-        let resp = req.send().await;
+        let resp = req.await;
         let elapsed = time.elapsed();
         println!("Log Flush time: {elapsed:?}");
 
         match resp {
             Ok(resp) => {
                 let status = resp.status();
-                _ = resp.text().await;
                 if status != 202 {
                     debug!(
                         "Failed to send logs to datadog after {}ms: {}",
