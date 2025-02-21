@@ -62,8 +62,7 @@ use std::{
     path::Path,
     process::Command,
     sync::{Arc, Mutex},
-    time::Duration,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
@@ -185,7 +184,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs();
 
-    enable_logging_subsystem(&config);
+    enable_logging_subsystem();
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,
@@ -242,10 +241,9 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
     (aws_config, config)
 }
 
-fn enable_logging_subsystem(config: &Arc<Config>) {
+fn enable_logging_subsystem() {
     let env_filter = format!(
-        "h2=off,hyper=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
-        config.log_level
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off",
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
@@ -416,12 +414,77 @@ async fn extension_loop_active(
                 "Flushed all data in {}ms",
                 flush_start_time.elapsed().as_millis()
             );
+            flush_interval.reset();
+            let next_response = next_event(client, &r.extension_id).await;
+            shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+        } else if flush_control.should_periodic_flush() {
+            // Should flush at the top of the invocation, which is now
+            let flush_start_time = Instant::now();
+            // flush
+            tokio::join!(
+                logs_flusher.flush(),
+                metrics_flusher.flush(),
+                trace_flusher.flush(),
+                stats_flusher.flush()
+            );
+            println!(
+                "Flushed all data in {}ms",
+                flush_start_time.elapsed().as_millis()
+            );
  
             flush_interval.reset();
-            let next_lambda_response = next_event(client, &r.extension_id).await;
+            let next_lambda_response = next_event(client, &r.extension_id);
+            tokio::pin!(next_lambda_response);
+            // break loop after runtime done
+            // flush everything
+            // call next
+            // optionally flush after tick for long running invos
+            'inner: loop {
+                tokio::select! {
+                biased;
+                    next_response = &mut next_lambda_response => {
+                        // Dear reader this is important, you may be tempted to remove this
+                        // after all, why reset the flush interval if we're not flushing?
+                        // It's because the flush_interval is only for the RACE FLUSH
+                        // For long-running txns. The call to `flush_control.should_flush_end()`
+                        // has its own interval which is not reset here.
+                        flush_interval.reset();
+                        // Thank you for not removing flush_interval.reset();
 
-            shutdown =
-                handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                        // Need to break here to re-call next
+                        break 'inner;
+                    }
+                    Some(event) = event_bus.rx.recv() => {
+                        if let Some(runtime_done_meta) = handle_event_bus_event(event, invocation_processor.clone()).await {
+                            let mut p = invocation_processor.lock().await;
+                            p.on_platform_runtime_done(
+                                &runtime_done_meta.request_id,
+                                runtime_done_meta.metrics.duration_ms,
+                                runtime_done_meta.status,
+                                config.clone(),
+                                tags_provider.clone(),
+                                trace_processor.clone(),
+                                trace_agent_channel.clone()
+                            ).await;
+                            drop(p);
+                        }
+                    }
+                    _ = flush_interval.tick() => {
+                        let race_flush_time = Instant::now();
+                        tokio::join!(
+                            logs_flusher.flush(),
+                            metrics_flusher.flush(),
+                            trace_flusher.flush(),
+                            stats_flusher.flush()
+                        );
+                        println!(
+                            "RACE FLUSH at end data in {}ms",
+                            race_flush_time.elapsed().as_millis()
+                        );
+                    }
+                }
+            }
         } else {
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
