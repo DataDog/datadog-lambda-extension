@@ -302,28 +302,35 @@ publish image ({{ $multi_arch_image_flavor.name }}):
 
 {{ end }} # end multi_arch_image_flavors
 
-layer bundle:
-  stage: build
+{{ range $environment := (ds "environments").environments }}
+
+{{ if eq $environment.name "prod" }}signed {{ end }}layer bundle:
+  stage: {{ if eq $environment.name "prod" }}sign{{ else }}build{{ end }}
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
+  rules:
+    - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     {{ range (ds "flavors").flavors }}
     {{ if .needs_layer_publish }}
-    - layer ({{ .name }})
+    - {{ if eq $environment.name "prod" }}sign {{ end }}layer ({{ .name }})
     {{ end }} # end needs_layer_publish
     {{ end }} # end flavors
   dependencies:
     {{ range (ds "flavors").flavors }}
     {{ if .needs_layer_publish }}
-    - layer ({{ .name }})
+    - {{ if eq $environment.name "prod" }}sign {{ end }}layer ({{ .name }})
     {{ end }} # end needs_layer_publish
     {{ end }} # end flavors
   artifacts:
     expire_in: 1 hr
     paths:
-      - datadog_extension-bundle-${CI_JOB_ID}/
-    name: datadog_extension-bundle-${CI_JOB_ID}
+      - datadog_extension-{{ if eq $environment.name "prod"}}signed-{{ end }}bundle-${CI_JOB_ID}/
+    name: datadog_extension-{{ if eq $environment.name "prod"}}signed-{{ end }}bundle-${CI_JOB_ID}
   script:
-    - rm -rf datadog_extension-bundle-${CI_JOB_ID}
-    - mkdir -p datadog_extension-bundle-${CI_JOB_ID}
-    - cp .layers/datadog_extension-*.zip datadog_extension-bundle-${CI_JOB_ID}
+    - rm -rf datadog_extension-{{ if eq $environment.name "prod"}}signed-{{ end }}bundle-${CI_JOB_ID}
+    - mkdir -p datadog_extension-{{ if eq $environment.name "prod"}}signed-{{ end }}bundle-${CI_JOB_ID}
+    - cp .layers/datadog_extension-*.zip datadog_extension-{{ if eq $environment.name "prod"}}signed-{{ end }}bundle-${CI_JOB_ID}
+
+{{ end }} # end environments
