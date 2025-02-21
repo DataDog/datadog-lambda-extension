@@ -22,7 +22,12 @@ where
     ) -> fmt::Result {
         // Format values from the event's's metadata:
         let metadata = event.metadata();
-        write!(&mut writer, "DD_EXTENSION | {} | {} | ", metadata.name(), metadata.level())?;
+        write!(
+            &mut writer,
+            "DD_EXTENSION | {} | {} | ",
+            metadata.name(),
+            metadata.level()
+        )?;
 
         // Format all the spans in the event's span context.
         if let Some(scope) = ctx.event_scope() {

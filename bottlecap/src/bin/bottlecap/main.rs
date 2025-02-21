@@ -387,35 +387,38 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
-                        tokio::join!(
-                            logs_flusher.flush(),
-                            metrics_flusher.flush(),
-                            trace_flusher.flush(),
-                            stats_flusher.flush()
-                        );
+                        flush_all(
+                            &logs_flusher,
+                            &mut metrics_flusher,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &mut flush_interval,
+                        ).await;
                     }
                 }
             }
             // flush
-            tokio::join!(
-                logs_flusher.flush(),
-                metrics_flusher.flush(),
-                trace_flusher.flush(),
-                stats_flusher.flush()
-            );
-            flush_interval.reset();
+            flush_all(
+                &logs_flusher,
+                &mut metrics_flusher,
+                &*trace_flusher,
+                &*stats_flusher,
+                &mut flush_interval,
+            )
+            .await;
             let next_response = next_event(client, &r.extension_id).await;
             shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else if flush_control.should_periodic_flush() {
             // Should flush at the top of the invocation, which is now
             // flush
-            tokio::join!(
-                logs_flusher.flush(),
-                metrics_flusher.flush(),
-                trace_flusher.flush(),
-                stats_flusher.flush()
-            );
-            
+            flush_all(
+                &logs_flusher,
+                &mut metrics_flusher,
+                &*trace_flusher,
+                &*stats_flusher,
+                &mut flush_interval,
+            )
+            .await;
             flush_interval.reset();
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
@@ -455,13 +458,13 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
-                        tokio::join!(
-                            logs_flusher.flush(),
-                            metrics_flusher.flush(),
-                            trace_flusher.flush(),
-                            stats_flusher.flush()
-                        );
-                        
+                        flush_all(
+                            &logs_flusher,
+                            &mut metrics_flusher,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &mut flush_interval,
+                        ).await;
                     }
                 }
             }
@@ -505,13 +508,13 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
-                        tokio::join!(
-                            logs_flusher.flush(),
-                            metrics_flusher.flush(),
-                            trace_flusher.flush(),
-                            stats_flusher.flush()
-                        );
-                        flush_interval.reset();
+                        flush_all(
+                            &logs_flusher,
+                            &mut metrics_flusher,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &mut flush_interval,
+                        ).await;
                     }
                 }
             }
@@ -520,15 +523,33 @@ async fn extension_loop_active(
         if shutdown {
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            tokio::join!(
-                logs_flusher.flush(),
-                metrics_flusher.flush(),
-                trace_flusher.flush(),
-                stats_flusher.flush()
-            );
+            flush_all(
+                &logs_flusher,
+                &mut metrics_flusher,
+                &*trace_flusher,
+                &*stats_flusher,
+                &mut flush_interval,
+            )
+            .await;
             return Ok(());
         }
     }
+}
+
+async fn flush_all(
+    logs_flusher: &LogsFlusher,
+    metrics_flusher: &mut MetricsFlusher,
+    trace_flusher: &dyn TraceFlusher,
+    stats_flusher: &dyn StatsFlusher,
+    flush_interval: &mut tokio::time::Interval,
+) {
+    tokio::join!(
+        logs_flusher.flush(),
+        metrics_flusher.flush(),
+        trace_flusher.flush(),
+        stats_flusher.flush()
+    );
+    flush_interval.reset();
 }
 
 struct RuntimeDoneMeta {
