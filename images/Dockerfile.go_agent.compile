@@ -53,9 +53,15 @@ RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/dat
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 RUN if [ "$FIPS" = "1" ]; then \
-    /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly' || \
-    (echo "boringcrypto not enabled" && exit 1); \
-    fi;
+        /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly' || \
+        (echo "boringcrypto not enabled" && exit 1); \
+    else \
+        /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly'; \
+        if [ $? -eq 0 ]; then \
+            echo "boringcrypto incorrectly enabled"; \
+            exit 1; \
+        fi; \
+    fi
 
 # Strip the binary to reduce size
 RUN strip datadog-agent
