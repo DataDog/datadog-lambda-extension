@@ -121,6 +121,8 @@ check layer size ({{ $flavor.name }}):
     - layer ({{ $flavor.name }})
   variables:
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
+    MAX_LAYER_COMPRESSED_SIZE_MB: {{ $flavor.max_layer_compressed_size_mb }}
+    MAX_LAYER_UNCOMPRESSED_SIZE_MB: {{ $flavor.max_layer_uncompressed_size_mb }}
   script:
     - .gitlab/scripts/check_layer_size.sh
 
