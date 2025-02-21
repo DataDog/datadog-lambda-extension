@@ -25,7 +25,7 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest:
         .http2_keep_alive_interval(Some(Duration::from_secs(10)))
         .http2_keep_alive_while_idle(true)
         .http2_keep_alive_timeout(Duration::from_secs(10))
-        .http2_initial_stream_window_size(5245555) // magic number
+        .http2_initial_stream_window_size(5_000_000) // magic number
         // Set keep-alive timeout
         .pool_idle_timeout(Some(Duration::from_secs(90)))
         // Set maximum idle connections per host
