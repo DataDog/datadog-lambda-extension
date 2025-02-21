@@ -243,7 +243,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
 
 fn enable_logging_subsystem() {
     let env_filter =
-        "TRACE".to_string();
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off".to_string();
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
             EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
@@ -390,9 +390,9 @@ async fn extension_loop_active(
                         let race_flush_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
-                            //metrics_flusher.flush(),
-                            //trace_flusher.flush(),
-                            //stats_flusher.flush()
+                            metrics_flusher.flush(),
+                            trace_flusher.flush(),
+                            stats_flusher.flush()
                         );
                         println!(
                             "RACE FLUSH at end data in {}ms",
@@ -405,9 +405,9 @@ async fn extension_loop_active(
             // flush
             tokio::join!(
                 logs_flusher.flush(),
-                //metrics_flusher.flush(),
-                //trace_flusher.flush(),
-                //stats_flusher.flush()
+                metrics_flusher.flush(),
+                trace_flusher.flush(),
+                stats_flusher.flush()
             );
             println!(
                 "Flushed all data in {}ms",
@@ -422,9 +422,9 @@ async fn extension_loop_active(
             // flush
             tokio::join!(
                 logs_flusher.flush(),
-                //metrics_flusher.flush(),
-                //trace_flusher.flush(),
-                //stats_flusher.flush()
+                metrics_flusher.flush(),
+                trace_flusher.flush(),
+                stats_flusher.flush()
             );
             println!(
                 "Flushed all data in {}ms",
@@ -473,9 +473,9 @@ async fn extension_loop_active(
                         let race_flush_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
-                            //metrics_flusher.flush(),
-                            //trace_flusher.flush(),
-                            //stats_flusher.flush()
+                            metrics_flusher.flush(),
+                            trace_flusher.flush(),
+                            stats_flusher.flush()
                         );
                         println!(
                             "RACE FLUSH at end data in {}ms",
@@ -527,9 +527,9 @@ async fn extension_loop_active(
                         let race_flush_no_flush_start_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
-                            //metrics_flusher.flush(),
-                            //trace_flusher.flush(),
-                            //stats_flusher.flush()
+                            metrics_flusher.flush(),
+                            trace_flusher.flush(),
+                            stats_flusher.flush()
                         );
                         flush_interval.reset();
                         println!(
