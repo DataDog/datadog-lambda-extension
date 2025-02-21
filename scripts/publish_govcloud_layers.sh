@@ -10,6 +10,9 @@
 # all of the required layers. Run this script as follows:
 #
 # ENVIRONMENT=[us1-stagin-fed or us-fed] [WORKFLOW_LAYER_SUFFIX=optional-layer-suffix] [REGIONS=us-gov-west-1] ./scripts/publish_govcloud_layers.sh <layer-bundle.zip>
+#
+# protip: you can drag the zip file from finder into your terminal to insert
+# its path.
 
 set -e
 
@@ -103,8 +106,6 @@ flavors["amd64"]="arch=amd64 suffix=amd64 layer_name_base_suffix="
 flavors["arm64"]="arch=arm64 suffix=arm64 layer_name_base_suffix=-ARM"
 flavors["amd64-fips"]="arch=amd64 suffix=amd64-fips layer_name_base_suffix=-FIPS"
 flavors["arm64-fips"]="arch=arm64 suffix=arm64-fips layer_name_base_suffix=-FIPS-ARM"
-echo "$flavors"
-
 
 for region in $REGIONS
 do
@@ -113,8 +114,7 @@ do
     export REGION=$region
 
     for flavor in "${!flavors[@]}"; do
-        echo "Publishing $flavor"
-
+        export LAYER_NAME_BASE_SUFFIX=""
         IFS=' ' read -r -a values <<< "${flavors[$flavor]}"
         for value in "${values[@]}"; do
             case $value in
@@ -125,6 +125,7 @@ do
         done
 
         export LAYER_FILE="datadog_extension-$SUFFIX.zip"
+        echo "Publishing $LAYER_FILE"
 
         $AWS_VAULT_PREFIX .gitlab/scripts/publish_layer.sh
     done

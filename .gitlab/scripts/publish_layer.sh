@@ -23,7 +23,7 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-if [ -z "$LAYER_NAME_BASE_SUFFIX" ]; then
+if [ -z "${LAYER_NAME_BASE_SUFFIX+x}" ]; then
     printf "[ERROR]: LAYER_NAME_BASE_SUFFIX not specified."
     exit 1
 fi
