@@ -35,25 +35,17 @@ impl FlushControl {
     pub fn should_flush_end(&mut self) -> bool {
         // previously: would return true if flush_strategy is not Periodically
         // !matches!(self.flush_strategy, FlushStrategy::Periodically(_))
-        let now = match time::SystemTime::now().duration_since(time::UNIX_EPOCH) {
-            Ok(now) => now.as_secs(),
-            Err(e) => {
-                debug!("Failed to get current time: {:?}", e);
-                return false;
-            }
-        };
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs();
         self.invocation_times.add(now);
         match &self.flush_strategy {
             FlushStrategy::End | FlushStrategy::EndPeriodically(_) => true,
             FlushStrategy::Periodically(_) => false,
             FlushStrategy::Default => {
                 if self.invocation_times.should_adapt_to_periodic(now) {
-                    let should_periodic_flush = self.should_periodic_flush(now, TWENTY_SECONDS);
-                    debug!(
-                        "Adapting over to periodic flush strategy. should_periodic_flush: {}",
-                        should_periodic_flush
-                    );
-                    return should_periodic_flush;
+                    return false;
                 }
                 debug!("Not enough invocations to adapt to periodic flush, flushing at the end of the invocation");
                 self.last_flush = now;
@@ -76,12 +68,22 @@ impl FlushControl {
     }
 
     // Only used for default strategy
-    fn should_periodic_flush(&mut self, now: u64, interval: u64) -> bool {
-        if now - self.last_flush > (interval / 1000) {
-            self.last_flush = now;
-            true
-        } else {
-            false
+    #[must_use]
+    pub fn should_periodic_flush(&mut self) -> bool {
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs();
+        match &self.flush_strategy {
+            FlushStrategy::Default => {
+                if now - self.last_flush > (TWENTY_SECONDS / 1000) {
+                    self.last_flush = now;
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => false,
         }
     }
 }
