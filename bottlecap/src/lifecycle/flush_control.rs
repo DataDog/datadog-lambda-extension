@@ -35,14 +35,17 @@ impl FlushControl {
     pub fn should_flush_end(&mut self) -> bool {
         // previously: would return true if flush_strategy is not Periodically
         // !matches!(self.flush_strategy, FlushStrategy::Periodically(_))
-        let now = time::SystemTime::now().duration_since(time::UNIX_EPOCH).expect("unable to poll clock, unrecoverable").as_secs();
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs();
         self.invocation_times.add(now);
         match &self.flush_strategy {
             FlushStrategy::End | FlushStrategy::EndPeriodically(_) => true,
             FlushStrategy::Periodically(_) => false,
             FlushStrategy::Default => {
                 if self.invocation_times.should_adapt_to_periodic(now) {
-                    return false
+                    return false;
                 }
                 debug!("Not enough invocations to adapt to periodic flush, flushing at the end of the invocation");
                 self.last_flush = now;
@@ -67,7 +70,10 @@ impl FlushControl {
     // Only used for default strategy
     #[must_use]
     pub fn should_periodic_flush(&mut self) -> bool {
-        let now = time::SystemTime::now().duration_since(time::UNIX_EPOCH).expect("unable to poll clock, unrecoverable").as_secs();
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs();
         match &self.flush_strategy {
             FlushStrategy::Default => {
                 if now - self.last_flush > (TWENTY_SECONDS / 1000) {

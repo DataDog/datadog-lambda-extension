@@ -126,7 +126,7 @@ async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventR
         debug!("HTTP Error {} - Response: {}", status, text);
         return Err(Error::new(
             std::io::ErrorKind::InvalidData,
-            format!("HTTP Error {}", status),
+            format!("HTTP Error {status}"),
         ));
     }
 
@@ -242,9 +242,8 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
 }
 
 fn enable_logging_subsystem() {
-    let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off",
-    );
+    let env_filter =
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off".to_string();
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
             EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
@@ -431,7 +430,7 @@ async fn extension_loop_active(
                 "Flushed all data in {}ms",
                 flush_start_time.elapsed().as_millis()
             );
- 
+
             flush_interval.reset();
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
