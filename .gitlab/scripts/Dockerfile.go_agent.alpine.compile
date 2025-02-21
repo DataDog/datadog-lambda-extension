@@ -33,6 +33,8 @@ WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    echo $CGO_ENABLED; \
+    echo $GOEXPERIMENT; \
     if [ -z "$AGENT_VERSION" ]; then \
         /usr/lib/go/bin/go build -ldflags="-w -extldflags '-static' \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
