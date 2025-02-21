@@ -2,6 +2,11 @@ FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG BUILD_TAGS
+ARG FIPS
+
+ENV CGO_ENABLED=${FIPS:+1}
+ENV GOEXPERIMENT=${FIPS:+boringcrypto}
+
 RUN mkdir -p /tmp/dd/datadog-agent
 
 RUN yum install -y wget tar gzip gcc
@@ -29,6 +34,8 @@ WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
+    echo $CGO_ENABLED; \
+    echo $GOEXPERIMENT; \
     if [ -z "$AGENT_VERSION" ]; then \
         /usr/local/go/bin/go build -ldflags="-w \
         -X github.com/DataDog/datadog-agent/pkg/serverless/tags.currentExtensionVersion=$EXTENSION_VERSION" \
@@ -42,6 +49,17 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
 
 RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
+
+RUN if [ "$FIPS" = "1" ]; then \
+        /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly' || \
+        (echo "boringcrypto not enabled" && exit 1); \
+    else \
+        /usr/local/go/bin/go tool nm datadog-agent | grep -i 'crypto/internal/boring/sig.FIPSOnly'; \
+        if [ $? -eq 0 ]; then \
+            echo "boringcrypto incorrectly enabled"; \
+            exit 1; \
+        fi; \
+    fi
 
 RUN strip datadog-agent
 RUN if [ "$arch" = "x86_64" ]; then apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent; fi
