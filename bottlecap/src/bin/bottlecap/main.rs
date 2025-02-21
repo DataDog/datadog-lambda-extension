@@ -387,38 +387,27 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
-                        let race_flush_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
                             metrics_flusher.flush(),
                             trace_flusher.flush(),
                             stats_flusher.flush()
                         );
-                        println!(
-                            "RACE FLUSH at end data in {}ms",
-                            race_flush_time.elapsed().as_millis()
-                        );
                     }
                 }
             }
-            let flush_start_time = Instant::now();
             // flush
             tokio::join!(
                 logs_flusher.flush(),
                 metrics_flusher.flush(),
                 trace_flusher.flush(),
                 stats_flusher.flush()
-            );
-            println!(
-                "Flushed all data in {}ms",
-                flush_start_time.elapsed().as_millis()
             );
             flush_interval.reset();
             let next_response = next_event(client, &r.extension_id).await;
             shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else if flush_control.should_periodic_flush() {
             // Should flush at the top of the invocation, which is now
-            let flush_start_time = Instant::now();
             // flush
             tokio::join!(
                 logs_flusher.flush(),
@@ -426,11 +415,7 @@ async fn extension_loop_active(
                 trace_flusher.flush(),
                 stats_flusher.flush()
             );
-            println!(
-                "Flushed all data in {}ms",
-                flush_start_time.elapsed().as_millis()
-            );
-
+            
             flush_interval.reset();
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
@@ -470,17 +455,13 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
-                        let race_flush_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
                             metrics_flusher.flush(),
                             trace_flusher.flush(),
                             stats_flusher.flush()
                         );
-                        println!(
-                            "RACE FLUSH at end data in {}ms",
-                            race_flush_time.elapsed().as_millis()
-                        );
+                        
                     }
                 }
             }
@@ -524,7 +505,6 @@ async fn extension_loop_active(
                         }
                     }
                     _ = flush_interval.tick() => {
-                        let race_flush_no_flush_start_time = Instant::now();
                         tokio::join!(
                             logs_flusher.flush(),
                             metrics_flusher.flush(),
@@ -532,10 +512,6 @@ async fn extension_loop_active(
                             stats_flusher.flush()
                         );
                         flush_interval.reset();
-                        println!(
-                            "RACE NO FLUSH in {}ms",
-                            race_flush_no_flush_start_time.elapsed().as_millis()
-                        );
                     }
                 }
             }
