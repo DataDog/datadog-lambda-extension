@@ -41,7 +41,7 @@ printf "Tagging container image with version: $VERSION and latest\n"
 
 docker buildx build \
     --platform $PLATFORM \
-    -f ./images/${TARGET_IMAGE} \
+    -f ./images/Dockerfile.extension_image \
     --build-arg SUFFIX=$SUFFIX \
     --tag "$DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX}" \
     --tag "$DOCKER_TARGET_IMAGE:${VERSION}${SUFFIX}" \
