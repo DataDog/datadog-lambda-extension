@@ -41,7 +41,7 @@ if [ "$ENVIRONMENT" = "us1-staging-fed" ]; then
 # sso_region=us-gov-west-1
 # region=us-gov-west-1
 
-    export ADD_PERMISSIONS=0
+    export ADD_LAYER_VERSION_PERMISSIONS=0
     export AUTOMATICALLY_BUMP_VERSION=1
 
     if [[ ! "$PACKAGE_NAME" =~ ^datadog_extension-(signed-)?bundle-[0-9]+$ ]]; then
@@ -60,7 +60,7 @@ elif [ $ENVIRONMENT = "us1-fed" ]; then
 # sso_region=us-gov-west-1
 # region=us-gov-west-1
 
-    export ADD_PERMISSIONS=1
+    export ADD_LAYER_VERSION_PERMISSIONS=1
     export AUTOMATICALLY_BUMP_VERSION=0
 
     if [[ ! "$PACKAGE_NAME" =~ ^datadog_extension-signed-bundle-[0-9]+$ ]]; then
