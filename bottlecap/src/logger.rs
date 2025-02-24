@@ -24,8 +24,7 @@ where
         let metadata = event.metadata();
         write!(
             &mut writer,
-            "DD_EXTENSION | {} | {} | ",
-            metadata.name(),
+            "DD_EXTENSION | {} | ",
             metadata.level()
         )?;
 

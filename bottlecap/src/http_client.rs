@@ -18,8 +18,6 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
 fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest::Error> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(config.flush_timeout))
-        .http1_only()
-        .tcp_nodelay(true)
         // Temporarily not force http2
         // Enable HTTP/2 for better multiplexing
         //.http2_prior_knowledge()

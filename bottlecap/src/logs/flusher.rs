@@ -106,7 +106,6 @@ impl Flusher {
         let time = Instant::now();
         let resp = req.send().await;
         let elapsed = time.elapsed();
-        debug!("Sent logs to datadog in {}ms", elapsed.as_millis());
 
         match resp {
             Ok(resp) => {
