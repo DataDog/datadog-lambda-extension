@@ -23,7 +23,7 @@ if [ -z "$WORKFLOW_LAYER_SUFFIX" ]; then
     printf "Building container images tagged without suffix\n"
 else
     printf "Building container images tagged with suffix: ${WORKFLOW_LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${WORKFLOW_LAYER_SUFFIX}${SUFFIX}"
+    LAYER_NAME="${LAYER_NAME}-${WORKFLOW_LAYER_SUFFIX}"
 fi
 
 # Increment last version
@@ -33,7 +33,7 @@ printf "Tagging container image with version: $VERSION and latest\n"
 
 docker buildx build \
     --platform $PLATFORM \
-    -f ./images/${TARGET_IMAGE} \
+    -f ./images/Dockerfile.extension_image \
     --build-arg SUFFIX=$SUFFIX \
     --tag "$DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX}" \
     --tag "$DOCKER_TARGET_IMAGE:${VERSION}${SUFFIX}" \
