@@ -348,8 +348,8 @@ async fn extension_loop_active(
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
 
-    let mut flush_interval = flush_control.get_flush_interval();
-    flush_interval.tick().await; // discard first tick, which is instantaneous
+    let mut race_flush_interval = flush_control.get_flush_interval();
+    race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
@@ -357,11 +357,7 @@ async fn extension_loop_active(
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let shutdown;
-        // Don't await! Pin it and check in the tokio loop
-        // Tokio select! drops whatever task does not complete first
-        // but the state machine API in Lambda will give us an invalid error
-        // if we call /next twice instead of waiting
-        //let mut next_response_received = false;
+
         if flush_control.should_flush_end() {
             // break loop after runtime done
             // flush everything
@@ -386,13 +382,13 @@ async fn extension_loop_active(
                             break 'inner;
                         }
                     }
-                    _ = flush_interval.tick() => {
+                    _ = race_flush_interval.tick() => {
                         flush_all(
                             &logs_flusher,
                             &mut metrics_flusher,
                             &*trace_flusher,
                             &*stats_flusher,
-                            &mut flush_interval,
+                            &mut race_flush_interval,
                         ).await;
                     }
                 }
@@ -403,7 +399,7 @@ async fn extension_loop_active(
                 &mut metrics_flusher,
                 &*trace_flusher,
                 &*stats_flusher,
-                &mut flush_interval,
+                &mut race_flush_interval,
             )
             .await;
             let next_response = next_event(client, &r.extension_id).await;
@@ -416,14 +412,16 @@ async fn extension_loop_active(
                 &mut metrics_flusher,
                 &*trace_flusher,
                 &*stats_flusher,
-                &mut flush_interval,
+                &mut race_flush_interval,
             )
             .await;
-            flush_interval.reset();
+            race_flush_interval.reset();
+            // Don't await! Pin it and check in the tokio loop
+            // Tokio select! drops whatever task does not complete first
+            // but the state machine API in Lambda will give us an invalid error
+            // if we call /next twice instead of waiting
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
-            // break loop after runtime done
-            // flush everything
             // call next
             // optionally flush after tick for long running invos
             'inner: loop {
@@ -432,11 +430,11 @@ async fn extension_loop_active(
                     next_response = &mut next_lambda_response => {
                         // Dear reader this is important, you may be tempted to remove this
                         // after all, why reset the flush interval if we're not flushing?
-                        // It's because the flush_interval is only for the RACE FLUSH
+                        // It's because the race_flush_interval is only for the RACE FLUSH
                         // For long-running txns. The call to `flush_control.should_flush_end()`
                         // has its own interval which is not reset here.
-                        flush_interval.reset();
-                        // Thank you for not removing flush_interval.reset();
+                        race_flush_interval.reset();
+                        // Thank you for not removing race_flush_interval.reset();
 
                         shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
@@ -457,13 +455,13 @@ async fn extension_loop_active(
                             drop(p);
                         }
                     }
-                    _ = flush_interval.tick() => {
+                    _ = race_flush_interval.tick() => {
                         flush_all(
                             &logs_flusher,
                             &mut metrics_flusher,
                             &*trace_flusher,
                             &*stats_flusher,
-                            &mut flush_interval,
+                            &mut race_flush_interval,
                         ).await;
                     }
                 }
@@ -482,11 +480,11 @@ async fn extension_loop_active(
                     next_response = &mut next_lambda_response => {
                         // Dear reader this is important, you may be tempted to remove this
                         // after all, why reset the flush interval if we're not flushing?
-                        // It's because the flush_interval is only for the RACE FLUSH
+                        // It's because the race_flush_interval is only for the RACE FLUSH
                         // For long-running txns. The call to `flush_control.should_flush_end()`
                         // has its own interval which is not reset here.
-                        flush_interval.reset();
-                        // Thank you for not removing flush_interval.reset();
+                        race_flush_interval.reset();
+                        // Thank you for not removing race_flush_interval.reset();
 
                         shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
@@ -507,13 +505,13 @@ async fn extension_loop_active(
                             drop(p);
                         }
                     }
-                    _ = flush_interval.tick() => {
+                    _ = race_flush_interval.tick() => {
                         flush_all(
                             &logs_flusher,
                             &mut metrics_flusher,
                             &*trace_flusher,
                             &*stats_flusher,
-                            &mut flush_interval,
+                            &mut race_flush_interval,
                         ).await;
                     }
                 }
@@ -528,7 +526,7 @@ async fn extension_loop_active(
                 &mut metrics_flusher,
                 &*trace_flusher,
                 &*stats_flusher,
-                &mut flush_interval,
+                &mut race_flush_interval,
             )
             .await;
             return Ok(());
@@ -541,7 +539,7 @@ async fn flush_all(
     metrics_flusher: &mut MetricsFlusher,
     trace_flusher: &dyn TraceFlusher,
     stats_flusher: &dyn StatsFlusher,
-    flush_interval: &mut tokio::time::Interval,
+    race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
         logs_flusher.flush(),
@@ -549,7 +547,7 @@ async fn flush_all(
         trace_flusher.flush(),
         stats_flusher.flush()
     );
-    flush_interval.reset();
+    race_flush_interval.reset();
 }
 
 struct RuntimeDoneMeta {
