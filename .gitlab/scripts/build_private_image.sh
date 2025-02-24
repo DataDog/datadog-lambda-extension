@@ -19,11 +19,11 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS --pa
 # anything other than the basic `self-monitoring-lambda-extension:latest` image
 # in our self-monitoring, so it's not a thing we're going to fix right now.
 LAYER_NAME="Datadog-Extension$SUFFIX"
-if [ -z "$WORKFLOW_LAYER_SUFFIX" ]; then
+if [ -z "$PIPELINE_LAYER_SUFFIX" ]; then
     printf "Building container images tagged without suffix\n"
 else
-    printf "Building container images tagged with suffix: ${WORKFLOW_LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${WORKFLOW_LAYER_SUFFIX}"
+    printf "Building container images tagged with suffix: ${PIPELINE_LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${PIPELINE_LAYER_SUFFIX}"
 fi
 
 # Increment last version
