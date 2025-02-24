@@ -9,7 +9,7 @@
 # Download button on the `layer bundle` job. This will be a zip file containing
 # all of the required layers. Run this script as follows:
 #
-# ENVIRONMENT=[us1-stagin-fed or us-fed] [WORKFLOW_LAYER_SUFFIX=optional-layer-suffix] [REGIONS=us-gov-west-1] ./scripts/publish_govcloud_layers.sh <layer-bundle.zip>
+# ENVIRONMENT=[us1-stagin-fed or us-fed] [PIPELINE_LAYER_SUFFIX=optional-layer-suffix] [REGIONS=us-gov-west-1] ./scripts/publish_govcloud_layers.sh <layer-bundle.zip>
 #
 # protip: you can drag the zip file from finder into your terminal to insert
 # its path.
