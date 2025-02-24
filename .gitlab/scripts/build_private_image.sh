@@ -14,24 +14,16 @@ IMAGE_TAG="latest"
 printf "Authenticating Docker to ECR...\n"
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 425362996713.dkr.ecr.us-east-1.amazonaws.com
 
-if [ "$ALPINE" = "0" ]; then
-    printf "Building image\n"
-    TARGET_IMAGE="Dockerfile.extension_image"
-else
-    printf "Building image for alpine\n"
-    TARGET_IMAGE="Dockerfile.extension_image.alpine"
-fi
-
 # NOTE: this probably does not work the way that we expect it to, especially
 # when suffixes are involved. This is a known bug but we don't really check
 # anything other than the basic `self-monitoring-lambda-extension:latest` image
 # in our self-monitoring, so it's not a thing we're going to fix right now.
 LAYER_NAME="Datadog-Extension"
-if [ -z "$WORKFLOW_LAYER_SUFFIX" ]; then
+if [ -z "$PIPELINE_LAYER_SUFFIX" ]; then
     printf "Building container images tagged without suffix\n"
 else
-    printf "Building container images tagged with suffix: ${WORKFLOW_LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${WORKFLOW_LAYER_SUFFIX}"
+    printf "Building container images tagged with suffix: ${PIPELINE_LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${PIPELINE_LAYER_SUFFIX}"
 fi
 
 # Increment last version

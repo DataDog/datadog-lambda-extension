@@ -75,11 +75,11 @@ fi
 
 LAYER_NAME="Datadog-Extension${LAYER_NAME_BASE_SUFFIX}"
 
-if [ -z "$WORKFLOW_LAYER_SUFFIX" ]; then
+if [ -z "$PIPELINE_LAYER_SUFFIX" ]; then
     printf "[$REGION] Deploying layers without suffix\n"
 else
-    printf "[$REGION] Deploying layers with specified suffix: ${WORKFLOW_LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${WORKFLOW_LAYER_SUFFIX}"
+    printf "[$REGION] Deploying layers with specified suffix: ${PIPELINE_LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${PIPELINE_LAYER_SUFFIX}"
 fi
 
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
