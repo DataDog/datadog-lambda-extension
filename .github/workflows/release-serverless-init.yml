@@ -54,7 +54,11 @@ jobs:
           path: datadog-agent
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        id: qemu
+        uses: docker/setup-qemu-action@4574d27a4764455b42196d70a065bc6853246a25 # v3.4.0
+        with:
+          image: tonistiigi/binfmt:qemu-v7.0.0-28
+          platforms: amd64,arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
