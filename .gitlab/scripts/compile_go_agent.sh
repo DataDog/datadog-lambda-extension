@@ -82,7 +82,7 @@ function docker_compile {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/compile-go-agent-${SUFFIX}:${VERSION} \
-        -f ${MAIN_DIR}/.gitlab/scripts/${file} \
+        -f ${MAIN_DIR}/images/${file} \
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \

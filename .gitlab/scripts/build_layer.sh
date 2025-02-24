@@ -35,7 +35,7 @@ docker_build() {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/build-extension-${SUFFIX} \
-        -f .gitlab/scripts/Dockerfile.build_layer \
+        -f ./images/Dockerfile.build_layer \
         --build-arg SUFFIX=$SUFFIX \
         . -o $TARGET_DIR/datadog-extension-${SUFFIX}
 
