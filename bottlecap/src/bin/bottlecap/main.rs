@@ -112,18 +112,18 @@ async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventR
         .send()
         .await
         .map_err(|e| {
-            debug!("Request failed: {}", e);
+            error!("Next request failed: {}", e);
             Error::new(std::io::ErrorKind::InvalidData, e.to_string())
         })?;
 
     let status = response.status();
     let text = response.text().await.map_err(|e| {
-        debug!("Failed to read response body: {}", e);
+        error!("Next response: Failed to read response body: {}", e);
         Error::new(std::io::ErrorKind::InvalidData, e.to_string())
     })?;
 
     if !status.is_success() {
-        debug!("HTTP Error {} - Response: {}", status, text);
+        error!("Next response HTTP Error {} - Response: {}", status, text);
         return Err(Error::new(
             std::io::ErrorKind::InvalidData,
             format!("HTTP Error {status}"),
@@ -131,7 +131,7 @@ async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventR
     }
 
     serde_json::from_str(&text).map_err(|e| {
-        debug!("JSON parse error on response: {}", text);
+        error!("Next JSON parse error on response: {}", text);
         Error::new(std::io::ErrorKind::InvalidData, e.to_string())
     })
 }
