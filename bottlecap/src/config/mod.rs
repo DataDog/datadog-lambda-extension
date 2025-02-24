@@ -177,26 +177,17 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
         };
 
     // Customer explicitly opted out of the Next Gen extension
-    let is_compatibility = match config.extension_version.as_deref() {
+    let opted_out = match config.extension_version.as_deref() {
         Some("compatibility") => true,
         // We want customers using the `next` to not be affected
         _ => false,
     };
 
-    // Check for us-gov region
-    let opted_out = is_compatibility || region.starts_with("us-gov-");
-
     if opted_out {
-        log_fallback_reason(if is_compatibility {
-            "extension_version"
-        } else {
-            "gov_region"
-        });
-        return Err(ConfigError::UnsupportedField(if is_compatibility {
-            "extension_version".to_string()
-        } else {
-            "gov_region".to_string()
-        }));
+        log_fallback_reason("extension_version");
+        return Err(ConfigError::UnsupportedField(
+            "extension_version".to_string(),
+        ));
     }
 
     if config.serverless_appsec_enabled || config.appsec_enabled {
@@ -239,6 +230,12 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
     {
         log_fallback_reason("intake_urls");
         return Err(ConfigError::UnsupportedField("intake_urls".to_string()));
+    }
+
+    // Govcloud Regions
+    if region.starts_with("us-gov-") {
+        log_fallback_reason("gov_region");
+        return Err(ConfigError::UnsupportedField("gov_region".to_string()));
     }
 
     Ok(())
