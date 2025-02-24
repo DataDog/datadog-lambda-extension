@@ -3,6 +3,7 @@ ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG BUILD_TAGS
 
+# Install dependencies
 RUN apk add --no-cache git make musl-dev gcc
 COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
 
@@ -13,17 +14,19 @@ ENV PATH=/go/bin:$PATH
 RUN mkdir -p ${GOPATH}/src ${GOPATH}/bin
 RUN mkdir -p /tmp/dd/datadog-agent
 
-# cache dependencies
+# Copy cached dependencies
 COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
 COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
 WORKDIR /tmp/dd/datadog-agent
 
-# copy source files (/tgz gets unzip automatically by Docker)
+# Add and unzip agent tarball
 ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
 
-# build the extension
+# Build the Serverless Go Agent
+#
+# Sets the `EXTENSION_VERSION` to the serverless tags.
+# Also sets the `AGENT_VERSION` to the version of the agent.
 WORKDIR /tmp/dd/datadog-agent/cmd/serverless
-# add the current version number to the tags package before compilation
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -38,18 +41,20 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -tags "${BUILD_TAGS}" -o datadog-agent; \
     fi
 
+# Ensure that the `agentVersionDefault` variable exists in the binary.
 RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
+# Strip the binary to reduce size
 RUN strip datadog-agent
+
+# Compress the binary with UPX, but only if the architecture is x86_64
 RUN arch="$(uname -m)"; \
     if [ "${arch}" = 'x86_64' ]; then \
       apk add --no-cache upx=3.96-r1 && upx -1 datadog-agent; \
     fi;
 
-
-# keep the smallest possible docker image
+# Use the smallest image possible
 FROM scratch
 COPY --from=compiler /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /
 ENTRYPOINT ["/datadog-agent"]
-
