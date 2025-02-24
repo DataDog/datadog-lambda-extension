@@ -8,8 +8,8 @@
 set -e
 
 
-if [ -z "$ADD_PERMISSIONS" ]; then
-    printf "[ERROR]: ADD_PERMISSIONS not specified."
+if [ -z "$ADD_LAYER_VERSION_PERMISSIONS" ]; then
+    printf "[ERROR]: ADD_LAYER_VERSION_PERMISSIONS not specified."
     exit 1
 fi
 
@@ -51,7 +51,7 @@ publish_layer() {
     )
 
     # Add permissions only for prod
-    if [ "$ADD_PERMISSIONS" = "1" ]; then
+    if [ "$ADD_LAYER_VERSION_PERMISSIONS" = "1" ]; then
         permission=$(aws lambda add-layer-version-permission --layer-name $layer \
             --version-number $version_nbr \
             --statement-id "release-$version_nbr" \
