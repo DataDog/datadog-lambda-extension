@@ -39,17 +39,15 @@ MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(( $MAX_LAYER_UNCOMPRESSED_SIZE_MB * 1024 ))
 FILE=".layers"/$LAYER_FILE
 FILE_SIZE=$(stat --printf="%s" "$FILE")
 FILE_SIZE_KB="$(( ${FILE_SIZE%% *} / 1024))"
-FILE_SIZE_MB="$(( ${FILE_SIZE%% *} / 1024.0 / 1024))"
 
 mkdir tmp
 unzip -q "$FILE" -d tmp
 UNZIPPED_FILE_SIZE=$(du -shb tmp/ | cut -f1)
 UNZIPPED_FILE_SIZE_KB="$(( ${UNZIPPED_FILE_SIZE%% *} / 1024))"
-UNZIPPED_FILE_SIZE_MB="$(( ${UNZIPPED_FILE_SIZE%% *} / 1024.0 / 1024))"
 rm -rf tmp
 
-echo "Layer file ${FILE} has zipped size ${FILE_SIZE_KB} kb (${FILE_SIZE_MB} mb)"
-echo "Layer file ${FILE} has unzipped size ${UNZIPPED_FILE_SIZE_KB} kb (${UNZIPPED_FILE_SIZE_MB} mb)"
+echo "Layer file ${FILE} has zipped size ${FILE_SIZE_KB} kb"
+echo "Layer file ${FILE} has unzipped size ${UNZIPPED_FILE_SIZE_KB} kb"
 
 validate_size "$MAX_LAYER_COMPRESSED_SIZE_KB" $FILE_SIZE_KB
 validate_size "$MAX_LAYER_UNCOMPRESSED_SIZE_KB" $UNZIPPED_FILE_SIZE_KB
