@@ -565,20 +565,17 @@ async fn handle_event_bus_event(
     match event {
         Event::Metric(event) => {
             debug!("Metric event: {:?}", event);
-            None
         }
         Event::OutOfMemory => {
             let mut p = invocation_processor.lock().await;
             p.on_out_of_memory_error();
             drop(p);
-            None
         }
         Event::Telemetry(event) => match event.record {
             TelemetryRecord::PlatformInitStart { .. } => {
                 let mut p = invocation_processor.lock().await;
                 p.on_platform_init_start(event.time);
                 drop(p);
-                None
             }
             TelemetryRecord::PlatformInitReport {
                 initialization_type,
@@ -589,13 +586,11 @@ async fn handle_event_bus_event(
                 let mut p = invocation_processor.lock().await;
                 p.on_platform_init_report(metrics.duration_ms);
                 drop(p);
-                None
             }
             TelemetryRecord::PlatformStart { request_id, .. } => {
                 let mut p = invocation_processor.lock().await;
                 p.on_platform_start(request_id, event.time);
                 drop(p);
-                None
             }
             TelemetryRecord::PlatformRuntimeDone {
                 request_id,
@@ -618,7 +613,6 @@ async fn handle_event_bus_event(
                         metrics,
                     });
                 }
-                None
             }
             TelemetryRecord::PlatformReport {
                 request_id,
@@ -636,14 +630,13 @@ async fn handle_event_bus_event(
                 let mut p = invocation_processor.lock().await;
                 p.on_platform_report(&request_id, metrics);
                 drop(p);
-                None
             }
             _ => {
                 debug!("Unforwarded Telemetry event: {:?}", event);
-                None
             }
         },
     }
+    None
 }
 
 async fn handle_next_invocation(
