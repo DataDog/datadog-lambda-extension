@@ -189,7 +189,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    ADD_PERMISSIONS: {{ $environment.add_permissions }}
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
     AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
@@ -217,7 +217,7 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
     REGION: us-east-1
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    ADD_PERMISSIONS: {{ $environment.add_permissions }}
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
     AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
