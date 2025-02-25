@@ -19,12 +19,16 @@ else
     printf "Alpine compile requested: ${ALPINE}\n"
 fi
 
+if [ -z "$SUFFIX" ]; then
+    printf "No suffix provided, using ${ARCHITECTURE}\n"
+    SUFFIX=$ARCHITECTURE
+fi
 
 if [ "$ALPINE" = "0" ]; then
-    COMPILE_FILE=Dockerfile.bottlecap.compile
+    COMPILE_IMAGE=Dockerfile.bottlecap.compile
 else
     printf "Compiling for alpine\n"
-    COMPILE_FILE=Dockerfile.bottlecap.alpine.compile
+    COMPILE_IMAGE=Dockerfile.bottlecap.alpine.compile
 fi
 
 prepare_folders() {
@@ -64,5 +68,4 @@ docker_build() {
 }
 
 prepare_folders
-docker_build $ARCHITECTURE $COMPILE_FILE
-
+docker_build $ARCHITECTURE $COMPILE_IMAGE

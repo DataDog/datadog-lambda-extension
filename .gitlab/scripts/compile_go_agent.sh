@@ -38,10 +38,15 @@ fi
 
 
 if [ "$ALPINE" = "0" ]; then
-    COMPILE_FILE=Dockerfile.go_agent.compile
+    COMPILE_IMAGE=Dockerfile.go_agent.compile
 else
     printf "Compiling for alpine\n"
-    COMPILE_FILE=Dockerfile.go_agent.alpine.compile
+    COMPILE_IMAGE=Dockerfile.go_agent.alpine.compile
+fi
+
+if [ -z "$SUFFIX" ]; then
+    printf "No suffix provided, using ${ARCHITECTURE}\n"
+    SUFFIX=$ARCHITECTURE
 fi
 
 # Allow override build tags
@@ -91,5 +96,4 @@ function docker_compile {
     cp $TARGET_DIR/compiled-datadog-agent-${SUFFIX}/datadog-agent $TARGET_DIR/datadog-agent-${SUFFIX}
 }
 
-docker_compile $ARCHITECTURE $COMPILE_FILE
-
+docker_compile $ARCHITECTURE $COMPILE_IMAGE
