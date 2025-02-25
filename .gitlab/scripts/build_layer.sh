@@ -33,11 +33,11 @@ prepare_folders() {
 docker_build() {
     local arch=$1
 
-    docker buildx build --platform linux/${arch} \
-        -t datadog/build-extension-${SUFFIX} \
+    docker buildx build --platform linux/"${arch}" \
+        -t datadog/build-extension-"${SUFFIX}" \
         -f .gitlab/scripts/Dockerfile.build_layer \
-        --build-arg SUFFIX=$SUFFIX \
-        . -o $TARGET_DIR/datadog-extension-${SUFFIX}
+        --build-arg SUFFIX="$SUFFIX" --build-arg UPX="$UPX" \
+        . -o "$TARGET_DIR"/datadog-extension-"${SUFFIX}"
 
     cp $TARGET_DIR/datadog-extension-${SUFFIX}/datadog_extension.zip $TARGET_DIR/datadog_extension-${SUFFIX}.zip
     unzip $TARGET_DIR/datadog-extension-${SUFFIX}/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${SUFFIX}

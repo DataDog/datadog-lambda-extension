@@ -5,6 +5,7 @@ flavors:
     needs_code_checks: true
     needs_layer_publish: true
     suffix: amd64
+    upx: true
 
   - name: arm64
     arch: arm64
@@ -12,6 +13,7 @@ flavors:
     needs_code_checks: true
     needs_layer_publish: true
     suffix: arm64
+    upx: false
 
   - name: amd64, alpine
     arch: amd64
@@ -19,6 +21,7 @@ flavors:
     needs_code_checks: false
     needs_layer_publish: false
     suffix: amd64-alpine
+    upx: true
 
   - name: arm64, alpine
     arch: arm64
@@ -26,6 +29,7 @@ flavors:
     needs_code_checks: false
     needs_layer_publish: false
     suffix: arm64-alpine
+    upx: false
 
 # Unfortunately our mutli-arch images don't fit nicely into the flavors
 # structure above.

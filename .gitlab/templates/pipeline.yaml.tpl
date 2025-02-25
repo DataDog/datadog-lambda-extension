@@ -104,6 +104,7 @@ layer ({{ $flavor.name }}):
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     SUFFIX: {{ $flavor.suffix }}
+    UPX: {{ $flavor.upx }}
   script:
     - .gitlab/scripts/build_layer.sh
 
