@@ -52,7 +52,7 @@ ARG CMD_PATH
 ARG DATADOG_WRAPPER=datadog_wrapper
 
 RUN apt-get update
-RUN apt-get install -y zip binutils
+RUN apt-get install -y zip binutils=2.38-4ubuntu2.6
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
