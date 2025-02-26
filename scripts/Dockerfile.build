@@ -47,12 +47,12 @@ RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/dat
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension
-FROM ubuntu:22.04 as compresser
+FROM ubuntu:25.04 as compresser
 ARG CMD_PATH
 ARG DATADOG_WRAPPER=datadog_wrapper
 
 RUN apt-get update
-RUN apt-get install -y zip binutils=2.38-4ubuntu2.6
+RUN apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
