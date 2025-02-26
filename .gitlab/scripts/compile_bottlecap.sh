@@ -31,23 +31,19 @@ else
     COMPILE_IMAGE=Dockerfile.bottlecap.alpine.compile
 fi
 
-prepare_folders() {
-    # Move into the root directory, so this script can be called from any directory
-    SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-    ROOT_DIR=$SCRIPTS_DIR/../..
-    cd $ROOT_DIR
 
-    echo $ROOT_DIR
+# Move into the root directory, so this script can be called from any directory
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+ROOT_DIR=$SCRIPTS_DIR/../..
+cd $ROOT_DIR
 
-    BINARY_DIR=".binaries"
-    TARGET_DIR=$(pwd)/$BINARY_DIR
+BINARY_DIR=".binaries"
+TARGET_DIR=$(pwd)/$BINARY_DIR
+BINARY_PATH=$TARGET_DIR/compiled-bottlecap-${SUFFIX}
 
-    rm -rf $BINARY_DIR 2>/dev/null
-    mkdir -p $BINARY_DIR
+mkdir -p $BINARY_DIR
 
-    cd $ROOT_DIR
-}
-
+cd $ROOT_DIR
 
 docker_build() {
     local arch=$1
@@ -62,10 +58,11 @@ docker_build() {
         -t datadog/compile-bottlecap-${SUFFIX} \
         -f ./images/${file} \
         --build-arg PLATFORM=$PLATFORM \
-        . -o $TARGET_DIR/compiled-bottlecap-${SUFFIX}
+        . -o $BINARY_PATH
 
-    cp $TARGET_DIR/compiled-bottlecap-${SUFFIX}/bottlecap $TARGET_DIR/bottlecap-${SUFFIX}
+    # Copy the compiled binary to the target directory with the expected name
+    # If it already exist, it will be replaced
+    cp $BINARY_PATH/bottlecap $TARGET_DIR/bottlecap-${SUFFIX}
 }
 
-prepare_folders
 docker_build $ARCHITECTURE $COMPILE_IMAGE

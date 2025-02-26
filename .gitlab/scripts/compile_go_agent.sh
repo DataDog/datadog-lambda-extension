@@ -63,9 +63,7 @@ MAIN_DIR=$(pwd) # datadog-lambda-extension
 
 BINARY_DIR=".binaries"
 TARGET_DIR=$MAIN_DIR/$BINARY_DIR
-
-# Make sure the folder does not exist
-rm -rf $BINARY_DIR 2>/dev/null
+BINARY_PATH=$TARGET_DIR/compiled-datadog-agent-${SUFFIX}
 
 mkdir -p $BINARY_DIR
 
@@ -91,9 +89,11 @@ function docker_compile {
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \
-        . -o $TARGET_DIR/compiled-datadog-agent-${SUFFIX}
+        . -o $BINARY_PATH
 
-    cp $TARGET_DIR/compiled-datadog-agent-${SUFFIX}/datadog-agent $TARGET_DIR/datadog-agent-${SUFFIX}
+    # Copy the compiled binary to the target directory with the expected name
+    # If it already exist, it will be replaced
+    cp $BINARY_PATH/datadog-agent $TARGET_DIR/datadog-agent-${SUFFIX}
 }
 
 docker_compile $ARCHITECTURE $COMPILE_IMAGE
