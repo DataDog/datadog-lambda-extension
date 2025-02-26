@@ -1,46 +1,33 @@
-# syntax = docker/dockerfile:experimental
-
-FROM public.ecr.aws/lambda/provided:al2 as bottlecap-builder
+FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
+
+# Install dependencies
 RUN yum install -y curl gcc gcc-c++ make unzip
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
 RUN chmod +x /install-protoc.sh && /install-protoc.sh
+
+# Install Rust Toolchain
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal --default-toolchain stable-$PLATFORM-unknown-linux-gnu -y
 ENV PATH=/root/.cargo/bin:$PATH
 RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-gnu
+
+# Copy source code
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap/src /tmp/dd/bottlecap/src
 COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
 COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
+
+# Build the binary
 ENV RUSTFLAGS="-C panic=abort"
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +stable build --release --target $PLATFORM-unknown-linux-gnu
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
-FROM ubuntu:22.04 as compresser
-ARG DATADOG_WRAPPER=datadog_wrapper
-ARG GO_AGENT_PATH
-
-RUN apt-get update
-RUN apt-get install -y zip binutils
-COPY .layers/$GO_AGENT_PATH/extensions/datadog-agent /datadog-agent-go
-RUN strip /datadog-agent-go
-RUN if [ "$PLATFORM" = "x86_64" ]; then apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent-go; fi
-
-
-RUN mkdir /extensions
-WORKDIR /extensions
-
-COPY --from=bottlecap-builder /tmp/dd/bottlecap/bottlecap /extensions/datadog-agent
-
-COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
-RUN chmod +x /$DATADOG_WRAPPER
-RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent-go
-
-# keep the smallest possible docker image
+# Use smallest image possible
 FROM scratch
-COPY --from=compresser /extensions/datadog_extension.zip /
-ENTRYPOINT ["/datadog_extension.zip"]
+COPY --from=compiler /tmp/dd/bottlecap/bottlecap /
+ENTRYPOINT ["/bottlecap"]
+

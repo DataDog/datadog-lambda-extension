@@ -17,8 +17,8 @@ about: Suggest an idea
 
 ## Specifications
 
-  - Datadog Lambda Layer version: 
-  - Python version: 
+  - Datadog Extension version:
+  - Datadog Lambda Library name and version:
   
 ## Stacktrace
   

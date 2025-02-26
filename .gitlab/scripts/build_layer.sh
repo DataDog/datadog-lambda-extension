@@ -12,37 +12,37 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-prepare_folders() {
-    # Move into the root directory, so this script can be called from any directory
-    SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-    ROOT_DIR=$SCRIPTS_DIR/../..
-    cd $ROOT_DIR
+if [ -z "$SUFFIX" ]; then
+    printf "No suffix provided, using ${ARCHITECTURE}\n"
+    SUFFIX=$ARCHITECTURE
+fi
 
-    echo $ROOT_DIR
+# Move into the root directory, so this script can be called from any directory
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+ROOT_DIR=$SCRIPTS_DIR/../..
+cd $ROOT_DIR
 
-    EXTENSION_DIR=".layers"
-    TARGET_DIR=$(pwd)/$EXTENSION_DIR
+EXTENSION_DIR=".layers"
+TARGET_DIR=$(pwd)/$EXTENSION_DIR
+EXTENSION_PATH=$TARGET_DIR/datadog-extension-${SUFFIX}
 
-    rm -rf ${EXTENSION_DIR} 2>/dev/null
-    mkdir -p $EXTENSION_DIR
+mkdir -p $EXTENSION_DIR
+rm -rf ${EXTENSION_PATH} 2>/dev/null
 
-    cd $ROOT_DIR
-}
-
+cd $ROOT_DIR
 
 docker_build() {
     local arch=$1
 
     docker buildx build --platform linux/${arch} \
         -t datadog/build-extension-${SUFFIX} \
-        -f .gitlab/scripts/Dockerfile.build_layer \
+        -f ./images/Dockerfile.build_layer \
         --build-arg SUFFIX=$SUFFIX \
-        . -o $TARGET_DIR/datadog-extension-${SUFFIX}
+        . -o $EXTENSION_PATH
 
-    cp $TARGET_DIR/datadog-extension-${SUFFIX}/datadog_extension.zip $TARGET_DIR/datadog_extension-${SUFFIX}.zip
-    unzip $TARGET_DIR/datadog-extension-${SUFFIX}/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${SUFFIX}
-    rm -rf $TARGET_DIR/datadog-extension-${SUFFIX}/
+    cp $EXTENSION_PATH/datadog_extension.zip $TARGET_DIR/datadog_extension-${SUFFIX}.zip
+    unzip $EXTENSION_PATH/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${SUFFIX}
+    rm -rf ${EXTENSION_PATH}
 }
 
-prepare_folders
 docker_build $ARCHITECTURE
