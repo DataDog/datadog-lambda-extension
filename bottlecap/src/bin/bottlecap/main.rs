@@ -242,8 +242,10 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
-    let env_filter =
-        format!("h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}", config.log_level);
+    let env_filter = format!(
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
+        config.log_level
+    );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
             EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
