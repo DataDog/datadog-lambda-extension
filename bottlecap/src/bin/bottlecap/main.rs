@@ -183,7 +183,8 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    println!("DD_EXTENSION | Starting Datadog Extension {EXTENSION_VERSION}");
+    let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
+    println!("DD_EXTENSION | Starting Datadog Extension {version_without_next}");
     let (mut aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
