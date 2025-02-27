@@ -40,7 +40,7 @@ fi
 
 docker buildx build \
     --platform $PLATFORM \
-    -f ./images/${TARGET_IMAGE} \
+    -f .gitlab/scripts/${TARGET_IMAGE} \
     --tag "$DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${SUFFIX}" \
     --push .
 printf "Image built and pushed to $DOCKER_TARGET_IMAGE:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}${SUFFIX} for $PLATFORM\n"

@@ -19,31 +19,31 @@ else
     printf "Alpine compile requested: ${ALPINE}\n"
 fi
 
-if [ -z "$SUFFIX" ]; then
-    printf "No suffix provided, using ${ARCHITECTURE}\n"
-    SUFFIX=$ARCHITECTURE
-fi
 
 if [ "$ALPINE" = "0" ]; then
-    COMPILE_IMAGE=Dockerfile.bottlecap.compile
+    COMPILE_FILE=Dockerfile.bottlecap.compile
 else
     printf "Compiling for alpine\n"
-    COMPILE_IMAGE=Dockerfile.bottlecap.alpine.compile
+    COMPILE_FILE=Dockerfile.bottlecap.alpine.compile
 fi
 
+prepare_folders() {
+    # Move into the root directory, so this script can be called from any directory
+    SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+    ROOT_DIR=$SCRIPTS_DIR/../..
+    cd $ROOT_DIR
 
-# Move into the root directory, so this script can be called from any directory
-SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-ROOT_DIR=$SCRIPTS_DIR/../..
-cd $ROOT_DIR
+    echo $ROOT_DIR
 
-BINARY_DIR=".binaries"
-TARGET_DIR=$(pwd)/$BINARY_DIR
-BINARY_PATH=$TARGET_DIR/compiled-bottlecap-${SUFFIX}
+    BINARY_DIR=".binaries"
+    TARGET_DIR=$(pwd)/$BINARY_DIR
 
-mkdir -p $BINARY_DIR
+    rm -rf $BINARY_DIR 2>/dev/null
+    mkdir -p $BINARY_DIR
 
-cd $ROOT_DIR
+    cd $ROOT_DIR
+}
+
 
 docker_build() {
     local arch=$1
@@ -56,13 +56,13 @@ docker_build() {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/compile-bottlecap-${SUFFIX} \
-        -f ./images/${file} \
+        -f .gitlab/scripts/${file} \
         --build-arg PLATFORM=$PLATFORM \
-        . -o $BINARY_PATH
+        . -o $TARGET_DIR/compiled-bottlecap-${SUFFIX}
 
-    # Copy the compiled binary to the target directory with the expected name
-    # If it already exist, it will be replaced
-    cp $BINARY_PATH/bottlecap $TARGET_DIR/bottlecap-${SUFFIX}
+    cp $TARGET_DIR/compiled-bottlecap-${SUFFIX}/bottlecap $TARGET_DIR/bottlecap-${SUFFIX}
 }
 
-docker_build $ARCHITECTURE $COMPILE_IMAGE
+prepare_folders
+docker_build $ARCHITECTURE $COMPILE_FILE
+

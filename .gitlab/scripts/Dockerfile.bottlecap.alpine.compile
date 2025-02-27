@@ -1,7 +1,5 @@
 FROM alpine:3.16 AS compiler
 ARG PLATFORM
-
-# Install dependencies
 RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++
 
 SHELL ["/bin/bash", "-c"]
@@ -15,21 +13,18 @@ RUN curl https://sh.rustup.rs -sSf | \
 ENV PATH=/root/.cargo/bin:$PATH
 RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-musl
 
-# Copy source code
+# Build Bottlecap
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap/src /tmp/dd/bottlecap/src
 COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
 COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
-
-# Build the binary
-#
 # Added `-C link-arg=-lgcc` for alpine.
 ENV RUSTFLAGS="-C panic=abort -C link-arg=-lgcc"
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/root/.cargo/registry cargo +stable build --release --target $PLATFORM-unknown-linux-musl
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-musl/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
-# Use the smallest image possible
+# keep the smallest possible docker image
 FROM scratch
 COPY --from=compiler /tmp/dd/bottlecap/bottlecap /
 ENTRYPOINT ["/bottlecap"]
