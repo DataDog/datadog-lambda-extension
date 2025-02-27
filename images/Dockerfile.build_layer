@@ -1,13 +1,13 @@
 FROM ubuntu:22.04 AS compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
-ARG SUFFIX
+ARG FILE_SUFFIX
 
 # Install dependencies
 RUN apt-get update
 RUN apt-get install -y zip binutils
 
 # Copy Go Agent binary
-COPY .binaries/datadog-agent-$SUFFIX /datadog-agent-go
+COPY .binaries/datadog-agent-$FILE_SUFFIX /datadog-agent-go
 
 # UPX compress on x86_64
 RUN if [ "$PLATFORM" = "x86_64" ]; then apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent-go; fi
@@ -16,7 +16,7 @@ RUN mkdir /extensions
 WORKDIR /extensions
 
 # Copy Rust Agent binary
-COPY .binaries/bottlecap-$SUFFIX /extensions/datadog-agent
+COPY .binaries/bottlecap-$FILE_SUFFIX /extensions/datadog-agent
 
 # Copy wrapper script
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
