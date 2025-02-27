@@ -12,10 +12,7 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-if [ -z "$SUFFIX" ]; then
-    printf "No suffix provided, using ${ARCHITECTURE}\n"
-    SUFFIX=$ARCHITECTURE
-fi
+FILE_SUFFIX=$ARCHITECTURE
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
@@ -35,13 +32,13 @@ docker_build() {
     local arch=$1
 
     docker buildx build --platform linux/${arch} \
-        -t datadog/build-extension-${SUFFIX} \
+        -t datadog/build-extension-${FILE_SUFFIX} \
         -f ./images/Dockerfile.build_layer \
-        --build-arg SUFFIX=$SUFFIX \
+        --build-arg FILE_SUFFIX=$FILE_SUFFIX \
         . -o $EXTENSION_PATH
 
-    cp $EXTENSION_PATH/datadog_extension.zip $TARGET_DIR/datadog_extension-${SUFFIX}.zip
-    unzip $EXTENSION_PATH/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${SUFFIX}
+    cp $EXTENSION_PATH/datadog_extension.zip $TARGET_DIR/datadog_extension-${FILE_SUFFIX}.zip
+    unzip $EXTENSION_PATH/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${FILE_SUFFIX}
     rm -rf ${EXTENSION_PATH}
 }
 
