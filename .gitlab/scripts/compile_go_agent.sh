@@ -12,6 +12,8 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
+FILE_SUFFIX=$ARCHITECTURE
+
 if [ -z "$AGENT_VERSION" ]; then
     printf "[ERROR]: AGENT_VERSION not specified\n"
     exit 1
@@ -42,11 +44,7 @@ if [ "$ALPINE" = "0" ]; then
 else
     printf "Compiling for alpine\n"
     COMPILE_IMAGE=Dockerfile.go_agent.alpine.compile
-fi
-
-if [ -z "$SUFFIX" ]; then
-    printf "No suffix provided, using ${ARCHITECTURE}\n"
-    SUFFIX=$ARCHITECTURE
+    FILE_SUFFIX=${FILE_SUFFIX}-alpine
 fi
 
 # Allow override build tags
@@ -63,7 +61,7 @@ MAIN_DIR=$(pwd) # datadog-lambda-extension
 
 BINARY_DIR=".binaries"
 TARGET_DIR=$MAIN_DIR/$BINARY_DIR
-BINARY_PATH=$TARGET_DIR/compiled-datadog-agent-${SUFFIX}
+BINARY_PATH=$TARGET_DIR/compiled-datadog-agent-$FILE_SUFFIX
 
 mkdir -p $BINARY_DIR
 
@@ -84,7 +82,7 @@ function docker_compile {
     file=$2
 
     docker buildx build --platform linux/${arch} \
-        -t datadog/compile-go-agent-${SUFFIX}:${VERSION} \
+        -t datadog/compile-go-agent:${VERSION} \
         -f ${MAIN_DIR}/images/${file} \
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
@@ -93,7 +91,7 @@ function docker_compile {
 
     # Copy the compiled binary to the target directory with the expected name
     # If it already exist, it will be replaced
-    cp $BINARY_PATH/datadog-agent $TARGET_DIR/datadog-agent-${SUFFIX}
+    cp $BINARY_PATH/datadog-agent $TARGET_DIR/datadog-agent-$FILE_SUFFIX
 }
 
 docker_compile $ARCHITECTURE $COMPILE_IMAGE

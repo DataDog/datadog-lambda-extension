@@ -12,6 +12,8 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
+FILE_SUFFIX=$ARCHITECTURE
+
 if [ -z "$ALPINE" ]; then
     printf "[ERROR]: ALPINE not specified\n"
     exit 1
@@ -19,16 +21,12 @@ else
     printf "Alpine compile requested: ${ALPINE}\n"
 fi
 
-if [ -z "$SUFFIX" ]; then
-    printf "No suffix provided, using ${ARCHITECTURE}\n"
-    SUFFIX=$ARCHITECTURE
-fi
-
 if [ "$ALPINE" = "0" ]; then
     COMPILE_IMAGE=Dockerfile.bottlecap.compile
 else
     printf "Compiling for alpine\n"
     COMPILE_IMAGE=Dockerfile.bottlecap.alpine.compile
+    FILE_SUFFIX=${FILE_SUFFIX}-alpine
 fi
 
 
@@ -39,7 +37,7 @@ cd $ROOT_DIR
 
 BINARY_DIR=".binaries"
 TARGET_DIR=$(pwd)/$BINARY_DIR
-BINARY_PATH=$TARGET_DIR/compiled-bottlecap-${SUFFIX}
+BINARY_PATH=$TARGET_DIR/compiled-bottlecap-$FILE_SUFFIX
 
 mkdir -p $BINARY_DIR
 
@@ -55,14 +53,14 @@ docker_build() {
     fi
 
     docker buildx build --platform linux/${arch} \
-        -t datadog/compile-bottlecap-${SUFFIX} \
+        -t datadog/compile-bottlecap \
         -f ./images/${file} \
         --build-arg PLATFORM=$PLATFORM \
         . -o $BINARY_PATH
 
     # Copy the compiled binary to the target directory with the expected name
     # If it already exist, it will be replaced
-    cp $BINARY_PATH/bottlecap $TARGET_DIR/bottlecap-${SUFFIX}
+    cp $BINARY_PATH/bottlecap $TARGET_DIR/bottlecap-$FILE_SUFFIX
 }
 
 docker_build $ARCHITECTURE $COMPILE_IMAGE
