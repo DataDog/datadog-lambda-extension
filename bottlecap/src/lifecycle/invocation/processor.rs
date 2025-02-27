@@ -104,7 +104,7 @@ impl Processor {
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
-    pub fn on_invoke_event(&mut self, request_id: String) {
+    pub fn on_invoke_event(&mut self, request_id: String, timestamp: i64) {
         self.reset_state();
         self.set_init_tags();
 
@@ -136,7 +136,7 @@ impl Processor {
         }
 
         // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric();
+        self.enhanced_metrics.increment_invocation_metric(timestamp);
     }
 
     /// Resets the state of the processor to default values.
@@ -225,8 +225,8 @@ impl Processor {
     /// Given the duration of the platform init report, set the init duration metric.
     ///
     #[allow(clippy::cast_possible_truncation)]
-    pub fn on_platform_init_report(&mut self, duration_ms: f64) {
-        self.enhanced_metrics.set_init_duration_metric(duration_ms);
+    pub fn on_platform_init_report(&mut self, duration_ms: f64, timestamp: i64) {
+        self.enhanced_metrics.set_init_duration_metric(duration_ms, timestamp);
 
         if let Some(cold_start_span) = &mut self.cold_start_span {
             // `round` is intentionally meant to be a whole integer
@@ -260,21 +260,22 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
+        timestamp: i64,
     ) {
         self.context_buffer
             .add_runtime_duration(request_id, duration_ms);
 
         // Set the runtime duration metric
         self.enhanced_metrics
-            .set_runtime_duration_metric(duration_ms);
+            .set_runtime_duration_metric(duration_ms, timestamp);
 
         if status != Status::Success {
             // Increment the error metric
-            self.enhanced_metrics.increment_errors_metric();
+            self.enhanced_metrics.increment_errors_metric(timestamp);
 
             // Increment the error type metric
             if status == Status::Timeout {
-                self.enhanced_metrics.increment_timeout_metric();
+                self.enhanced_metrics.increment_timeout_metric(timestamp);
 
                 // Invocation Span will never have the `trace_id` or `span_id` set
                 self.span.trace_id = generate_span_id();
@@ -377,9 +378,9 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(&mut self, request_id: &String, metrics: ReportMetrics) {
+    pub fn on_platform_report(&mut self, request_id: &String, metrics: ReportMetrics, timestamp: i64) {
         // Set the report log metrics
-        self.enhanced_metrics.set_report_log_metrics(&metrics);
+        self.enhanced_metrics.set_report_log_metrics(&metrics, timestamp);
 
         if let Some(context) = self.context_buffer.get(request_id) {
             if context.runtime_duration_ms != 0.0 {
@@ -387,7 +388,7 @@ impl Processor {
 
                 // Set the post runtime duration metric
                 self.enhanced_metrics
-                    .set_post_runtime_duration_metric(post_runtime_duration_ms);
+                    .set_post_runtime_duration_metric(post_runtime_duration_ms, timestamp);
             }
 
             // Set Network and CPU time metrics
@@ -503,7 +504,8 @@ impl Processor {
         self.set_span_error_from_headers(headers);
 
         if self.span.error == 1 {
-            self.enhanced_metrics.increment_errors_metric();
+            let now = std::time::UNIX_EPOCH.elapsed().expect("can't poll clock").as_secs().try_into().unwrap_or_default();
+            self.enhanced_metrics.increment_errors_metric(now);
         }
     }
 
@@ -616,8 +618,8 @@ impl Processor {
         }
     }
 
-    pub fn on_out_of_memory_error(&mut self) {
-        self.enhanced_metrics.increment_oom_metric();
+    pub fn on_out_of_memory_error(&mut self, timestamp: i64) {
+        self.enhanced_metrics.increment_oom_metric(timestamp);
     }
 }
 

@@ -65,3 +65,4 @@ build_for_arch() {
 
 prepare_folders
 build_for_arch
+
