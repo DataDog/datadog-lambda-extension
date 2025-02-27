@@ -75,7 +75,7 @@ impl FlushControl {
             .expect("unable to poll clock, unrecoverable")
             .as_secs();
         match &self.flush_strategy {
-            FlushStrategy::Default => {
+            FlushStrategy::Default | FlushStrategy::Periodically(_) => {
                 if now - self.last_flush > (TWENTY_SECONDS / 1000) {
                     self.last_flush = now;
                     true
