@@ -5,7 +5,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::error;
 
 use crate::config;
-use crate::events::Event;
+use crate::events::{Event, OomEvent};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
@@ -93,7 +93,8 @@ impl LambdaProcessor {
 
                 if let Some(message) = message {
                     if is_oom_error(&message) {
-                        if let Err(e) = self.event_bus.send(Event::OutOfMemory).await {
+                        let oom_event = OomEvent { timestamp: event.time.timestamp() };
+                        if let Err(e) = self.event_bus.send(Event::OutOfMemory(oom_event)).await {
                             error!("Failed to send OOM event to the main event bus: {e}");
                         }
                     }
