@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::tags::lambda::tags::EXTENSION_VERSION;
 use bottlecap::{
     base_url,
     config::{self, get_aws_partition_by_region, AwsConfig, Config},
@@ -67,7 +68,7 @@ use std::{
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone, Deserialize)]
@@ -182,7 +183,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    info!(format!("Starting Datadog Extension {EXTENSION_VERSION}"));
+    println!("DD_EXTENSION | Starting Datadog Extension {EXTENSION_VERSION}");
     let (mut aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
