@@ -184,7 +184,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs();
 
-    enable_logging_subsystem();
+    enable_logging_subsystem(&config);
     let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,
@@ -241,9 +241,9 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
     (aws_config, config)
 }
 
-fn enable_logging_subsystem() {
+fn enable_logging_subsystem(config: &Arc<Config>) {
     let env_filter =
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off".to_string();
+        format!("h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}", config.log_level);
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
             EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
