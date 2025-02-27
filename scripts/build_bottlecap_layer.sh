@@ -43,7 +43,7 @@ docker buildx build --platform linux/${ARCHITECTURE} \
     --build-arg SUFFIX=$SUFFIX \
     . -o $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}
 
-cp $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}.zip
+cp $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}-${ARCHITECTURE}.zip
 
-unzip $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip -d $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}
+unzip $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip -d $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}-${ARCHITECTURE}
 rm -rf $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip
