@@ -10,7 +10,7 @@ use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
-use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
+use crate::telemetry::events::{InitPhase, InitType, TelemetryEvent, TelemetryRecord};
 use crate::LAMBDA_RUNTIME_SLUG;
 
 use crate::logs::lambda::{IntakeLog, Message};
@@ -128,12 +128,28 @@ impl LambdaProcessor {
                 ))
             },
             // TODO: check if we could do anything with the fields from `PlatformInitReport`
-            TelemetryRecord::PlatformInitReport { .. } => {
-                if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
+            TelemetryRecord::PlatformInitReport { initialization_type, phase, ..  } => {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformInitReport to the main event bus: {}", e);
                 }
-                // We don't need to process any log for this event
-                Err("Unsupported event type".into())
+                
+                let init_type = match initialization_type {
+                    InitType::OnDemand => "On-Demand",
+                    InitType::SnapStart => "SnapStart",
+                    InitType::ProvisionedConcurrency => "Provisioned Concurrency"
+                };
+                
+                let phase_str = match phase {
+                    InitPhase::Init => "Init",
+                    InitPhase::Invoke => "Invoke", 
+                };
+                
+                Ok(Message::new(
+                    format!("INIT_REPORT InitializationType: {init_type} Phase: {phase_str}"),
+                    None,
+                    self.function_arn.clone(),
+                    event.time.timestamp_millis(),
+                ))
             }
             // This is the first log where `request_id` is available
             // So we set it here and use it in the unprocessed and following logs.
