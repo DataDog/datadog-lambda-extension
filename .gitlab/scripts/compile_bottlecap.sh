@@ -12,7 +12,10 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-FILE_SUFFIX=$ARCHITECTURE
+if [ -z "$FILE_SUFFIX" ]; then
+    printf "[WARNING] No FILE_SUFFIX provided, using ${ARCHITECTURE}\n"
+    FILE_SUFFIX=$ARCHITECTURE
+fi
 
 if [ -z "$ALPINE" ]; then
     printf "[ERROR]: ALPINE not specified\n"

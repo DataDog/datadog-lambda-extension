@@ -58,6 +58,7 @@ go agent ({{ $flavor.name }}):
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
+    FILE_SUFFIX: {{ $flavor.suffix }}
   script:
     - echo "Building go agent based on $AGENT_BRANCH"
     # TODO: do this clone once in a separate job so that we can make sure that
@@ -78,6 +79,7 @@ bottlecap ({{ $flavor.name }}):
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
+    FILE_SUFFIX: {{ $flavor.suffix }}
   script:
     - .gitlab/scripts/compile_bottlecap.sh
 
@@ -101,6 +103,7 @@ layer ({{ $flavor.name }}):
       - .layers/datadog_extension-{{ $flavor.suffix }}/*
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
+    FILE_SUFFIX: {{ $flavor.suffix }}
   script:
     - .gitlab/scripts/build_layer.sh
 

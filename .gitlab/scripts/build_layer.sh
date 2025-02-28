@@ -12,7 +12,10 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-FILE_SUFFIX=$ARCHITECTURE
+if [ -z "$FILE_SUFFIX" ]; then
+    printf "[WARNING] No FILE_SUFFIX provided, using ${ARCHITECTURE}\n"
+    FILE_SUFFIX=$ARCHITECTURE
+fi
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
