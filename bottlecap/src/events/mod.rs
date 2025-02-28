@@ -15,9 +15,21 @@ impl MetricEvent {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct OomEvent {
+    pub timestamp: i64,
+}
+
+impl OomEvent {
+    #[must_use]
+    pub fn new(timestamp: i64) -> OomEvent {
+        OomEvent { timestamp }
+    }
+}
+
 #[derive(Debug)]
 pub enum Event {
     Metric(MetricEvent),
     Telemetry(TelemetryEvent),
-    OutOfMemory,
+    OutOfMemory(OomEvent),
 }
