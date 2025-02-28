@@ -68,7 +68,7 @@ use std::{
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Clone, Deserialize)]
@@ -187,7 +187,7 @@ async fn main() -> Result<()> {
 
     enable_logging_subsystem(&config);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
-    info!("DD_EXTENSION | Starting Datadog Extension {version_without_next}");
+    debug!("Starting Datadog Extension {version_without_next}");
     let client = Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,
