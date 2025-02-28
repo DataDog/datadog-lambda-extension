@@ -67,7 +67,6 @@ function docker_build_zip {
     arch=$1
     suffix=$2
 
-    DOCKER_BUILDKIT=1
     docker buildx build --platform linux/${arch} \
         -t datadog/build-lambda-extension-${arch}:$VERSION \
         -f ./scripts/$BUILD_FILE \
