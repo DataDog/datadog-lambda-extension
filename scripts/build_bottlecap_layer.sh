@@ -17,10 +17,7 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-if [ -z "$SUFFIX" ]; then
-    printf "No suffix provided, using ${ARCHITECTURE}\n"
-    SUFFIX=$ARCHITECTURE
-fi
+FILE_SUFFIX=$ARCHITECTURE
 
 PLATFORM="aarch64"
 if [ "$ARCHITECTURE" == "amd64" ]; then
@@ -31,19 +28,25 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 ROOT_DIR=$SCRIPTS_DIR/..
 cd $ROOT_DIR
 
-EXTENSION_DIR=".layers"
-EXTENSION_PATH=$ROOT_DIR/$EXTENSION_DIR
+LAYERS_DIR=".layers"
+BUILD_DIR=$ROOT_DIR/$LAYERS_DIR
+EXTENSION_PATH=$BUILD_DIR/datadog_extension-$FILE_SUFFIX
+
+mkdir -p $LAYERS_DIR
+rm -rf ${EXTENSION_PATH} 2>/dev/null
+
+cd $ROOT_DIR
 
 ALPINE=0
-ARCHITECTURE=$ARCHITECTURE ALPINE=$ALPINE .gitlab/scripts/compile_bottlecap.sh
+ARCHITECTURE=$ARCHITECTURE ALPINE=$ALPINE FILE_SUFFIX=$FILE_SUFFIX .gitlab/scripts/compile_bottlecap.sh
 
 docker buildx build --platform linux/${ARCHITECTURE} \
-    -t datadog/build-bottlecap-${SUFFIX} \
+    -t datadog/build-bottlecap-${FILE_SUFFIX} \
     -f ./images/Dockerfile.bottlecap.dev \
-    --build-arg SUFFIX=$SUFFIX \
-    . -o $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}
+    --build-arg FILE_SUFFIX=$FILE_SUFFIX \
+    . -o $EXTENSION_PATH
 
-cp $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}.zip
+cp $EXTENSION_PATH/datadog_extension.zip $EXTENSION_PATH.zip
 
-unzip $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip -d $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}
-rm -rf $EXTENSION_PATH/datadog_bottlecap-${SUFFIX}/datadog_extension.zip
+unzip $EXTENSION_PATH/datadog_extension.zip -d $EXTENSION_PATH
+rm -rf $EXTENSION_PATH/datadog_extension.zip

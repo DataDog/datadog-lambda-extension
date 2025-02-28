@@ -1,5 +1,5 @@
 FROM ubuntu:22.04 AS compresser
-ARG SUFFIX
+ARG FILE_SUFFIX
 
 RUN apt-get update && apt-get install -y zip binutils
 
@@ -8,7 +8,7 @@ COPY --from=public.ecr.aws/datadog/lambda-extension:latest /opt/datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 
-COPY .binaries/bottlecap-${SUFFIX} /extensions/datadog-agent
+COPY .binaries/bottlecap-${FILE_SUFFIX} /extensions/datadog-agent
 COPY ./scripts/datadog_wrapper /datadog_wrapper
 RUN chmod +x /datadog_wrapper
 RUN  zip -r datadog_extension.zip /extensions /datadog_wrapper /datadog-agent-go
