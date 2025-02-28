@@ -32,10 +32,10 @@ else
 fi
 
 if [ "$ALPINE" = "0" ]; then
-    COMPILE_FILE=Dockerfile.bottlecap.compile
+    COMPILE_IMAGE=Dockerfile.bottlecap.compile
 else
     printf "Compiling for alpine\n"
-    COMPILE_FILE=Dockerfile.bottlecap.alpine.compile
+    COMPILE_IMAGE=Dockerfile.bottlecap.alpine.compile
 fi
 
 
