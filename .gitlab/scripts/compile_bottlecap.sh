@@ -56,6 +56,7 @@ docker_build() {
 
     docker buildx build --platform linux/${arch} \
         -t datadog/compile-bottlecap-${SUFFIX} \
+        --network=host \
         -f ./images/${file} \
         --build-arg PLATFORM=$PLATFORM \
         . -o $BINARY_PATH

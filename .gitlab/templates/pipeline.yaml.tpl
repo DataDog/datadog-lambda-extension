@@ -16,35 +16,18 @@ variables:
   CI_DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   CI_DOCKER_TARGET_VERSION: latest
 
+code checks:
+  stage: test
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  needs: []
+  script:
+    - cd bottlecap && cargo fmt && cargo check && cargo clippy --all-features
+
 {{ range $flavor := (ds "flavors").flavors }}
 
 {{ if $flavor.needs_code_checks }}
 
-cargo fmt ({{ $flavor.arch }}):
-  stage: test
-  tags: ["arch:{{ $flavor.arch }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo fmt
-
-cargo check ({{ $flavor.arch }}):
-  stage: test
-  tags: ["arch:{{ $flavor.arch }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo check
-
-cargo clippy ({{ $flavor.arch }}):
-  stage: test
-  tags: ["arch:{{ $flavor.arch }}"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  needs: []
-  script:
-    - cd bottlecap && cargo clippy --all-features
-
-{{ end }} # end needs_code_checks
 
 go agent ({{ $flavor.name }}):
   stage: compile
@@ -88,11 +71,9 @@ layer ({{ $flavor.name }}):
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   needs:
+    - code check
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
-    - cargo fmt ({{ $flavor.arch }})
-    - cargo check ({{ $flavor.arch }})
-    - cargo clippy ({{ $flavor.arch }})
   dependencies:
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
