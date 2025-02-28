@@ -21,7 +21,7 @@ cd $ROOT_DIR
 
 EXTENSION_DIR=".layers"
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
-EXTENSION_PATH=$TARGET_DIR/datadog-extension-${SUFFIX}
+EXTENSION_PATH=$TARGET_DIR/datadog_extension-${FILE_SUFFIX}
 
 mkdir -p $EXTENSION_DIR
 rm -rf ${EXTENSION_PATH} 2>/dev/null
