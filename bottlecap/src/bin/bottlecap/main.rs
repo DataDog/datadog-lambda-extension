@@ -410,6 +410,7 @@ async fn extension_loop_active(
         } else if flush_control.should_periodic_flush() {
             // Should flush at the top of the invocation, which is now
             // flush
+            //
             flush_all(
                 &logs_flusher,
                 &mut metrics_flusher,
@@ -460,7 +461,6 @@ async fn extension_loop_active(
                         }
                     }
                     _ = race_flush_interval.tick() => {
-                        let flush_start = Instant::now();
                         flush_all(
                             &logs_flusher,
                             &mut metrics_flusher,
@@ -468,7 +468,6 @@ async fn extension_loop_active(
                             &*stats_flusher,
                             &mut race_flush_interval,
                         ).await;
-                        println!("ASTUYVE Flushed at the top of the invocation {:?}", flush_start.elapsed().as_millis());
                     }
                 }
             }

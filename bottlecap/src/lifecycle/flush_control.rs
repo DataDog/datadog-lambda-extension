@@ -83,6 +83,14 @@ impl FlushControl {
                     false
                 }
             }
+            FlushStrategy::Periodically(strategy) => {
+                if now - self.last_flush > (strategy.interval / 1000) {
+                    self.last_flush = now;
+                    true
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
