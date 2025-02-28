@@ -536,7 +536,10 @@ async fn extension_loop_active(
                 &mut race_flush_interval,
             )
             .await;
-            println!("Exiting for shutdown {:?}", flush_start.elapsed().as_millis());
+            println!(
+                "Exiting for shutdown {:?}",
+                flush_start.elapsed().as_millis()
+            );
             return Ok(());
         }
     }
@@ -661,7 +664,12 @@ async fn handle_next_invocation(
                 "Invoke event {}; deadline: {}, invoked_function_arn: {}",
                 request_id, deadline_ms, invoked_function_arn
             );
-            let now = std::time::UNIX_EPOCH.elapsed().expect("can't poll clock, unrecoverable").as_secs().try_into().unwrap_or_default();
+            let now = std::time::UNIX_EPOCH
+                .elapsed()
+                .expect("can't poll clock, unrecoverable")
+                .as_secs()
+                .try_into()
+                .unwrap_or_default();
             let mut p = invocation_processor.lock().await;
             p.on_invoke_event(request_id, now);
             drop(p);

@@ -94,7 +94,7 @@ impl Lambda {
             constants::INIT_DURATION_METRIC.into(),
             MetricValue::distribution(init_duration_ms * constants::MS_TO_SEC),
             self.get_dynamic_value_tags(),
-            Some(timestamp)
+            Some(timestamp),
         );
 
         if let Err(e) = self
@@ -115,7 +115,7 @@ impl Lambda {
             metric_name.into(),
             MetricValue::distribution(1f64),
             self.get_dynamic_value_tags(),
-            Some(timestamp)
+            Some(timestamp),
         );
         if let Err(e) = self
             .aggregator
@@ -136,7 +136,7 @@ impl Lambda {
             MetricValue::distribution(duration_ms),
             // Datadog expects this value as milliseconds, not seconds
             self.get_dynamic_value_tags(),
-            Some(timestamp)
+            Some(timestamp),
         );
         if let Err(e) = self
             .aggregator
@@ -157,7 +157,7 @@ impl Lambda {
             MetricValue::distribution(duration_ms),
             // Datadog expects this value as milliseconds, not seconds
             self.get_dynamic_value_tags(),
-            Some(timestamp)
+            Some(timestamp),
         );
         if let Err(e) = self
             .aggregator
@@ -567,7 +567,7 @@ impl Lambda {
                 constants::FD_USE_METRIC.into(),
                 MetricValue::distribution(fd_use),
                 tags.clone(),
-            Some(now),
+                Some(now),
             );
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert fd_use metric: {}", e);
@@ -592,7 +592,7 @@ impl Lambda {
                 constants::THREADS_USE_METRIC.into(),
                 MetricValue::distribution(threads_use),
                 tags,
-            Some(now),
+                Some(now),
             );
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert threads_use metric: {}", e);
@@ -762,7 +762,12 @@ mod tests {
         )
     }
 
-    fn assert_sketch(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64, timestamp: i64) {
+    fn assert_sketch(
+        aggregator_mutex: &Mutex<Aggregator>,
+        metric_id: &str,
+        value: f64,
+        timestamp: i64,
+    ) {
         let aggregator = aggregator_mutex.lock().unwrap();
         if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None, timestamp) {
             let metric = e.value.get_sketch().unwrap();
@@ -838,14 +843,17 @@ mod tests {
         lambda.set_init_duration_metric(100.0, now);
         lambda.set_runtime_duration_metric(100.0, now);
         lambda.set_post_runtime_duration_metric(100.0, now);
-        lambda.set_report_log_metrics(&ReportMetrics {
-            duration_ms: 100.0,
-            billed_duration_ms: 100,
-            max_memory_used_mb: 128,
-            memory_size_mb: 256,
-            init_duration_ms: Some(50.0),
-            restore_duration_ms: None,
-        }, now);
+        lambda.set_report_log_metrics(
+            &ReportMetrics {
+                duration_ms: 100.0,
+                billed_duration_ms: 100,
+                max_memory_used_mb: 128,
+                memory_size_mb: 256,
+                init_duration_ms: Some(50.0),
+                restore_duration_ms: None,
+            },
+            now,
+        );
         let aggr = metrics_aggr.lock().expect("lock poisoned");
         assert!(aggr
             .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), &None, now)
@@ -899,7 +907,11 @@ mod tests {
             .get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(), &None, now)
+            .get_entry_by_id(
+                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
+                &None,
+                now
+            )
             .is_none());
         assert!(aggr
             .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), &None, now)
@@ -1084,10 +1096,25 @@ mod tests {
             30.0,
             now,
         );
-        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_UTILIZATION_METRIC, 0.6, now);
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_TOTAL_UTILIZATION_METRIC,
+            0.6,
+            now,
+        );
         assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0, now);
-        assert_sketch(&metrics_aggr, constants::CPU_MAX_UTILIZATION_METRIC, 30.0, now);
-        assert_sketch(&metrics_aggr, constants::CPU_MIN_UTILIZATION_METRIC, 28.75, now);
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MAX_UTILIZATION_METRIC,
+            30.0,
+            now,
+        );
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MIN_UTILIZATION_METRIC,
+            28.75,
+            now,
+        );
     }
 
     #[test]
@@ -1112,7 +1139,12 @@ mod tests {
 
         assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0, now);
         assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0, now);
-        assert_sketch(&metrics_aggr, constants::TMP_FREE_METRIC, 538_296_320.0, now);
+        assert_sketch(
+            &metrics_aggr,
+            constants::TMP_FREE_METRIC,
+            538_296_320.0,
+            now,
+        );
     }
 
     #[test]

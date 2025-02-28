@@ -226,7 +226,8 @@ impl Processor {
     ///
     #[allow(clippy::cast_possible_truncation)]
     pub fn on_platform_init_report(&mut self, duration_ms: f64, timestamp: i64) {
-        self.enhanced_metrics.set_init_duration_metric(duration_ms, timestamp);
+        self.enhanced_metrics
+            .set_init_duration_metric(duration_ms, timestamp);
 
         if let Some(cold_start_span) = &mut self.cold_start_span {
             // `round` is intentionally meant to be a whole integer
@@ -378,9 +379,15 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(&mut self, request_id: &String, metrics: ReportMetrics, timestamp: i64) {
+    pub fn on_platform_report(
+        &mut self,
+        request_id: &String,
+        metrics: ReportMetrics,
+        timestamp: i64,
+    ) {
         // Set the report log metrics
-        self.enhanced_metrics.set_report_log_metrics(&metrics, timestamp);
+        self.enhanced_metrics
+            .set_report_log_metrics(&metrics, timestamp);
 
         if let Some(context) = self.context_buffer.get(request_id) {
             if context.runtime_duration_ms != 0.0 {
@@ -504,7 +511,12 @@ impl Processor {
         self.set_span_error_from_headers(headers);
 
         if self.span.error == 1 {
-            let now = std::time::UNIX_EPOCH.elapsed().expect("can't poll clock").as_secs().try_into().unwrap_or_default();
+            let now = std::time::UNIX_EPOCH
+                .elapsed()
+                .expect("can't poll clock")
+                .as_secs()
+                .try_into()
+                .unwrap_or_default();
             self.enhanced_metrics.increment_errors_metric(now);
         }
     }
