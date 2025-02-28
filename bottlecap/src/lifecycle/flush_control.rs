@@ -76,21 +76,19 @@ impl FlushControl {
             .as_secs();
         match &self.flush_strategy {
             FlushStrategy::Default | FlushStrategy::Periodically(_) => {
-                if now - self.last_flush > (TWENTY_SECONDS / 1000) {
+                let interval = match &self.flush_strategy {
+                    FlushStrategy::Default => TWENTY_SECONDS,
+                    FlushStrategy::Periodically(strategy) => strategy.interval,
+                    _ => return false,
+                };
+                
+                if now - self.last_flush > interval / 1000 {
                     self.last_flush = now;
                     true
                 } else {
                     false
                 }
-            }
-            FlushStrategy::Periodically(strategy) => {
-                if now - self.last_flush > (strategy.interval / 1000) {
-                    self.last_flush = now;
-                    true
-                } else {
-                    false
-                }
-            }
+            },
             _ => false,
         }
     }
