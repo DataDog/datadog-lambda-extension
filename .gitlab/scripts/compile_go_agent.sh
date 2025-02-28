@@ -47,7 +47,6 @@ if [ "$ALPINE" = "0" ]; then
 else
     printf "Compiling for alpine\n"
     COMPILE_IMAGE=Dockerfile.go_agent.alpine.compile
-    FILE_SUFFIX=${FILE_SUFFIX}-alpine
 fi
 
 # Allow override build tags
