@@ -326,7 +326,7 @@ publish image ({{ $multi_arch_image_flavor.name }}):
     {{ end }} # end needs_layer_publish
     {{ end }} # end flavors
   artifacts:
-    expire_in: 1 hr
+    expire_in: {{ if eq $environment.name "prod" }}1 day{{ else }}1 hr{{ end }}
     paths:
       - datadog_extension-{{ if eq $environment.name "prod"}}signed-{{ end }}bundle-${CI_JOB_ID}/
     name: datadog_extension-{{ if eq $environment.name "prod"}}signed-{{ end }}bundle-${CI_JOB_ID}
