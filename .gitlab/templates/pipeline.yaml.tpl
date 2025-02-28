@@ -46,8 +46,6 @@ cargo clippy ({{ $flavor.arch }}):
 
 {{ end }} # end needs_code_checks
 
-{{ $suffix := printf "%s%s" $flavor.arch (ternary "-alpine" "" $flavor.alpine) }}
-
 go agent ({{ $flavor.name }}):
   stage: compile
   image: registry.ddbuild.io/images/docker:20.10
@@ -56,7 +54,7 @@ go agent ({{ $flavor.name }}):
   artifacts:
     expire_in: 1 hr
     paths:
-      - .binaries/datadog-agent-{{ $suffix }}
+      - .binaries/datadog-agent-{{ $flavor.suffix }}
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
@@ -76,7 +74,7 @@ bottlecap ({{ $flavor.name }}):
   artifacts:
     expire_in: 1 hr
     paths:
-      - .binaries/bottlecap-{{ $suffix }}
+      - .binaries/bottlecap-{{ $flavor.suffix }}
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
@@ -99,8 +97,8 @@ layer ({{ $flavor.name }}):
   artifacts:
     expire_in: 1 hr
     paths:
-      - .layers/datadog_extension-{{ $flavor.arch }}.zip
-      - .layers/datadog_extension-{{ $flavor.arch }}/*
+      - .layers/datadog_extension-{{ $flavor.suffix }}.zip
+      - .layers/datadog_extension-{{ $flavor.suffix }}/*
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
   script:
@@ -117,7 +115,7 @@ check layer size ({{ $flavor.name }}):
   dependencies:
     - layer ({{ $flavor.name }})
   variables:
-    LAYER_FILE: datadog_extension-{{ $flavor.arch }}.zip
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
   script:
     - .gitlab/scripts/check_layer_size.sh
 
@@ -140,9 +138,9 @@ sign layer ({{ $flavor.name }}):
   artifacts: # Re specify artifacts so the modified signed file is passed
     expire_in: 1 day # Signed layers should expire after 1 day
     paths:
-      - .layers/datadog_extension-{{ $flavor.arch }}.zip
+      - .layers/datadog_extension-{{ $flavor.suffix }}.zip
   variables:
-    LAYER_FILE: datadog_extension-{{ $flavor.arch }}.zip
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
@@ -182,7 +180,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
         {{- end}}
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
-    LAYER_FILE: datadog_extension-{{ $flavor.arch }}.zip
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
     STAGE: {{ $environment.name }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
@@ -208,7 +206,7 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
   variables:
     REGION: us-east-1
     ARCHITECTURE: {{ $flavor.arch }}
-    LAYER_FILE: datadog_extension-{{ $flavor.arch }}.zip
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
     STAGE: {{ $environment.name }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
