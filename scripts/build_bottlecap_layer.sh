@@ -30,7 +30,7 @@ cd $ROOT_DIR
 
 LAYERS_DIR=".layers"
 BUILD_DIR=$ROOT_DIR/$LAYERS_DIR
-EXTENSION_PATH=$BUILD_DIR/datadog_bottlecap-$FILE_SUFFIX
+EXTENSION_PATH=$BUILD_DIR/datadog_extension-$FILE_SUFFIX
 
 mkdir -p $LAYERS_DIR
 rm -rf ${EXTENSION_PATH} 2>/dev/null
