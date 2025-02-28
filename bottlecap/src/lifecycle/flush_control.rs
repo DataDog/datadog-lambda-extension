@@ -75,7 +75,7 @@ impl FlushControl {
             .expect("unable to poll clock, unrecoverable")
             .as_secs();
         match &self.flush_strategy {
-            FlushStrategy::Default => {
+            FlushStrategy::Default | FlushStrategy::Periodically(_) => {
                 if now - self.last_flush > (TWENTY_SECONDS / 1000) {
                     self.last_flush = now;
                     true
@@ -126,6 +126,7 @@ mod tests {
         let mut flush_control = super::FlushControl::new(FlushStrategy::Default);
         assert!(flush_control.should_flush_end());
     }
+
     #[test]
     fn should_flush_default_periodic() {
         const LOOKBACK_COUNT: usize = 20;
@@ -134,6 +135,15 @@ mod tests {
             assert!(flush_control.should_flush_end());
         }
         assert!(!flush_control.should_flush_end());
+    }
+
+    #[test]
+    fn should_flush_custom_periodic() {
+        let mut flush_control =
+            super::FlushControl::new(FlushStrategy::Periodically(PeriodicStrategy {
+                interval: 1,
+            }));
+        assert!(flush_control.should_periodic_flush());
     }
 
     #[tokio::test]

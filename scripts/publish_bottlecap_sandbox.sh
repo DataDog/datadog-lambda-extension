@@ -17,11 +17,11 @@ set -e
 _init_arg(){
   if [ "$ARCHITECTURE" == "amd64" ]; then
       echo "Publishing for amd64 only"
-      LAYER_PATH=".layers/datadog_bottlecap-amd64.zip"
+      LAYER_PATH=".layers/datadog_extension-amd64.zip"
       LAYER_NAME="Datadog-Bottlecap-Beta"
   elif [ "$ARCHITECTURE" == "arm64" ]; then
       echo "Publishing for arm64 only"
-      LAYER_PATH=".layers/datadog_bottlecap-arm64.zip"
+      LAYER_PATH=".layers/datadog_extension-arm64.zip"
       LAYER_NAME="Datadog-Bottlecap-Beta-ARM"
   fi
   if [ -z $ARCHITECTURE ]; then
@@ -40,10 +40,6 @@ _init_arg(){
 }
 
 publish(){
-  # Move into the root directory
-  SCRIPTS_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
-  cd $SCRIPTS_DIR/..
-
   ARCHITECTURE=$ARCHITECTURE ./scripts/build_bottlecap_layer.sh
   NEW_VERSION=$(aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda publish-layer-version --layer-name "${LAYER_NAME}" \
       --description "Datadog Bottlecap Beta" \

@@ -12,9 +12,9 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-if [ -z "$SUFFIX" ]; then
-    printf "No suffix provided, using ${ARCHITECTURE}\n"
-    SUFFIX=$ARCHITECTURE
+if [ -z "$FILE_SUFFIX" ]; then
+    printf "[WARNING] No FILE_SUFFIX provided, using ${ARCHITECTURE}\n"
+    FILE_SUFFIX=$ARCHITECTURE
 fi
 
 # Move into the root directory, so this script can be called from any directory
@@ -24,7 +24,7 @@ cd $ROOT_DIR
 
 EXTENSION_DIR=".layers"
 TARGET_DIR=$(pwd)/$EXTENSION_DIR
-EXTENSION_PATH=$TARGET_DIR/datadog-extension-${SUFFIX}
+EXTENSION_PATH=$TARGET_DIR/datadog_extension-${FILE_SUFFIX}
 
 mkdir -p $EXTENSION_DIR
 rm -rf ${EXTENSION_PATH} 2>/dev/null
@@ -35,13 +35,13 @@ docker_build() {
     local arch=$1
 
     docker buildx build --platform linux/${arch} \
-        -t datadog/build-extension-${SUFFIX} \
+        -t datadog/build-extension-${FILE_SUFFIX} \
         -f ./images/Dockerfile.build_layer \
-        --build-arg SUFFIX=$SUFFIX \
+        --build-arg FILE_SUFFIX=$FILE_SUFFIX \
         . -o $EXTENSION_PATH
 
-    cp $EXTENSION_PATH/datadog_extension.zip $TARGET_DIR/datadog_extension-${SUFFIX}.zip
-    unzip $EXTENSION_PATH/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${SUFFIX}
+    cp $EXTENSION_PATH/datadog_extension.zip $TARGET_DIR/datadog_extension-${FILE_SUFFIX}.zip
+    unzip $EXTENSION_PATH/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${FILE_SUFFIX}
     rm -rf ${EXTENSION_PATH}
 }
 
