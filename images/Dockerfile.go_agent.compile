@@ -50,9 +50,6 @@ RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/dat
 # Strip the binary to reduce size
 RUN strip datadog-agent
 
-# Compress the binary with UPX, but only if the architecture is x86_64
-RUN if [ "$arch" = "x86_64" ]; then apt-get install -y upx=3.96-r0 && upx -1 /datadog-agent; fi
-
 # Use the smallest image possible
 FROM scratch
 COPY --from=compiler /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /
