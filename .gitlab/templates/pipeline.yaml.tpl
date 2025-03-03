@@ -160,7 +160,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
-    - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
+    - if: '"{{ $environment.name }}" == "sandbox"'
       when: manual
       allow_failure: true
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
@@ -311,7 +311,7 @@ publish image ({{ $multi_arch_image_flavor.name }}):
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:amd64"]
   rules:
-    - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
+    - if: '"{{ $environment.name }}" == "sandbox"'
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     {{ range (ds "flavors").flavors }}
