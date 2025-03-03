@@ -36,10 +36,6 @@ const VERSION_KEY: &str = "version";
 // ServiceKey is the tag key for a function's service environment variable
 const SERVICE_KEY: &str = "service";
 
-// TODO(astuyve): origin tags when tracing is supported
-// const TRACE_ORIGIN_METADATA_KEY: &str = "_dd.origin";
-// const TRACE_ORIGIN_METADATA_VALUE: &str = "lambda";
-
 // ComputeStatsKey is the tag key indicating whether trace stats should be computed
 const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // ComputeStatsValue is the tag value indicating trace stats should be computed
@@ -55,14 +51,6 @@ const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
 const AWS_ACCOUNT_KEY: &str = "aws_account";
 const RESOURCE_KEY: &str = "resource";
-
-// TODO(astuyve) platform tags
-// X86LambdaPlatform is for the lambda platform X86_64
-// const X86_LAMBDA_PLATFORM: &str = "x86_64";
-// ArmLambdaPlatform is for the lambda platform Arm64
-// const ARM_LAMBDA_PLATFORM: &str = "arm64";
-// AmdLambdaPlatform is for the lambda platform Amd64, which is an extension of X86_64
-// const AMD_LAMBDA_PLATFORM: &str = "amd64";
 
 #[derive(Debug, Clone)]
 pub struct Lambda {
