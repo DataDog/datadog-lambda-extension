@@ -1,6 +1,9 @@
 FROM alpine:3.16 AS compiler
 ARG PLATFORM
 
+# FIPS is not used for now.
+ARG FIPS
+
 # Install dependencies
 RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++
 
