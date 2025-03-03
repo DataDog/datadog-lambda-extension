@@ -24,7 +24,10 @@ use bottlecap::{
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
     },
     secrets::decrypt,
-    tags::{lambda, provider::Provider as TagProvider},
+    tags::{
+        lambda::{self, tags::EXTENSION_VERSION},
+        provider::Provider as TagProvider,
+    },
     telemetry::{
         self,
         client::TelemetryApiClient,
@@ -101,7 +104,7 @@ enum NextEventResponse {
     },
 }
 
-async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventResponse> {
+async fn next_event(client: &Client, ext_id: &str) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
@@ -136,7 +139,7 @@ async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventR
     })
 }
 
-async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
+async fn register(client: &Client) -> Result<RegisterResponse> {
     let mut map = HashMap::new();
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
@@ -185,7 +188,9 @@ async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
-    let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
+    let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
+    debug!("Starting Datadog Extension {version_without_next}");
+    let client = Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Failed to create client: {e:?}"),
