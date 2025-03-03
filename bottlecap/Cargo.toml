@@ -15,7 +15,7 @@ datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "b5
 datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
-dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
+dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "89754a92d3725c10b6e6e14202efd541a9fdc5a7" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
 lazy_static = { version = "1.5", default-features = false }
@@ -40,7 +40,7 @@ rmp-serde = { version = "1.3.0", default-features = false }
 rustls = { version = "0.23.18", default-features = false, features = ["aws-lc-rs"] }
 rand = { version = "0.8", default-features = false }
 prost = { version = "0.11.6", default-features = false }
-zstd = { version = "0.13.2", default-features = false }
+zstd = { version = "0.13.3", default-features = false }
 futures = { version = "0.3.31", default-features = false}
 
 [dev-dependencies]

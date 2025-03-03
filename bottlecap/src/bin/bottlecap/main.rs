@@ -383,7 +383,8 @@ async fn extension_loop_active(
                                 config.clone(),
                                 tags_provider.clone(),
                                 trace_processor.clone(),
-                                trace_agent_channel.clone()
+                                trace_agent_channel.clone(),
+                                runtime_done_meta.timestamp,
                             ).await;
                             drop(p);
                             break 'inner;
@@ -414,6 +415,7 @@ async fn extension_loop_active(
         } else if flush_control.should_periodic_flush() {
             // Should flush at the top of the invocation, which is now
             // flush
+            //
             flush_all(
                 &logs_flusher,
                 &mut metrics_flusher,
@@ -457,7 +459,8 @@ async fn extension_loop_active(
                                 config.clone(),
                                 tags_provider.clone(),
                                 trace_processor.clone(),
-                                trace_agent_channel.clone()
+                                trace_agent_channel.clone(),
+                                runtime_done_meta.timestamp,
                             ).await;
                             drop(p);
                         }
@@ -507,7 +510,8 @@ async fn extension_loop_active(
                                 config.clone(),
                                 tags_provider.clone(),
                                 trace_processor.clone(),
-                                trace_agent_channel.clone()
+                                trace_agent_channel.clone(),
+                                runtime_done_meta.timestamp,
                             ).await;
                             drop(p);
                         }
@@ -561,6 +565,7 @@ struct RuntimeDoneMeta {
     request_id: String,
     status: Status,
     metrics: RuntimeDoneMetrics,
+    timestamp: i64,
 }
 
 async fn handle_event_bus_event(
@@ -571,9 +576,9 @@ async fn handle_event_bus_event(
         Event::Metric(event) => {
             debug!("Metric event: {:?}", event);
         }
-        Event::OutOfMemory => {
+        Event::OutOfMemory(event_timestamp) => {
             let mut p = invocation_processor.lock().await;
-            p.on_out_of_memory_error();
+            p.on_out_of_memory_error(event_timestamp);
             drop(p);
         }
         Event::Telemetry(event) => match event.record {
@@ -589,7 +594,7 @@ async fn handle_event_bus_event(
             } => {
                 debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
                 let mut p = invocation_processor.lock().await;
-                p.on_platform_init_report(metrics.duration_ms);
+                p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
                 drop(p);
             }
             TelemetryRecord::PlatformStart { request_id, .. } => {
@@ -616,6 +621,7 @@ async fn handle_event_bus_event(
                         request_id,
                         status,
                         metrics,
+                        timestamp: event.time.timestamp(),
                     });
                 }
             }
@@ -633,7 +639,7 @@ async fn handle_event_bus_event(
                     error_type.unwrap_or("None".to_string())
                 );
                 let mut p = invocation_processor.lock().await;
-                p.on_platform_report(&request_id, metrics);
+                p.on_platform_report(&request_id, metrics, event.time.timestamp());
                 drop(p);
             }
             _ => {

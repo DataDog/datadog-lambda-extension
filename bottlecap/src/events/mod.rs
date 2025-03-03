@@ -19,5 +19,5 @@ impl MetricEvent {
 pub enum Event {
     Metric(MetricEvent),
     Telemetry(TelemetryEvent),
-    OutOfMemory,
+    OutOfMemory(i64),
 }
