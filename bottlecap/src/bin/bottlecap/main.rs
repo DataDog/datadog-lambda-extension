@@ -571,9 +571,9 @@ async fn handle_event_bus_event(
         Event::Metric(event) => {
             debug!("Metric event: {:?}", event);
         }
-        Event::OutOfMemory(event) => {
+        Event::OutOfMemory(event_timestamp) => {
             let mut p = invocation_processor.lock().await;
-            p.on_out_of_memory_error(event.timestamp);
+            p.on_out_of_memory_error(event_timestamp);
             drop(p);
         }
         Event::Telemetry(event) => match event.record {
@@ -659,14 +659,8 @@ async fn handle_next_invocation(
                 "Invoke event {}; deadline: {}, invoked_function_arn: {}",
                 request_id, deadline_ms, invoked_function_arn
             );
-            let now = std::time::UNIX_EPOCH
-                .elapsed()
-                .expect("can't poll clock, unrecoverable")
-                .as_secs()
-                .try_into()
-                .unwrap_or_default();
             let mut p = invocation_processor.lock().await;
-            p.on_invoke_event(request_id, now);
+            p.on_invoke_event(request_id);
             drop(p);
             false
         }

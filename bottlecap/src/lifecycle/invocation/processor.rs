@@ -104,7 +104,13 @@ impl Processor {
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
-    pub fn on_invoke_event(&mut self, request_id: String, timestamp: i64) {
+    pub fn on_invoke_event(&mut self, request_id: String) {
+        let timestamp = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("can't poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         self.reset_state();
         self.set_init_tags();
 
