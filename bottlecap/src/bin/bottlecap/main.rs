@@ -527,7 +527,6 @@ async fn extension_loop_active(
         if shutdown {
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            let flush_start = Instant::now();
             flush_all(
                 &logs_flusher,
                 &mut metrics_flusher,
@@ -536,10 +535,6 @@ async fn extension_loop_active(
                 &mut race_flush_interval,
             )
             .await;
-            println!(
-                "Exiting for shutdown {:?}",
-                flush_start.elapsed().as_millis()
-            );
             return Ok(());
         }
     }
