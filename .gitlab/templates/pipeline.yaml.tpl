@@ -126,10 +126,6 @@ check layer size ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/check_layer_size.sh
 
-{{ range $environment_name, $environment := (ds "environments").environments }}
-
-{{ if eq $environment_name "prod" }}
-
 sign layer ({{ $flavor.name }}):
   stage: sign
   tags: ["arch:amd64"]
@@ -149,11 +145,13 @@ sign layer ({{ $flavor.name }}):
   variables:
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
   before_script:
+    {{ with $environment := (ds "environments").environments.prod }}
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    {{ end }}
   script:
-    - .gitlab/scripts/sign_layers.sh {{ $environment_name }}
+    - .gitlab/scripts/sign_layers.sh prod
 
-{{ end }} # if prod
+{{ range $environment_name, $environment := (ds "environments").environments }}
 
 publish layer {{ $environment_name }} ({{ $flavor.name }}):
   stage: publish
@@ -196,7 +194,7 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/publish_layer.sh
 
-{{ if eq $environment_name "sandbox" }}
+{{ end }} # end environments
 
 publish layer sandbox [us-east-1] ({{ $flavor.name }}):
   stage: self-monitoring
@@ -212,6 +210,7 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
   dependencies:
     - layer ({{ $flavor.name }})
 
+  {{ with $environment := (ds "environments").environments.sandbox }}
   variables:
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     REGION: us-east-1
@@ -221,22 +220,15 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
     AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  {{ end }}
   script:
     - .gitlab/scripts/publish_layer.sh
-
-{{ end }} # if environment sandbox
-
-{{ end }} # end environments
 
 {{ end }} # end needs_layer_publish
 
 {{ end }}  # end flavors
 
 {{ range $multi_arch_image_flavor := (ds "flavors").multi_arch_image_flavors }}
-
-{{ range $environment_name, $environment := (ds "environments").environments }}
-
-{{ if eq $environment_name "sandbox" }}
 
 publish private images ({{ $multi_arch_image_flavor.name }}):
   stage: self-monitoring
@@ -256,13 +248,11 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
     SUFFIX: {{ $multi_arch_image_flavor.suffix }}
     PLATFORM: {{ $multi_arch_image_flavor.platform }}
   before_script:
+    {{ with $environment := (ds "environments").environments.sandbox }}
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    {{ end }}
   script:
     - .gitlab/scripts/build_private_image.sh
-
-{{ end }} # end if environment sandbox
-
-{{ end }} # end environments
 
 image ({{ $multi_arch_image_flavor.name }}):
   stage: build
