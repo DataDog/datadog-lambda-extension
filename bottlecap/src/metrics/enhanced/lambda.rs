@@ -768,8 +768,9 @@ mod tests {
         value: f64,
         timestamp: i64,
     ) {
+        let ts = (timestamp / 10) * 10;
         let aggregator = aggregator_mutex.lock().unwrap();
-        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None, timestamp) {
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None, ts) {
             let metric = e.value.get_sketch().unwrap();
             assert!((metric.max().unwrap() - value).abs() < PRECISION);
             assert!((metric.min().unwrap() - value).abs() < PRECISION);
