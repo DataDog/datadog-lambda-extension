@@ -38,12 +38,11 @@ pub struct FallbackConfig {
     trace_otel_enabled: bool,
     otlp_config_receiver_protocols_http_endpoint: Option<String>,
     otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
-    // intake urls
+    // Metric intake urls
     url: Option<String>,
     dd_url: Option<String>,
-    logs_config_logs_dd_url: Option<String>,
     // APM, as opposed to logs, does not use the `apm_config` prefix for env vars
-    apm_dd_url: Option<String>,
+    //apm_dd_url: Option<String>,
 }
 
 /// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
@@ -102,6 +101,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
+    pub logs_config_logs_dd_url: String,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
     //flush timeout in seconds
@@ -141,6 +141,7 @@ impl Default for Config {
             logs_config_processing_rules: None,
             logs_config_use_compression: true,
             logs_config_compression_level: 6,
+            logs_config_logs_dd_url: String::default(),
             // Metrics
             enhanced_metrics: true,
             https_proxy: None,
@@ -222,20 +223,20 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
     }
 
     // Intake URLs
-    if config.url.is_some()
-        || config.dd_url.is_some()
-        || config.logs_config_logs_dd_url.is_some()
-        || config.apm_dd_url.is_some()
-        || yaml_config
-            .logs_config
-            .is_some_and(|c| c.get("logs_dd_url").is_some())
-        || yaml_config
-            .apm_config
-            .is_some_and(|c| c.get("apm_dd_url").is_some())
-    {
-        log_fallback_reason("intake_urls");
-        return Err(ConfigError::UnsupportedField("intake_urls".to_string()));
-    }
+    // if config.url.is_some()
+    //     || config.dd_url.is_some()
+    //     || config.logs_config_logs_dd_url.is_some()
+    //     || config.apm_dd_url.is_some()
+    //     || yaml_config
+    //         .logs_config
+    //         .is_some_and(|c| c.get("logs_dd_url").is_some())
+    //     || yaml_config
+    //         .apm_config
+    //         .is_some_and(|c| c.get("apm_dd_url").is_some())
+    // {
+    //     log_fallback_reason("intake_urls");
+    //     return Err(ConfigError::UnsupportedField("intake_urls".to_string()));
+    // }
 
     // Govcloud Regions
     if region.starts_with("us-gov-") {
@@ -314,8 +315,17 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
             .trace_propagation_style_extract
             .clone_from(&config.trace_propagation_style);
     }
+    if config.logs_config_logs_dd_url.is_empty() {
+        config.logs_config_logs_dd_url = build_fqdn_logs(config.site.clone());
+    }
 
     Ok(config)
+}
+
+#[inline]
+#[must_use]
+fn build_fqdn_logs(site: String) -> String {
+    format!("https://http-intake.logs.{site}")
 }
 
 fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -452,38 +462,31 @@ pub mod tests {
     }
 
     #[test]
-    fn test_fallback_on_intake_urls() {
+    fn test_default_logs_intake_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_APM_DD_URL", "some_url");
 
             let config =
-                get_config(Path::new(""), MOCK_REGION).expect_err("should reject unknown fields");
+                get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(
-                config,
-                ConfigError::UnsupportedField("intake_urls".to_string())
+                config.logs_config_logs_dd_url,
+               "https://http-intake.logs.datadoghq.com".to_string() 
             );
             Ok(())
         });
     }
 
     #[test]
-    fn test_fallback_on_intake_urls_yaml() {
+    fn test_support_pci_logs_intake_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                apm_config:
-                  apm_dd_url: some_url
-            ",
-            )?;
+            jail.set_env("DD_LOGS_CONFIG_LOGS_DD_URL", "agent-http-intake-pci.logs.datadoghq.com:443");
 
             let config =
-                get_config(Path::new(""), MOCK_REGION).expect_err("should reject unknown fields");
+                get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(
-                config,
-                ConfigError::UnsupportedField("intake_urls".to_string())
+                config.logs_config_logs_dd_url,
+               "agent-http-intake-pci.logs.datadoghq.com:443".to_string() 
             );
             Ok(())
         });
@@ -572,6 +575,7 @@ pub mod tests {
                         TracePropagationStyle::Datadog,
                         TracePropagationStyle::TraceContext
                     ],
+                    logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
                     ..Config::default()
                 }
             );

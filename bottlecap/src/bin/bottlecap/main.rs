@@ -21,7 +21,7 @@ use bottlecap::{
     logger,
     logs::{
         agent::LogsAgent,
-        flusher::{build_fqdn_logs, Flusher as LogsFlusher},
+        flusher::Flusher as LogsFlusher,
     },
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
@@ -702,7 +702,6 @@ fn start_logs_agent(
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
         Arc::clone(&logs_agent.aggregator),
-        build_fqdn_logs(config.site.clone()),
         config.clone(),
     );
     tokio::spawn(async move {
