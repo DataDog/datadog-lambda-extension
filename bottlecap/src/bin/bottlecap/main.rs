@@ -9,7 +9,6 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use bottlecap::tags::lambda::tags::EXTENSION_VERSION;
 use bottlecap::{
     base_url,
     config::{self, get_aws_partition_by_region, AwsConfig, Config},
@@ -25,7 +24,10 @@ use bottlecap::{
         flusher::{build_fqdn_logs, Flusher as LogsFlusher},
     },
     secrets::decrypt,
-    tags::{lambda, provider::Provider as TagProvider},
+    tags::{
+        lambda::{self, tags::EXTENSION_VERSION},
+        provider::Provider as TagProvider,
+    },
     telemetry::{
         self,
         client::TelemetryApiClient,
