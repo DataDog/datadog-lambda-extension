@@ -33,14 +33,6 @@ fi
 if [ "$ENVIRONMENT" = "us1-staging-fed" ]; then
     AWS_VAULT_ROLE=sso-govcloud-us1-staging-fed-power-user
 
-# this role looks like this in ~/.aws/config:
-# [profile sso-govcloud-us1-staging-fed-power-user]
-# sso_start_url=https://start.us-gov-home.awsapps.com/directory/d-9867188aeb
-# sso_account_id=553727695824
-# sso_role_name=power-user
-# sso_region=us-gov-west-1
-# region=us-gov-west-1
-
     export ADD_LAYER_VERSION_PERMISSIONS=0
     export AUTOMATICALLY_BUMP_VERSION=1
 
@@ -51,14 +43,6 @@ if [ "$ENVIRONMENT" = "us1-staging-fed" ]; then
 
 elif [ $ENVIRONMENT = "us1-fed" ]; then
     AWS_VAULT_ROLE=sso-govcloud-us1-fed-engineering
-
-# this role looks like this in ~/.aws/config:
-# [profile sso-govcloud-us1-fed-engineering]
-# sso_start_url=https://start.us-gov-west-1.us-gov-home.awsapps.com/directory/d-98671fdc8b
-# sso_account_id=002406178527
-# sso_role_name=engineering
-# sso_region=us-gov-west-1
-# region=us-gov-west-1
 
     export ADD_LAYER_VERSION_PERMISSIONS=1
     export AUTOMATICALLY_BUMP_VERSION=0
