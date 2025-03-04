@@ -39,6 +39,7 @@ async fn test_logs() {
 
     let arc_conf = Arc::new(Config {
         logs_config_use_compression: false,
+        logs_config_logs_dd_url: server.url(""),
         ..Config::default()
     });
     let tags_provider = Arc::new(Provider::new(
