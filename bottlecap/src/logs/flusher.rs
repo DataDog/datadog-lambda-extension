@@ -20,7 +20,6 @@ pub struct Flusher {
     headers: HeaderMap,
 }
 
-
 impl Flusher {
     pub fn new(
         api_key: String,

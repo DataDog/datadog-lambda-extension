@@ -4,6 +4,7 @@ pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
 
+use datadog_trace_utils::config_utils::trace_intake_url;
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -41,8 +42,6 @@ pub struct FallbackConfig {
     // Metric intake urls
     url: Option<String>,
     dd_url: Option<String>,
-    // APM, as opposed to logs, does not use the `apm_config` prefix for env vars
-    //apm_dd_url: Option<String>,
 }
 
 /// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
@@ -51,8 +50,6 @@ pub struct FallbackConfig {
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
 pub struct FallbackYamlConfig {
-    logs_config: Option<Value>,
-    apm_config: Option<Value>,
     otlp_config: Option<Value>,
 }
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -119,6 +116,7 @@ pub struct Config {
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
+    pub apm_config_apm_dd_url: String,
 }
 
 impl Default for Config {
@@ -157,6 +155,7 @@ impl Default for Config {
             trace_propagation_style_extract: vec![],
             trace_propagation_extract_first: false,
             trace_propagation_http_baggage_enabled: false,
+            apm_config_apm_dd_url: String::default(),
         }
     }
 }
@@ -319,6 +318,10 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
         config.logs_config_logs_dd_url = build_fqdn_logs(config.site.clone());
     }
 
+    if config.apm_config_apm_dd_url.is_empty() {
+        config.apm_config_apm_dd_url = trace_intake_url(config.site.clone().as_str());
+    }
+
     Ok(config)
 }
 
@@ -466,11 +469,10 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
 
-            let config =
-                get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(
                 config.logs_config_logs_dd_url,
-               "https://http-intake.logs.datadoghq.com".to_string() 
+                "https://http-intake.logs.datadoghq.com".to_string()
             );
             Ok(())
         });
@@ -480,13 +482,33 @@ pub mod tests {
     fn test_support_pci_logs_intake_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_LOGS_CONFIG_LOGS_DD_URL", "agent-http-intake-pci.logs.datadoghq.com:443");
+            jail.set_env(
+                "DD_LOGS_CONFIG_LOGS_DD_URL",
+                "agent-http-intake-pci.logs.datadoghq.com:443",
+            );
 
-            let config =
-                get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(
                 config.logs_config_logs_dd_url,
-               "agent-http-intake-pci.logs.datadoghq.com:443".to_string() 
+                "agent-http-intake-pci.logs.datadoghq.com:443".to_string()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_support_pci_traces_intake_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_APM_CONFIG_APM_DD_URL",
+                "https://trace-pci.agent.datadoghq.com",
+            );
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(
+                config.apm_config_apm_dd_url,
+                "https://trace-pci.agent.datadoghq.com".to_string()
             );
             Ok(())
         });
@@ -576,6 +598,7 @@ pub mod tests {
                         TracePropagationStyle::TraceContext
                     ],
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
+                    apm_config_apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
                     ..Config::default()
                 }
             );

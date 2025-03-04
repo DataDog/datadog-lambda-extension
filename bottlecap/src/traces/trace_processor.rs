@@ -13,7 +13,6 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::config_utils::trace_intake_url;
 use datadog_trace_utils::send_data::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
@@ -158,9 +157,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 }
             }
         }
-        let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
+            url: hyper::Uri::from_str(&config.apm_config_apm_dd_url)
+                .expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
             timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
@@ -205,6 +204,7 @@ mod tests {
 
     fn create_test_config() -> Arc<Config> {
         Arc::new(Config {
+            apm_config_apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             service: Some("test-service".to_string()),
             tags: Some("test:tag,env:test-env".to_string()),
             ..Config::default()

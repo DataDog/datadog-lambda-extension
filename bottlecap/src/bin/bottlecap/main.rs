@@ -19,10 +19,7 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{
-        agent::LogsAgent,
-        flusher::Flusher as LogsFlusher,
-    },
+    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     secrets::decrypt,
     tags::{lambda, provider::Provider as TagProvider},
     telemetry::{
