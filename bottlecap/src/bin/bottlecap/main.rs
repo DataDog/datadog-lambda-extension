@@ -44,7 +44,9 @@ use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
-    datadog::{MetricsIntakeUrlPrefix, Site as MetricsSite},
+    datadog::{
+        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride, Site as MetricsSite,
+    },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
@@ -307,12 +309,26 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let metrics_site = MetricsSite::new(config.dd_url.clone()).expect("can't parse site");
+    let metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else if !config.url.is_empty() {
+        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else {
+        // use site
+        let metrics_site = MetricsSite::new(config.dd_url.clone()).expect("can't parse site");
+        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+    };
+
     let flusher_config = MetricsFlusherConfig {
         api_key: resolved_api_key.clone(),
         aggregator: Arc::clone(&metrics_aggr),
-        metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
-            .expect("can't parse metrics intake URL from site"),
+        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
         https_proxy: config.https_proxy.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
     };

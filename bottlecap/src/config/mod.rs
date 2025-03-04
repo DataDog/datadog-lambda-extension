@@ -4,7 +4,7 @@ pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
 
-use datadog_trace_utils::config_utils::trace_intake_url;
+use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -114,9 +114,9 @@ pub struct Config {
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
     pub apm_config_apm_dd_url: String,
+    // Metrics overrides
     pub dd_url: String,
-    // Note: DD_DD_URL overrides DD_URL: https://docs.datadoghq.com/serverless/guide/agent_configuration/
-    pub url: Option<String>,
+    pub url: String,
 }
 
 impl Default for Config {
@@ -157,7 +157,7 @@ impl Default for Config {
             trace_propagation_http_baggage_enabled: false,
             apm_config_apm_dd_url: String::default(),
             dd_url: String::default(),
-            url: None,
+            url: String::default(),
         }
     }
 }
@@ -222,22 +222,6 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
         log_fallback_reason("otel");
         return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
-
-    // Intake URLs
-    // if config.url.is_some()
-    //     || config.dd_url.is_some()
-    //     || config.logs_config_logs_dd_url.is_some()
-    //     || config.apm_dd_url.is_some()
-    //     || yaml_config
-    //         .logs_config
-    //         .is_some_and(|c| c.get("logs_dd_url").is_some())
-    //     || yaml_config
-    //         .apm_config
-    //         .is_some_and(|c| c.get("apm_dd_url").is_some())
-    // {
-    //     log_fallback_reason("intake_urls");
-    //     return Err(ConfigError::UnsupportedField("intake_urls".to_string()));
-    // }
 
     // Govcloud Regions
     if region.starts_with("us-gov-") {
@@ -322,17 +306,12 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
 
     if config.apm_config_apm_dd_url.is_empty() {
         config.apm_config_apm_dd_url = trace_intake_url(config.site.clone().as_str());
+    } else {
+        config.apm_config_apm_dd_url =
+            trace_intake_url_prefixed(config.apm_config_apm_dd_url.as_str());
     }
 
-    if config.dd_url.is_empty() {
-        if let Some(url) = config.url {
-            config.dd_url.clone_from(&url);
-            config.url = None;
-        } else {
-            config.dd_url.clone_from(&config.site);
-        }
-    }
-
+    // Metrics are handled by dogstatsd in Main
     Ok(config)
 }
 
@@ -519,7 +498,7 @@ pub mod tests {
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(
                 config.apm_config_apm_dd_url,
-                "https://trace-pci.agent.datadoghq.com".to_string()
+                "https://trace-pci.agent.datadoghq.com/api/v0.2/traces".to_string()
             );
             Ok(())
         });
@@ -544,20 +523,7 @@ pub mod tests {
             jail.set_env("DD_URL", "custom_proxy:3128");
 
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
-            assert_eq!(config.dd_url, "custom_proxy:3128".to_string());
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_dd_dd_url_overrides_dd_url() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.set_env("DD_DD_URL", "use_this:3128");
-            jail.set_env("DD_URL", "dont_use_this:3128");
-
-            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
-            assert_eq!(config.dd_url, "use_this:3128".to_string());
+            assert_eq!(config.url, "custom_proxy:3128".to_string());
             Ok(())
         });
     }
@@ -568,7 +534,7 @@ pub mod tests {
             jail.clear_env();
 
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
-            assert_eq!(config.dd_url, "datadoghq.com".to_string());
+            assert_eq!(config.dd_url, String::new());
             Ok(())
         });
     }
@@ -658,7 +624,7 @@ pub mod tests {
                     ],
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
                     apm_config_apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
-                    dd_url: "datadoghq.com".to_string(),
+                    dd_url: String::new(), // We add the prefix in main.rs
                     ..Config::default()
                 }
             );
