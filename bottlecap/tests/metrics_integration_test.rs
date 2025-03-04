@@ -55,7 +55,13 @@ async fn test_enhanced_metrics() {
     let lambda_enhanced_metrics =
         enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(&arc_config));
 
-    lambda_enhanced_metrics.increment_invocation_metric();
+    let now = std::time::UNIX_EPOCH
+        .elapsed()
+        .unwrap()
+        .as_secs()
+        .try_into()
+        .unwrap_or_default();
+    lambda_enhanced_metrics.increment_invocation_metric(now);
 
     let _ = metrics_flusher.flush().await;
 

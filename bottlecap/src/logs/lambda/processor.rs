@@ -93,7 +93,7 @@ impl LambdaProcessor {
 
                 if let Some(message) = message {
                     if is_oom_error(&message) {
-                        if let Err(e) = self.event_bus.send(Event::OutOfMemory).await {
+                        if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
                             error!("Failed to send OOM event to the main event bus: {e}");
                         }
                     }

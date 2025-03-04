@@ -21,7 +21,10 @@ use bottlecap::{
     logger,
     logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     secrets::decrypt,
-    tags::{lambda, provider::Provider as TagProvider},
+    tags::{
+        lambda::{self, tags::EXTENSION_VERSION},
+        provider::Provider as TagProvider,
+    },
     telemetry::{
         self,
         client::TelemetryApiClient,
@@ -100,7 +103,7 @@ enum NextEventResponse {
     },
 }
 
-async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventResponse> {
+async fn next_event(client: &Client, ext_id: &str) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
@@ -135,7 +138,7 @@ async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventR
     })
 }
 
-async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
+async fn register(client: &Client) -> Result<RegisterResponse> {
     let mut map = HashMap::new();
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
@@ -184,7 +187,9 @@ async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
-    let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
+    let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
+    debug!("Starting Datadog Extension {version_without_next}");
+    let client = Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Failed to create client: {e:?}"),
@@ -391,7 +396,8 @@ async fn extension_loop_active(
                                 config.clone(),
                                 tags_provider.clone(),
                                 trace_processor.clone(),
-                                trace_agent_channel.clone()
+                                trace_agent_channel.clone(),
+                                runtime_done_meta.timestamp,
                             ).await;
                             drop(p);
                             break 'inner;
@@ -422,6 +428,7 @@ async fn extension_loop_active(
         } else if flush_control.should_periodic_flush() {
             // Should flush at the top of the invocation, which is now
             // flush
+            //
             flush_all(
                 &logs_flusher,
                 &mut metrics_flusher,
@@ -465,7 +472,8 @@ async fn extension_loop_active(
                                 config.clone(),
                                 tags_provider.clone(),
                                 trace_processor.clone(),
-                                trace_agent_channel.clone()
+                                trace_agent_channel.clone(),
+                                runtime_done_meta.timestamp,
                             ).await;
                             drop(p);
                         }
@@ -515,7 +523,8 @@ async fn extension_loop_active(
                                 config.clone(),
                                 tags_provider.clone(),
                                 trace_processor.clone(),
-                                trace_agent_channel.clone()
+                                trace_agent_channel.clone(),
+                                runtime_done_meta.timestamp,
                             ).await;
                             drop(p);
                         }
@@ -569,6 +578,7 @@ struct RuntimeDoneMeta {
     request_id: String,
     status: Status,
     metrics: RuntimeDoneMetrics,
+    timestamp: i64,
 }
 
 async fn handle_event_bus_event(
@@ -579,9 +589,9 @@ async fn handle_event_bus_event(
         Event::Metric(event) => {
             debug!("Metric event: {:?}", event);
         }
-        Event::OutOfMemory => {
+        Event::OutOfMemory(event_timestamp) => {
             let mut p = invocation_processor.lock().await;
-            p.on_out_of_memory_error();
+            p.on_out_of_memory_error(event_timestamp);
             drop(p);
         }
         Event::Telemetry(event) => match event.record {
@@ -597,7 +607,7 @@ async fn handle_event_bus_event(
             } => {
                 debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
                 let mut p = invocation_processor.lock().await;
-                p.on_platform_init_report(metrics.duration_ms);
+                p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
                 drop(p);
             }
             TelemetryRecord::PlatformStart { request_id, .. } => {
@@ -624,6 +634,7 @@ async fn handle_event_bus_event(
                         request_id,
                         status,
                         metrics,
+                        timestamp: event.time.timestamp(),
                     });
                 }
             }
@@ -641,7 +652,7 @@ async fn handle_event_bus_event(
                     error_type.unwrap_or("None".to_string())
                 );
                 let mut p = invocation_processor.lock().await;
-                p.on_platform_report(&request_id, metrics);
+                p.on_platform_report(&request_id, metrics, event.time.timestamp());
                 drop(p);
             }
             _ => {

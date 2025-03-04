@@ -849,8 +849,8 @@ dependencies = [
 
 [[package]]
 name = "dogstatsd"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=89754a92d3725c10b6e6e14202efd541a9fdc5a7#89754a92d3725c10b6e6e14202efd541a9fdc5a7"
 dependencies = [
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
@@ -868,6 +868,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "ustr",
+ "zstd",
 ]
 
 [[package]]
@@ -3874,9 +3875,9 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.13.2"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcf2b778a664581e31e389454a7072dab1647606d44f7feea22cd5abb9c9f3f9"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
 dependencies = [
  "zstd-safe",
 ]
