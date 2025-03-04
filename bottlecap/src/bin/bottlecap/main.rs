@@ -326,7 +326,7 @@ async fn extension_loop_active(
         MetricsIntakeUrlPrefix::new(None, prefix_override)
     } else {
         // use site
-        let metrics_site = MetricsSite::new(config.dd_url.clone()).expect("can't parse site");
+        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
         MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
     };
 
