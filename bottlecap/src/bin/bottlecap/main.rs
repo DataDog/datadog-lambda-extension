@@ -307,7 +307,7 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+    let metrics_site = MetricsSite::new(config.dd_url.clone()).expect("can't parse site");
     let flusher_config = MetricsFlusherConfig {
         api_key: resolved_api_key.clone(),
         aggregator: Arc::clone(&metrics_aggr),

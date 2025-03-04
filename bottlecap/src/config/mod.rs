@@ -39,9 +39,6 @@ pub struct FallbackConfig {
     trace_otel_enabled: bool,
     otlp_config_receiver_protocols_http_endpoint: Option<String>,
     otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
-    // Metric intake urls
-    url: Option<String>,
-    dd_url: Option<String>,
 }
 
 /// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
@@ -117,6 +114,9 @@ pub struct Config {
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
     pub apm_config_apm_dd_url: String,
+    pub dd_url: String,
+    // Note: DD_DD_URL overrides DD_URL: https://docs.datadoghq.com/serverless/guide/agent_configuration/
+    pub url: Option<String>,
 }
 
 impl Default for Config {
@@ -156,6 +156,8 @@ impl Default for Config {
             trace_propagation_extract_first: false,
             trace_propagation_http_baggage_enabled: false,
             apm_config_apm_dd_url: String::default(),
+            dd_url: String::default(),
+            url: None,
         }
     }
 }
@@ -320,6 +322,15 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
 
     if config.apm_config_apm_dd_url.is_empty() {
         config.apm_config_apm_dd_url = trace_intake_url(config.site.clone().as_str());
+    }
+
+    if config.dd_url.is_empty() {
+        if let Some(url) = config.url {
+            config.dd_url.clone_from(&url);
+            config.url = None;
+        } else {
+            config.dd_url.clone_from(&config.site);
+        }
     }
 
     Ok(config)
@@ -515,6 +526,54 @@ pub mod tests {
     }
 
     #[test]
+    fn test_support_dd_dd_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_DD_URL", "custom_proxy:3128");
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.dd_url, "custom_proxy:3128".to_string());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_support_dd_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_URL", "custom_proxy:3128");
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.dd_url, "custom_proxy:3128".to_string());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dd_dd_url_overrides_dd_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_DD_URL", "use_this:3128");
+            jail.set_env("DD_URL", "dont_use_this:3128");
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.dd_url, "use_this:3128".to_string());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dd_dd_url_default() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.dd_url, "datadoghq.com".to_string());
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
@@ -599,6 +658,7 @@ pub mod tests {
                     ],
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
                     apm_config_apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
+                    dd_url: "datadoghq.com".to_string(),
                     ..Config::default()
                 }
             );
