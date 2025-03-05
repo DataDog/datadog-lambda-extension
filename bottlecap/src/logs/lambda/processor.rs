@@ -10,7 +10,7 @@ use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
-use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
+use crate::telemetry::events::{TelemetryEvent, TelemetryRecord, Status};
 use crate::LAMBDA_RUNTIME_SLUG;
 
 use crate::logs::lambda::{IntakeLog, Message};
@@ -155,15 +155,20 @@ impl LambdaProcessor {
                     event.time.timestamp_millis(),
                 ))
             },
-            TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
+            TelemetryRecord::PlatformRuntimeDone { request_id, status, metrics, .. } => {  // TODO: check what to do with rest of the fields
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
+                let mut message = String::new();
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
+                    if status == Status::Timeout {
+                        message = format!("RequestId: {request_id} Task timed out after {} seconds.\n", metrics.duration_ms / 1000.0);
+                    }
                 }
-
+                
+                message.push_str(format!("END RequestId: {request_id}").as_str());
                 // Remove the `request_id` since no more orphan logs will be processed with this one
                 self.invocation_context.request_id = String::new();
 
