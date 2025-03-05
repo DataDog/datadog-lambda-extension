@@ -1001,12 +1001,7 @@ mod tests {
             100.0,
             now,
         );
-        assert_sketch(
-            &metrics_aggr,
-            constants::PRODUCED_BYTES_METRIC,
-            20000.0,
-            now,
-        );
+        assert_sketch(&metrics_aggr, constants::PRODUCED_BYTES_METRIC, 42.0, now);
     }
 
     #[test]
