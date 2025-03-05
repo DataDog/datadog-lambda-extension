@@ -201,7 +201,7 @@ impl LambdaProcessor {
 
                 let init_duration_ms = metrics.init_duration_ms;
                 if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{message} Init Duration: {init_duration_ms} ms");
+                    message = format!("{message} Init Duration: {:.2} ms", init_duration_ms);
                 }
 
                 Ok(Message::new(
@@ -462,7 +462,7 @@ mod tests {
                 }
             },
             Message {
-                    message: "REPORT RequestId: test-request-id Duration: 100 ms Runtime Duration: 0 ms Post Runtime Duration: 0 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
+                    message: "REPORT RequestId: test-request-id Duration: 100.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50.00 ms".to_string(),
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
