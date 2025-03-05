@@ -63,7 +63,6 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 Ok(_) => debug!("Successfully flushed traces"),
                 Err(e) => {
                     error!("Error sending trace: {e:?}");
-                    // TODO: Retries
                 }
             }
         }
