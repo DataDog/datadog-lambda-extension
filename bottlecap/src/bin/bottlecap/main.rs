@@ -314,31 +314,7 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let metrics_intake_url = if !config.dd_url.is_empty() {
-        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
-
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
-        MetricsIntakeUrlPrefix::new(None, prefix_override)
-    } else if !config.url.is_empty() {
-        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
-
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
-        MetricsIntakeUrlPrefix::new(None, prefix_override)
-    } else {
-        // use site
-        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
-        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
-    };
-
-    let flusher_config = MetricsFlusherConfig {
-        api_key: resolved_api_key.clone(),
-        aggregator: Arc::clone(&metrics_aggr),
-        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
-        https_proxy: config.https_proxy.clone(),
-        timeout: Duration::from_secs(config.flush_timeout),
-    };
-    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
-
+    let mut metrics_flusher = start_metrics_flusher(resolved_api_key.clone(), &metrics_aggr, config.clone());
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -732,6 +708,33 @@ fn start_logs_agent(
         logs_agent.spin().await;
     });
     (logs_agent_channel, logs_flusher)
+}
+
+fn start_metrics_flusher(resolved_api_key: String, metrics_aggr: &Arc<Mutex<MetricsAggregator>>, config: Arc<Config>) -> MetricsFlusher{
+    let metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else if !config.url.is_empty() {
+        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else {
+        // use site
+        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+    };
+
+    let flusher_config = MetricsFlusherConfig {
+        api_key: resolved_api_key.clone(),
+        aggregator: Arc::clone(&metrics_aggr),
+        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
+        https_proxy: config.https_proxy.clone(),
+        timeout: Duration::from_secs(config.flush_timeout),
+    };
+    MetricsFlusher::new(flusher_config)
 }
 
 fn start_trace_agent(
