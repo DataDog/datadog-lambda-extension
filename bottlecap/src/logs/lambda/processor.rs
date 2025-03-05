@@ -201,7 +201,7 @@ impl LambdaProcessor {
 
                 let init_duration_ms = metrics.init_duration_ms;
                 if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{message} Init Duration: {:.2} ms", init_duration_ms);
+                    message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
                 }
 
                 Ok(Message::new(
