@@ -10,7 +10,7 @@ use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
-use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
+use crate::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::LAMBDA_RUNTIME_SLUG;
 
 use crate::logs::lambda::{IntakeLog, Message};
@@ -155,20 +155,23 @@ impl LambdaProcessor {
                     event.time.timestamp_millis(),
                 ))
             },
-            TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
+            TelemetryRecord::PlatformRuntimeDone { request_id, status, metrics, .. } => {  // TODO: check what to do with rest of the fields
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
+                let mut message = format!("END RequestId: {request_id}"); 
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
+                    if status == Status::Timeout {
+                        message.push_str(format!(" Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0).as_str());
+                    }
                 }
-
                 // Remove the `request_id` since no more orphan logs will be processed with this one
                 self.invocation_context.request_id = String::new();
 
                 Ok(Message::new(
-                    format!("END RequestId: {request_id}"),
+                    message,
                     Some(request_id),
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
@@ -186,7 +189,7 @@ impl LambdaProcessor {
                 }
 
                 let mut message = format!(
-                    "REPORT RequestId: {} Duration: {} ms Runtime Duration: {} ms Post Runtime Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
+                    "REPORT RequestId: {} Duration: {:.2} ms Runtime Duration: {:.2} ms Post Runtime Duration: {:.2} ms Billed Duration: {:.2} ms Memory Size: {} MB Max Memory Used: {} MB",
                     request_id,
                     metrics.duration_ms,
                     self.invocation_context.runtime_duration_ms,
@@ -198,7 +201,7 @@ impl LambdaProcessor {
 
                 let init_duration_ms = metrics.init_duration_ms;
                 if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{message} Init Duration: {init_duration_ms} ms");
+                    message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
                 }
 
                 Ok(Message::new(
@@ -440,6 +443,31 @@ mod tests {
                 },
         ),
 
+        // platform runtime done
+        platform_runtime_done_timeout: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformRuntimeDone {
+                    request_id: "test-request-id".to_string(),
+                    status: Status::Timeout,
+                    error_type: None,
+                    metrics: Some(RuntimeDoneMetrics {
+                        duration_ms: 5000.0,
+                        produced_bytes: Some(42)
+                    })
+                }
+            },
+            Message {
+                    message: "END RequestId: test-request-id Task timed out after 5.00 seconds".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "info".to_string(),
+                },
+        ),
+
         // platform report
         platform_report: (
             &TelemetryEvent {
@@ -459,7 +487,7 @@ mod tests {
                 }
             },
             Message {
-                    message: "REPORT RequestId: test-request-id Duration: 100 ms Runtime Duration: 0 ms Post Runtime Duration: 0 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
+                    message: "REPORT RequestId: test-request-id Duration: 100.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50.00 ms".to_string(),
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
