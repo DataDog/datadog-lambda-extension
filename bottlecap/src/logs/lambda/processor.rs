@@ -443,6 +443,31 @@ mod tests {
                 },
         ),
 
+        // platform runtime done
+        platform_runtime_done_timeout: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformRuntimeDone {
+                    request_id: "test-request-id".to_string(),
+                    status: Status::Timeout,
+                    error_type: None,
+                    metrics: Some(RuntimeDoneMetrics {
+                        duration_ms: 5000.0,
+                        produced_bytes: Some(42)
+                    })
+                }
+            },
+            Message {
+                    message: "END RequestId: test-request-id Task timed out after 5.00 seconds".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "info".to_string(),
+                },
+        ),
+
         // platform report
         platform_report: (
             &TelemetryEvent {
