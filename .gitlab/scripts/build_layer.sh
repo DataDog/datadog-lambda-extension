@@ -42,7 +42,6 @@ docker_build() {
 
     cp $EXTENSION_PATH/datadog_extension.zip $TARGET_DIR/datadog_extension-${FILE_SUFFIX}.zip
     unzip $EXTENSION_PATH/datadog_extension.zip -d $TARGET_DIR/datadog_extension-${FILE_SUFFIX}
-    rm -rf ${EXTENSION_PATH}
 }
 
 docker_build $ARCHITECTURE
