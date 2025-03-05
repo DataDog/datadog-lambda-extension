@@ -25,7 +25,7 @@ use crate::{
         CPUData, NetworkData,
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
-    telemetry::events::{ReportMetrics, Status},
+    telemetry::events::{ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{
@@ -261,7 +261,7 @@ impl Processor {
     pub async fn on_platform_runtime_done(
         &mut self,
         request_id: &String,
-        duration_ms: f64,
+        metrics: RuntimeDoneMetrics,
         status: Status,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
@@ -270,11 +270,11 @@ impl Processor {
         timestamp: i64,
     ) {
         self.context_buffer
-            .add_runtime_duration(request_id, duration_ms);
+            .add_runtime_duration(request_id, metrics.duration_ms);
 
         // Set the runtime duration metric
         self.enhanced_metrics
-            .set_runtime_duration_metric(duration_ms, timestamp);
+            .set_runtime_done_metrics(&metrics, timestamp);
 
         if status != Status::Success {
             // Increment the error metric

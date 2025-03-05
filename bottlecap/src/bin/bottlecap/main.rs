@@ -368,7 +368,7 @@ async fn extension_loop_active(
                             let mut p = invocation_processor.lock().await;
                             p.on_platform_runtime_done(
                                 &runtime_done_meta.request_id,
-                                runtime_done_meta.metrics.duration_ms,
+                                runtime_done_meta.metrics,
                                 runtime_done_meta.status,
                                 config.clone(),
                                 tags_provider.clone(),
@@ -444,7 +444,7 @@ async fn extension_loop_active(
                             let mut p = invocation_processor.lock().await;
                             p.on_platform_runtime_done(
                                 &runtime_done_meta.request_id,
-                                runtime_done_meta.metrics.duration_ms,
+                                runtime_done_meta.metrics,
                                 runtime_done_meta.status,
                                 config.clone(),
                                 tags_provider.clone(),
@@ -495,7 +495,7 @@ async fn extension_loop_active(
                             let mut p = invocation_processor.lock().await;
                             p.on_platform_runtime_done(
                                 &runtime_done_meta.request_id,
-                                runtime_done_meta.metrics.duration_ms,
+                                runtime_done_meta.metrics,
                                 runtime_done_meta.status,
                                 config.clone(),
                                 tags_provider.clone(),
