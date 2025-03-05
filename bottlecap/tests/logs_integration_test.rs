@@ -39,6 +39,7 @@ async fn test_logs() {
 
     let arc_conf = Arc::new(Config {
         logs_config_use_compression: false,
+        logs_config_logs_dd_url: server.url(""),
         ..Config::default()
     });
     let tags_provider = Arc::new(Provider::new(
@@ -53,7 +54,6 @@ async fn test_logs() {
     let logs_flusher = LogsFlusher::new(
         dd_api_key.to_string(),
         Arc::clone(&logs_agent.aggregator),
-        server.base_url(),
         arc_conf.clone(),
     );
 
