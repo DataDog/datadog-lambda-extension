@@ -1,9 +1,12 @@
-use crate::{metrics::enhanced::{
-    constants::{self, BASE_LAMBDA_INVOCATION_PRICE},
-    statfs::statfs_info,
-}, telemetry::events::RuntimeDoneMetrics};
 use crate::proc::{self, CPUData, NetworkData};
 use crate::telemetry::events::ReportMetrics;
+use crate::{
+    metrics::enhanced::{
+        constants::{self, BASE_LAMBDA_INVOCATION_PRICE},
+        statfs::statfs_info,
+    },
+    telemetry::events::RuntimeDoneMetrics,
+};
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator::Aggregator, metric::SortedTags};
@@ -863,9 +866,9 @@ mod tests {
         lambda.set_runtime_done_metrics(
             &RuntimeDoneMetrics {
                 duration_ms: 100.0,
-                produced_bytes: Some(20000 as u64)
+                produced_bytes: Some(20000 as u64),
             },
-            now
+            now,
         );
         lambda.set_post_runtime_duration_metric(100.0, now);
         lambda.set_report_log_metrics(
@@ -982,7 +985,7 @@ mod tests {
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let runtime_done_metrics = RuntimeDoneMetrics {
             duration_ms: 100.0,
-            produced_bytes: Some(20000 as u64)
+            produced_bytes: Some(20000 as u64),
         };
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
@@ -992,8 +995,18 @@ mod tests {
             .unwrap_or_default();
         lambda.set_runtime_done_metrics(&runtime_done_metrics, now);
 
-        assert_sketch(&metrics_aggr, constants::RUNTIME_DURATION_METRIC, 100.0, now);
-        assert_sketch(&metrics_aggr, constants::PRODUCED_BYTES_METRIC, 20000.0, now);
+        assert_sketch(
+            &metrics_aggr,
+            constants::RUNTIME_DURATION_METRIC,
+            100.0,
+            now,
+        );
+        assert_sketch(
+            &metrics_aggr,
+            constants::PRODUCED_BYTES_METRIC,
+            20000.0,
+            now,
+        );
     }
 
     #[test]
