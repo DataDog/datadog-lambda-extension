@@ -9,12 +9,12 @@ async-trait = { version = "0.1", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
-datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
-datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
-datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
-datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "b58170645053a75fcb7abd6920bdafb6ab2e5a45" }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "1269fa6ef2b09a5c3a5802b40a6224d3a3d927a2" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "1269fa6ef2b09a5c3a5802b40a6224d3a3d927a2" }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "1269fa6ef2b09a5c3a5802b40a6224d3a3d927a2", features = ["compression"] }
+datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "1269fa6ef2b09a5c3a5802b40a6224d3a3d927a2" }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "1269fa6ef2b09a5c3a5802b40a6224d3a3d927a2" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "1269fa6ef2b09a5c3a5802b40a6224d3a3d927a2" }
 dogstatsd = { git = "https://github.com/DataDog/libdatadog", rev = "89754a92d3725c10b6e6e14202efd541a9fdc5a7" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "0.14", default-features = false, features = ["server"] }
