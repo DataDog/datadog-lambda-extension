@@ -159,8 +159,8 @@ impl StepFunctionEvent {
             self.execution.id.clone(),
             self.state.name.clone(),
             self.state.entered_time.clone(),
-            self.state.retry_count.clone(),
-            self.execution.redrive_count.clone(),
+            self.state.retry_count,
+            self.execution.redrive_count,
         );
 
         SpanContext {
@@ -178,7 +178,7 @@ impl StepFunctionEvent {
     }
 
     /// Generates a random 64 bit ID from the formatted hash of the
-    /// Step Function context object. Omit retry_count and redrive_count
+    /// Step Function context object. We omit `retry_count` and `redrive_count`
     /// when both are 0 to maintain backwards compatibility.
     ///
     fn generate_parent_id(
