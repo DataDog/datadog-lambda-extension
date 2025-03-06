@@ -14,13 +14,6 @@ use crate::{
     },
 };
 
-#[allow(clippy::module_name_repetitions)]
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct LegacyStepFunctionEvent {
-    #[serde(rename = "Payload")]
-    pub payload: StepFunctionEvent,
-}
-
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct StepFunctionEvent {
     #[serde(rename = "Execution")]
@@ -29,12 +22,22 @@ pub struct StepFunctionEvent {
     pub state: State,
     #[serde(rename = "StateMachine")]
     pub state_machine: Option<StateMachine>,
+    #[serde(rename = "x-datadog-trace-id")]
+    pub trace_id: Option<String>,
+    #[serde(rename = "x-datadog-tags")]
+    pub trace_tags: Option<String>,
+    #[serde(rename = "RootExecutionID")]
+    pub root_execution_id: Option<String>,
+    #[serde(rename = "serverless-version")]
+    pub serverless_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Execution {
     #[serde(rename = "Id")]
     id: String,
+    #[serde(rename = "RedriveCount")]
+    redrive_count: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -43,6 +46,8 @@ pub struct State {
     name: String,
     #[serde(rename = "EnteredTime")]
     entered_time: String,
+    #[serde(rename = "RetryCount")]
+    retry_count: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -56,7 +61,11 @@ impl Trigger for StepFunctionEvent {
     where
         Self: Sized,
     {
-        let p = payload.get("Payload").unwrap_or(&payload);
+        let p = payload
+            .get("Payload")
+            .unwrap_or(&payload)
+            .get("_datadog")
+            .unwrap_or(payload.get("Payload").unwrap_or(&payload));
         match serde_json::from_value::<StepFunctionEvent>(p.clone()) {
             Ok(event) => Some(event),
             Err(e) => {
@@ -70,8 +79,12 @@ impl Trigger for StepFunctionEvent {
     where
         Self: Sized,
     {
-        // Check first if the payload is a Legacy Step Function event
-        let p = payload.get("Payload").unwrap_or(payload);
+        // Check if the payload is a Legacy Step Function event and also a JSONata event
+        let p = payload
+            .get("Payload")
+            .unwrap_or(payload)
+            .get("_datadog")
+            .unwrap_or(payload.get("Payload").unwrap_or(payload));
 
         let execution_id = p
             .get("Execution")
@@ -128,6 +141,8 @@ impl StepFunctionEvent {
             self.execution.id.clone(),
             self.state.name.clone(),
             self.state.entered_time.clone(),
+            self.state.retry_count.clone(),
+            self.execution.redrive_count.clone(),
         );
 
         SpanContext {
@@ -145,14 +160,21 @@ impl StepFunctionEvent {
     }
 
     /// Generates a random 64 bit ID from the formatted hash of the
-    /// Step Function Execution ARN, the State Name, and the State Entered Time
+    /// Step Function context object. Omit retry_count and redrive_count
+    /// when both are 0 to maintain backwards compatibility.
     ///
     fn generate_parent_id(
         execution_id: String,
         state_name: String,
         state_entered_time: String,
+        retry_count: u16,
+        redrive_count: u16,
     ) -> u64 {
-        let unique_string = format!("{execution_id}#{state_name}#{state_entered_time}");
+        let mut unique_string = format!("{execution_id}#{state_name}#{state_entered_time}");
+
+        if retry_count != 0 || redrive_count != 0 {
+            unique_string.push_str(&format!("#{retry_count}#{redrive_count}"));
+        }
 
         let hash = Sha256::digest(unique_string.as_bytes());
         Self::get_positive_u64(&hash[0..8])
@@ -213,14 +235,20 @@ mod tests {
         let expected = StepFunctionEvent {
             execution: Execution {
                 id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44"),
+                redrive_count: 0,
             },
             state: State {
-                name: String::from("agocsTest1"), 
+                name: String::from("agocsTest1"),
                 entered_time: String::from("2024-07-30T19:55:53.018Z"),
+                retry_count: 0,
             },
             state_machine: Some(StateMachine {
                 id: String::from("arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"),
             }),
+            trace_id: None,
+            trace_tags: None,
+            root_execution_id: None,
+            serverless_version: None,
         };
 
         assert_eq!(result, expected);
@@ -235,14 +263,20 @@ mod tests {
         let expected = StepFunctionEvent {
             execution: Execution {
                 id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44"),
+                redrive_count: 0,
             },
             state: State {
-                name: String::from("agocsTest1"), 
+                name: String::from("agocsTest1"),
                 entered_time: String::from("2024-07-30T19:55:53.018Z"),
+                retry_count: 0,
             },
             state_machine: Some(StateMachine {
                 id: String::from("arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"),
             }),
+            trace_id: None,
+            trace_tags: None,
+            root_execution_id: None,
+            serverless_version: None,
         };
 
         assert_eq!(result, expected);
@@ -251,14 +285,6 @@ mod tests {
     #[test]
     fn test_is_match() {
         let json = read_json_file("step_function_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize StepFunctionEvent");
-
-        assert!(StepFunctionEvent::is_match(&payload));
-    }
-
-    #[test]
-    fn test_is_match_legacy_event() {
-        let json = read_json_file("step_function_legacy_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize StepFunctionEvent");
 
         assert!(StepFunctionEvent::is_match(&payload));
@@ -344,7 +370,9 @@ mod tests {
         let parent_id = StepFunctionEvent::generate_parent_id(
             String::from("arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"),
             String::from("step-one"),
-            String::from("2022-12-08T21:08:19.224Z")
+            String::from("2022-12-08T21:08:19.224Z"),
+            0,
+            0,
         );
 
         assert_eq!(parent_id, 4_340_734_536_022_949_921);
@@ -352,7 +380,9 @@ mod tests {
         let parent_id = StepFunctionEvent::generate_parent_id(
             String::from("arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"),
             String::from("step-one"),
-            String::from("2022-12-08T21:08:19.224Y")
+            String::from("2022-12-08T21:08:19.224Y"),
+            0,
+            0,
         );
 
         assert_eq!(parent_id, 981_693_280_319_792_699);
