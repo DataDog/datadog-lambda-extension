@@ -535,7 +535,7 @@ async fn handle_event_bus_event(
                 let mut p = invocation_processor.lock().await;
                 p.on_platform_runtime_done(
                     request_id,
-                    metrics.duration_ms,
+                    metrics,
                     status,
                     config.clone(),
                     tags_provider.clone(),
