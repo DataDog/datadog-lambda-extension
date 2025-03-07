@@ -364,33 +364,9 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
-                            match telemetry_event.record {
-                                TelemetryRecord::PlatformReport{ request_id, metrics, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_report(
-                                        &request_id,
-                                        metrics,
-                                        telemetry_event.time.timestamp(),
-                                    );
-                                    drop(p);
-                                },
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_runtime_done(
-                                        &request_id,
-                                        metrics.duration_ms,
-                                        status,
-                                        config.clone(),
-                                        tags_provider.clone(),
-                                        trace_processor.clone(),
-                                        trace_agent_channel.clone(),
-                                        telemetry_event.time.timestamp(),
-                                    ).await;
-                                    drop(p);
-                                    break 'flush_end;
-                                },
-                                _ => {}
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                break 'flush_end;
                             }
                         }
                     }
@@ -453,34 +429,7 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
-                            match telemetry_event.record {
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_runtime_done(
-                                        &request_id,
-                                        metrics.duration_ms,
-                                        status,
-                                        config.clone(),
-                                        tags_provider.clone(),
-                                        trace_processor.clone(),
-                                        trace_agent_channel.clone(),
-                                        telemetry_event.time.timestamp(),
-                                    ).await;
-                                    drop(p);
-                                },
-                                TelemetryRecord::PlatformReport{ request_id, metrics, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_report(
-                                        &request_id,
-                                        metrics,
-                                        telemetry_event.time.timestamp(),
-                                    );
-                                    drop(p);
-                                },
-                                _ => {}
-                            }
-                        }
+                        handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
                         flush_all(
@@ -499,33 +448,10 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
-                            match telemetry_event.record {
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_runtime_done(
-                                        &request_id,
-                                        metrics.duration_ms,
-                                        status,
-                                        config.clone(),
-                                        tags_provider.clone(),
-                                        trace_processor.clone(),
-                                        trace_agent_channel.clone(),
-                                        telemetry_event.time.timestamp(),
-                                    ).await;
-                                    drop(p);
-                                },
-                                TelemetryRecord::PlatformReport{ request_id, metrics, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_report(
-                                        &request_id,
-                                        metrics,
-                                        telemetry_event.time.timestamp(),
-                                    );
-                                    drop(p);
-                                    break 'shutdown;
-                                },
-                                _ => {}
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
+                                // Wait for the report event before shutting down
+                                break 'shutdown;
                             }
                         }
                     }
@@ -565,6 +491,10 @@ async fn flush_all(
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    config: Arc<Config>,
+    tags_provider: Arc<TagProvider>,
+    trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
+    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::Metric(event) => {
@@ -596,10 +526,37 @@ async fn handle_event_bus_event(
                 p.on_platform_start(request_id, event.time);
                 drop(p);
             }
-            TelemetryRecord::PlatformRuntimeDone { .. } => {
+            TelemetryRecord::PlatformRuntimeDone {
+                ref request_id,
+                metrics: Some(metrics),
+                status,
+                ..
+            } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_runtime_done(
+                    request_id,
+                    metrics.duration_ms,
+                    status,
+                    config.clone(),
+                    tags_provider.clone(),
+                    trace_processor.clone(),
+                    trace_agent_channel.clone(),
+                    event.time.timestamp(),
+                )
+                .await;
+                drop(p);
                 return Some(event);
             }
-            TelemetryRecord::PlatformReport { .. } => return Some(event),
+            TelemetryRecord::PlatformReport {
+                ref request_id,
+                metrics,
+                ..
+            } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_report(request_id, metrics, event.time.timestamp());
+                drop(p);
+                return Some(event);
+            }
             _ => {
                 debug!("Unforwarded Telemetry event: {:?}", event);
             }
