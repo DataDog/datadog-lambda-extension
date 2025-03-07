@@ -428,7 +428,6 @@ async fn extension_loop_active(
                     &mut race_flush_interval,
                 )
                 .await;
-                race_flush_interval.reset();
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
