@@ -17,6 +17,8 @@ use crate::{
     },
 };
 
+use super::DATADOG_CARRIER_KEY;
+
 pub const DATADOG_LEGACY_LAMBDA_PAYLOAD: &str = "Payload";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -69,7 +71,7 @@ impl Trigger for StepFunctionEvent {
         let p = payload
             .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
             .unwrap_or(&payload)
-            .get(super::DATADOG_CARRIER_KEY)
+            .get(DATADOG_CARRIER_KEY)
             .unwrap_or(
                 payload
                     .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
@@ -93,7 +95,7 @@ impl Trigger for StepFunctionEvent {
         let p = payload
             .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
             .unwrap_or(payload)
-            .get(super::DATADOG_CARRIER_KEY)
+            .get(DATADOG_CARRIER_KEY)
             .unwrap_or(
                 payload
                     .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
