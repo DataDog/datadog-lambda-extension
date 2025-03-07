@@ -360,7 +360,7 @@ async fn extension_loop_active(
             // flush everything
             // call next
             // optionally flush after tick for long running invos
-            'inner: loop {
+            'flush_end: loop {
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
@@ -388,7 +388,7 @@ async fn extension_loop_active(
                                         telemetry_event.time.timestamp(),
                                     ).await;
                                     drop(p);
-                                    break 'inner;
+                                    break 'flush_end;
                                 },
                                 _ => {}
                             }
@@ -416,85 +416,20 @@ async fn extension_loop_active(
             .await;
             let next_response = next_event(client, &r.extension_id).await;
             shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
-        } else if flush_control.should_periodic_flush() {
-            // Should flush at the top of the invocation, which is now
-            // flush
-            //
-            flush_all(
-                &logs_flusher,
-                &mut metrics_flusher,
-                &*trace_flusher,
-                &*stats_flusher,
-                &mut race_flush_interval,
-            )
-            .await;
-            race_flush_interval.reset();
-            // Don't await! Pin it and check in the tokio loop
-            // Tokio select! drops whatever task does not complete first
-            // but the state machine API in Lambda will give us an invalid error
-            // if we call /next twice instead of waiting
-            let next_lambda_response = next_event(client, &r.extension_id);
-            tokio::pin!(next_lambda_response);
-            // call next
-            // optionally flush after tick for long running invos
-            'inner: loop {
-                tokio::select! {
-                biased;
-                    next_response = &mut next_lambda_response => {
-                        // Dear reader this is important, you may be tempted to remove this
-                        // after all, why reset the flush interval if we're not flushing?
-                        // It's because the race_flush_interval is only for the RACE FLUSH
-                        // For long-running txns. The call to `flush_control.should_flush_end()`
-                        // has its own interval which is not reset here.
-                        race_flush_interval.reset();
-                        // Thank you for not removing race_flush_interval.reset();
-
-                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
-                        // Need to break here to re-call next
-                        break 'inner;
-                    }
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
-                            match telemetry_event.record {
-                                TelemetryRecord::PlatformReport{ request_id, metrics, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_report(
-                                        &request_id,
-                                        metrics,
-                                        telemetry_event.time.timestamp(),
-                                    );
-                                    drop(p);
-                                },
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_runtime_done(
-                                        &request_id,
-                                        metrics.duration_ms,
-                                        status,
-                                        config.clone(),
-                                        tags_provider.clone(),
-                                        trace_processor.clone(),
-                                        trace_agent_channel.clone(),
-                                        telemetry_event.time.timestamp(),
-                                    ).await;
-                                    drop(p);
-                                },
-                                _ => {}
-                            }
-                        }
-                    }
-                    _ = race_flush_interval.tick() => {
-                        flush_all(
-                            &logs_flusher,
-                            &mut metrics_flusher,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                        ).await;
-                    }
-                }
-            }
         } else {
+            //Periodic flush scenario, flush at top of invocation
+            if flush_control.should_periodic_flush() {
+                // Should flush at the top of the invocation, which is now
+                flush_all(
+                    &logs_flusher,
+                    &mut metrics_flusher,
+                    &*trace_flusher,
+                    &*stats_flusher,
+                    &mut race_flush_interval,
+                )
+                .await;
+                race_flush_interval.reset();
+            }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
             // If we get platform.runtimeDone or platform.runtimeReport
@@ -502,7 +437,7 @@ async fn extension_loop_active(
             // and then we break to determine if we'll flush or not
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
-            'inner: loop {
+            'next_invocation: loop {
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
@@ -516,7 +451,7 @@ async fn extension_loop_active(
 
                         shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
-                        break 'inner;
+                        break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
                         if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
@@ -562,7 +497,7 @@ async fn extension_loop_active(
         }
 
         if shutdown {
-            'inner: loop {
+            'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
                         if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
@@ -589,7 +524,7 @@ async fn extension_loop_active(
                                         telemetry_event.time.timestamp(),
                                     );
                                     drop(p);
-                                    break 'inner;
+                                    break 'shutdown;
                                 },
                                 _ => {}
                             }
