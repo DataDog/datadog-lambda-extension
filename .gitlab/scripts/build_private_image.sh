@@ -29,12 +29,12 @@ else
     TARGET_IMAGE="Dockerfile.extension_image.alpine"
 fi
 
-LAYER_NAME="Datadog-Extension$SUFFIX"
+LAYER_NAME="Datadog-Extension"
 if [ -z "$LAYER_SUFFIX" ]; then
     printf "Building container images tagged without suffix\n"
 else
     printf "Building container images tagged with suffix: ${LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}${SUFFIX}"
+    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}"
 fi
 
 # Increment last version
@@ -49,4 +49,4 @@ docker buildx build \
     --tag "$DOCKER_TARGET_IMAGE:${VERSION}${SUFFIX}" \
     --push .
 
-printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX} for arm64 and amd64\n"
+printf "Image built and pushed to $DOCKER_TARGET_IMAGE:${IMAGE_TAG}${SUFFIX} for ${PLATFORM}\n"
