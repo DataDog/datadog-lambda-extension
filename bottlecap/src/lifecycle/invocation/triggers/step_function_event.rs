@@ -10,9 +10,14 @@ use crate::{
     },
     traces::{
         context::{Sampling, SpanContext},
-        propagation::text_map_propagator::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
+        propagation::text_map_propagator::{
+            DatadogHeaderPropagator, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
+            DATADOG_SAMPLING_DECISION_KEY, DATADOG_TAGS_KEY,
+        },
     },
 };
+
+pub const DATADOG_LEGACY_LAMBDA_PAYLOAD: &str = "Payload";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct StepFunctionEvent {
@@ -62,10 +67,15 @@ impl Trigger for StepFunctionEvent {
         Self: Sized,
     {
         let p = payload
-            .get("Payload")
+            .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
             .unwrap_or(&payload)
-            .get("_datadog")
-            .unwrap_or(payload.get("Payload").unwrap_or(&payload));
+            .get(super::DATADOG_CARRIER_KEY)
+            .unwrap_or(
+                payload
+                    .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
+                    .unwrap_or(&payload),
+            );
+
         match serde_json::from_value::<StepFunctionEvent>(p.clone()) {
             Ok(event) => Some(event),
             Err(e) => {
@@ -81,10 +91,14 @@ impl Trigger for StepFunctionEvent {
     {
         // Check if the payload is a Legacy Step Function event and also a JSONata event
         let p = payload
-            .get("Payload")
+            .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
             .unwrap_or(payload)
-            .get("_datadog")
-            .unwrap_or(payload.get("Payload").unwrap_or(payload));
+            .get(super::DATADOG_CARRIER_KEY)
+            .unwrap_or(
+                payload
+                    .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
+                    .unwrap_or(payload),
+            );
 
         let execution_id = p
             .get("Execution")
@@ -134,20 +148,23 @@ impl StepFunctionEvent {
         let (lo_tid, tags) =
             if let (Some(trace_id), Some(trace_tags)) = (&self.trace_id, &self.trace_tags) {
                 // Lambda Root
-                let lo_tid = trace_id.parse().expect("Failed to parse trace_id to u64");
-                let tags = Self::extract_trace_tags(trace_tags);
-                (lo_tid, tags)
-            } else if let Some(root_execution_id) = &self.root_execution_id {
-                // Nested
-                let (lo_tid, hi_tid) = Self::generate_trace_id(root_execution_id.clone());
-                let tags = HashMap::from([(
-                    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                    format!("{hi_tid:x}"),
-                )]);
+                let lo_tid = trace_id
+                    .parse()
+                    .unwrap_or(Self::generate_trace_id(self.execution.id.clone()).0);
+
+                let tags = DatadogHeaderPropagator::extract_tags(&HashMap::from([(
+                    DATADOG_TAGS_KEY.to_string(),
+                    trace_tags.to_string(),
+                )]));
+
                 (lo_tid, tags)
             } else {
-                // Normal
-                let (lo_tid, hi_tid) = Self::generate_trace_id(self.execution.id.clone());
+                // Nested or Normal, fetch correct ID
+                let execution_arn = self
+                    .root_execution_id
+                    .as_ref()
+                    .unwrap_or(&self.execution.id);
+                let (lo_tid, hi_tid) = Self::generate_trace_id(execution_arn.clone());
                 let tags = HashMap::from([(
                     DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
                     format!("{hi_tid:x}"),
@@ -226,19 +243,6 @@ impl StepFunctionEvent {
         } else {
             result
         }
-    }
-
-    /// Extracts the `_dd.p.tid` tag from a comma-separated trace tags string
-    ///
-    fn extract_trace_tags(trace_tags: &str) -> HashMap<String, String> {
-        trace_tags
-            .split(',')
-            .filter_map(|s| s.split_once('='))
-            .find_map(|(k, v)| {
-                (k == DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
-                    .then(|| (k.to_string(), v.to_string()))
-            })
-            .map_or_else(HashMap::new, |entry| HashMap::from([entry]))
     }
 }
 
@@ -533,10 +537,13 @@ mod tests {
                         mechanism: None,
                     }),
                     origin: Some("states".to_string()),
-                    tags: HashMap::from([(
-                        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                        "672a7cb100000000".to_string(),
-                    )]),
+                    tags: HashMap::from([
+                        (
+                            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                            "672a7cb100000000".to_string(),
+                        ),
+                        (DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string()),
+                    ]),
                     links: vec![],
                 },
             ),
@@ -550,10 +557,13 @@ mod tests {
                         mechanism: None,
                     }),
                     origin: Some("states".to_string()),
-                    tags: HashMap::from([(
-                        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                        "672a7cb100000000".to_string(),
-                    )]),
+                    tags: HashMap::from([
+                        (
+                            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                            "672a7cb100000000".to_string(),
+                        ),
+                        (DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string()),
+                    ]),
                     links: vec![],
                 },
             ),
@@ -623,38 +633,5 @@ mod tests {
         assert_eq!(hi_tid, 1_807_349_139_850_867_390);
 
         assert_eq!(hex_tid, "1914fe7789eb32be");
-    }
-
-    #[test]
-    fn test_extract_trace_tags() {
-        let test_cases = vec![
-            (
-                "valid_tid_at_start",
-                "_dd.p.tid=66bcb5eb00000000,_dd.p.dm=-0",
-                HashMap::from([(
-                    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                    "66bcb5eb00000000".to_string(),
-                )]),
-            ),
-            (
-                "valid_tid_at_end",
-                "_dd.p.dm=-0,_dd.p.tid=abcdef1234567890",
-                HashMap::from([(
-                    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                    "abcdef1234567890".to_string(),
-                )]),
-            ),
-            ("no_tid_present", "_dd.p.dm=-0", HashMap::new()),
-            ("empty_input", "", HashMap::new()),
-        ];
-
-        for (name, input, expected) in test_cases {
-            let result = StepFunctionEvent::extract_trace_tags(input);
-            assert_eq!(
-                result, expected,
-                "Test '{}' failed: input '{}'",
-                name, input
-            );
-        }
     }
 }
