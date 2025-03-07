@@ -375,22 +375,20 @@ async fn extension_loop_active(
                                     );
                                     drop(p);
                                 },
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics, status, .. } => {
-                                    if let Some(metrics) = metrics {
-                                        let mut p = invocation_processor.lock().await;
-                                        p.on_platform_runtime_done(
-                                            &request_id,
-                                            metrics.duration_ms,
-                                            status,
-                                            config.clone(),
-                                            tags_provider.clone(),
-                                            trace_processor.clone(),
-                                            trace_agent_channel.clone(),
-                                            telemetry_event.time.timestamp(),
-                                        ).await;
-                                        drop(p);
-                                        break 'inner;
-                                    }
+                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
+                                    let mut p = invocation_processor.lock().await;
+                                    p.on_platform_runtime_done(
+                                        &request_id,
+                                        metrics.duration_ms,
+                                        status,
+                                        config.clone(),
+                                        tags_provider.clone(),
+                                        trace_processor.clone(),
+                                        trace_agent_channel.clone(),
+                                        telemetry_event.time.timestamp(),
+                                    ).await;
+                                    drop(p);
+                                    break 'inner;
                                 },
                                 _ => {}
                             }
@@ -467,21 +465,19 @@ async fn extension_loop_active(
                                     );
                                     drop(p);
                                 },
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics, status, .. } => {
-                                    if let Some(metrics) = metrics {
-                                        let mut p = invocation_processor.lock().await;
-                                        p.on_platform_runtime_done(
-                                            &request_id,
-                                            metrics.duration_ms,
-                                            status,
-                                            config.clone(),
-                                            tags_provider.clone(),
-                                            trace_processor.clone(),
-                                            trace_agent_channel.clone(),
-                                            telemetry_event.time.timestamp(),
-                                        ).await;
-                                        drop(p);
-                                    }
+                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
+                                    let mut p = invocation_processor.lock().await;
+                                    p.on_platform_runtime_done(
+                                        &request_id,
+                                        metrics.duration_ms,
+                                        status,
+                                        config.clone(),
+                                        tags_provider.clone(),
+                                        trace_processor.clone(),
+                                        trace_agent_channel.clone(),
+                                        telemetry_event.time.timestamp(),
+                                    ).await;
+                                    drop(p);
                                 },
                                 _ => {}
                             }
@@ -525,21 +521,19 @@ async fn extension_loop_active(
                     Some(event) = event_bus.rx.recv() => {
                         if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
                             match telemetry_event.record {
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics, status, .. } => {
-                                    if let Some(metrics) = metrics {
-                                        let mut p = invocation_processor.lock().await;
-                                        p.on_platform_runtime_done(
-                                            &request_id,
-                                            metrics.duration_ms,
-                                            status,
-                                            config.clone(),
-                                            tags_provider.clone(),
-                                            trace_processor.clone(),
-                                            trace_agent_channel.clone(),
-                                            telemetry_event.time.timestamp(),
-                                        ).await;
-                                        drop(p);
-                                    }
+                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
+                                    let mut p = invocation_processor.lock().await;
+                                    p.on_platform_runtime_done(
+                                        &request_id,
+                                        metrics.duration_ms,
+                                        status,
+                                        config.clone(),
+                                        tags_provider.clone(),
+                                        trace_processor.clone(),
+                                        trace_agent_channel.clone(),
+                                        telemetry_event.time.timestamp(),
+                                    ).await;
+                                    drop(p);
                                 },
                                 TelemetryRecord::PlatformReport{ request_id, metrics, .. } => {
                                     let mut p = invocation_processor.lock().await;
@@ -573,21 +567,19 @@ async fn extension_loop_active(
                     Some(event) = event_bus.rx.recv() => {
                         if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone()).await {
                             match telemetry_event.record {
-                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics, status, .. } => {
-                                    if let Some(metrics) = metrics {
-                                        let mut p = invocation_processor.lock().await;
-                                        p.on_platform_runtime_done(
-                                            &request_id,
-                                            metrics.duration_ms,
-                                            status,
-                                            config.clone(),
-                                            tags_provider.clone(),
-                                            trace_processor.clone(),
-                                            trace_agent_channel.clone(),
-                                            telemetry_event.time.timestamp(),
-                                        ).await;
-                                        drop(p);
-                                    }
+                                TelemetryRecord::PlatformRuntimeDone{ request_id, metrics: Some(metrics), status, .. } => {
+                                    let mut p = invocation_processor.lock().await;
+                                    p.on_platform_runtime_done(
+                                        &request_id,
+                                        metrics.duration_ms,
+                                        status,
+                                        config.clone(),
+                                        tags_provider.clone(),
+                                        trace_processor.clone(),
+                                        trace_agent_channel.clone(),
+                                        telemetry_event.time.timestamp(),
+                                    ).await;
+                                    drop(p);
                                 },
                                 TelemetryRecord::PlatformReport{ request_id, metrics, .. } => {
                                     let mut p = invocation_processor.lock().await;
@@ -636,7 +628,6 @@ async fn flush_all(
     race_flush_interval.reset();
 }
 
-
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
@@ -671,16 +662,10 @@ async fn handle_event_bus_event(
                 p.on_platform_start(request_id, event.time);
                 drop(p);
             }
-            TelemetryRecord::PlatformRuntimeDone {
-                ..
-            } => {
+            TelemetryRecord::PlatformRuntimeDone { .. } => {
                 return Some(event);
             }
-            TelemetryRecord::PlatformReport {
-                ..
-            } => {
-                return Some(event)
-            }
+            TelemetryRecord::PlatformReport { .. } => return Some(event),
             _ => {
                 debug!("Unforwarded Telemetry event: {:?}", event);
             }
