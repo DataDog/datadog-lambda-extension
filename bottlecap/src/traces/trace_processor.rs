@@ -13,7 +13,7 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::send_data::{RetryBackoffType, RetryStrategy};
+use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
