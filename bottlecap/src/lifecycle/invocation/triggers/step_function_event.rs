@@ -11,8 +11,7 @@ use crate::{
     traces::{
         context::{Sampling, SpanContext},
         propagation::text_map_propagator::{
-            DatadogHeaderPropagator, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
-            DATADOG_SAMPLING_DECISION_KEY, DATADOG_TAGS_KEY,
+            DatadogHeaderPropagator, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY,
         },
     },
 };
@@ -262,6 +261,7 @@ impl ServiceNameResolver for StepFunctionEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+    use crate::traces::propagation::text_map_propagator::DATADOG_SAMPLING_DECISION_KEY;
 
     #[test]
     fn test_new_event() {
