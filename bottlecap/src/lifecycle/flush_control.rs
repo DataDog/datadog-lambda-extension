@@ -64,7 +64,9 @@ impl FlushControl {
             FlushStrategy::Periodically(p) | FlushStrategy::EndPeriodically(p) => {
                 tokio::time::interval(tokio::time::Duration::from_millis(p.interval))
             }
-            FlushStrategy::End => tokio::time::interval(tokio::time::Duration::from_millis(FIFTEEN_MINUTES)),
+            FlushStrategy::End => {
+                tokio::time::interval(tokio::time::Duration::from_millis(FIFTEEN_MINUTES))
+            }
         }
     }
 
