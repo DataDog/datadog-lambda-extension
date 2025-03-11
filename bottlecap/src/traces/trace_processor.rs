@@ -153,15 +153,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
             error!("Failed to collect trace chunks");
             TracerPayloadCollection::V07(Vec::new())
         });
-        match payload {
-            TracerPayloadCollection::V07(ref mut collection) => {
-                // add function tags to all payloads in this TracerPayloadCollection
-                let tags = tags_provider.get_function_tags_map();
-                for tracer_payload in collection.iter_mut() {
-                    tracer_payload.tags.extend(tags.clone());
-                }
+        if let TracerPayloadCollection::V07(ref mut collection) = payload {
+            // add function tags to all payloads in this TracerPayloadCollection
+            let tags = tags_provider.get_function_tags_map();
+            for tracer_payload in collection.iter_mut() {
+                tracer_payload.tags.extend(tags.clone());
             }
-            _ => {}
         }
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_config_apm_dd_url)
