@@ -23,6 +23,7 @@ use datadog_trace_utils::tracer_payload::{
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::error;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -146,9 +147,13 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 span_pointers,
             },
             true,
-        );
+            false,
+        )
+        .unwrap_or_else(|_| {
+            error!("Failed to collect trace chunks");
+            TracerPayloadCollection::V07(Vec::new())
+        });
         match payload {
-            TracerPayloadCollection::V04(_) => {}
             TracerPayloadCollection::V07(ref mut collection) => {
                 // add function tags to all payloads in this TracerPayloadCollection
                 let tags = tags_provider.get_function_tags_map();
@@ -156,6 +161,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     tracer_payload.tags.extend(tags.clone());
                 }
             }
+            _ => {}
         }
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_config_apm_dd_url)
