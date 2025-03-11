@@ -53,7 +53,18 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
+                let secret_region = config
+                    .kms_api_key
+                    .split(":")
+                    .nth(3)
+                    .unwrap_or(&aws_config.region);
+                decrypt_aws_sm(
+                    &client,
+                    config.api_key_secret_arn.clone(),
+                    aws_config,
+                    secret_region.to_string(),
+                )
+                .await
             } else {
                 decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
             };
@@ -107,6 +118,7 @@ async fn decrypt_aws_kms(
 
     let headers = build_get_secret_signed_headers(
         aws_config,
+        aws_config.region.clone(),
         RequestArgs {
             service: "kms".to_string(),
             body: json_body,
@@ -128,6 +140,7 @@ async fn decrypt_aws_kms(
 
         let headers = build_get_secret_signed_headers(
             aws_config,
+            aws_config.region.clone(),
             RequestArgs {
                 service: "kms".to_string(),
                 body: json_body,
@@ -151,11 +164,13 @@ async fn decrypt_aws_sm(
     client: &Client,
     secret_arn: String,
     aws_config: &AwsConfig,
+    secret_region: String,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
 
     let headers = build_get_secret_signed_headers(
         aws_config,
+        secret_region,
         RequestArgs {
             service: "secretsmanager".to_string(),
             body: json_body,
@@ -211,6 +226,7 @@ async fn request(
 
 fn build_get_secret_signed_headers(
     aws_config: &AwsConfig,
+    region: String,
     header_values: RequestArgs,
 ) -> Result<HeaderMap, Box<dyn std::error::Error>> {
     let amz_date = header_values.time.format("%Y%m%dT%H%M%SZ").to_string();
@@ -222,7 +238,7 @@ fn build_get_secret_signed_headers(
         "amazonaws.com"
     };
 
-    let host = format!("{}.{}.{}", header_values.service, aws_config.region, domain);
+    let host = format!("{}.{}.{}", header_values.service, region, domain);
 
     let canonical_uri = "/";
     let canonical_querystring = "";
@@ -338,6 +354,7 @@ mod tests {
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
             },
+            "us-east-1".to_string(),
             RequestArgs {
                 service: "secretsmanager".to_string(),
                 body: &serde_json::json!({ "SecretId": "arn:aws:secretsmanager:region:account-id:secret:secret-name"}),
@@ -351,6 +368,60 @@ mod tests {
         expected_headers.insert(
             "host",
             HeaderValue::from_str("secretsmanager.us-east-1.amazonaws.com").unwrap(),
+        );
+        expected_headers.insert(
+            "content-type",
+            HeaderValue::from_str("application/x-amz-json-1.1").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-date",
+            HeaderValue::from_str("20240530T091011Z").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-target",
+            HeaderValue::from_str("secretsmanager.GetSecretValue").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-security-token",
+            HeaderValue::from_str("AQoDYXdzEJr...<remainder of session token>").unwrap(),
+        );
+
+        for (k, v) in &expected_headers {
+            assert_eq!(headers.get(k).expect("cannot get header"), v);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_cross_region_secret() {
+        let time = Utc.from_utc_datetime(
+            &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
+        );
+        let headers = build_get_secret_signed_headers(
+            &AwsConfig{
+                region: "us-east-1".to_string(),
+                aws_access_key_id: "AKIDEXAMPLE".to_string(),
+                aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
+                aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
+                aws_container_authorization_token: String::new(),
+                aws_container_credentials_full_uri: String::new(),
+                function_name: "arn:some-function".to_string(),
+                sandbox_init_time: Instant::now(),
+            },
+            "us-west-2".to_string(),
+            RequestArgs {
+                service: "secretsmanager".to_string(),
+                body: &serde_json::json!({ "SecretId": "arn:aws:secretsmanager:us-west-2:account-id:secret:secret-name"}),
+                time,
+                x_amz_target: "secretsmanager.GetSecretValue".to_string(),
+            },
+        ).unwrap();
+
+        let mut expected_headers = HeaderMap::new();
+        expected_headers.insert("authorization", HeaderValue::from_str("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20240530/us-east-1/secretsmanager/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token;x-amz-target, Signature=233e62035a3d0db0eed5b163ccb77e65fbab95df22e19aafdc2d9d0c1b1cc7a5").unwrap());
+        expected_headers.insert(
+            "host",
+            HeaderValue::from_str("secretsmanager.us-west-2.amazonaws.com").unwrap(),
         );
         expected_headers.insert(
             "content-type",
