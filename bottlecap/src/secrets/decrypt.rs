@@ -54,8 +54,8 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
 
             let decrypted_key = if config.kms_api_key.is_empty() {
                 let secret_region = config
-                    .kms_api_key
-                    .split(":")
+                    .api_key_secret_arn
+                    .split(':')
                     .nth(3)
                     .unwrap_or(&aws_config.region);
                 decrypt_aws_sm(
@@ -256,7 +256,7 @@ fn build_get_secret_signed_headers(
     let algorithm = "AWS4-HMAC-SHA256";
     let credential_scope = format!(
         "{}/{}/{}/aws4_request",
-        date_stamp, aws_config.region, header_values.service
+        date_stamp, region, header_values.service
     );
     let string_to_sign = format!(
         "{}\n{}\n{}\n{}",
@@ -269,7 +269,7 @@ fn build_get_secret_signed_headers(
     let signing_key = get_aws4_signature_key(
         &aws_config.aws_secret_access_key,
         &date_stamp,
-        aws_config.region.as_str(),
+        region.as_str(),
         header_values.service.as_str(),
     )?;
 
