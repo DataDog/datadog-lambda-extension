@@ -155,6 +155,7 @@ async fn decrypt_aws_sm(
     aws_config: &AwsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
+    // Supports cross-region secrets
     let secret_region = secret_arn
         .split(':')
         .nth(3)
