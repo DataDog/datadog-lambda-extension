@@ -3,7 +3,9 @@ pub mod log_level;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
+pub mod apm_replace_rule;
 
+use datadog_trace_obfuscation::replacer::ReplaceRule;
 use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 use std::collections::HashMap;
 use std::path::Path;
@@ -21,6 +23,7 @@ use crate::config::{
     log_level::{deserialize_log_level, LogLevel},
     processing_rule::{deserialize_processing_rules, ProcessingRule},
     service_mapping::deserialize_service_mapping,
+    apm_replace_rule::deserialize_apm_replace_rules,
 };
 
 /// `FallbackConfig` is a struct that represents fields that are not supported in the extension yet.
@@ -114,6 +117,8 @@ pub struct Config {
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
     pub apm_config_apm_dd_url: String,
+    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
+    pub apm_config_replace_tags: Option<Vec<ReplaceRule>>,
     // Metrics overrides
     pub dd_url: String,
     pub url: String,
@@ -156,6 +161,7 @@ impl Default for Config {
             trace_propagation_extract_first: false,
             trace_propagation_http_baggage_enabled: false,
             apm_config_apm_dd_url: String::default(),
+            apm_config_replace_tags: None,
             dd_url: String::default(),
             url: String::default(),
         }

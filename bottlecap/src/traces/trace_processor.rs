@@ -13,7 +13,7 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::send_data::{RetryBackoffType, RetryStrategy};
+use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
@@ -146,9 +146,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 span_pointers,
             },
             true,
-        );
+            false,
+        ).unwrap_or_else(|e| {
+            log::error!("Error processing traces: {:?}", e);
+            TracerPayloadCollection::V07(vec![])
+        });
         match payload {
-            TracerPayloadCollection::V04(_) => {}
             TracerPayloadCollection::V07(ref mut collection) => {
                 // add function tags to all payloads in this TracerPayloadCollection
                 let tags = tags_provider.get_function_tags_map();
@@ -156,6 +159,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                     tracer_payload.tags.extend(tags.clone());
                 }
             }
+            _ => {}
         }
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_config_apm_dd_url)

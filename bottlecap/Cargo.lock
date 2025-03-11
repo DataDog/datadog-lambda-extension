@@ -652,8 +652,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-mini-agent"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -671,8 +671,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-normalization"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -680,8 +680,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-obfuscation"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -697,8 +697,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-protobuf"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -707,8 +707,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-utils"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
 dependencies = [
  "anyhow",
  "bytes",
@@ -734,8 +734,8 @@ dependencies = [
 
 [[package]]
 name = "ddcommon"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
 dependencies = [
  "anyhow",
  "cc",
@@ -750,8 +750,12 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
+ "memfd",
  "pin-project",
+ "rand",
  "regex",
+ "rmp",
+ "rmp-serde",
  "rustls 0.23.20",
  "rustls-native-certs 0.7.3",
  "serde",
@@ -1813,6 +1817,15 @@ name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
+
+[[package]]
+name = "memfd"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2cffa4ad52c6f791f4f8b15f0c05f9824b2ced1160e88cc393d64fff9a8ac64"
+dependencies = [
+ "rustix",
+]
 
 [[package]]
 name = "mime"
@@ -3131,8 +3144,8 @@ dependencies = [
 
 [[package]]
 name = "tinybytes"
-version = "16.0.2"
-source = "git+https://github.com/DataDog/libdatadog?rev=b58170645053a75fcb7abd6920bdafb6ab2e5a45#b58170645053a75fcb7abd6920bdafb6ab2e5a45"
+version = "16.0.3"
+source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
 dependencies = [
  "serde",
 ]
