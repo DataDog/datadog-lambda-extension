@@ -60,6 +60,14 @@ pub struct YamlLogsConfig {
     processing_rules: Option<Vec<ProcessingRule>>,
 }
 
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct YamlApmConfig {
+    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
+    replace_tags: Option<Vec<ReplaceRule>>,
+}
+
 /// `YamlConfig` is a struct that represents some of the fields in the datadog.yaml file.
 ///
 /// It is used to deserialize the datadog.yaml file into a struct that can be merged with the Config struct.
@@ -68,6 +76,7 @@ pub struct YamlLogsConfig {
 #[allow(clippy::module_name_repetitions)]
 pub struct YamlConfig {
     pub logs_config: YamlLogsConfig,
+    pub apm_config: YamlApmConfig,
     pub proxy: YamlProxyConfig,
 }
 
@@ -317,6 +326,12 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
             trace_intake_url_prefixed(config.apm_config_apm_dd_url.as_str());
     }
 
+    if config.apm_config_replace_tags.is_none() {
+        if let Some(rules) = yaml_config.apm_config.replace_tags {
+            config.apm_config_replace_tags = Some(rules);
+        }
+    }
+
     // Metrics are handled by dogstatsd in Main
     Ok(config)
 }
@@ -369,6 +384,8 @@ pub fn get_aws_partition_by_region(region: &str) -> String {
 
 #[cfg(test)]
 pub mod tests {
+    use datadog_trace_obfuscation::replacer::parse_rules_from_string;
+
     use super::*;
 
     use crate::config::flush_strategy::PeriodicStrategy;
@@ -831,6 +848,32 @@ pub mod tests {
         });
     }
 
+    #[test]
+    fn test_parse_apm_replace_tags_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                site: datadoghq.com
+                apm_config:
+                  replace_tags:
+                    - name: '*'
+                      pattern: 'foo'
+                      repl: 'REDACTED'
+            ",
+            )?;
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            let rule = parse_rules_from_string(r#"[
+                        {"name": "*", "pattern": "foo", "repl": "REDACTED"}
+                    ]"#).unwrap();
+            assert_eq!(
+                config.apm_config_replace_tags,
+                Some(rule),
+            );
+            Ok(())
+        });
+    }
     #[test]
     fn test_parse_trace_propagation_style() {
         figment::Jail::expect_with(|jail| {
