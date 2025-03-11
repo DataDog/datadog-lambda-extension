@@ -13,8 +13,8 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::send_data::{RetryBackoffType, RetryStrategy};
-use datadog_trace_utils::trace_utils::SendData;
+use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
+use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{
@@ -23,6 +23,7 @@ use datadog_trace_utils::tracer_payload::{
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::error;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -146,15 +147,17 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 span_pointers,
             },
             true,
-        );
-        match payload {
-            TracerPayloadCollection::V04(_) => {}
-            TracerPayloadCollection::V07(ref mut collection) => {
-                // add function tags to all payloads in this TracerPayloadCollection
-                let tags = tags_provider.get_function_tags_map();
-                for tracer_payload in collection.iter_mut() {
-                    tracer_payload.tags.extend(tags.clone());
-                }
+            false,
+        )
+        .unwrap_or_else(|_| {
+            error!("Failed to collect trace chunks");
+            TracerPayloadCollection::V07(Vec::new())
+        });
+        if let TracerPayloadCollection::V07(ref mut collection) = payload {
+            // add function tags to all payloads in this TracerPayloadCollection
+            let tags = tags_provider.get_function_tags_map();
+            for tracer_payload in collection.iter_mut() {
+                tracer_payload.tags.extend(tags.clone());
             }
         }
         let endpoint = Endpoint {
@@ -165,7 +168,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        let mut send_data = SendData::new(body_size, payload, header_tags, &endpoint);
+        let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
+        let mut send_data = send_data_builder
+            .with_compression(Compression::Zstd(6))
+            .build();
         send_data.set_retry_strategy(RetryStrategy::new(
             1,
             100,
