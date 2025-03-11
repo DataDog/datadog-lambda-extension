@@ -13,8 +13,8 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
+use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
 use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
-use datadog_trace_utils::send_data::{SendData, SendDataBuilder, Compression};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{
@@ -166,7 +166,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
         };
 
         let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
-        let mut send_data = send_data_builder.with_compression(Compression::Zstd(6)).build();
+        let mut send_data = send_data_builder
+            .with_compression(Compression::Zstd(6))
+            .build();
         send_data.set_retry_strategy(RetryStrategy::new(
             1,
             100,
