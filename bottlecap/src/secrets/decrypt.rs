@@ -53,18 +53,7 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                let secret_region = config
-                    .api_key_secret_arn
-                    .split(':')
-                    .nth(3)
-                    .unwrap_or(&aws_config.region);
-                decrypt_aws_sm(
-                    &client,
-                    config.api_key_secret_arn.clone(),
-                    aws_config,
-                    secret_region.to_string(),
-                )
-                .await
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
             } else {
                 decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
             };
@@ -164,10 +153,13 @@ async fn decrypt_aws_sm(
     client: &Client,
     secret_arn: String,
     aws_config: &AwsConfig,
-    secret_region: String,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
-
+    let secret_region = secret_arn
+        .split(':')
+        .nth(3)
+        .unwrap_or(&aws_config.region)
+        .to_string();
     let headers = build_get_secret_signed_headers(
         aws_config,
         secret_region,
@@ -418,7 +410,7 @@ mod tests {
         ).unwrap();
 
         let mut expected_headers = HeaderMap::new();
-        expected_headers.insert("authorization", HeaderValue::from_str("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20240530/us-east-1/secretsmanager/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token;x-amz-target, Signature=233e62035a3d0db0eed5b163ccb77e65fbab95df22e19aafdc2d9d0c1b1cc7a5").unwrap());
+        expected_headers.insert("authorization", HeaderValue::from_str("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20240530/us-west-2/secretsmanager/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token;x-amz-target, Signature=bd77112dd24d7a35566b29a39861f7421660c49b065964212f966db509e90813").unwrap());
         expected_headers.insert(
             "host",
             HeaderValue::from_str("secretsmanager.us-west-2.amazonaws.com").unwrap(),
