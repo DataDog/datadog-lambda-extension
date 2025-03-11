@@ -510,13 +510,15 @@ mod tests {
     fn test_get_threads_use_data() {
         let path = "./tests/proc/process/valid";
         let pids = get_pid_list_from_path(path_from_root(path).as_str());
-        let threads_use_result = get_threads_use_data_from_path(path_from_root(path).as_str(), &pids);
+        let threads_use_result =
+            get_threads_use_data_from_path(path_from_root(path).as_str(), &pids);
         assert!(threads_use_result.is_ok());
         let threads_use = threads_use_result.unwrap();
         assert!((threads_use - 5.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_missing";
-        let threads_use_result = get_threads_use_data_from_path(path_from_root(path).as_str(), &pids);
+        let threads_use_result =
+            get_threads_use_data_from_path(path_from_root(path).as_str(), &pids);
         assert!(threads_use_result.is_err());
     }
 }
