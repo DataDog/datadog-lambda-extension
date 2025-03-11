@@ -694,7 +694,6 @@ fn start_trace_agent(
         config: Arc::clone(config),
     });
 
-    println!("ASTUYVE REPLACE TAGS IS: {:?}", config.apm_config_replace_tags);
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
         tag_replace_rules: config.apm_config_replace_tags.clone(),
         http_remove_path_digits: false,
