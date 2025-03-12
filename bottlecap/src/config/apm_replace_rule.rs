@@ -42,7 +42,7 @@ impl<'de> Visitor<'de> for StringOrReplaceRulesVisitor {
         }
         // Serialize to JSON string for compatibility with parse_rules_from_string
         serde_json::to_string(&rules)
-            .map_err(|e| serde::de::Error::custom(format!("Failed to serialize rules to JSON: {}", e)))
+            .map_err(|e| serde::de::Error::custom(format!("Failed to serialize rules to JSON: {e}")))
     }
 }
 
@@ -56,7 +56,7 @@ where
     let json_string = deserializer.deserialize_any(StringOrReplaceRulesVisitor)?;
     
     let rules = parse_rules_from_string(&json_string)
-        .map_err(|e| serde::de::Error::custom(format!("Parse error: {}", e)))?;
+        .map_err(|e| serde::de::Error::custom(format!("Parse error: {e}")))?;
     
     Ok(Some(rules))
 }

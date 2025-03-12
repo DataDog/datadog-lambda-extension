@@ -381,15 +381,11 @@ mod tests {
 
         for file in test_files {
             let json = read_json_file(file);
-            let payload = serde_json::from_str(&json).expect(&format!(
-                "Failed to deserialize StepFunctionEvent from {}",
-                file
-            ));
+            let payload = serde_json::from_str(&json).unwrap_or_else(|_| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
             assert!(
                 StepFunctionEvent::is_match(&payload),
-                "StepFunctionEvent::is_match failed for {}",
-                file
+                "StepFunctionEvent::is_match failed for {file}"
             );
         }
     }
@@ -415,12 +411,9 @@ mod tests {
         for file in &test_files {
             let json = read_json_file(file);
             let payload = serde_json::from_str(&json)
-                .expect(&format!("Failed to deserialize into Value from {}", file));
+                .unwrap_or_else(|_| panic!("Failed to deserialize into Value from {file}"));
 
-            let event = StepFunctionEvent::new(payload).expect(&format!(
-                "Failed to deserialize StepFunctionEvent from {}",
-                file
-            ));
+            let event = StepFunctionEvent::new(payload).unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
             let tags = event.get_tags();
 
@@ -429,7 +422,7 @@ mod tests {
                 "states".to_string(),
             )]);
 
-            assert_eq!(tags, expected, "get_tags() failed for {}", file);
+            assert_eq!(tags, expected, "get_tags() failed for {file}");
         }
     }
 
@@ -574,19 +567,15 @@ mod tests {
         for (file, expected) in test_cases {
             let json = read_json_file(file);
             let payload = serde_json::from_str(&json)
-                .expect(&format!("Failed to deserialize into Value from {}", file));
+                .unwrap_or_else(|_| panic!("Failed to deserialize into Value from {file}"));
 
-            let event = StepFunctionEvent::new(payload).expect(&format!(
-                "Failed to deserialize StepFunctionEvent from {}",
-                file
-            ));
+            let event = StepFunctionEvent::new(payload).unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
             let span_context = event.get_span_context();
 
             assert_eq!(
                 span_context, expected,
-                "get_span_context() failed for {}",
-                file
+                "get_span_context() failed for {file}"
             );
         }
     }

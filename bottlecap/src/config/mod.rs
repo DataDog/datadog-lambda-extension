@@ -866,7 +866,7 @@ pub mod tests {
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             let rule = parse_rules_from_string(r#"[
                         {"name": "*", "pattern": "foo", "repl": "REDACTED"}
-                    ]"#).unwrap();
+                    ]"#).expect("can't parse rules");
             assert_eq!(
                 config.apm_config_replace_tags,
                 Some(rule),

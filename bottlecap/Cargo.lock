@@ -653,7 +653,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-mini-agent"
 version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
+source = "git+https://github.com/DataDog/libdatadog?rev=4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a#4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -672,7 +672,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
+source = "git+https://github.com/DataDog/libdatadog?rev=4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a#4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -681,7 +681,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
+source = "git+https://github.com/DataDog/libdatadog?rev=4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a#4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -698,7 +698,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
+source = "git+https://github.com/DataDog/libdatadog?rev=4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a#4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -708,7 +708,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
+source = "git+https://github.com/DataDog/libdatadog?rev=4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a#4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a"
 dependencies = [
  "anyhow",
  "bytes",
@@ -735,7 +735,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
+source = "git+https://github.com/DataDog/libdatadog?rev=4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a#4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a"
 dependencies = [
  "anyhow",
  "cc",
@@ -3145,7 +3145,7 @@ dependencies = [
 [[package]]
 name = "tinybytes"
 version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=ad9c25892bf39d85f584ddcf78d563e5b67e2b46#ad9c25892bf39d85f584ddcf78d563e5b67e2b46"
+source = "git+https://github.com/DataDog/libdatadog?rev=4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a#4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a"
 dependencies = [
  "serde",
 ]
