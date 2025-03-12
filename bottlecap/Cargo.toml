@@ -11,7 +11,7 @@ datadog-protos = { version = "0.1.0", default-features = false, git = "https://g
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a" }
 datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a" }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a" }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a", features = ["compression"] }
 datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a" }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "4ba2f3a7b6bc298035bad8721134a4c34fdd2f1a" }

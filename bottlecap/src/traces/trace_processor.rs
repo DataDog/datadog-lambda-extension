@@ -13,8 +13,8 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
+use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
 use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
-use datadog_trace_utils::trace_utils::SendData;
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{
@@ -23,6 +23,7 @@ use datadog_trace_utils::tracer_payload::{
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::error;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -148,7 +149,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             true,
             false,
         ).unwrap_or_else(|e| {
-            log::error!("Error processing traces: {:?}", e);
+            error!("Error processing traces: {:?}", e);
             TracerPayloadCollection::V07(vec![])
         });
         if let TracerPayloadCollection::V07(ref mut collection) = payload {
@@ -166,7 +167,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        let mut send_data = SendData::new(body_size, payload, header_tags, &endpoint);
+        let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
+        let mut send_data = send_data_builder
+            .with_compression(Compression::Zstd(6))
+            .build();
         send_data.set_retry_strategy(RetryStrategy::new(
             1,
             100,

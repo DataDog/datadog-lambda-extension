@@ -381,7 +381,8 @@ mod tests {
 
         for file in test_files {
             let json = read_json_file(file);
-            let payload = serde_json::from_str(&json).unwrap_or_else(|_| panic!("Failed to deserialize StepFunctionEvent from {file}"));
+            let payload = serde_json::from_str(&json)
+                .unwrap_or_else(|_| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
             assert!(
                 StepFunctionEvent::is_match(&payload),
@@ -413,7 +414,8 @@ mod tests {
             let payload = serde_json::from_str(&json)
                 .unwrap_or_else(|_| panic!("Failed to deserialize into Value from {file}"));
 
-            let event = StepFunctionEvent::new(payload).unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
+            let event = StepFunctionEvent::new(payload)
+                .unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
             let tags = event.get_tags();
 
@@ -569,7 +571,8 @@ mod tests {
             let payload = serde_json::from_str(&json)
                 .unwrap_or_else(|_| panic!("Failed to deserialize into Value from {file}"));
 
-            let event = StepFunctionEvent::new(payload).unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
+            let event = StepFunctionEvent::new(payload)
+                .unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
             let span_context = event.get_span_context();
 
