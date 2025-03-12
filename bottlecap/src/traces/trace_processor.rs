@@ -149,9 +149,9 @@ impl TraceProcessor for ServerlessTraceProcessor {
             true,
             false,
         )
-        .unwrap_or_else(|_| {
-            error!("Failed to collect trace chunks");
-            TracerPayloadCollection::V07(Vec::new())
+        .unwrap_or_else(|e| {
+            error!("Error processing traces: {:?}", e);
+            TracerPayloadCollection::V07(vec![])
         });
         if let TracerPayloadCollection::V07(ref mut collection) = payload {
             // add function tags to all payloads in this TracerPayloadCollection

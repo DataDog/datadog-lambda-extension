@@ -694,9 +694,14 @@ fn start_trace_agent(
         config: Arc::clone(config),
     });
 
-    let obfuscation_config = obfuscation_config::ObfuscationConfig::new()
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
-        .expect("Failed to create obfuscation config for Trace Agent");
+    let obfuscation_config = obfuscation_config::ObfuscationConfig {
+        tag_replace_rules: config.apm_config_replace_tags.clone(),
+        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
+        obfuscate_memcached: false,
+        obfuscation_redis_enabled: false,
+        obfuscation_redis_remove_all_args: false,
+    };
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
