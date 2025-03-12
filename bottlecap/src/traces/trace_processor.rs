@@ -148,7 +148,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
             },
             true,
             false,
-        ).unwrap_or_else(|e| {
+        )
+        .unwrap_or_else(|e| {
             error!("Error processing traces: {:?}", e);
             TracerPayloadCollection::V07(vec![])
         });

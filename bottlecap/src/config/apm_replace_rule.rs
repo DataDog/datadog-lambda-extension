@@ -1,4 +1,4 @@
-use datadog_trace_obfuscation::replacer::{ReplaceRule, parse_rules_from_string};
+use datadog_trace_obfuscation::replacer::{parse_rules_from_string, ReplaceRule};
 use serde::de::{Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json;
@@ -26,8 +26,8 @@ impl<'de> Visitor<'de> for StringOrReplaceRulesVisitor {
         E: serde::de::Error,
     {
         // Validate it's at least valid JSON
-        let _: serde_json::Value = serde_json::from_str(value)
-            .map_err(|_| E::custom("Expected valid JSON string"))?;
+        let _: serde_json::Value =
+            serde_json::from_str(value).map_err(|_| E::custom("Expected valid JSON string"))?;
         Ok(value.to_string())
     }
 
@@ -41,8 +41,9 @@ impl<'de> Visitor<'de> for StringOrReplaceRulesVisitor {
             rules.push(rule);
         }
         // Serialize to JSON string for compatibility with parse_rules_from_string
-        serde_json::to_string(&rules)
-            .map_err(|e| serde::de::Error::custom(format!("Failed to serialize rules to JSON: {e}")))
+        serde_json::to_string(&rules).map_err(|e| {
+            serde::de::Error::custom(format!("Failed to serialize rules to JSON: {e}"))
+        })
     }
 }
 
@@ -52,11 +53,10 @@ pub fn deserialize_apm_replace_rules<'de, D>(
 where
     D: Deserializer<'de>,
 {
-    
     let json_string = deserializer.deserialize_any(StringOrReplaceRulesVisitor)?;
-    
+
     let rules = parse_rules_from_string(&json_string)
         .map_err(|e| serde::de::Error::custom(format!("Parse error: {e}")))?;
-    
+
     Ok(Some(rules))
 }
