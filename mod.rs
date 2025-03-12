@@ -1,9 +1,11 @@
+pub mod apm_replace_rule;
 pub mod flush_strategy;
 pub mod log_level;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
 
+use datadog_trace_obfuscation::replacer::ReplaceRule;
 use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 use std::collections::HashMap;
 use std::path::Path;
@@ -17,6 +19,7 @@ use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
 use crate::config::{
+    apm_replace_rule::deserialize_apm_replace_rules,
     flush_strategy::FlushStrategy,
     log_level::{deserialize_log_level, LogLevel},
     processing_rule::{deserialize_processing_rules, ProcessingRule},
@@ -57,6 +60,30 @@ pub struct YamlLogsConfig {
     processing_rules: Option<Vec<ProcessingRule>>,
 }
 
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct YamlApmConfig {
+    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
+    replace_tags: Option<Vec<ReplaceRule>>,
+    obfuscation: Option<ApmObfuscation>,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Clone, Copy, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ApmObfuscation {
+    http: ApmHttpObfuscation,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Clone, Copy, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ApmHttpObfuscation {
+    remove_query_string: bool,
+    remove_paths_with_digits: bool,
+}
+
 /// `YamlConfig` is a struct that represents some of the fields in the datadog.yaml file.
 ///
 /// It is used to deserialize the datadog.yaml file into a struct that can be merged with the Config struct.
@@ -65,6 +92,7 @@ pub struct YamlLogsConfig {
 #[allow(clippy::module_name_repetitions)]
 pub struct YamlConfig {
     pub logs_config: YamlLogsConfig,
+    pub apm_config: YamlApmConfig,
     pub proxy: YamlProxyConfig,
 }
 
@@ -114,6 +142,10 @@ pub struct Config {
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
     pub apm_config_apm_dd_url: String,
+    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
+    pub apm_config_replace_tags: Option<Vec<ReplaceRule>>,
+    pub apm_config_obfuscation_http_remove_query_string: bool,
+    pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
     // Metrics overrides
     pub dd_url: String,
     pub url: String,
@@ -156,6 +188,9 @@ impl Default for Config {
             trace_propagation_extract_first: false,
             trace_propagation_http_baggage_enabled: false,
             apm_config_apm_dd_url: String::default(),
+            apm_config_replace_tags: None,
+            apm_config_obfuscation_http_remove_query_string: false,
+            apm_config_obfuscation_http_remove_paths_with_digits: false,
             dd_url: String::default(),
             url: String::default(),
         }
@@ -311,6 +346,26 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
             trace_intake_url_prefixed(config.apm_config_apm_dd_url.as_str());
     }
 
+    if config.apm_config_replace_tags.is_none() {
+        if let Some(rules) = yaml_config.apm_config.replace_tags {
+            config.apm_config_replace_tags = Some(rules);
+        }
+    }
+
+    if !config.apm_config_obfuscation_http_remove_paths_with_digits {
+        if let Some(obfuscation) = yaml_config.apm_config.obfuscation {
+            config.apm_config_obfuscation_http_remove_paths_with_digits =
+                obfuscation.http.remove_paths_with_digits;
+        }
+    }
+
+    if !config.apm_config_obfuscation_http_remove_query_string {
+        if let Some(obfuscation) = yaml_config.apm_config.obfuscation {
+            config.apm_config_obfuscation_http_remove_query_string =
+                obfuscation.http.remove_query_string;
+        }
+    }
+
     // Metrics are handled by dogstatsd in Main
     Ok(config)
 }
@@ -363,6 +418,8 @@ pub fn get_aws_partition_by_region(region: &str) -> String {
 
 #[cfg(test)]
 pub mod tests {
+    use datadog_trace_obfuscation::replacer::parse_rules_from_string;
+
     use super::*;
 
     use crate::config::flush_strategy::PeriodicStrategy;
@@ -825,6 +882,54 @@ pub mod tests {
         });
     }
 
+    #[test]
+    fn test_parse_apm_replace_tags_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                site: datadoghq.com
+                apm_config:
+                  replace_tags:
+                    - name: '*'
+                      pattern: 'foo'
+                      repl: 'REDACTED'
+            ",
+            )?;
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            let rule = parse_rules_from_string(
+                r#"[
+                        {"name": "*", "pattern": "foo", "repl": "REDACTED"}
+                    ]"#,
+            )
+            .expect("can't parse rules");
+            assert_eq!(config.apm_config_replace_tags, Some(rule),);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_apm_http_obfuscation_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                site: datadoghq.com
+                apm_config:
+                  obfuscation:
+                    http:
+                      remove_query_string: true
+                      remove_paths_with_digits: true
+            ",
+            )?;
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert!(config.apm_config_obfuscation_http_remove_query_string,);
+            assert!(config.apm_config_obfuscation_http_remove_paths_with_digits,);
+            Ok(())
+        });
+    }
     #[test]
     fn test_parse_trace_propagation_style() {
         figment::Jail::expect_with(|jail| {
