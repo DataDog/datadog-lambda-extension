@@ -229,13 +229,41 @@ impl LambdaProcessor {
         };
 
         lambda_message.lambda.request_id = request_id;
-
-        let log = IntakeLog {
-            hostname: self.function_arn.clone(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: self.service.clone(),
-            tags: self.tags.clone(),
-            message: lambda_message,
+        // Test if message is a JSON object, it may have tags we need to pass along.
+        // Don't care about host, service, and status, since we'll override them.
+        let parsed_message = serde_json::from_str::<serde_json::Value>(&lambda_message.message.as_str());
+        let log = match parsed_message {
+            Ok(serde_json::Value::Object(obj)) => {
+                let mut tags = self.tags.clone();
+                if let Some(message_tags) = obj.get("tags") {
+                    tags.push_str(",");
+                    tags.push_str(message_tags.to_string().as_str());
+                }
+                let final_message = if let Some(inner_message) = obj.get("message") {
+                    inner_message.to_string()
+                } else {
+                    lambda_message.message.clone()
+                };
+                IntakeLog {
+                    hostname: self.function_arn.clone(),
+                    source: LAMBDA_RUNTIME_SLUG.to_string(),
+                    service: self.service.clone(),
+                    tags,
+                    message: Message {
+                        message: final_message,
+                        lambda: lambda_message.lambda,
+                        timestamp: lambda_message.timestamp,
+                        status: lambda_message.status,
+                    }
+                }
+            },
+            _ => IntakeLog {
+                hostname: self.function_arn.clone(),
+                source: LAMBDA_RUNTIME_SLUG.to_string(),
+                service: self.service.clone(),
+                tags: self.tags.clone(),
+                message: lambda_message,
+                }
         };
 
         if log.message.lambda.request_id.is_some() {
