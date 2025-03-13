@@ -10,10 +10,16 @@ use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+use hyper::body::HttpBody;
+use hyper::http::request::Parts;
+use hyper::service::{make_service_fn, service_fn};
+use hyper::{http, Body, HeaderMap, Method, Request, Response, StatusCode};
+use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
-use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
+use crate::lifecycle::invocation::processor::{Processor as InvocationProcessor, Processor};
 use crate::traces::propagation::text_map_propagator::{
     DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
     DATADOG_TRACE_ID_KEY,
@@ -95,7 +101,8 @@ impl Listener {
     ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
             (&Method::POST, START_INVOCATION_PATH) => {
-                Self::start_invocation_handler(req, invocation_processor).await
+                let (parts, body) = req.into_parts();
+                Self::start_invocation_handler(parts.headers, body, invocation_processor).await
             }
             (&Method::POST, END_INVOCATION_PATH) => {
                 match Self::end_invocation_handler(req, invocation_processor).await {
@@ -119,17 +126,18 @@ impl Listener {
     }
 
     async fn start_invocation_handler(
+        headers: HeaderMap,
+        body: Body,
         req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received start invocation request");
-        let (parts, body) = req.into_parts();
         match body.collect().await {
             Ok(b) => {
                 let body = b.to_bytes().to_vec();
                 let mut processor = invocation_processor.lock().await;
 
-                let headers = Self::headers_to_map(parts.headers);
+                let headers = Self::headers_to_map(headers);
 
                 let span_context = processor.on_universal_instrumentation_start(headers, body);
 
@@ -172,7 +180,7 @@ impl Listener {
         }
     }
 
-    async fn end_invocation_handler(
+    pub async fn end_invocation_handler(
         req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<hyper_migration::HttpResponse> {
