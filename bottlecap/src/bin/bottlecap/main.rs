@@ -185,7 +185,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
-    let (mut aws_config, config) = load_configs();
+    let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
@@ -229,7 +229,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn load_configs() -> (AwsConfig, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     // First load the configuration
     let aws_config = AwsConfig {
         region: env::var("AWS_DEFAULT_REGION").unwrap_or("us-east-1".to_string()),
@@ -241,7 +241,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         aws_container_authorization_token: env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN")
             .unwrap_or_default(),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
-        sandbox_init_time: Instant::now(),
+        sandbox_init_time: start_time,
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
