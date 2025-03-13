@@ -521,9 +521,10 @@ impl Processor {
         context.extracted_span_context = span_context;
 
         // Set the extracted trace context to the spans
-        if let Some(sc) = &context.extracted_span_context {
-            context.invocation_span.trace_id = sc.trace_id;
-            context.invocation_span.parent_id = sc.span_id;
+        if let Some(sc) = &self.extracted_span_context {
+            debug!("LIP: found span context in headers {:?}", sc);
+            self.span.trace_id = sc.trace_id;
+            self.span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
@@ -540,6 +541,13 @@ impl Processor {
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             context.invocation_span.parent_id = inferred_span.span_id;
         }
+
+        debug!(
+            "LIP: trace context found trace_id:{trace_id} span_id:{span_id} parent_id:{parent_id}",
+            trace_id = self.span.trace_id,
+            span_id = self.span.span_id,
+            parent_id = self.span.parent_id
+        );
         (self.span.span_id, self.span.trace_id, self.span.parent_id)
     }
 
