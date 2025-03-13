@@ -184,6 +184,7 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let start_time = Instant::now();
     let (mut aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
@@ -201,7 +202,7 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
-        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
+        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key, start_time).await {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
                 Ok(())
@@ -289,6 +290,7 @@ async fn extension_loop_active(
     client: &Client,
     r: &RegisterResponse,
     resolved_api_key: String,
+    start_time: Instant,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
@@ -348,6 +350,7 @@ async fn extension_loop_active(
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
+    debug!("Datadog Next-Gen Extension ready in {:}ms",start_time.elapsed().as_millis().to_string());
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
 
