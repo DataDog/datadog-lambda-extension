@@ -184,7 +184,8 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (mut aws_config, config) = load_configs();
+    let start_time = Instant::now();
+    let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
@@ -201,7 +202,16 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
-        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
+        match extension_loop_active(
+            &aws_config,
+            &config,
+            &client,
+            &r,
+            resolved_api_key,
+            start_time,
+        )
+        .await
+        {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
                 Ok(())
@@ -219,7 +229,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn load_configs() -> (AwsConfig, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     // First load the configuration
     let aws_config = AwsConfig {
         region: env::var("AWS_DEFAULT_REGION").unwrap_or("us-east-1".to_string()),
@@ -231,7 +241,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         aws_container_authorization_token: env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN")
             .unwrap_or_default(),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
-        sandbox_init_time: Instant::now(),
+        sandbox_init_time: start_time,
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
@@ -289,6 +299,7 @@ async fn extension_loop_active(
     client: &Client,
     r: &RegisterResponse,
     resolved_api_key: String,
+    start_time: Instant,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
@@ -348,6 +359,10 @@ async fn extension_loop_active(
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
+    debug!(
+        "Datadog Next-Gen Extension ready in {:}ms",
+        start_time.elapsed().as_millis().to_string()
+    );
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
 
