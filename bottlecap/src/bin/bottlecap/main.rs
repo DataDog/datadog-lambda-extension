@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::lwa::proxy::start_lwa_proxy;
 use bottlecap::{
     base_url,
     config::{self, get_aws_partition_by_region, AwsConfig, Config},
@@ -342,6 +343,9 @@ async fn extension_loop_active(
         &tags_provider,
         Arc::clone(&invocation_processor),
     );
+
+    // let _ = start_lwa_proxy(Arc::clone(&invocation_processor), Arc::clone(&trace_processor));
+    let _ = start_lwa_proxy(Arc::clone(&invocation_processor));
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
