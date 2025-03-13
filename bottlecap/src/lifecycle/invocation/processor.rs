@@ -451,6 +451,7 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
+            debug!("LIP: found span context in headers {:?}", sc);
             self.span.trace_id = sc.trace_id;
             self.span.parent_id = sc.span_id;
 
@@ -469,6 +470,9 @@ impl Processor {
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.span.parent_id = inferred_span.span_id;
         }
+
+        debug!("LIP: trace context found trace_id:{trace_id} span_id:{span_id} parent_id:{parent_id}",
+            trace_id = self.span.trace_id, span_id = self.span.span_id, parent_id = self.span.parent_id);
         (self.span.span_id, self.span.trace_id, self.span.parent_id)
     }
 
