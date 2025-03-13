@@ -1,7 +1,6 @@
 use crate::{
     lifecycle::invocation::processor::Processor,
     lifecycle::listener::Listener,
-    traces::trace_processor::{ServerlessTraceProcessor, TraceProcessor},
 };
 use hyper::http::request::Parts;
 use hyper::{
@@ -11,9 +10,8 @@ use hyper::{
     Body, Client, Error, Request, Response, Server, Uri,
 };
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
-use rand::random;
 use serde_json::Value;
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{debug, error};
 
@@ -87,7 +85,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                 if let (Some(host), Some(port)) = (host, port) {
                     if host == "localhost" {
                         error!("LWA: Cannot use localhost as host in AWS_LWA_PROXY_LAMBDA_RUNTIME_API, use 127.0.0.1 instead");
-                        None
+                        return None;
                     }
                     format!("{host}:{port}")
                         .parse::<SocketAddr>()
@@ -113,7 +111,6 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
             }
         },
         Err(e) => {
-            error!("LWA: Error parsing AWS_LWA_PROXY_LAMBDA_RUNTIME_API: {}", e);
             None
         }
     };
@@ -148,8 +145,9 @@ async fn intercept_payload(
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
     debug!("LWA: Intercepted request: {:?}", intercepted_parts);
 
+    let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
     let forward_intercepted =
-        forward_request(aws_runtime_addr, &intercepted_parts, intercepted_body).await?;
+        forward_request(aws_runtime_addr, &intercepted_parts, waited_intercepted_body.clone().into()).await?;
 
     // response after forwarding to AWS runtime API
     let response_to_intercepted_req = client.request(forward_intercepted).await?;
@@ -190,7 +188,6 @@ async fn intercept_payload(
         {
             // intercepted response to runtime/invocation. The *request* contains the returned
             // values and headers from lambda handler
-            // let parsed_body = serde_json::from_slice::<Value>(&request_body_waited);
             // let _ = Listener::start_invocation_handler(
             //     req,
             //     processor,
@@ -201,6 +198,12 @@ async fn intercept_payload(
             //     parsed_body,
             // )
             // .await;
+            let _ = Listener::end_invocation_handler(
+                intercepted_parts.headers,
+                waited_intercepted_body.into(),
+                Arc::clone(&processor),
+            )
+                .await;
             // only parsing of the original request (handler -> runtime API) is needed so
             // the original response can be used
             Ok(response_to_intercepted_req)
@@ -269,18 +272,18 @@ async fn forward_request(
 // }
 // }
 
-fn deserialize_json(response: Result<Bytes, Error>) -> Option<Value> {
-    match response {
-        Ok(bytes) => serde_json::from_slice(bytes.as_ref()).unwrap_or_else(|e| {
-            error!("Error deserializing response body: {}", e);
-            None
-        }),
-        Err(e) => {
-            error!("Error reading response body: {}", e);
-            None
-        }
-    }
-}
+// fn deserialize_json(response: Result<Bytes, Error>) -> Option<Value> {
+//     match response {
+//         Ok(bytes) => serde_json::from_slice(bytes.as_ref()).unwrap_or_else(|e| {
+//             error!("Error deserializing response body: {}", e);
+//             None
+//         }),
+//         Err(e) => {
+//             error!("Error reading response body: {}", e);
+//             None
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
