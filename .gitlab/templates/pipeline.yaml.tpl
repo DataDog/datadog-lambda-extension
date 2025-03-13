@@ -105,7 +105,7 @@ layer ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/build_layer.sh
 
-{{ if $flavor.needs_layer_publish }}
+{{ if and (index $flavor "max_layer_compressed_size_mb") (index $flavor "max_layer_uncompressed_size_mb") }}
 
 check layer size ({{ $flavor.name }}):
   stage: build
@@ -120,7 +120,11 @@ check layer size ({{ $flavor.name }}):
     MAX_LAYER_COMPRESSED_SIZE_MB: {{ $flavor.max_layer_compressed_size_mb }}
     MAX_LAYER_UNCOMPRESSED_SIZE_MB: {{ $flavor.max_layer_uncompressed_size_mb }}
   script:
-    - .gitlab/scripts/check_layer_size.sh
+    - .gitlab/scripts/check_layer_size.s
+
+{{ end }} # end max_layer_compressed_size_mb
+
+{{ if $flavor.needs_layer_publish }}
 
 sign layer ({{ $flavor.name }}):
   stage: sign
