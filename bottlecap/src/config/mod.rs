@@ -812,14 +812,16 @@ pub mod tests {
     }
 
     #[test]
-    fn parse_number_or_string_dd_version_env() {
+    fn parse_number_or_string_env_vars() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_VERSION", "123");
             jail.set_env("DD_ENV", "123456890");
+            jail.set_env("DD_SERVICE", "123456");
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(config.version.expect("failed to parse DD_VERSION"), "123");
             assert_eq!(config.env.expect("failed to parse DD_ENV"), "123456890");
+            assert_eq!(config.service.expect("failed to parse DD_SERVICE"), "123456");
             Ok(())
         });
     }
