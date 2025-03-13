@@ -234,6 +234,7 @@ impl LambdaProcessor {
         let parsed_message = serde_json::from_str::<serde_json::Value>(&lambda_message.message.as_str());
         let log = match parsed_message {
             Ok(serde_json::Value::Object(obj)) => {
+                println!("ASTUYVE parsed log");
                 let mut tags = self.tags.clone();
                 if let Some(message_tags) = obj.get("tags") {
                     tags.push_str(",");
@@ -257,13 +258,16 @@ impl LambdaProcessor {
                     }
                 }
             },
-            _ => IntakeLog {
+            _ => {
+                println!("ASTUYVE cant parse log");
+                IntakeLog {
                 hostname: self.function_arn.clone(),
                 source: LAMBDA_RUNTIME_SLUG.to_string(),
                 service: self.service.clone(),
                 tags: self.tags.clone(),
                 message: lambda_message,
                 }
+            }
         };
 
         if log.message.lambda.request_id.is_some() {
