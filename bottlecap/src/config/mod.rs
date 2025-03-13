@@ -821,7 +821,10 @@ pub mod tests {
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(config.version.expect("failed to parse DD_VERSION"), "123");
             assert_eq!(config.env.expect("failed to parse DD_ENV"), "123456890");
-            assert_eq!(config.service.expect("failed to parse DD_SERVICE"), "123456");
+            assert_eq!(
+                config.service.expect("failed to parse DD_SERVICE"),
+                "123456"
+            );
             Ok(())
         });
     }
