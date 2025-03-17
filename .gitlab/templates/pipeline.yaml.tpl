@@ -120,7 +120,7 @@ check layer size ({{ $flavor.name }}):
     MAX_LAYER_COMPRESSED_SIZE_MB: {{ $flavor.max_layer_compressed_size_mb }}
     MAX_LAYER_UNCOMPRESSED_SIZE_MB: {{ $flavor.max_layer_uncompressed_size_mb }}
   script:
-    - .gitlab/scripts/check_layer_size.s
+    - .gitlab/scripts/check_layer_size.sh
 
 {{ end }} # end max_layer_compressed_size_mb
 
