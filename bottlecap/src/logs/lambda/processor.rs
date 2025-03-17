@@ -229,13 +229,47 @@ impl LambdaProcessor {
         };
 
         lambda_message.lambda.request_id = request_id;
-
-        let log = IntakeLog {
-            hostname: self.function_arn.clone(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: self.service.clone(),
-            tags: self.tags.clone(),
-            message: lambda_message,
+        // Test if message is a JSON object, it may have tags we need to pass along.
+        // Don't care about host, service, and status, since we'll override them.
+        let parsed_message =
+            serde_json::from_str::<serde_json::Value>(lambda_message.message.as_str());
+        let log = match parsed_message {
+            Ok(serde_json::Value::Object(mut obj)) => {
+                let mut tags = self.tags.clone();
+                let final_message = if let Some(inner_message) = obj.get_mut("message") {
+                    if let Some(serde_json::Value::String(message_tags)) =
+                        inner_message.get("ddtags")
+                    {
+                        tags.push(',');
+                        tags.push_str(message_tags);
+                        if let Some(inner_message_object) = inner_message.as_object_mut() {
+                            inner_message_object.remove("ddtags");
+                        }
+                    }
+                    inner_message.to_string()
+                } else {
+                    lambda_message.message.clone()
+                };
+                IntakeLog {
+                    hostname: self.function_arn.clone(),
+                    source: LAMBDA_RUNTIME_SLUG.to_string(),
+                    service: self.service.clone(),
+                    tags,
+                    message: Message {
+                        message: final_message,
+                        lambda: lambda_message.lambda,
+                        timestamp: lambda_message.timestamp,
+                        status: lambda_message.status,
+                    },
+                }
+            }
+            _ => IntakeLog {
+                hostname: self.function_arn.clone(),
+                source: LAMBDA_RUNTIME_SLUG.to_string(),
+                service: self.service.clone(),
+                tags: self.tags.clone(),
+                message: lambda_message,
+            },
         };
 
         if log.message.lambda.request_id.is_some() {
@@ -850,5 +884,63 @@ mod tests {
             serde_json::to_string(&function_log).unwrap()
         );
         assert_eq!(batch, serialized_log.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn test_process_logs_structured_ddtags() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+
+        let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
+        processor.get_intake_log(start_lambda_message).unwrap();
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details": "my-structured-message","ddtags":"added_tag1:added_value1,added_tag2:added_value2"}}"#.to_string())),
+        };
+
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        assert!(intake_log.tags.contains("added_tag1:added_value1"));
+        let function_log = IntakeLog {
+            message: Message {
+                message: r#"{"custom_details":"my-structured-message"}"#.to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string()
+                + ",added_tag1:added_value1,added_tag2:added_value2",
+        };
+        assert_eq!(intake_log, function_log);
     }
 }
