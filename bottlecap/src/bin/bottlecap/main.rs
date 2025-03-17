@@ -48,7 +48,7 @@ use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
     datadog::{
-        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride, Site as MetricsSite,
+        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride, Site as MetricsSite, RetryStrategy as DsdRetryStrategy,
     },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
@@ -678,6 +678,7 @@ fn start_metrics_flusher(
         metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
         https_proxy: config.https_proxy.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
+        retry_strategy: DsdRetryStrategy::Immediate(3),
     };
     MetricsFlusher::new(flusher_config)
 }
