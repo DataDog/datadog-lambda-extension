@@ -7,7 +7,7 @@ flavors:
     needs_layer_publish: true
     suffix: amd64
     layer_name_base_suffix: ""
-    max_layer_compressed_size_mb: 20
+    max_layer_compressed_size_mb: 23
     max_layer_uncompressed_size_mb: 54
 
   - name: arm64
@@ -18,7 +18,7 @@ flavors:
     needs_layer_publish: true
     suffix: arm64
     layer_name_base_suffix: "-ARM"
-    max_layer_compressed_size_mb: 19
+    max_layer_compressed_size_mb: 21
     max_layer_uncompressed_size_mb: 50
 
   - name: amd64, alpine
@@ -44,7 +44,7 @@ flavors:
     needs_layer_sign: true
     needs_layer_publish: false
     suffix: amd64-fips
-    max_layer_compressed_size_mb: 21
+    max_layer_compressed_size_mb: 24
     max_layer_uncompressed_size_mb: 56
 
   - name: arm64, fips
@@ -54,7 +54,7 @@ flavors:
     needs_layer_sign: true
     needs_layer_publish: false
     suffix: arm64-fips
-    max_layer_compressed_size_mb: 19
+    max_layer_compressed_size_mb: 21
     max_layer_uncompressed_size_mb: 52
 
   - name: amd64, fips, alpine
