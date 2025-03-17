@@ -124,8 +124,7 @@ check layer size ({{ $flavor.name }}):
 
 {{ end }} # end max_layer_compressed_size_mb
 
-{{ if $flavor.needs_layer_publish }}
-
+{{ if $flavor.needs_layer_sign }}
 sign layer ({{ $flavor.name }}):
   stage: sign
   tags: ["arch:amd64"]
@@ -150,6 +149,9 @@ sign layer ({{ $flavor.name }}):
     {{ end }}
   script:
     - .gitlab/scripts/sign_layers.sh prod
+{{ end }} # end needs_layer_sign
+
+{{ if $flavor.needs_layer_publish }}
 
 {{ range $environment_name, $environment := (ds "environments").environments }}
 
@@ -300,15 +302,11 @@ layer bundle:
   tags: ["arch:amd64"]
   needs:
     {{ range (ds "flavors").flavors }}
-    {{ if .needs_layer_publish }}
     - layer ({{ .name }})
-    {{ end }} # end needs_layer_publish
     {{ end }} # end flavors
   dependencies:
     {{ range (ds "flavors").flavors }}
-    {{ if .needs_layer_publish }}
     - layer ({{ .name }})
-    {{ end }} # end needs_layer_publish
     {{ end }} # end flavors
   artifacts:
     expire_in: 1 hr
@@ -328,13 +326,13 @@ signed layer bundle:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
     {{ range (ds "flavors").flavors }}
-    {{ if .needs_layer_publish }}
+    {{ if .needs_layer_sign }}
     - sign layer ({{ .name }})
     {{ end }} # end needs_layer_publish
     {{ end }} # end flavors
   dependencies:
     {{ range (ds "flavors").flavors }}
-    {{ if .needs_layer_publish }}
+    {{ if .needs_layer_sign }}
     - sign layer ({{ .name }})
     {{ end }} # end needs_layer_publish
     {{ end }} # end flavors

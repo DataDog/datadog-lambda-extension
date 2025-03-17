@@ -3,6 +3,7 @@ flavors:
     arch: amd64
     alpine: 0
     fips: 0
+    needs_layer_sign: true
     needs_layer_publish: true
     suffix: amd64
     layer_name_base_suffix: ""
@@ -13,6 +14,7 @@ flavors:
     arch: arm64
     alpine: 0
     fips: 0
+    needs_layer_sign: true
     needs_layer_publish: true
     suffix: arm64
     layer_name_base_suffix: "-ARM"
@@ -23,6 +25,7 @@ flavors:
     arch: amd64
     alpine: 1
     fips: 0
+    needs_layer_sign: false
     needs_layer_publish: false
     suffix: amd64-alpine
 
@@ -30,6 +33,7 @@ flavors:
     arch: arm64
     alpine: 1
     fips: 0
+    needs_layer_sign: false
     needs_layer_publish: false
     suffix: arm64-alpine
 
@@ -37,6 +41,7 @@ flavors:
     arch: amd64
     alpine: 0
     fips: 1
+    needs_layer_sign: true
     needs_layer_publish: false
     suffix: amd64-fips
     max_layer_compressed_size_mb: 21
@@ -46,6 +51,7 @@ flavors:
     arch: arm64
     alpine: 0
     fips: 1
+    needs_layer_sign: true
     needs_layer_publish: false
     suffix: arm64-fips
     max_layer_compressed_size_mb: 19
@@ -55,6 +61,7 @@ flavors:
     arch: amd64
     alpine: 1
     fips: 1
+    needs_layer_sign: false
     needs_layer_publish: false
     suffix: amd64-fips-alpine
 
@@ -62,6 +69,7 @@ flavors:
     arch: arm64
     alpine: 1
     fips: 1
+    needs_layer_sign: false
     needs_layer_publish: false
     suffix: arm64-fips-alpine
 
