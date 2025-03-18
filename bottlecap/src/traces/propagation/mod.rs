@@ -23,14 +23,14 @@ pub fn extract_composite(
     if config.trace_propagation_extract_first {
         for propagation_style in &config.trace_propagation_style_extract {
             let context = propagation_style.extract(carrier);
-                if let Some(mut context) = context {
-                    if self.config.trace_propagation_http_baggage_enabled {
-                        Self::attach_baggage(&mut context, carrier);
-                    }
-                    return Some(context);
+            if let Some(mut context) = context {
+                if config.trace_propagation_http_baggage_enabled {
+                    attach_baggage(&mut context, carrier);
                 }
+                return Some(context);
             }
         }
+    }
 
     let contexts_found = extract_available_contexts(config, carrier);
     if let Some(mut primary_context) = resolve_primary_context_with_links(contexts_found) {
