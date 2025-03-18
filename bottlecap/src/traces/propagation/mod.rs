@@ -29,8 +29,8 @@ pub fn extract_composite(
         }
         None
     } else {
-        let contexts_found = extract_available_contexts(&config.trace_propagation_style_extract, carrier);
-        resolve_primary_context_with_links(contexts_found)
+        let contexts = extract_available_contexts(&config.trace_propagation_style_extract, carrier);
+        resolve_primary_context_with_links(contexts)
     };
 
     if let Some(mut valid_context) = context {
@@ -748,7 +748,8 @@ pub mod tests {
                 "_dd.p.test=value,_dd.p.tid=9291375655657946024,any=tag".to_string(),
             ),
         ]);
-        let contexts = extract_available_contexts(&config.trace_propagation_style_extract, &carrier);
+        let contexts =
+            extract_available_contexts(&config.trace_propagation_style_extract, &carrier);
 
         assert_eq!(contexts.len(), 2);
     }
@@ -770,7 +771,8 @@ pub mod tests {
                 "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
             ),
         ]);
-        let contexts = extract_available_contexts(&config.trace_propagation_style_extract, &carrier);
+        let contexts =
+            extract_available_contexts(&config.trace_propagation_style_extract, &carrier);
 
         assert_eq!(contexts.len(), 0);
     }
