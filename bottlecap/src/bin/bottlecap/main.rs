@@ -329,7 +329,7 @@ async fn extension_loop_active(
         start_trace_agent(config, resolved_api_key.clone(), &tags_provider);
 
     // let _ = start_lwa_proxy(Arc::clone(&invocation_processor), Arc::clone(&trace_processor));
-    let _ = start_lwa_proxy(Arc::clone(&invocation_processor));
+    let _ = start_lwa_proxy(Arc::clone(&config), Arc::clone(&invocation_processor));
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
