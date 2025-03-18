@@ -36,7 +36,7 @@ lazy_static! {
         Regex::new(r"^-([0-9])$").expect("failed creating regex");
 }
 
-pub fn extract_context_datadog_header(carrier: &dyn Extractor) -> Option<SpanContext> {
+pub fn extract_context_datadog_header(carrier: &impl Extractor) -> Option<SpanContext> {
     let trace_id = match extract_trace_id(carrier) {
         Ok(trace_id) => trace_id,
         Err(e) => {
@@ -92,7 +92,7 @@ fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
     // todo: appsec standalone
 }
 
-fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
+fn extract_trace_id(carrier: &impl Extractor) -> Result<u64, Error> {
     let trace_id = carrier
         .get(DATADOG_TRACE_ID_KEY)
         .ok_or(Error::extract("`trace_id` not found", "datadog"))?;
@@ -106,13 +106,13 @@ fn extract_trace_id(carrier: &dyn Extractor) -> Result<u64, Error> {
         .map_err(|_| Error::extract("Failed to decode `trace_id`", "datadog"))
 }
 
-fn extract_parent_id(carrier: &dyn Extractor) -> Option<u64> {
+fn extract_parent_id(carrier: &impl Extractor) -> Option<u64> {
     let parent_id = carrier.get(DATADOG_PARENT_ID_KEY)?;
 
     parent_id.parse::<u64>().ok()
 }
 
-fn extract_sampling_priority(carrier: &dyn Extractor) -> Result<i8, Error> {
+fn extract_sampling_priority(carrier: &impl Extractor) -> Result<i8, Error> {
     // todo: enum? Default is USER_KEEP=2
     let sampling_priority = carrier.get(DATADOG_SAMPLING_PRIORITY_KEY).unwrap_or("2");
 
@@ -121,12 +121,12 @@ fn extract_sampling_priority(carrier: &dyn Extractor) -> Result<i8, Error> {
         .map_err(|_| Error::extract("Failed to decode `sampling_priority`", "datadog"))
 }
 
-fn extract_origin(carrier: &dyn Extractor) -> Option<String> {
+fn extract_origin(carrier: &impl Extractor) -> Option<String> {
     let origin = carrier.get(DATADOG_ORIGIN_KEY)?;
     Some(origin.to_string())
 }
 
-pub fn extract_tags_datadog_context(carrier: &dyn Extractor) -> HashMap<String, String> {
+pub fn extract_tags_datadog_context(carrier: &impl Extractor) -> HashMap<String, String> {
     let carrier_tags = carrier.get(DATADOG_TAGS_KEY).unwrap_or_default();
     let mut tags: HashMap<String, String> = HashMap::new();
 

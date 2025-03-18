@@ -33,7 +33,7 @@ lazy_static! {
 }
 
 impl TracePropagationStyle {
-    pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
+    pub fn extract(&self, carrier: &impl Extractor) -> Option<SpanContext> {
         match self {
             TracePropagationStyle::Datadog => extract_context_datadog_header(carrier),
             TracePropagationStyle::TraceContext => extract_context_standard_header(carrier),
@@ -54,7 +54,7 @@ struct Tracestate {
     lower_order_trace_id: Option<String>,
 }
 
-pub fn extract_context_standard_header(carrier: &dyn Extractor) -> Option<SpanContext> {
+pub fn extract_context_standard_header(carrier: &impl Extractor) -> Option<SpanContext> {
     let tp = carrier.get(TRACEPARENT_KEY)?.trim();
 
     match extract_traceparent(tp) {
