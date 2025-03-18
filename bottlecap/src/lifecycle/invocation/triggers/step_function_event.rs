@@ -4,19 +4,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use super::DATADOG_CARRIER_KEY;
 use crate::{
     lifecycle::invocation::triggers::{
         ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
     traces::{
         context::{Sampling, SpanContext},
-        propagation::text_map_propagator::{
-            DatadogHeaderPropagator, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY,
-        },
     },
 };
-
-use super::DATADOG_CARRIER_KEY;
+use crate::traces::propagation::datadog_propagation::{extract_tags_datadog_context, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY};
 
 pub const DATADOG_LEGACY_LAMBDA_PAYLOAD: &str = "Payload";
 
@@ -153,7 +150,7 @@ impl StepFunctionEvent {
                     .parse()
                     .unwrap_or(Self::generate_trace_id(self.execution.id.clone()).0);
 
-                let tags = DatadogHeaderPropagator::extract_tags(&HashMap::from([(
+                let tags = extract_tags_datadog_context(&HashMap::from([(
                     DATADOG_TAGS_KEY.to_string(),
                     trace_tags.to_string(),
                 )]));
@@ -261,7 +258,7 @@ impl ServiceNameResolver for StepFunctionEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
-    use crate::traces::propagation::text_map_propagator::DATADOG_SAMPLING_DECISION_KEY;
+    use crate::traces::propagation::datadog_propagation::DATADOG_SAMPLING_DECISION_KEY;
 
     #[test]
     fn test_new_event() {

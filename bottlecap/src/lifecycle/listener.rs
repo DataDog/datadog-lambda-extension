@@ -14,10 +14,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
-use crate::traces::propagation::text_map_propagator::{
-    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
-    DATADOG_TRACE_ID_KEY,
-};
+use crate::traces::propagation::datadog_propagation::{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY, DATADOG_TRACE_ID_KEY};
 
 const HELLO_PATH: &str = "/lambda/hello";
 const START_INVOCATION_PATH: &str = "/lambda/start-invocation";

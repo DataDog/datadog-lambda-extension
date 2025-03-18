@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::debug;
 
+use crate::traces::propagation::extract_composite;
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{
@@ -28,16 +29,10 @@ use crate::{
     telemetry::events::{ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
-        propagation::{
-            text_map_propagator::{
-                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-                DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY,
-            },
-            DatadogCompositePropagator, Propagator,
-        },
         trace_processor,
     },
 };
+use crate::traces::propagation::datadog_propagation::{extract_tags_datadog_context, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY};
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
@@ -61,7 +56,6 @@ pub struct Processor {
     // Extracted span context from inferred span, headers, or payload
     pub extracted_span_context: Option<SpanContext>,
     // Used to extract the trace context from inferred span, headers, or payload
-    propagator: DatadogCompositePropagator,
     // Helper to send enhanced metrics
     enhanced_metrics: EnhancedMetrics,
     // AWS configuration from the Lambda environment
@@ -85,15 +79,12 @@ impl Processor {
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
 
-        let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
-
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(config.service_mapping.clone()),
             span: create_empty_span(String::from("aws.lambda"), resource, service),
             cold_start_span: None,
             extracted_span_context: None,
-            propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config: aws_config.clone(),
             tracer_detected: false,
@@ -463,18 +454,18 @@ impl Processor {
         headers: &HashMap<String, String>,
         payload_value: &Value,
     ) -> Option<SpanContext> {
-        if let Some(sc) = self.inferrer.get_span_context(&self.propagator) {
+        if let Some(sc) = self.inferrer.get_span_context(&self.config) {
             return Some(sc);
         }
 
         if let Some(payload_headers) = payload_value.get("headers") {
-            if let Some(sc) = self.propagator.extract(payload_headers) {
+            if let Some(sc) = extract_composite(&self.config, payload_headers) {
                 debug!("Extracted trace context from event headers");
                 return Some(sc);
             }
         }
 
-        if let Some(sc) = self.propagator.extract(headers) {
+        if let Some(sc) = extract_composite(&self.config, headers) {
             debug!("Extracted trace context from headers");
             return Some(sc);
         }
@@ -564,7 +555,7 @@ impl Processor {
 
             // Extract tags from headers
             // Used for 128 bit trace ids
-            tags = DatadogHeaderPropagator::extract_tags(headers);
+            tags = extract_tags_datadog_context(headers);
         }
 
         // We should always use the generated trace id from the tracer
@@ -648,6 +639,7 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
+    use crate::traces::propagation::datadog_propagation::DATADOG_TRACE_ID_KEY;
 
     fn setup() -> Processor {
         let aws_config = AwsConfig {
