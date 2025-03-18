@@ -20,34 +20,35 @@ pub fn extract_composite(
     config: &Arc<config::Config>,
     carrier: &dyn Extractor,
 ) -> Option<SpanContext> {
-    if config.trace_propagation_extract_first {
+    let context = if config.trace_propagation_extract_first {
         for propagation_style in &config.trace_propagation_style_extract {
             let context = propagation_style.extract(carrier);
-            if let Some(mut context) = context {
-                if config.trace_propagation_http_baggage_enabled {
-                    attach_baggage(&mut context, carrier);
-                }
-                return Some(context);
+            if context.is_some() {
+                return context;
             }
         }
+        None
+    } else {
+        let contexts_found = extract_available_contexts(&config.trace_propagation_style_extract, carrier);
+        resolve_primary_context_with_links(contexts_found)
+    };
+
+    if let Some(mut valid_context) = context {
+        if config.trace_propagation_http_baggage_enabled {
+            attach_baggage(&mut valid_context, carrier);
+        }
+        return Some(valid_context);
     }
 
-    let contexts_found = extract_available_contexts(config, carrier);
-    if let Some(mut primary_context) = resolve_primary_context_with_links(contexts_found) {
-        if config.trace_propagation_http_baggage_enabled {
-            attach_baggage(&mut primary_context, carrier);
-        }
-        return Some(primary_context);
-    }
     None
 }
 
 fn extract_available_contexts(
-    config: &Arc<config::Config>,
+    styles: &Vec<TracePropagationStyle>,
     carrier: &dyn Extractor,
 ) -> VecDeque<(TracePropagationStyle, SpanContext)> {
     let mut contexts_found: VecDeque<(TracePropagationStyle, SpanContext)> = VecDeque::new();
-    for propagation_style in &config.trace_propagation_style_extract {
+    for propagation_style in styles {
         if let Some(context) = propagation_style.extract(carrier) {
             contexts_found.push_back((*propagation_style, context));
         }
@@ -747,7 +748,7 @@ pub mod tests {
                 "_dd.p.test=value,_dd.p.tid=9291375655657946024,any=tag".to_string(),
             ),
         ]);
-        let contexts = extract_available_contexts(&Arc::new(config), &carrier);
+        let contexts = extract_available_contexts(&config.trace_propagation_style_extract, &carrier);
 
         assert_eq!(contexts.len(), 2);
     }
@@ -769,7 +770,7 @@ pub mod tests {
                 "dd=p:00f067aa0ba902b7;s:2;o:rum".to_string(),
             ),
         ]);
-        let contexts = extract_available_contexts(&Arc::new(config), &carrier);
+        let contexts = extract_available_contexts(&config.trace_propagation_style_extract, &carrier);
 
         assert_eq!(contexts.len(), 0);
     }
