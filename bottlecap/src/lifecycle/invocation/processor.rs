@@ -435,6 +435,9 @@ impl Processor {
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
+        debug!("AG: at start invocation headers: {:?}", headers);
+        debug!("AG: at start invocation payload: {:?}", payload_value);
+
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
             tag_span_from_value(
@@ -515,6 +518,9 @@ impl Processor {
                 self.config.capture_lambda_payload_max_depth,
             );
         }
+
+        debug!("AG: at end invocation headers: {:?}", headers);
+        debug!("AG: at end invocation payload: {:?}", payload_value);
 
         if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_i64) {
             let status_code_as_string = status_code.to_string();

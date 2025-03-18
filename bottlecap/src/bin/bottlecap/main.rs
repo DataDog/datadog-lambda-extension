@@ -499,8 +499,8 @@ async fn extension_loop_active(
 async fn flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flusher: &mut MetricsFlusher,
-    trace_flusher: &dyn TraceFlusher,
-    stats_flusher: &dyn StatsFlusher,
+    trace_flusher: &impl TraceFlusher,
+    stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
