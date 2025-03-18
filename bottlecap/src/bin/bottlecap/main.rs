@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::lwa::proxy::start_lwa_proxy;
 use bottlecap::{
     base_url,
     config::{self, get_aws_partition_by_region, AwsConfig, Config},
@@ -338,6 +339,9 @@ async fn extension_loop_active(
     let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) =
         start_trace_agent(config, resolved_api_key.clone(), &tags_provider);
 
+    // let _ = start_lwa_proxy(Arc::clone(&invocation_processor), Arc::clone(&trace_processor));
+    let _ = start_lwa_proxy(Arc::clone(&config), Arc::clone(&invocation_processor));
+
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
     };
@@ -490,8 +494,8 @@ async fn extension_loop_active(
 async fn flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flusher: &mut MetricsFlusher,
-    trace_flusher: &dyn TraceFlusher,
-    stats_flusher: &dyn StatsFlusher,
+    trace_flusher: &impl TraceFlusher,
+    stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(

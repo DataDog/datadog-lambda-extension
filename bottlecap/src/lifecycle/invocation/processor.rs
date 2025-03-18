@@ -417,10 +417,17 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn on_invocation_start(
+        &mut self,
+        headers: HashMap<String, String>,
+        payload: Vec<u8>,
+    ) -> (u64, u64, u64) {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
+
+        debug!("AG: at start invocation headers: {:?}", headers);
+        debug!("AG: at start invocation payload: {:?}", payload_value);
 
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
@@ -438,6 +445,7 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
+            debug!("LIP: found span context in headers {:?}", sc);
             self.span.trace_id = sc.trace_id;
             self.span.parent_id = sc.span_id;
 
@@ -456,6 +464,10 @@ impl Processor {
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.span.parent_id = inferred_span.span_id;
         }
+
+        debug!("LIP: trace context found trace_id:{trace_id} span_id:{span_id} parent_id:{parent_id}",
+            trace_id = self.span.trace_id, span_id = self.span.span_id, parent_id = self.span.parent_id);
+        (self.span.span_id, self.span.trace_id, self.span.parent_id)
     }
 
     fn extract_span_context(
@@ -497,6 +509,9 @@ impl Processor {
                 self.config.capture_lambda_payload_max_depth,
             );
         }
+
+        debug!("AG: at end invocation headers: {:?}", headers);
+        debug!("AG: at end invocation payload: {:?}", payload_value);
 
         if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_i64) {
             let status_code_as_string = status_code.to_string();
