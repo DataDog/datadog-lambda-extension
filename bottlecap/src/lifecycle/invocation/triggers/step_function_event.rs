@@ -454,6 +454,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_get_span_context() {
         let test_cases = vec![
             (
