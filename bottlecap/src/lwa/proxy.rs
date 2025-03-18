@@ -2,16 +2,13 @@ use crate::{
     lifecycle::invocation::processor::Processor,
     lifecycle::listener::Listener,
 };
-use hyper::http::request::Parts;
-use hyper::{
-    body::{Bytes, HttpBody},
-    client::HttpConnector,
-    service::{make_service_fn, service_fn},
-    Body, Client, Error, Request, Response, Server, Uri,
-};
+use hyper::{http::request::Parts, body::HttpBody, client::HttpConnector, service::{make_service_fn, service_fn}, Body, Client, Error, Request, Response, Server, Uri, HeaderMap};
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{net::SocketAddr, sync::Arc};
+use std::collections::HashMap;
+use hyper::header::HeaderValue;
+use hyper::http::HeaderName;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{debug, error};
 
@@ -110,7 +107,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                 None
             }
         },
-        Err(e) => {
+        Err(_) => {
             None
         }
     };
@@ -162,33 +159,56 @@ async fn intercept_payload(
     // request received from lambda handler directed to AWS runtime API
     // it can be either invocation/next, or a lambda handler response to it
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
-    debug!("LWA: Intercepted request: {:?}", intercepted_parts);
 
     let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
+
+    debug!("LWA: Intercepted request: {:?}", intercepted_parts);
+    debug!("LWA: Intercepted request body: {:?}", waited_intercepted_body);
+
     let forward_intercepted =
         forward_request(aws_runtime_addr, &intercepted_parts, waited_intercepted_body.clone().into()).await?;
 
     // response after forwarding to AWS runtime API
     let response_to_intercepted_req = client.request(forward_intercepted).await?;
 
+
+    let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
+    let resp_payload = resp_body.collect().await?.to_bytes();
+
+    debug!("LWA: Intercepted resp: {:?}", &resp_part);
+    debug!("LWA: Intercepted resp body: {:?}", resp_payload);
+
+    let mut response_to_intercepted_req = Response::builder()
+        .status(resp_part.status)
+        .version(resp_part.version)
+        .body(Body::from(resp_payload.clone()))
+        .unwrap();
+    *response_to_intercepted_req.headers_mut() = resp_part.headers.clone();
+
+
     match (intercepted_parts.method, intercepted_parts.uri.path()) {
         (hyper::Method::GET, "/2018-06-01/runtime/invocation/next") => {
             // intercepted invocation/next. The *response body* contains the payload of
             // the request that the lambda handler will see
-            let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
-            let resp_payload = resp_body.collect().await?.to_bytes();
+            // let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
+            // let resp_payload = resp_body.collect().await?.to_bytes();
+
+            let inner_payload = serde_json::from_slice::<Value>(&resp_payload).unwrap_or_else(|_| json!({}));
+            debug!("LWA: payload wrapped in body {}", inner_payload);
+
+            let body_bytes = inner_payload.get("body")
+                .map(|body| serde_json::to_vec(body)
+                    .unwrap_or_else(|_| vec![]))
+                .unwrap_or_else(|| vec![]);
+
+            let header_map = inner_header(inner_payload);
+
             let _ = Listener::start_invocation_handler(
-                resp_part.headers.clone(),
-                resp_payload.clone().into(),
+                header_map,
+                body_bytes.into(),
                 Arc::clone(&processor),
             )
             .await;
-            // invoke_universal_instrumentation_start(
-            //     Arc::clone(&span_generator),
-            //     Arc::clone(&processor),
-            //     resp_payload.clone(),
-            // )
-            // .await;
 
             // Response is not cloneable, so it must be built again
             let mut rebuild_response = Response::builder()
@@ -205,21 +225,18 @@ async fn intercept_payload(
             if path.starts_with("/2018-06-01/runtime/invocation/")
                 && path.ends_with("/response") =>
         {
-            // intercepted response to runtime/invocation. The *request* contains the returned
-            // values and headers from lambda handler
-            // let _ = Listener::start_invocation_handler(
-            //     req,
-            //     processor,
-            // ).await;
-            // lifecycle_listener.lock().trace_invocation_end(
-            //     lifecycle_listener.clone(),
-            //     req_parts.headers.clone(),
-            //     parsed_body,
-            // )
-            // .await;
+            let inner_payload = serde_json::from_slice::<Value>(&waited_intercepted_body).unwrap_or_else(|_| json!({}));
+
+            let body_bytes = inner_payload.get("body")
+                .map(|body| serde_json::to_vec(body)
+                    .unwrap_or_else(|_| vec![]))
+                .unwrap_or_else(|| vec![]);
+
+            let header_map = inner_header(inner_payload);
+
             let _ = Listener::end_invocation_handler(
-                intercepted_parts.headers,
-                waited_intercepted_body.into(),
+                header_map,
+                body_bytes.into(),
                 Arc::clone(&processor),
             )
                 .await;
@@ -229,6 +246,21 @@ async fn intercept_payload(
         }
         _ => Ok(response_to_intercepted_req),
     }
+}
+
+fn inner_header(inner_payload: Value) -> HeaderMap {
+    let headers = if let Some(body) = inner_payload.get("headers") {
+        serde_json::from_value::<HashMap<String, String>>(body.clone()).unwrap_or_else(|_| HashMap::new())
+    } else {
+        HashMap::new()
+    };
+
+    let mut header_map = HeaderMap::new();
+    for (k, v) in headers.into_iter() {
+        let header_name = HeaderName::from_bytes(k.as_bytes()).unwrap();
+        header_map.insert(header_name, HeaderValue::from_str(&v).unwrap());
+    }
+    header_map
 }
 
 async fn forward_request(
