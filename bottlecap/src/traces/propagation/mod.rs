@@ -18,7 +18,7 @@ pub mod text_map_extraction;
 
 pub fn extract_composite(
     config: &Arc<config::Config>,
-    carrier: &dyn Extractor,
+    carrier: &impl Extractor,
 ) -> Option<SpanContext> {
     let context = if config.trace_propagation_extract_first {
         for propagation_style in &config.trace_propagation_style_extract {
@@ -45,7 +45,7 @@ pub fn extract_composite(
 
 fn extract_available_contexts(
     styles: &Vec<TracePropagationStyle>,
-    carrier: &dyn Extractor,
+    carrier: &impl Extractor,
 ) -> VecDeque<(TracePropagationStyle, SpanContext)> {
     let mut contexts_found: VecDeque<(TracePropagationStyle, SpanContext)> = VecDeque::new();
     for propagation_style in styles {
@@ -131,7 +131,7 @@ fn resolve_primary_context_with_links(
     Some(primary_context)
 }
 
-fn attach_baggage(context: &mut SpanContext, carrier: &dyn Extractor) {
+fn attach_baggage(context: &mut SpanContext, carrier: &impl Extractor) {
     let keys = carrier.keys();
 
     for key in keys {
