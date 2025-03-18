@@ -1,3 +1,6 @@
+use crate::traces::propagation::datadog_extraction::{
+    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY,
+};
 use crate::{
     config::{self, trace_propagation_style::TracePropagationStyle},
     traces::context::SpanContext,
@@ -6,15 +9,12 @@ use carrier::Extractor;
 use datadog_trace_protobuf::pb::SpanLink;
 use std::collections::VecDeque;
 use std::{collections::HashMap, sync::Arc};
-use text_map_propagation::{
-    BAGGAGE_PREFIX, TRACESTATE_KEY,
-};
-use crate::traces::propagation::datadog_propagation::{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY};
+use text_map_extraction::{BAGGAGE_PREFIX, TRACESTATE_KEY};
 
 pub mod carrier;
+pub mod datadog_extraction;
 pub mod error;
-pub mod text_map_propagation;
-pub mod datadog_propagation;
+pub mod text_map_extraction;
 
 pub fn extract_composite(
     config: &Arc<config::Config>,
@@ -33,15 +33,13 @@ pub fn extract_composite(
         }
 
     let contexts_found = extract_available_contexts(config, carrier);
-    if contexts_found.is_empty() {
-        return None;
+    if let Some(mut primary_context) = resolve_primary_context_with_links(contexts_found) {
+        if config.trace_propagation_http_baggage_enabled {
+            attach_baggage(&mut primary_context, carrier);
+        }
+        return Some(primary_context);
     }
-    let mut primary_context = resolve_primary_context_with_links(contexts_found);
-    if config.trace_propagation_http_baggage_enabled {
-        attach_baggage(&mut primary_context, carrier);
-    }
-
-    Some(primary_context)
+    None
 }
 
 fn extract_available_contexts(
@@ -50,26 +48,26 @@ fn extract_available_contexts(
 ) -> VecDeque<(TracePropagationStyle, SpanContext)> {
     let mut contexts_found: VecDeque<(TracePropagationStyle, SpanContext)> = VecDeque::new();
     for propagation_style in &config.trace_propagation_style_extract {
-            if let Some(context) = propagation_style.extract(carrier) {
-                contexts_found.push_back((*propagation_style, context));
-            }
+        if let Some(context) = propagation_style.extract(carrier) {
+            contexts_found.push_back((*propagation_style, context));
+        }
     }
     contexts_found
 }
 
 fn resolve_primary_context_with_links(
     mut all_contexts: VecDeque<(TracePropagationStyle, SpanContext)>,
-) -> SpanContext {
+) -> Option<SpanContext> {
     let dd_context: Option<SpanContext> = all_contexts
         .iter()
         .find(|(style, _)| *style == TracePropagationStyle::Datadog)
-        .and_then(|style_and_context| Some(style_and_context.1.clone()))
+        .map(|style_and_context| style_and_context.1.clone())
         .or(None);
 
-    let (_primary_style, mut primary_context) = all_contexts.pop_front().unwrap();
+    let (_primary_style, mut primary_context) = all_contexts.pop_front()?;
     let mut links = Vec::<SpanLink>::new();
 
-    for style_and_context in all_contexts.iter() {
+    for style_and_context in &all_contexts {
         let style = style_and_context.0;
         let context = style_and_context.1.clone();
 
@@ -129,7 +127,7 @@ fn resolve_primary_context_with_links(
 
     primary_context.links = links;
 
-    primary_context
+    Some(primary_context)
 }
 
 fn attach_baggage(context: &mut SpanContext, carrier: &dyn Extractor) {

@@ -12,6 +12,10 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::debug;
 
+use crate::traces::propagation::datadog_extraction::{
+    extract_tags_datadog_context, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+    DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY,
+};
 use crate::traces::propagation::extract_composite;
 use crate::{
     config::{self, AwsConfig},
@@ -27,12 +31,8 @@ use crate::{
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     telemetry::events::{ReportMetrics, RuntimeDoneMetrics, Status},
-    traces::{
-        context::SpanContext,
-        trace_processor,
-    },
+    traces::{context::SpanContext, trace_processor},
 };
-use crate::traces::propagation::datadog_propagation::{extract_tags_datadog_context, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY};
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
@@ -635,11 +635,11 @@ impl Processor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::traces::propagation::datadog_extraction::DATADOG_TRACE_ID_KEY;
     use crate::LAMBDA_RUNTIME_SLUG;
     use base64::{engine::general_purpose::STANDARD, Engine};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
-    use crate::traces::propagation::datadog_propagation::DATADOG_TRACE_ID_KEY;
 
     fn setup() -> Processor {
         let aws_config = AwsConfig {

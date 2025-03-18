@@ -5,15 +5,15 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use super::DATADOG_CARRIER_KEY;
+use crate::traces::propagation::datadog_extraction::{
+    extract_tags_datadog_context, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY,
+};
 use crate::{
     lifecycle::invocation::triggers::{
         ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
-    traces::{
-        context::{Sampling, SpanContext},
-    },
+    traces::context::{Sampling, SpanContext},
 };
-use crate::traces::propagation::datadog_propagation::{extract_tags_datadog_context, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY};
 
 pub const DATADOG_LEGACY_LAMBDA_PAYLOAD: &str = "Payload";
 
@@ -258,7 +258,7 @@ impl ServiceNameResolver for StepFunctionEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
-    use crate::traces::propagation::datadog_propagation::DATADOG_SAMPLING_DECISION_KEY;
+    use crate::traces::propagation::datadog_extraction::DATADOG_SAMPLING_DECISION_KEY;
 
     #[test]
     fn test_new_event() {

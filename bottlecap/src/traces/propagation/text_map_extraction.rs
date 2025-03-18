@@ -2,11 +2,14 @@ use std::collections::HashMap;
 
 use crate::config::trace_propagation_style::TracePropagationStyle;
 use crate::traces::context::{Sampling, SpanContext};
+use crate::traces::propagation::datadog_extraction::{
+    extract_context_datadog_header, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
+    DATADOG_LAST_PARENT_ID_KEY,
+};
 use crate::traces::propagation::{carrier::Extractor, error::Error};
 use lazy_static::lazy_static;
 use regex::Regex;
 use tracing::{debug, error, warn};
-use crate::traces::propagation::datadog_propagation::{extract_context_datadog_header, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY};
 
 // Traceparent Keys
 const TRACEPARENT_KEY: &str = "traceparent";
@@ -33,10 +36,8 @@ impl TracePropagationStyle {
     pub fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
         match self {
             TracePropagationStyle::Datadog => extract_context_datadog_header(carrier),
-            TracePropagationStyle::B3Multi => None,
-            TracePropagationStyle::B3 => None,
             TracePropagationStyle::TraceContext => extract_context_standard_header(carrier),
-            TracePropagationStyle::None => None,
+            _ => None,
         }
     }
 }

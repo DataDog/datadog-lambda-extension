@@ -183,8 +183,8 @@ fn higher_order_bits_valid(trace_id_higher_order_bits: &str) -> bool {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-    use crate::traces::propagation::text_map_propagation::extract_context_standard_header;
     use super::*;
+    use crate::traces::propagation::text_map_extraction::extract_context_standard_header;
 
     #[test]
     fn test_extract_traceparent_propagator() {
