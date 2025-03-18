@@ -9,11 +9,17 @@ use std::{net::SocketAddr, sync::Arc};
 use std::collections::HashMap;
 use hyper::header::HeaderValue;
 use hyper::http::HeaderName;
+use nix::libc::sock_fprog;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{debug, error};
+use crate::config::Config;
+use crate::lifecycle::invocation::span_inferrer::SpanInferrer;
+use crate::traces::context::SpanContext;
+use crate::traces::propagation::{DatadogCompositePropagator, Propagator};
 
 #[must_use]
 pub fn start_lwa_proxy(
+    config: Arc<Config>,
     invocation_processor: Arc<Mutex<Processor>>,
     // trace_processor: Arc<Mutex<ServerlessTraceProcessor>>,
 ) -> Option<JoinHandle<()>> {
@@ -39,7 +45,7 @@ pub fn start_lwa_proxy(
                             intercept_payload(
                                 req,
                                 Arc::clone(&client),
-                                // Arc::clone(&trace_processor),
+                                Arc::clone(&config),
                                 Arc::clone(&processor),
                                 uri.clone(),
                             )
@@ -150,6 +156,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
 //     LWA: Intercepted request body: b""
 
 async fn intercept_payload(
+    config: Arc<Config>,
     intercepted: Request<Body>,
     client: Arc<Client<ProxyConnector<HttpConnector>>>,
     // span_generator: Arc<Mutex<ServerlessTraceProcessor>>,
@@ -201,14 +208,13 @@ async fn intercept_payload(
                     .unwrap_or_else(|_| vec![]))
                 .unwrap_or_else(|| vec![]);
 
-            let header_map = inner_header(inner_payload);
+            let header_map = inner_header(&inner_payload);
 
-            let _ = Listener::start_invocation_handler(
-                header_map,
-                body_bytes.into(),
-                Arc::clone(&processor),
-            )
-            .await;
+            if let Some(span_context) = extract_span_context(Arc::clone(&config), &header_map, &inner_payload.clone()){
+                // re parent with aws lambda span
+            } else {
+                // inject aws lambda span
+            }
 
             // Response is not cloneable, so it must be built again
             let mut rebuild_response = Response::builder()
@@ -248,19 +254,47 @@ async fn intercept_payload(
     }
 }
 
-fn inner_header(inner_payload: Value) -> HeaderMap {
+fn extract_span_context(
+    config: Arc<Config>,
+    headers: &HashMap<String, String>,
+    payload_value: &Value,
+) -> Option<SpanContext> {
+    let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
+    let inferrer = SpanInferrer::new(config.service_mapping.clone());
+
+    if let Some(sc) = inferrer.get_span_context(&propagator) {
+        return Some(sc);
+    }
+
+
+    if let Some(payload_headers) = payload_value.get("headers") {
+        if let Some(sc) = propagator.extract(payload_headers) {
+            debug!("Extracted trace context from event headers");
+            return Some(sc);
+        }
+    }
+
+    if let Some(sc) = propagator.extract(headers) {
+        debug!("Extracted trace context from headers");
+        return Some(sc);
+    }
+
+    None
+}
+
+fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
     let headers = if let Some(body) = inner_payload.get("headers") {
         serde_json::from_value::<HashMap<String, String>>(body.clone()).unwrap_or_else(|_| HashMap::new())
     } else {
         HashMap::new()
     };
 
-    let mut header_map = HeaderMap::new();
-    for (k, v) in headers.into_iter() {
-        let header_name = HeaderName::from_bytes(k.as_bytes()).unwrap();
-        header_map.insert(header_name, HeaderValue::from_str(&v).unwrap());
-    }
-    header_map
+    // let mut header_map = HeaderMap::new();
+    // for (k, v) in headers.into_iter() {
+    //     let header_name = HeaderName::from_bytes(k.as_bytes()).unwrap();
+    //     header_map.insert(header_name, HeaderValue::from_str(&v).unwrap());
+    // }
+    headers
 }
 
 async fn forward_request(
