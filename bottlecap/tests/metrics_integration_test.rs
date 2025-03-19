@@ -50,6 +50,7 @@ async fn test_enhanced_metrics() {
             .expect("can't parse metrics intake URL from site"),
         https_proxy: None,
         timeout: std::time::Duration::from_secs(5),
+        retry_strategy: dogstatsd::datadog::RetryStrategy::Immediate(1),
     };
     let mut metrics_flusher = MetricsFlusher::new(flusher_config);
     let lambda_enhanced_metrics =
