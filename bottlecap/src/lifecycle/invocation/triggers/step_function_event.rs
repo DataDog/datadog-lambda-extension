@@ -10,16 +10,15 @@ use crate::{
     },
     traces::{
         context::{Sampling, SpanContext},
-        propagation::text_map_propagator::DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY,
+        propagation::text_map_propagator::{
+            DatadogHeaderPropagator, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY,
+        },
     },
 };
 
-#[allow(clippy::module_name_repetitions)]
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct LegacyStepFunctionEvent {
-    #[serde(rename = "Payload")]
-    pub payload: StepFunctionEvent,
-}
+use super::DATADOG_CARRIER_KEY;
+
+pub const DATADOG_LEGACY_LAMBDA_PAYLOAD: &str = "Payload";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct StepFunctionEvent {
@@ -29,12 +28,22 @@ pub struct StepFunctionEvent {
     pub state: State,
     #[serde(rename = "StateMachine")]
     pub state_machine: Option<StateMachine>,
+    #[serde(rename = "x-datadog-trace-id")]
+    pub trace_id: Option<String>,
+    #[serde(rename = "x-datadog-tags")]
+    pub trace_tags: Option<String>,
+    #[serde(rename = "RootExecutionId")]
+    pub root_execution_id: Option<String>,
+    #[serde(rename = "serverless-version")]
+    pub serverless_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct Execution {
     #[serde(rename = "Id")]
     id: String,
+    #[serde(rename = "RedriveCount")]
+    redrive_count: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -43,6 +52,8 @@ pub struct State {
     name: String,
     #[serde(rename = "EnteredTime")]
     entered_time: String,
+    #[serde(rename = "RetryCount")]
+    retry_count: u16,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -56,7 +67,16 @@ impl Trigger for StepFunctionEvent {
     where
         Self: Sized,
     {
-        let p = payload.get("Payload").unwrap_or(&payload);
+        let p = payload
+            .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
+            .unwrap_or(&payload)
+            .get(DATADOG_CARRIER_KEY)
+            .unwrap_or(
+                payload
+                    .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
+                    .unwrap_or(&payload),
+            );
+
         match serde_json::from_value::<StepFunctionEvent>(p.clone()) {
             Ok(event) => Some(event),
             Err(e) => {
@@ -70,8 +90,16 @@ impl Trigger for StepFunctionEvent {
     where
         Self: Sized,
     {
-        // Check first if the payload is a Legacy Step Function event
-        let p = payload.get("Payload").unwrap_or(payload);
+        // Check if the payload is a Legacy Step Function event and also a JSONata event
+        let p = payload
+            .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
+            .unwrap_or(payload)
+            .get(DATADOG_CARRIER_KEY)
+            .unwrap_or(
+                payload
+                    .get(DATADOG_LEGACY_LAMBDA_PAYLOAD)
+                    .unwrap_or(payload),
+            );
 
         let execution_id = p
             .get("Execution")
@@ -118,16 +146,39 @@ impl Trigger for StepFunctionEvent {
 impl StepFunctionEvent {
     #[must_use]
     pub fn get_span_context(&self) -> SpanContext {
-        let (lo_tid, hi_tid) = Self::generate_trace_id(self.execution.id.clone());
-        let tags = HashMap::from([(
-            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-            format!("{hi_tid:x}"),
-        )]);
+        let (lo_tid, tags) =
+            if let (Some(trace_id), Some(trace_tags)) = (&self.trace_id, &self.trace_tags) {
+                // Lambda Root
+                let lo_tid = trace_id
+                    .parse()
+                    .unwrap_or(Self::generate_trace_id(self.execution.id.clone()).0);
+
+                let tags = DatadogHeaderPropagator::extract_tags(&HashMap::from([(
+                    DATADOG_TAGS_KEY.to_string(),
+                    trace_tags.to_string(),
+                )]));
+
+                (lo_tid, tags)
+            } else {
+                // Nested or Normal, fetch correct ID
+                let execution_arn = self
+                    .root_execution_id
+                    .as_ref()
+                    .unwrap_or(&self.execution.id);
+                let (lo_tid, hi_tid) = Self::generate_trace_id(execution_arn.clone());
+                let tags = HashMap::from([(
+                    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                    format!("{hi_tid:x}"),
+                )]);
+                (lo_tid, tags)
+            };
 
         let parent_id = Self::generate_parent_id(
             self.execution.id.clone(),
             self.state.name.clone(),
             self.state.entered_time.clone(),
+            self.state.retry_count,
+            self.execution.redrive_count,
         );
 
         SpanContext {
@@ -145,14 +196,21 @@ impl StepFunctionEvent {
     }
 
     /// Generates a random 64 bit ID from the formatted hash of the
-    /// Step Function Execution ARN, the State Name, and the State Entered Time
+    /// Step Function context object. We omit `retry_count` and `redrive_count`
+    /// when both are 0 to maintain backwards compatibility.
     ///
     fn generate_parent_id(
         execution_id: String,
         state_name: String,
         state_entered_time: String,
+        retry_count: u16,
+        redrive_count: u16,
     ) -> u64 {
-        let unique_string = format!("{execution_id}#{state_name}#{state_entered_time}");
+        let mut unique_string = format!("{execution_id}#{state_name}#{state_entered_time}");
+
+        if retry_count != 0 || redrive_count != 0 {
+            unique_string.push_str(&format!("#{retry_count}#{redrive_count}"));
+        }
 
         let hash = Sha256::digest(unique_string.as_bytes());
         Self::get_positive_u64(&hash[0..8])
@@ -203,65 +261,134 @@ impl ServiceNameResolver for StepFunctionEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+    use crate::traces::propagation::text_map_propagator::DATADOG_SAMPLING_DECISION_KEY;
 
     #[test]
-    fn test_new() {
-        let json = read_json_file("step_function_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let result = StepFunctionEvent::new(payload).expect("Failed to deserialize into Event");
+    fn test_new_event() {
+        let test_files = vec![
+            "step_function_event.json",
+            "step_function_legacy_event.json",
+        ];
 
         let expected = StepFunctionEvent {
             execution: Execution {
                 id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44"),
+                redrive_count: 0,
             },
             state: State {
-                name: String::from("agocsTest1"), 
+                name: String::from("agocsTest1"),
                 entered_time: String::from("2024-07-30T19:55:53.018Z"),
+                retry_count: 0,
             },
             state_machine: Some(StateMachine {
                 id: String::from("arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"),
             }),
+            trace_id: None,
+            trace_tags: None,
+            root_execution_id: None,
+            serverless_version: None,
         };
 
-        assert_eq!(result, expected);
+        for file in test_files {
+            let json = read_json_file(file);
+            let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+            let result = StepFunctionEvent::new(payload).expect("Failed to deserialize into Event");
+
+            assert_eq!(result, expected);
+        }
     }
 
     #[test]
-    fn test_new_legacy_event() {
-        let json = read_json_file("step_function_legacy_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let result = StepFunctionEvent::new(payload).expect("Failed to deserialize into Event");
+    fn test_new_nested_event() {
+        let test_files = vec![
+            "step_function_nested_event.json",
+            "step_function_nested_legacy_event.json",
+        ];
 
         let expected = StepFunctionEvent {
             execution: Execution {
-                id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44"),
+                id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:aa6c9316-713a-41d4-9c30-61131716744f"),
+                redrive_count: 0,
             },
             state: State {
-                name: String::from("agocsTest1"), 
-                entered_time: String::from("2024-07-30T19:55:53.018Z"),
+                name: String::from("agocsTest1"),
+                entered_time: String::from("2024-07-30T20:46:20.824Z"),
+                retry_count: 0,
             },
             state_machine: Some(StateMachine {
                 id: String::from("arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"),
             }),
+            trace_id: None,
+            trace_tags: None,
+            root_execution_id: Some(String::from("arn:aws:states:sa-east-1:425362996713:execution:invokeJavaLambda:4875aba4-ae31-4a4c-bf8a-63e9eee31dad")),
+            serverless_version: Some(String::from("v1")),
         };
 
-        assert_eq!(result, expected);
+        for file in test_files {
+            let json = read_json_file(file);
+            let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+            let result = StepFunctionEvent::new(payload).expect("Failed to deserialize into Event");
+
+            assert_eq!(result, expected);
+        }
+    }
+
+    #[test]
+    fn test_new_lambda_root_event() {
+        let test_files = vec![
+            "step_function_lambda_root_event.json",
+            "step_function_lambda_root_legacy_event.json",
+        ];
+
+        let expected = StepFunctionEvent {
+            execution: Execution {
+                id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:aa6c9316-713a-41d4-9c30-61131716744f"),
+                redrive_count: 0,
+            },
+            state: State {
+                name: String::from("agocsTest1"),
+                entered_time: String::from("2024-07-30T20:46:20.824Z"),
+                retry_count: 0,
+            },
+            state_machine: Some(StateMachine {
+                id: String::from("arn:aws:states:us-east-1:425362996713:stateMachine:agocsTestSF"),
+            }),
+            trace_id: Some(String::from("5821803790426892636")),
+            trace_tags: Some(String::from("_dd.p.dm=-0,_dd.p.tid=672a7cb100000000")),
+            root_execution_id: None,
+            serverless_version: Some(String::from("v1")),
+        };
+
+        for file in test_files {
+            let json = read_json_file(file);
+            let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+            let result = StepFunctionEvent::new(payload).expect("Failed to deserialize into Event");
+
+            assert_eq!(result, expected);
+        }
     }
 
     #[test]
     fn test_is_match() {
-        let json = read_json_file("step_function_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize StepFunctionEvent");
+        let test_files = vec![
+            "step_function_event.json",
+            "step_function_legacy_event.json",
+            "step_function_nested_event.json",
+            "step_function_nested_legacy_event.json",
+            "step_function_lambda_root_event.json",
+            "step_function_lambda_root_legacy_event.json",
+        ];
 
-        assert!(StepFunctionEvent::is_match(&payload));
-    }
+        for file in test_files {
+            let json = read_json_file(file);
+            let payload = serde_json::from_str(&json)
+                .unwrap_or_else(|_| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
-    #[test]
-    fn test_is_match_legacy_event() {
-        let json = read_json_file("step_function_legacy_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize StepFunctionEvent");
-
-        assert!(StepFunctionEvent::is_match(&payload));
+            assert!(
+                StepFunctionEvent::is_match(&payload),
+                "StepFunctionEvent::is_match failed for {file}"
+            );
+        }
     }
 
     #[test]
@@ -273,18 +400,32 @@ mod tests {
 
     #[test]
     fn test_get_tags() {
-        let json = read_json_file("step_function_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
-        let tags = event.get_tags();
+        let test_files = vec![
+            "step_function_event.json",
+            "step_function_legacy_event.json",
+            "step_function_nested_event.json",
+            "step_function_nested_legacy_event.json",
+            "step_function_lambda_root_event.json",
+            "step_function_lambda_root_legacy_event.json",
+        ];
 
-        let expected = HashMap::from([(
-            "function_trigger.event_source".to_string(),
-            "states".to_string(),
-        )]);
+        for file in &test_files {
+            let json = read_json_file(file);
+            let payload = serde_json::from_str(&json)
+                .unwrap_or_else(|_| panic!("Failed to deserialize into Value from {file}"));
 
-        assert_eq!(tags, expected);
+            let event = StepFunctionEvent::new(payload)
+                .unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
+
+            let tags = event.get_tags();
+
+            let expected = HashMap::from([(
+                "function_trigger.event_source".to_string(),
+                "states".to_string(),
+            )]);
+
+            assert_eq!(tags, expected, "get_tags() failed for {file}");
+        }
     }
 
     #[test]
@@ -313,30 +454,134 @@ mod tests {
     }
 
     #[test]
-    fn get_span_context() {
-        let json = read_json_file("step_function_event.json");
-        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
+    #[allow(clippy::too_many_lines)]
+    fn test_get_span_context() {
+        let test_cases = vec![
+            (
+                "step_function_event.json",
+                SpanContext {
+                    trace_id: 5_744_042_798_732_701_615,
+                    span_id: 2_902_498_116_043_018_663,
+                    sampling: Some(Sampling {
+                        priority: Some(1),
+                        mechanism: None,
+                    }),
+                    origin: Some("states".to_string()),
+                    tags: HashMap::from([(
+                        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                        "1914fe7789eb32be".to_string(),
+                    )]),
+                    links: vec![],
+                },
+            ),
+            (
+                "step_function_legacy_event.json",
+                SpanContext {
+                    trace_id: 5_744_042_798_732_701_615,
+                    span_id: 2_902_498_116_043_018_663,
+                    sampling: Some(Sampling {
+                        priority: Some(1),
+                        mechanism: None,
+                    }),
+                    origin: Some("states".to_string()),
+                    tags: HashMap::from([(
+                        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                        "1914fe7789eb32be".to_string(),
+                    )]),
+                    links: vec![],
+                },
+            ),
+            (
+                "step_function_nested_event.json",
+                SpanContext {
+                    trace_id: 1_322_229_001_489_018_110,
+                    span_id: 8_947_638_978_974_359_093,
+                    sampling: Some(Sampling {
+                        priority: Some(1),
+                        mechanism: None,
+                    }),
+                    origin: Some("states".to_string()),
+                    tags: HashMap::from([(
+                        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                        "579d19b3ee216ee9".to_string(),
+                    )]),
+                    links: vec![],
+                },
+            ),
+            (
+                "step_function_nested_legacy_event.json",
+                SpanContext {
+                    trace_id: 1_322_229_001_489_018_110,
+                    span_id: 8_947_638_978_974_359_093,
+                    sampling: Some(Sampling {
+                        priority: Some(1),
+                        mechanism: None,
+                    }),
+                    origin: Some("states".to_string()),
+                    tags: HashMap::from([(
+                        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                        "579d19b3ee216ee9".to_string(),
+                    )]),
+                    links: vec![],
+                },
+            ),
+            (
+                "step_function_lambda_root_event.json",
+                SpanContext {
+                    trace_id: 5_821_803_790_426_892_636,
+                    span_id: 8_947_638_978_974_359_093,
+                    sampling: Some(Sampling {
+                        priority: Some(1),
+                        mechanism: None,
+                    }),
+                    origin: Some("states".to_string()),
+                    tags: HashMap::from([
+                        (
+                            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                            "672a7cb100000000".to_string(),
+                        ),
+                        (DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string()),
+                    ]),
+                    links: vec![],
+                },
+            ),
+            (
+                "step_function_lambda_root_legacy_event.json",
+                SpanContext {
+                    trace_id: 5_821_803_790_426_892_636,
+                    span_id: 8_947_638_978_974_359_093,
+                    sampling: Some(Sampling {
+                        priority: Some(1),
+                        mechanism: None,
+                    }),
+                    origin: Some("states".to_string()),
+                    tags: HashMap::from([
+                        (
+                            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
+                            "672a7cb100000000".to_string(),
+                        ),
+                        (DATADOG_SAMPLING_DECISION_KEY.to_string(), "-0".to_string()),
+                    ]),
+                    links: vec![],
+                },
+            ),
+        ];
 
-        let span_context = event.get_span_context();
+        for (file, expected) in test_cases {
+            let json = read_json_file(file);
+            let payload = serde_json::from_str(&json)
+                .unwrap_or_else(|_| panic!("Failed to deserialize into Value from {file}"));
 
-        let expected = SpanContext {
-            trace_id: 5_744_042_798_732_701_615,
-            span_id: 2_902_498_116_043_018_663,
-            sampling: Some(Sampling {
-                priority: Some(1),
-                mechanism: None,
-            }),
-            origin: Some("states".to_string()),
-            tags: HashMap::from([(
-                DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY.to_string(),
-                "1914fe7789eb32be".to_string(),
-            )]),
-            links: vec![],
-        };
+            let event = StepFunctionEvent::new(payload)
+                .unwrap_or_else(|| panic!("Failed to deserialize StepFunctionEvent from {file}"));
 
-        assert_eq!(span_context, expected);
+            let span_context = event.get_span_context();
+
+            assert_eq!(
+                span_context, expected,
+                "get_span_context() failed for {file}"
+            );
+        }
     }
 
     #[test]
@@ -344,7 +589,9 @@ mod tests {
         let parent_id = StepFunctionEvent::generate_parent_id(
             String::from("arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"),
             String::from("step-one"),
-            String::from("2022-12-08T21:08:19.224Z")
+            String::from("2022-12-08T21:08:19.224Z"),
+            0,
+            0,
         );
 
         assert_eq!(parent_id, 4_340_734_536_022_949_921);
@@ -352,7 +599,9 @@ mod tests {
         let parent_id = StepFunctionEvent::generate_parent_id(
             String::from("arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"),
             String::from("step-one"),
-            String::from("2022-12-08T21:08:19.224Y")
+            String::from("2022-12-08T21:08:19.224Y"),
+            0,
+            0,
         );
 
         assert_eq!(parent_id, 981_693_280_319_792_699);

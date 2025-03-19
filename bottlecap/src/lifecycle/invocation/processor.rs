@@ -25,13 +25,13 @@ use crate::{
         CPUData, NetworkData,
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
-    telemetry::events::{ReportMetrics, Status},
+    telemetry::events::{ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{
             text_map_propagator::{
-                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SPAN_ID_KEY,
-                DATADOG_TRACE_ID_KEY,
+                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
+                DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY,
             },
             DatadogCompositePropagator, Propagator,
         },
@@ -47,6 +47,7 @@ pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-err
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
+const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
     // Buffer containing context of the previous 5 invocations
@@ -105,6 +106,12 @@ impl Processor {
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
+        let timestamp = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("can't poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         self.reset_state();
         self.set_init_tags();
 
@@ -137,7 +144,7 @@ impl Processor {
         drop(context_buffer);
 
         // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric();
+        self.enhanced_metrics.increment_invocation_metric(timestamp);
     }
 
     /// Resets the state of the processor to default values.
@@ -228,8 +235,9 @@ impl Processor {
     /// Given the duration of the platform init report, set the init duration metric.
     ///
     #[allow(clippy::cast_possible_truncation)]
-    pub fn on_platform_init_report(&mut self, duration_ms: f64) {
-        self.enhanced_metrics.set_init_duration_metric(duration_ms);
+    pub fn on_platform_init_report(&mut self, duration_ms: f64, timestamp: i64) {
+        self.enhanced_metrics
+            .set_init_duration_metric(duration_ms, timestamp);
 
         if let Some(cold_start_span) = &mut self.cold_start_span {
             // `round` is intentionally meant to be a whole integer
@@ -259,27 +267,28 @@ impl Processor {
     pub async fn on_platform_runtime_done(
         &mut self,
         request_id: &String,
-        duration_ms: f64,
+        metrics: RuntimeDoneMetrics,
         status: Status,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
+        timestamp: i64,
     ) {
         let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
         context_buffer.add_runtime_duration(request_id, duration_ms);
 
         // Set the runtime duration metric
         self.enhanced_metrics
-            .set_runtime_duration_metric(duration_ms);
+            .set_runtime_done_metrics(&metrics, timestamp);
 
         if status != Status::Success {
             // Increment the error metric
-            self.enhanced_metrics.increment_errors_metric();
+            self.enhanced_metrics.increment_errors_metric(timestamp);
 
             // Increment the error type metric
             if status == Status::Timeout {
-                self.enhanced_metrics.increment_timeout_metric();
+                self.enhanced_metrics.increment_timeout_metric(timestamp);
 
                 // Invocation Span will never have the `trace_id` or `span_id` set
                 self.span.trace_id = generate_span_id();
@@ -388,9 +397,15 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(&mut self, request_id: &String, metrics: ReportMetrics) {
+    pub fn on_platform_report(
+        &mut self,
+        request_id: &String,
+        metrics: ReportMetrics,
+        timestamp: i64,
+    ) {
         // Set the report log metrics
-        self.enhanced_metrics.set_report_log_metrics(&metrics);
+        self.enhanced_metrics
+            .set_report_log_metrics(&metrics, timestamp);
 
         let context_buffer = self.context_buffer.lock().expect("lock poisoned");
         if let Some(context) = context_buffer.get(request_id) {
@@ -399,7 +414,7 @@ impl Processor {
 
                 // Set the post runtime duration metric
                 self.enhanced_metrics
-                    .set_post_runtime_duration_metric(post_runtime_duration_ms);
+                    .set_post_runtime_duration_metric(post_runtime_duration_ms, timestamp);
             }
 
             // Set Network and CPU time metrics
@@ -418,10 +433,7 @@ impl Processor {
     pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
 
-        let payload_value = match serde_json::from_slice::<Value>(&payload) {
-            Ok(value) => value,
-            Err(_) => json!({}),
-        };
+        let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
@@ -486,10 +498,7 @@ impl Processor {
     /// Given trace context information, set it to the current span.
     ///
     pub fn on_invocation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
-        let payload_value = match serde_json::from_slice::<Value>(&payload) {
-            Ok(value) => value,
-            Err(_) => json!({}),
-        };
+        let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
@@ -502,24 +511,32 @@ impl Processor {
             );
         }
 
-        if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_str) {
-            self.span
-                .meta
-                .insert("http.status_code".to_string(), status_code.to_string());
+        if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_i64) {
+            let status_code_as_string = status_code.to_string();
+            self.span.meta.insert(
+                "http.status_code".to_string(),
+                status_code_as_string.clone(),
+            );
 
-            if status_code.len() == 3 && status_code.starts_with('5') {
+            if status_code_as_string.len() == 3 && status_code_as_string.starts_with('5') {
                 self.span.error = 1;
             }
 
             // If we have an inferred span, set the status code to it
-            self.inferrer.set_status_code(status_code.to_string());
+            self.inferrer.set_status_code(status_code_as_string);
         }
 
         self.update_span_context_from_headers(&headers);
         self.set_span_error_from_headers(headers);
 
         if self.span.error == 1 {
-            self.enhanced_metrics.increment_errors_metric();
+            let now = std::time::UNIX_EPOCH
+                .elapsed()
+                .expect("can't poll clock")
+                .as_secs()
+                .try_into()
+                .unwrap_or_default();
+            self.enhanced_metrics.increment_errors_metric(now);
         }
     }
 
@@ -550,7 +567,13 @@ impl Processor {
                 parent_id = header.parse::<u64>().unwrap_or(0);
             }
 
-            // TODO: sampling priority extraction
+            if let Some(priority_str) = headers.get(DATADOG_SAMPLING_PRIORITY_KEY) {
+                if let Ok(priority) = priority_str.parse::<f64>() {
+                    self.span
+                        .metrics
+                        .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
+                }
+            }
 
             // Extract tags from headers
             // Used for 128 bit trace ids
@@ -626,8 +649,8 @@ impl Processor {
         }
     }
 
-    pub fn on_out_of_memory_error(&mut self) {
-        self.enhanced_metrics.increment_oom_metric();
+    pub fn on_out_of_memory_error(&mut self, timestamp: i64) {
+        self.enhanced_metrics.increment_oom_metric(timestamp);
     }
 }
 
@@ -735,5 +758,85 @@ mod tests {
         assert_eq!(p.span.meta["error.msg"], error_message);
         assert_eq!(p.span.meta["error.type"], error_type);
         assert_eq!(p.span.meta["error.stack"], error_stack);
+    }
+
+    #[test]
+    fn test_update_span_context_with_sampling_priority() {
+        let mut p = setup();
+        let mut headers = HashMap::new();
+
+        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "999".to_string());
+        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "1000".to_string());
+        headers.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), "-1".to_string());
+
+        p.update_span_context_from_headers(&headers);
+
+        assert_eq!(p.span.trace_id, 999);
+        assert_eq!(p.span.parent_id, 1000);
+        let priority = p.span.metrics.get(TAG_SAMPLING_PRIORITY).copied();
+        assert_eq!(priority, Some(-1.0));
+    }
+
+    #[test]
+    fn test_update_span_context_with_invalid_priority() {
+        let mut p = setup();
+        let mut headers = HashMap::new();
+
+        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "888".to_string());
+        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "999".to_string());
+        headers.insert(
+            DATADOG_SAMPLING_PRIORITY_KEY.to_string(),
+            "not-a-number".to_string(),
+        );
+
+        p.update_span_context_from_headers(&headers);
+
+        assert!(!p.span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
+        assert_eq!(p.span.trace_id, 888);
+        assert_eq!(p.span.parent_id, 999);
+    }
+
+    #[test]
+    fn test_update_span_context_no_sampling_priority() {
+        let mut p = setup();
+        let mut headers = HashMap::new();
+
+        headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "111".to_string());
+        headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "222".to_string());
+
+        p.update_span_context_from_headers(&headers);
+
+        assert!(!p.span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
+        assert_eq!(p.span.trace_id, 111);
+        assert_eq!(p.span.parent_id, 222);
+    }
+
+    #[test]
+    fn parsing_status_code() {
+        let mut p = setup();
+
+        let response = r#"
+       {
+           "statusCode": 200,
+           "headers": {
+               "Content-Type": "application/json"
+           },
+           "isBase64Encoded": false,
+           "multiValueHeaders": {
+               "X-Custom-Header": ["My value", "My other value"]
+           },
+           "body": "{\n  \"TotalCodeSize\": 104330022,\n  \"FunctionCount\": 26\n}"
+       }
+       "#;
+
+        p.on_invocation_end(HashMap::new(), response.as_bytes().to_vec());
+
+        assert_eq!(
+            p.span
+                .meta
+                .get("http.status_code")
+                .expect("Status code not parsed!"),
+            "200"
+        );
     }
 }

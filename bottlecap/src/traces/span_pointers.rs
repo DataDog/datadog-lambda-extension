@@ -82,6 +82,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_attach_span_pointers_to_span() {
         let test_cases = vec![
             SpanPointerTestCase {

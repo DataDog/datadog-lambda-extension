@@ -11,7 +11,7 @@
 
 use bottlecap::{
     base_url,
-    config::{self, flush_strategy::FlushStrategy, get_aws_partition_by_region, AwsConfig, Config},
+    config::{self, get_aws_partition_by_region, AwsConfig, Config},
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -20,16 +20,16 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{
-        agent::LogsAgent,
-        flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    },
+    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     secrets::decrypt,
-    tags::{lambda, provider::Provider as TagProvider},
+    tags::{
+        lambda::{self, tags::EXTENSION_VERSION},
+        provider::Provider as TagProvider,
+    },
     telemetry::{
         self,
         client::TelemetryApiClient,
-        events::{Status, TelemetryEvent, TelemetryRecord},
+        events::{TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
     },
     traces::{
@@ -48,7 +48,9 @@ use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
-    datadog::{MetricsIntakeUrlPrefix, Site as MetricsSite},
+    datadog::{
+        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride, Site as MetricsSite,
+    },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
@@ -63,8 +65,7 @@ use std::{
     path::Path,
     process::Command,
     sync::{Arc, Mutex},
-    time::Duration,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use telemetry::listener::TelemetryListenerConfig;
 use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
@@ -103,22 +104,42 @@ enum NextEventResponse {
     },
 }
 
-async fn next_event(client: &reqwest::Client, ext_id: &str) -> Result<NextEventResponse> {
+async fn next_event(client: &Client, ext_id: &str) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
-    client
+
+    let response = client
         .get(&url)
         .header(EXTENSION_ID_HEADER, ext_id)
         .send()
         .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?
-        .json()
-        .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+        .map_err(|e| {
+            error!("Next request failed: {}", e);
+            Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+        })?;
+
+    let status = response.status();
+    let text = response.text().await.map_err(|e| {
+        error!("Next response: Failed to read response body: {}", e);
+        Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+    })?;
+
+    if !status.is_success() {
+        error!("Next response HTTP Error {} - Response: {}", status, text);
+        return Err(Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("HTTP Error {status}"),
+        ));
+    }
+
+    serde_json::from_str(&text).map_err(|e| {
+        error!("Next JSON parse error on response: {}", text);
+        Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+    })
 }
 
-async fn register(client: &reqwest::Client) -> Result<RegisterResponse> {
+async fn register(client: &Client) -> Result<RegisterResponse> {
     let mut map = HashMap::new();
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
@@ -164,10 +185,13 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (mut aws_config, config) = load_configs();
+    let start_time = Instant::now();
+    let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
-    let client = reqwest::Client::builder().no_proxy().build().map_err(|e| {
+    let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
+    debug!("Starting Datadog Extension {version_without_next}");
+    let client = Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Failed to create client: {e:?}"),
@@ -179,7 +203,16 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
-        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
+        match extension_loop_active(
+            &aws_config,
+            &config,
+            &client,
+            &r,
+            resolved_api_key,
+            start_time,
+        )
+        .await
+        {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
                 Ok(())
@@ -197,7 +230,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn load_configs() -> (AwsConfig, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     // First load the configuration
     let aws_config = AwsConfig {
         region: env::var("AWS_DEFAULT_REGION").unwrap_or("us-east-1".to_string()),
@@ -209,10 +242,10 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         aws_container_authorization_token: env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN")
             .unwrap_or_default(),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
-        sandbox_init_time: Instant::now(),
+        sandbox_init_time: start_time,
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory)) {
+    let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
             let err = Command::new("/opt/datadog-agent-go").exec();
@@ -225,7 +258,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
     let env_filter = format!(
-        "h2=off,hyper=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
         config.log_level
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
@@ -267,6 +300,7 @@ async fn extension_loop_active(
     client: &Client,
     r: &RegisterResponse,
     resolved_api_key: String,
+    start_time: Instant,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
@@ -292,17 +326,8 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
-    let flusher_config = MetricsFlusherConfig {
-        api_key: resolved_api_key.clone(),
-        aggregator: Arc::clone(&metrics_aggr),
-        metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
-            .expect("can't parse metrics intake URL from site"),
-        https_proxy: config.https_proxy.clone(),
-        timeout: Duration::from_secs(config.flush_timeout),
-    };
-    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
-
+    let mut metrics_flusher =
+        start_metrics_flusher(resolved_api_key.clone(), &metrics_aggr, config);
     // Lifecycle Invocation Processor
     let context_buffer = Arc::new(Mutex::new(ContextBuffer::default()));
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
@@ -337,169 +362,261 @@ async fn extension_loop_active(
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
-    let mut shutdown = false;
 
-    let mut flush_interval = flush_control.get_flush_interval();
-    flush_interval.tick().await; // discard first tick, which is instantaneous
+    let mut race_flush_interval = flush_control.get_flush_interval();
+    race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
+    debug!(
+        "Datadog Next-Gen Extension ready in {:}ms",
+        start_time.elapsed().as_millis().to_string()
+    );
+    // first invoke we must call next
+    let next_lambda_response = next_event(client, &r.extension_id).await;
+
+    handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
-        let evt = next_event(client, &r.extension_id).await;
-        match evt {
-            Ok(NextEventResponse::Invoke {
-                request_id,
-                deadline_ms,
-                invoked_function_arn,
-            }) => {
-                debug!(
-                    "Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                    request_id, deadline_ms, invoked_function_arn
-                );
-                let mut p = invocation_processor.lock().await;
-                p.on_invoke_event(request_id);
-                drop(p);
-            }
-            Ok(NextEventResponse::Shutdown {
-                shutdown_reason,
-                deadline_ms,
-            }) => {
-                println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
-                shutdown = true;
-            }
-            Err(err) => {
-                eprintln!("Error: {err:?}");
-                println!("Exiting");
-                return Err(err);
-            }
-        }
-        // Block until we get something from the telemetry API
-        // Check if flush logic says we should block and flush or not
-        loop {
-            tokio::select! {
-            biased;
-                Some(event) = event_bus.rx.recv() => {
-                    match event {
-                        Event::Metric(event) => {
-                            debug!("Metric event: {:?}", event);
-                        },
-                        Event::OutOfMemory => {
-                            let mut p = invocation_processor.lock().await;
-                            p.on_out_of_memory_error();
-                            drop(p);
-                        },
-                        Event::Telemetry(event) =>
-                            match event.record {
-                                TelemetryRecord::PlatformInitStart { .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_init_start(event.time);
-                                    drop(p);
-                                }
-                                TelemetryRecord::PlatformInitReport {
-                                    initialization_type,
-                                    phase,
-                                    metrics,
-                                } => {
-                                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_init_report(metrics.duration_ms);
-                                    drop(p);
-                                }
-                                TelemetryRecord::PlatformStart { request_id, .. } => {
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_start(request_id, event.time);
-                                    drop(p);
-                                }
-                                TelemetryRecord::PlatformRuntimeDone {
-                                    request_id,
-                                    status,
-                                    metrics,
-                                    error_type,
-                                    ..
-                                } => {
-                                    debug!(
-                                        "Runtime done for request_id: {:?} with status: {:?} and error: {:?}",
-                                        request_id, status, error_type.unwrap_or("None".to_string())
-                                    );
+        let shutdown;
 
-                                    let mut p = invocation_processor.lock().await;
-                                    if let Some(metrics) = metrics {
-                                        p.on_platform_runtime_done(
-                                            &request_id,
-                                            metrics.duration_ms,
-                                            status,
-                                            config.clone(),
-                                            tags_provider.clone(),
-                                            trace_processor.clone(),
-                                            trace_agent_channel.clone()
-                                        ).await;
-                                    }
-                                    drop(p);
-
-                                    // TODO(astuyve) it'll be easy to
-                                    // pass the invocation deadline to
-                                    // flush tasks here, so they can
-                                    // retry if we have more time
-                                    //
-                                    // We always want to flush on a timeout
-                                    if flush_control.should_flush_end() || status == Status::Timeout {
-                                        tokio::join!(
-                                            logs_flusher.flush(),
-                                            metrics_flusher.flush(),
-                                            trace_flusher.flush(),
-                                            stats_flusher.flush()
-                                        );
-                                    }
-
-                                    break;
-                                }
-                                TelemetryRecord::PlatformReport {
-                                    request_id,
-                                    status,
-                                    metrics,
-                                    error_type,
-                                    ..
-                                } => {
-                                    debug!(
-                                        "Platform report for request_id: {:?} with status: {:?} and error: {:?}",
-                                        request_id, status, error_type.unwrap_or("None".to_string())
-                                    );
-                                    let mut p = invocation_processor.lock().await;
-                                    p.on_platform_report(&request_id, metrics);
-                                    drop(p);
-
-                                    if shutdown {
-                                        break;
-                                    }
-                                }
-                                _ => {
-                                    debug!("Unforwarded Telemetry event: {:?}", event);
-                                }
+        if flush_control.should_flush_end() {
+            // break loop after runtime done
+            // flush everything
+            // call next
+            // optionally flush after tick for long running invos
+            'flush_end: loop {
+                tokio::select! {
+                biased;
+                    Some(event) = event_bus.rx.recv() => {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                break 'flush_end;
                             }
+                        }
+                    }
+                    _ = race_flush_interval.tick() => {
+                        flush_all(
+                            &logs_flusher,
+                            &mut metrics_flusher,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &mut race_flush_interval,
+                        ).await;
                     }
                 }
-                _ = flush_interval.tick() => {
-                    tokio::join!(
-                        logs_flusher.flush(),
-                        metrics_flusher.flush(),
-                        trace_flusher.flush(),
-                        stats_flusher.flush()
-                    );
-                    if matches!(flush_control.flush_strategy, FlushStrategy::Periodically(_)) {
-                        break;
+            }
+            // flush
+            flush_all(
+                &logs_flusher,
+                &mut metrics_flusher,
+                &*trace_flusher,
+                &*stats_flusher,
+                &mut race_flush_interval,
+            )
+            .await;
+            let next_response = next_event(client, &r.extension_id).await;
+            shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+        } else {
+            //Periodic flush scenario, flush at top of invocation
+            if flush_control.should_periodic_flush() {
+                // Should flush at the top of the invocation, which is now
+                flush_all(
+                    &logs_flusher,
+                    &mut metrics_flusher,
+                    &*trace_flusher,
+                    &*stats_flusher,
+                    &mut race_flush_interval,
+                )
+                .await;
+            }
+            // NO FLUSH SCENARIO
+            // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
+            // If we get platform.runtimeDone or platform.runtimeReport
+            // That's fine, we still wait to break until we get the response from next
+            // and then we break to determine if we'll flush or not
+            let next_lambda_response = next_event(client, &r.extension_id);
+            tokio::pin!(next_lambda_response);
+            'next_invocation: loop {
+                tokio::select! {
+                biased;
+                    next_response = &mut next_lambda_response => {
+                        // Dear reader this is important, you may be tempted to remove this
+                        // after all, why reset the flush interval if we're not flushing?
+                        // It's because the race_flush_interval is only for the RACE FLUSH
+                        // For long-running txns. The call to `flush_control.should_flush_end()`
+                        // has its own interval which is not reset here.
+                        race_flush_interval.reset();
+                        // Thank you for not removing race_flush_interval.reset();
+
+                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                        // Need to break here to re-call next
+                        break 'next_invocation;
+                    }
+                    Some(event) = event_bus.rx.recv() => {
+                        handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                    }
+                    _ = race_flush_interval.tick() => {
+                        flush_all(
+                            &logs_flusher,
+                            &mut metrics_flusher,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &mut race_flush_interval,
+                        ).await;
                     }
                 }
             }
         }
 
         if shutdown {
+            'shutdown: loop {
+                tokio::select! {
+                    Some(event) = event_bus.rx.recv() => {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
+                                // Wait for the report event before shutting down
+                                break 'shutdown;
+                            }
+                        }
+                    }
+                }
+            }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            tokio::join!(
-                logs_flusher.flush(),
-                metrics_flusher.flush(),
-                trace_flusher.flush(),
-                stats_flusher.flush()
-            );
+            flush_all(
+                &logs_flusher,
+                &mut metrics_flusher,
+                &*trace_flusher,
+                &*stats_flusher,
+                &mut race_flush_interval,
+            )
+            .await;
             return Ok(());
+        }
+    }
+}
+
+async fn flush_all(
+    logs_flusher: &LogsFlusher,
+    metrics_flusher: &mut MetricsFlusher,
+    trace_flusher: &dyn TraceFlusher,
+    stats_flusher: &dyn StatsFlusher,
+    race_flush_interval: &mut tokio::time::Interval,
+) {
+    tokio::join!(
+        logs_flusher.flush(),
+        metrics_flusher.flush(),
+        trace_flusher.flush(),
+        stats_flusher.flush()
+    );
+    race_flush_interval.reset();
+}
+
+async fn handle_event_bus_event(
+    event: Event,
+    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    config: Arc<Config>,
+    tags_provider: Arc<TagProvider>,
+    trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
+    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
+) -> Option<TelemetryEvent> {
+    match event {
+        Event::Metric(event) => {
+            debug!("Metric event: {:?}", event);
+        }
+        Event::OutOfMemory(event_timestamp) => {
+            let mut p = invocation_processor.lock().await;
+            p.on_out_of_memory_error(event_timestamp);
+            drop(p);
+        }
+        Event::Telemetry(event) => match event.record {
+            TelemetryRecord::PlatformInitStart { .. } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_init_start(event.time);
+                drop(p);
+            }
+            TelemetryRecord::PlatformInitReport {
+                initialization_type,
+                phase,
+                metrics,
+            } => {
+                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
+                drop(p);
+            }
+            TelemetryRecord::PlatformStart { request_id, .. } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_start(request_id, event.time);
+                drop(p);
+            }
+            TelemetryRecord::PlatformRuntimeDone {
+                ref request_id,
+                metrics: Some(metrics),
+                status,
+                ..
+            } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_runtime_done(
+                    request_id,
+                    metrics,
+                    status,
+                    config.clone(),
+                    tags_provider.clone(),
+                    trace_processor.clone(),
+                    trace_agent_channel.clone(),
+                    event.time.timestamp(),
+                )
+                .await;
+                drop(p);
+                return Some(event);
+            }
+            TelemetryRecord::PlatformReport {
+                ref request_id,
+                metrics,
+                ..
+            } => {
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_report(request_id, metrics, event.time.timestamp());
+                drop(p);
+                return Some(event);
+            }
+            _ => {
+                debug!("Unforwarded Telemetry event: {:?}", event);
+            }
+        },
+    }
+    None
+}
+
+async fn handle_next_invocation(
+    next_response: Result<NextEventResponse>,
+    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+) -> bool {
+    match next_response {
+        Ok(NextEventResponse::Invoke {
+            request_id,
+            deadline_ms,
+            invoked_function_arn,
+        }) => {
+            debug!(
+                "Invoke event {}; deadline: {}, invoked_function_arn: {}",
+                request_id, deadline_ms, invoked_function_arn
+            );
+            let mut p = invocation_processor.lock().await;
+            p.on_invoke_event(request_id);
+            drop(p);
+            false
+        }
+        Ok(NextEventResponse::Shutdown {
+            shutdown_reason,
+            deadline_ms,
+        }) => {
+            println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
+            true
+        }
+        Err(err) => {
+            eprintln!("Error: {err:?}");
+            println!("Exiting");
+            true
         }
     }
 }
@@ -533,13 +650,43 @@ fn start_logs_agent(
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
         Arc::clone(&logs_agent.aggregator),
-        build_fqdn_logs(config.site.clone()),
         config.clone(),
     );
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
     (logs_agent_channel, logs_flusher)
+}
+
+fn start_metrics_flusher(
+    resolved_api_key: String,
+    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
+    config: &Arc<Config>,
+) -> MetricsFlusher {
+    let metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else if !config.url.is_empty() {
+        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else {
+        // use site
+        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+    };
+
+    let flusher_config = MetricsFlusherConfig {
+        api_key: resolved_api_key,
+        aggregator: Arc::clone(metrics_aggr),
+        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
+        https_proxy: config.https_proxy.clone(),
+        timeout: Duration::from_secs(config.flush_timeout),
+    };
+    MetricsFlusher::new(flusher_config)
 }
 
 fn start_trace_agent(
@@ -570,9 +717,14 @@ fn start_trace_agent(
         config: Arc::clone(config),
     });
 
-    let obfuscation_config = obfuscation_config::ObfuscationConfig::new()
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
-        .expect("Failed to create obfuscation config for Trace Agent");
+    let obfuscation_config = obfuscation_config::ObfuscationConfig {
+        tag_replace_rules: config.apm_config_replace_tags.clone(),
+        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
+        obfuscate_memcached: false,
+        obfuscation_redis_enabled: false,
+        obfuscation_redis_remove_all_args: false,
+    };
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),

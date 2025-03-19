@@ -12,56 +12,41 @@
 
 set -e
 
-prepare_folders() {
-  # Move into the root directory, so this script can be called from any directory
-  SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-  ROOT_DIR=$SCRIPTS_DIR/..
-  cd $ROOT_DIR
+if [ -z "$ARCHITECTURE" ]; then
+    printf "[ERROR]: ARCHITECTURE not specified\n"
+    exit 1
+fi
 
-  EXTENSION_DIR=".layers"
-  TARGET_DIR=$(pwd)/$EXTENSION_DIR
+FILE_SUFFIX=$ARCHITECTURE
 
-  # Make sure the folder does not exist
-  rm -rf $EXTENSION_DIR 2>/dev/null
+PLATFORM="aarch64"
+if [ "$ARCHITECTURE" == "amd64" ]; then
+    PLATFORM="x86_64"
+fi
 
-  mkdir -p $EXTENSION_DIR
-  cd $ROOT_DIR
-}
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+ROOT_DIR=$SCRIPTS_DIR/..
+cd $ROOT_DIR
 
+LAYERS_DIR=".layers"
+BUILD_DIR=$ROOT_DIR/$LAYERS_DIR
+EXTENSION_PATH=$BUILD_DIR/datadog_extension-$FILE_SUFFIX
 
-_docker_build_bottlecap_zip() {
-    local arch=$1
-    if [ "$arch" == "amd64" ]; then
-        PLATFORM="x86_64"
-    else
-        PLATFORM="aarch64"
-    fi
+mkdir -p $LAYERS_DIR
+rm -rf ${EXTENSION_PATH} 2>/dev/null
 
-    docker buildx build --platform linux/${arch} \
-        -t datadog/build-bottlecap-${arch} \
-        -f ./scripts/Dockerfile.bottlecap.dev \
-        --build-arg PLATFORM=$PLATFORM \
-        . -o $TARGET_DIR/datadog_bottlecap-${arch}
+cd $ROOT_DIR
 
-    cp $TARGET_DIR/datadog_bottlecap-${arch}/datadog_extension.zip $TARGET_DIR/datadog_bottlecap-${arch}.zip
+ALPINE=0
+ARCHITECTURE=$ARCHITECTURE ALPINE=$ALPINE FILE_SUFFIX=$FILE_SUFFIX .gitlab/scripts/compile_bottlecap.sh
 
-    unzip $TARGET_DIR/datadog_bottlecap-${arch}/datadog_extension.zip -d $TARGET_DIR/datadog_bottlecap-${arch}
-    rm -rf $TARGET_DIR/datadog_bottlecap-${arch}/datadog_extension.zip
-}
+docker buildx build --platform linux/${ARCHITECTURE} \
+    -t datadog/build-bottlecap-${FILE_SUFFIX} \
+    -f ./images/Dockerfile.bottlecap.dev \
+    --build-arg FILE_SUFFIX=$FILE_SUFFIX \
+    . -o $EXTENSION_PATH
 
-build_for_arch() {
-  if [ "$ARCHITECTURE" == "amd64" ]; then
-      echo "Building for amd64 only"
-      _docker_build_bottlecap_zip amd64
-  elif [ "$ARCHITECTURE" == "arm64" ]; then
-      echo "Building for arm64 only"
-      _docker_build_bottlecap_zip arm64
-  else
-      echo "Building for both amd64 and arm64"
-      _docker_build_bottlecap_zip amd64
-      _docker_build_bottlecap_zip arm64
-  fi
-}
+cp $EXTENSION_PATH/datadog_extension.zip $EXTENSION_PATH.zip
 
-prepare_folders
-build_for_arch
+unzip $EXTENSION_PATH/datadog_extension.zip -d $EXTENSION_PATH
+rm -rf $EXTENSION_PATH/datadog_extension.zip

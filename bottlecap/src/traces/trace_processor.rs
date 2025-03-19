@@ -2,11 +2,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::lifecycle::invocation::context::ContextBuffer;
+use crate::config;
 use crate::tags::provider;
 use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
+use crate::traces::{
+    AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
+    DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
+    LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
+};
+use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::config_utils::trace_intake_url;
+use datadog_trace_protobuf::pb::Span;
+use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
+use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
+use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{
     TraceChunkProcessor, TraceCollection::V07, TracerPayloadCollection,
@@ -14,16 +24,7 @@ use datadog_trace_utils::tracer_payload::{
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-
-use crate::config;
-use crate::traces::{
-    AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
-    DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
-    LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
-};
-use datadog_trace_obfuscation::obfuscate::obfuscate_span;
-use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::trace_utils::{self, SendData};
+use tracing::error;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -159,26 +160,38 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 context_buffer,
             },
             true,
-        );
-        match payload {
-            TracerPayloadCollection::V04(_) => {}
-            TracerPayloadCollection::V07(ref mut collection) => {
-                // add function tags to all payloads in this TracerPayloadCollection
-                let tags = tags_provider.get_function_tags_map();
-                for tracer_payload in collection.iter_mut() {
-                    tracer_payload.tags.extend(tags.clone());
-                }
+            false,
+        )
+        .unwrap_or_else(|e| {
+            error!("Error processing traces: {:?}", e);
+            TracerPayloadCollection::V07(vec![])
+        });
+        if let TracerPayloadCollection::V07(ref mut collection) = payload {
+            // add function tags to all payloads in this TracerPayloadCollection
+            let tags = tags_provider.get_function_tags_map();
+            for tracer_payload in collection.iter_mut() {
+                tracer_payload.tags.extend(tags.clone());
             }
         }
-        let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
+            url: hyper::Uri::from_str(&config.apm_config_apm_dd_url)
+                .expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
-            timeout_ms: Endpoint::DEFAULT_TIMEOUT,
+            timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
 
-        SendData::new(body_size, payload, header_tags, &endpoint)
+        let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
+        let mut send_data = send_data_builder
+            .with_compression(Compression::Zstd(6))
+            .build();
+        send_data.set_retry_strategy(RetryStrategy::new(
+            1,
+            100,
+            RetryBackoffType::Exponential,
+            None,
+        ));
+        send_data
     }
 }
 
@@ -210,6 +223,7 @@ mod tests {
 
     fn create_test_config() -> Arc<Config> {
         Arc::new(Config {
+            apm_config_apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             service: Some("test-service".to_string()),
             tags: Some("test:tag,env:test-env".to_string()),
             ..Config::default()

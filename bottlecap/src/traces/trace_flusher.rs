@@ -50,6 +50,8 @@ impl TraceFlusher for ServerlessTraceFlusher {
         if traces.is_empty() {
             return;
         }
+
+        let start = std::time::Instant::now();
         debug!("Flushing {} traces", traces.len());
 
         for traces in trace_utils::coalesce_send_data(traces) {
@@ -61,9 +63,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 Ok(_) => debug!("Successfully flushed traces"),
                 Err(e) => {
                     error!("Error sending trace: {e:?}");
-                    // TODO: Retries
                 }
             }
         }
+        debug!("Flushing traces took {}ms", start.elapsed().as_millis());
     }
 }

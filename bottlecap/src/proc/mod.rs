@@ -8,7 +8,8 @@ use std::{
 };
 
 use constants::{
-    LAMDBA_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
+    LAMBDA_NETWORK_INTERFACE, LAMBDA_RUNTIME_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH,
+    PROC_STAT_PATH, PROC_UPTIME_PATH,
 };
 use regex::Regex;
 use tracing::{debug, trace};
@@ -60,7 +61,8 @@ fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
         let mut values = line.split_whitespace();
 
         if values.next().map_or(false, |interface_name| {
-            interface_name.starts_with(LAMDBA_NETWORK_INTERFACE)
+            interface_name.starts_with(LAMBDA_NETWORK_INTERFACE)
+                || interface_name.starts_with(LAMBDA_RUNTIME_NETWORK_INTERFACE)
         }) {
             // Read the value for received bytes if present
             let rx_bytes: Option<f64> = values.next().and_then(|s| s.parse().ok());
@@ -363,19 +365,19 @@ mod tests {
         assert!((network_data.tx_bytes - 254.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/net/invalid_dev_malformed";
-        let network_data_result = get_network_data_from_path(path);
+        let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_err());
 
         let path = "./tests/proc/net/invalid_dev_non_numerical_value";
-        let network_data_result = get_network_data_from_path(path);
+        let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_err());
 
         let path = "./tests/proc/net/missing_interface_dev";
-        let network_data_result = get_network_data_from_path(path);
+        let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_err());
 
         let path = "./tests/proc/net/nonexistent_dev";
-        let network_data_result = get_network_data_from_path(path);
+        let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_err());
     }
 
@@ -409,27 +411,27 @@ mod tests {
         );
 
         let path = "./tests/proc/stat/invalid_stat_non_numerical_value_1";
-        let cpu_data_result = get_cpu_data_from_path(path);
+        let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_non_numerical_value_2";
-        let cpu_data_result = get_cpu_data_from_path(path);
+        let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_malformed_first_line";
-        let cpu_data_result = get_cpu_data_from_path(path);
+        let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_malformed_per_cpu_line";
-        let cpu_data_result = get_cpu_data_from_path(path);
+        let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/invalid_stat_missing_cpun_data";
-        let cpu_data_result = get_cpu_data_from_path(path);
+        let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_err());
 
         let path = "./tests/proc/stat/nonexistent_stat";
-        let cpu_data_result = get_cpu_data_from_path(path);
+        let cpu_data_result = get_cpu_data_from_path(path_from_root(path).as_str());
         assert!(cpu_data_result.is_err());
     }
 
@@ -442,15 +444,15 @@ mod tests {
         assert!((uptime_data - 3_213_103_123_000.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/uptime/invalid_data_uptime";
-        let uptime_data_result = get_uptime_from_path(path);
+        let uptime_data_result = get_uptime_from_path(path_from_root(path).as_str());
         assert!(uptime_data_result.is_err());
 
         let path = "./tests/proc/uptime/malformed_uptime";
-        let uptime_data_result = get_uptime_from_path(path);
+        let uptime_data_result = get_uptime_from_path(path_from_root(path).as_str());
         assert!(uptime_data_result.is_err());
 
         let path = "./tests/proc/uptime/nonexistent_uptime";
-        let uptime_data_result = get_uptime_from_path(path);
+        let uptime_data_result = get_uptime_from_path(path_from_root(path).as_str());
         assert!(uptime_data_result.is_err());
     }
 
@@ -458,16 +460,16 @@ mod tests {
     fn test_get_fd_max_data() {
         let path = "./tests/proc/process/valid";
         let pids = get_pid_list_from_path(path_from_root(path).as_str());
-        let fd_max = get_fd_max_data_from_path(path, &pids);
+        let fd_max = get_fd_max_data_from_path(path_from_root(path).as_str(), &pids);
         assert!((fd_max - 900.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_malformed";
-        let fd_max = get_fd_max_data_from_path(path, &pids);
+        let fd_max = get_fd_max_data_from_path(path_from_root(path).as_str(), &pids);
         // assert that fd_max is equal to AWS Lambda limit
         assert!((fd_max - constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_missing";
-        let fd_max = get_fd_max_data_from_path(path, &pids);
+        let fd_max = get_fd_max_data_from_path(path_from_root(path).as_str(), &pids);
         // assert that fd_max is equal to AWS Lambda limit
         assert!((fd_max - constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT).abs() < f64::EPSILON);
     }
@@ -476,7 +478,7 @@ mod tests {
     fn test_get_fd_use_data() {
         let path = "./tests/proc/process/valid";
         let pids = get_pid_list_from_path(path_from_root(path).as_str());
-        let fd_use = get_fd_use_data_from_path(path, &pids);
+        let fd_use = get_fd_use_data_from_path(path_from_root(path).as_str(), &pids);
         assert!((fd_use - 5.0).abs() < f64::EPSILON);
     }
 
@@ -484,11 +486,11 @@ mod tests {
     fn test_get_threads_max_data() {
         let path = "./tests/proc/process/valid";
         let pids = get_pid_list_from_path(path_from_root(path).as_str());
-        let threads_max = get_threads_max_data_from_path(path, &pids);
+        let threads_max = get_threads_max_data_from_path(path_from_root(path).as_str(), &pids);
         assert!((threads_max - 1024.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_malformed";
-        let threads_max = get_threads_max_data_from_path(path, &pids);
+        let threads_max = get_threads_max_data_from_path(path_from_root(path).as_str(), &pids);
         // assert that threads_max is equal to AWS Lambda limit
         assert!(
             (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs()
@@ -496,7 +498,7 @@ mod tests {
         );
 
         let path = "./tests/proc/process/invalid_missing";
-        let threads_max = get_threads_max_data_from_path(path, &pids);
+        let threads_max = get_threads_max_data_from_path(path_from_root(path).as_str(), &pids);
         // assert that threads_max is equal to AWS Lambda limit
         assert!(
             (threads_max - constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT).abs()
@@ -508,13 +510,15 @@ mod tests {
     fn test_get_threads_use_data() {
         let path = "./tests/proc/process/valid";
         let pids = get_pid_list_from_path(path_from_root(path).as_str());
-        let threads_use_result = get_threads_use_data_from_path(path, &pids);
+        let threads_use_result =
+            get_threads_use_data_from_path(path_from_root(path).as_str(), &pids);
         assert!(threads_use_result.is_ok());
         let threads_use = threads_use_result.unwrap();
         assert!((threads_use - 5.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/process/invalid_missing";
-        let threads_use_result = get_threads_use_data_from_path(path, &pids);
+        let threads_use_result =
+            get_threads_use_data_from_path(path_from_root(path).as_str(), &pids);
         assert!(threads_use_result.is_err());
     }
 }

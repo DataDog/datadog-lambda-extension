@@ -1,5 +1,5 @@
 use crate::config;
-use std::collections::hash_map;
+use std::collections::HashMap;
 use std::env::consts::ARCH;
 use std::fs;
 use std::sync::Arc;
@@ -36,10 +36,6 @@ const VERSION_KEY: &str = "version";
 // ServiceKey is the tag key for a function's service environment variable
 const SERVICE_KEY: &str = "service";
 
-// TODO(astuyve): origin tags when tracing is supported
-// const TRACE_ORIGIN_METADATA_KEY: &str = "_dd.origin";
-// const TRACE_ORIGIN_METADATA_VALUE: &str = "lambda";
-
 // ComputeStatsKey is the tag key indicating whether trace stats should be computed
 const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
 // ComputeStatsValue is the tag value indicating trace stats should be computed
@@ -49,24 +45,16 @@ const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-const EXTENSION_VERSION: &str = "69-next";
+pub const EXTENSION_VERSION: &str = "74-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
 const AWS_ACCOUNT_KEY: &str = "aws_account";
 const RESOURCE_KEY: &str = "resource";
 
-// TODO(astuyve) platform tags
-// X86LambdaPlatform is for the lambda platform X86_64
-// const X86_LAMBDA_PLATFORM: &str = "x86_64";
-// ArmLambdaPlatform is for the lambda platform Arm64
-// const ARM_LAMBDA_PLATFORM: &str = "arm64";
-// AmdLambdaPlatform is for the lambda platform Amd64, which is an extension of X86_64
-// const AMD_LAMBDA_PLATFORM: &str = "amd64";
-
 #[derive(Debug, Clone)]
 pub struct Lambda {
-    tags_map: hash_map::HashMap<String, String>,
+    tags_map: HashMap<String, String>,
 }
 
 fn arch_to_platform<'a>() -> &'a str {
@@ -77,10 +65,10 @@ fn arch_to_platform<'a>() -> &'a str {
 }
 
 fn tags_from_env(
-    mut tags_map: hash_map::HashMap<String, String>,
+    mut tags_map: HashMap<String, String>,
     config: Arc<config::Config>,
-    metadata: &hash_map::HashMap<String, String>,
-) -> hash_map::HashMap<String, String> {
+    metadata: &HashMap<String, String>,
+) -> HashMap<String, String> {
     if metadata.contains_key(FUNCTION_ARN_KEY) {
         let parts = metadata[FUNCTION_ARN_KEY].split(':').collect::<Vec<&str>>();
         if parts.len() > 6 {
@@ -222,10 +210,10 @@ impl Lambda {
     #[must_use]
     pub fn new_from_config(
         config: Arc<config::Config>,
-        metadata: &hash_map::HashMap<String, String>,
+        metadata: &HashMap<String, String>,
     ) -> Self {
         Lambda {
-            tags_map: tags_from_env(hash_map::HashMap::new(), config, metadata),
+            tags_map: tags_from_env(HashMap::new(), config, metadata),
         }
     }
 
@@ -248,19 +236,19 @@ impl Lambda {
     }
 
     #[must_use]
-    pub fn get_tags_map(&self) -> &hash_map::HashMap<String, String> {
+    pub fn get_tags_map(&self) -> &HashMap<String, String> {
         &self.tags_map
     }
 
     #[must_use]
-    pub fn get_function_tags_map(&self) -> hash_map::HashMap<String, String> {
+    pub fn get_function_tags_map(&self) -> HashMap<String, String> {
         let tags = self
             .tags_map
             .iter()
             .map(|(k, v)| format!("{k}:{v}"))
             .collect::<Vec<String>>()
             .join(",");
-        hash_map::HashMap::from_iter([(FUNCTION_TAGS_KEY.to_string(), tags)])
+        HashMap::from_iter([(FUNCTION_TAGS_KEY.to_string(), tags)])
     }
 }
 
@@ -270,13 +258,14 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use serial_test::serial;
+    use std::collections::HashMap;
     use std::fs::File;
     use std::io::Write;
     use std::path::Path;
 
     #[test]
     fn test_new_from_config() {
-        let metadata = hash_map::HashMap::new();
+        let metadata = HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
         assert_eq!(tags.tags_map.len(), 3);
         assert_eq!(
@@ -297,7 +286,7 @@ mod tests {
 
     #[test]
     fn test_new_with_function_arn_metadata() {
-        let mut metadata = hash_map::HashMap::new();
+        let mut metadata = HashMap::new();
         metadata.insert(
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
@@ -317,7 +306,7 @@ mod tests {
     #[test]
     #[serial] //run test serially since it sets and unsets env vars
     fn test_with_lambda_env_vars() {
-        let mut metadata = hash_map::HashMap::new();
+        let mut metadata = HashMap::new();
         metadata.insert(
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:My-function".to_string(),
@@ -387,7 +376,7 @@ mod tests {
 
     #[test]
     fn test_get_function_tags_map() {
-        let mut metadata = hash_map::HashMap::new();
+        let mut metadata = HashMap::new();
         metadata.insert(
             FUNCTION_ARN_KEY.to_string(),
             "arn:aws:lambda:us-west-2:123456789012:function:my-function".to_string(),
@@ -402,16 +391,15 @@ mod tests {
         let tags = Lambda::new_from_config(config, &metadata);
         let function_tags = tags.get_function_tags_map();
         assert_eq!(function_tags.len(), 1);
-        let fn_tags_map: hash_map::HashMap<String, String> = hash_map::HashMap::from_iter(
-            function_tags
-                .get(FUNCTION_TAGS_KEY)
-                .unwrap()
-                .split(',')
-                .map(|tag| {
-                    let parts = tag.split(':').collect::<Vec<&str>>();
-                    (parts[0].to_string(), parts[1].to_string())
-                }),
-        );
+        let fn_tags_map: HashMap<String, String> = function_tags
+            .get(FUNCTION_TAGS_KEY)
+            .unwrap()
+            .split(',')
+            .map(|tag| {
+                let parts = tag.split(':').collect::<Vec<&str>>();
+                (parts[0].to_string(), parts[1].to_string())
+            })
+            .collect();
         assert_eq!(fn_tags_map.len(), 14);
         assert_eq!(fn_tags_map.get("key1").unwrap(), "value1");
         assert_eq!(fn_tags_map.get("key2").unwrap(), "value2");

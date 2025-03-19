@@ -1,32 +1,32 @@
-# syntax = docker/dockerfile:experimental
-
-FROM alpine:3.16 as builder
+FROM alpine:3.16 AS compiler
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
-ARG CMD_PATH
 ARG BUILD_TAGS
 
+# Install dependencies
 RUN apk add --no-cache git make musl-dev gcc
 COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
 
-ENV GOROOT /usr/lib/go
-ENV GOPATH /go
-ENV PATH /go/bin:$PATH
+ENV GOROOT=/usr/lib/go
+ENV GOPATH=/go
+ENV PATH=/go/bin:$PATH
 
 RUN mkdir -p ${GOPATH}/src ${GOPATH}/bin
 RUN mkdir -p /tmp/dd/datadog-agent
 
-# cache dependencies
+# Copy cached dependencies
 COPY ./scripts/.cache/go.mod /tmp/dd/datadog-agent
 COPY ./scripts/.cache/go.sum /tmp/dd/datadog-agent
 WORKDIR /tmp/dd/datadog-agent
 
-# copy source files (/tgz gets unzip automatically by Docker)
+# Add and unzip agent tarball
 ADD ./scripts/.src/datadog-agent.tgz /tmp/dd
 
-# build the extension
-WORKDIR /tmp/dd/datadog-agent/"${CMD_PATH}"
-# add the current version number to the tags package before compilation
+# Build the Serverless Go Agent
+#
+# Sets the `EXTENSION_VERSION` to the serverless tags.
+# Also sets the `AGENT_VERSION` to the version of the agent.
+WORKDIR /tmp/dd/datadog-agent/cmd/serverless
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -41,25 +41,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         -tags "${BUILD_TAGS}" -o datadog-agent; \
     fi
 
+# Ensure that the `agentVersionDefault` variable exists in the binary.
 RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/version.agentVersionDefault' || \
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
-# zip the extension
-FROM ubuntu:22.04 as compresser
-ARG CMD_PATH
-ARG DATADOG_WRAPPER=datadog_wrapper
-RUN apt-get update
-RUN apt-get install -y zip binutils
-RUN mkdir /extensions
-WORKDIR /extensions
-COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent
-RUN strip /extensions/datadog-agent
+# Strip the binary to reduce size
+RUN strip datadog-agent
 
-COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
-RUN chmod +x /$DATADOG_WRAPPER
-RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER
-
-# keep the smallest possible docker image
+# Use the smallest image possible
 FROM scratch
-COPY --from=compresser /extensions/datadog_extension.zip /
-ENTRYPOINT ["/datadog_extension.zip"]
+COPY --from=compiler /tmp/dd/datadog-agent/cmd/serverless/datadog-agent /
+ENTRYPOINT ["/datadog-agent"]

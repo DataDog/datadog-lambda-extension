@@ -3,7 +3,7 @@ use crate::metrics::enhanced::{
     statfs::statfs_info,
 };
 use crate::proc::{self, CPUData, NetworkData};
-use crate::telemetry::events::ReportMetrics;
+use crate::telemetry::events::{ReportMetrics, RuntimeDoneMetrics};
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator::Aggregator, metric::SortedTags};
@@ -70,23 +70,23 @@ impl Lambda {
         SortedTags::parse(&string_tags).ok()
     }
 
-    pub fn increment_invocation_metric(&self) {
-        self.increment_metric(constants::INVOCATIONS_METRIC);
+    pub fn increment_invocation_metric(&self, timestamp: i64) {
+        self.increment_metric(constants::INVOCATIONS_METRIC, timestamp);
     }
 
-    pub fn increment_errors_metric(&self) {
-        self.increment_metric(constants::ERRORS_METRIC);
+    pub fn increment_errors_metric(&self, timestamp: i64) {
+        self.increment_metric(constants::ERRORS_METRIC, timestamp);
     }
 
-    pub fn increment_timeout_metric(&self) {
-        self.increment_metric(constants::TIMEOUTS_METRIC);
+    pub fn increment_timeout_metric(&self, timestamp: i64) {
+        self.increment_metric(constants::TIMEOUTS_METRIC, timestamp);
     }
 
-    pub fn increment_oom_metric(&self) {
-        self.increment_metric(constants::OUT_OF_MEMORY_METRIC);
+    pub fn increment_oom_metric(&self, timestamp: i64) {
+        self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
     }
 
-    pub fn set_init_duration_metric(&self, init_duration_ms: f64) {
+    pub fn set_init_duration_metric(&self, init_duration_ms: f64, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -94,6 +94,7 @@ impl Lambda {
             constants::INIT_DURATION_METRIC.into(),
             MetricValue::distribution(init_duration_ms * constants::MS_TO_SEC),
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
 
         if let Err(e) = self
@@ -106,7 +107,7 @@ impl Lambda {
         }
     }
 
-    fn increment_metric(&self, metric_name: &str) {
+    fn increment_metric(&self, metric_name: &str, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -114,6 +115,7 @@ impl Lambda {
             metric_name.into(),
             MetricValue::distribution(1f64),
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = self
             .aggregator
@@ -125,15 +127,16 @@ impl Lambda {
         }
     }
 
-    pub fn set_runtime_duration_metric(&self, duration_ms: f64) {
+    pub fn set_runtime_done_metrics(&self, metrics: &RuntimeDoneMetrics, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
         }
         let metric = Metric::new(
             constants::RUNTIME_DURATION_METRIC.into(),
-            MetricValue::distribution(duration_ms),
+            MetricValue::distribution(metrics.duration_ms),
             // Datadog expects this value as milliseconds, not seconds
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = self
             .aggregator
@@ -143,9 +146,27 @@ impl Lambda {
         {
             error!("failed to insert runtime duration metric: {}", e);
         }
+
+        if let Some(produced_bytes) = metrics.produced_bytes {
+            let metric = Metric::new(
+                constants::PRODUCED_BYTES_METRIC.into(),
+                MetricValue::distribution(produced_bytes as f64),
+                // Datadog expects this value as milliseconds, not seconds
+                self.get_dynamic_value_tags(),
+                Some(timestamp),
+            );
+            if let Err(e) = self
+                .aggregator
+                .lock()
+                .expect("lock poisoned")
+                .insert(metric)
+            {
+                error!("failed to insert produced bytes metric: {}", e);
+            }
+        }
     }
 
-    pub fn set_post_runtime_duration_metric(&self, duration_ms: f64) {
+    pub fn set_post_runtime_duration_metric(&self, duration_ms: f64, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -154,6 +175,7 @@ impl Lambda {
             MetricValue::distribution(duration_ms),
             // Datadog expects this value as milliseconds, not seconds
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = self
             .aggregator
@@ -171,6 +193,12 @@ impl Lambda {
         aggr: &mut std::sync::MutexGuard<Aggregator>,
         tags: Option<SortedTags>,
     ) {
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let rx_bytes = network_data_end.rx_bytes - network_data_offset.rx_bytes;
         let tx_bytes = network_data_end.tx_bytes - network_data_offset.tx_bytes;
         let total_network = rx_bytes + tx_bytes;
@@ -179,6 +207,7 @@ impl Lambda {
             constants::RX_BYTES_METRIC.into(),
             MetricValue::distribution(rx_bytes),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert rx_bytes metric: {}", e);
@@ -188,6 +217,7 @@ impl Lambda {
             constants::TX_BYTES_METRIC.into(),
             MetricValue::distribution(tx_bytes),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tx_bytes metric: {}", e);
@@ -197,6 +227,7 @@ impl Lambda {
             constants::TOTAL_NETWORK_METRIC.into(),
             MetricValue::distribution(total_network),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert total_network metric: {}", e);
@@ -240,11 +271,17 @@ impl Lambda {
         let cpu_system_time =
             cpu_data_end.total_system_time_ms - cpu_data_offset.total_system_time_ms;
         let cpu_total_time = cpu_user_time + cpu_system_time;
-
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let metric = Metric::new(
             constants::CPU_USER_TIME_METRIC.into(),
             MetricValue::distribution(cpu_user_time),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_user_time metric: {}", e);
@@ -254,6 +291,7 @@ impl Lambda {
             constants::CPU_SYSTEM_TIME_METRIC.into(),
             MetricValue::distribution(cpu_system_time),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_system_time metric: {}", e);
@@ -263,6 +301,7 @@ impl Lambda {
             constants::CPU_TOTAL_TIME_METRIC.into(),
             MetricValue::distribution(cpu_total_time),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_total_time metric: {}", e);
@@ -307,7 +346,12 @@ impl Lambda {
 
         let mut max_idle_time = 0.0;
         let mut min_idle_time = f64::MAX;
-
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         for (cpu_name, cpu_idle_time) in &cpu_data_end.individual_cpu_idle_times {
             if let Some(cpu_idle_time_offset) =
                 cpu_data_offset.individual_cpu_idle_times.get(cpu_name)
@@ -342,6 +386,7 @@ impl Lambda {
             constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
             MetricValue::distribution(cpu_total_utilization_pct),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_total_utilization_pct metric: {}", e);
@@ -351,6 +396,7 @@ impl Lambda {
             constants::CPU_TOTAL_UTILIZATION_METRIC.into(),
             MetricValue::distribution(cpu_total_utilization),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_total_utilization metric: {}", e);
@@ -360,6 +406,7 @@ impl Lambda {
             constants::NUM_CORES_METRIC.into(),
             MetricValue::distribution(num_cores),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert num_cores metric: {}", e);
@@ -369,6 +416,7 @@ impl Lambda {
             constants::CPU_MAX_UTILIZATION_METRIC.into(),
             MetricValue::distribution(cpu_max_utilization),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_max_utilization metric: {}", e);
@@ -378,6 +426,7 @@ impl Lambda {
             constants::CPU_MIN_UTILIZATION_METRIC.into(),
             MetricValue::distribution(cpu_min_utilization),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert cpu_min_utilization metric: {}", e);
@@ -421,10 +470,17 @@ impl Lambda {
         aggr: &mut std::sync::MutexGuard<Aggregator>,
         tags: Option<SortedTags>,
     ) {
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let metric = Metric::new(
             constants::TMP_MAX_METRIC.into(),
             MetricValue::distribution(tmp_max),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_max metric: {}", e);
@@ -434,6 +490,7 @@ impl Lambda {
             constants::TMP_USED_METRIC.into(),
             MetricValue::distribution(tmp_used),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_used metric: {}", e);
@@ -444,6 +501,7 @@ impl Lambda {
             constants::TMP_FREE_METRIC.into(),
             MetricValue::distribution(tmp_free),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert tmp_free metric: {}", e);
@@ -505,10 +563,17 @@ impl Lambda {
         aggr: &mut std::sync::MutexGuard<Aggregator>,
         tags: Option<SortedTags>,
     ) {
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let metric = Metric::new(
             constants::FD_MAX_METRIC.into(),
             MetricValue::distribution(fd_max),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert fd_max metric: {}", e);
@@ -520,6 +585,7 @@ impl Lambda {
                 constants::FD_USE_METRIC.into(),
                 MetricValue::distribution(fd_use),
                 tags.clone(),
+                Some(now),
             );
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert fd_use metric: {}", e);
@@ -532,6 +598,7 @@ impl Lambda {
             constants::THREADS_MAX_METRIC.into(),
             MetricValue::distribution(threads_max),
             tags.clone(),
+            Some(now),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert threads_max metric: {}", e);
@@ -543,6 +610,7 @@ impl Lambda {
                 constants::THREADS_USE_METRIC.into(),
                 MetricValue::distribution(threads_use),
                 tags,
+                Some(now),
             );
             if let Err(e) = aggr.insert(metric) {
                 error!("Failed to insert threads_use metric: {}", e);
@@ -613,7 +681,7 @@ impl Lambda {
         ((BASE_LAMBDA_INVOCATION_PRICE + (gb_seconds * price_per_gb)) * 1e12).round() / 1e12
     }
 
-    pub fn set_report_log_metrics(&self, metrics: &ReportMetrics) {
+    pub fn set_report_log_metrics(&self, metrics: &ReportMetrics, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -623,6 +691,7 @@ impl Lambda {
             constants::DURATION_METRIC.into(),
             MetricValue::distribution(metrics.duration_ms * constants::MS_TO_SEC),
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert duration metric: {}", e);
@@ -631,6 +700,7 @@ impl Lambda {
             constants::BILLED_DURATION_METRIC.into(),
             MetricValue::distribution(metrics.billed_duration_ms as f64 * constants::MS_TO_SEC),
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert billed duration metric: {}", e);
@@ -639,6 +709,7 @@ impl Lambda {
             constants::MAX_MEMORY_USED_METRIC.into(),
             MetricValue::distribution(metrics.max_memory_used_mb as f64),
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert max memory used metric: {}", e);
@@ -647,6 +718,7 @@ impl Lambda {
             constants::MEMORY_SIZE_METRIC.into(),
             MetricValue::distribution(metrics.memory_size_mb as f64),
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert memory size metric: {}", e);
@@ -658,6 +730,7 @@ impl Lambda {
             constants::ESTIMATED_COST_METRIC.into(),
             MetricValue::distribution(cost_usd),
             self.get_dynamic_value_tags(),
+            Some(timestamp),
         );
         if let Err(e) = aggr.insert(metric) {
             error!("failed to insert estimated cost metric: {}", e);
@@ -707,9 +780,15 @@ mod tests {
         )
     }
 
-    fn assert_sketch(aggregator_mutex: &Mutex<Aggregator>, metric_id: &str, value: f64) {
+    fn assert_sketch(
+        aggregator_mutex: &Mutex<Aggregator>,
+        metric_id: &str,
+        value: f64,
+        timestamp: i64,
+    ) {
+        let ts = (timestamp / 10) * 10;
         let aggregator = aggregator_mutex.lock().unwrap();
-        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None) {
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None, ts) {
             let metric = e.value.get_sketch().unwrap();
             assert!((metric.max().unwrap() - value).abs() < PRECISION);
             assert!((metric.min().unwrap() - value).abs() < PRECISION);
@@ -725,9 +804,20 @@ mod tests {
     fn test_increment_invocation_metric() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        lambda.increment_invocation_metric();
-
-        assert_sketch(&metrics_aggr, constants::INVOCATIONS_METRIC, 1f64);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        lambda.increment_invocation_metric(now);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        assert_sketch(&metrics_aggr, constants::INVOCATIONS_METRIC, 1f64, now);
     }
 
     #[test]
@@ -735,9 +825,20 @@ mod tests {
     fn test_increment_errors_metric() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        lambda.increment_errors_metric();
-
-        assert_sketch(&metrics_aggr, constants::ERRORS_METRIC, 1f64);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        lambda.increment_errors_metric(now);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        assert_sketch(&metrics_aggr, constants::ERRORS_METRIC, 1f64, now);
     }
 
     #[test]
@@ -749,108 +850,155 @@ mod tests {
             ..no_config.as_ref().clone()
         });
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        lambda.increment_invocation_metric();
-        lambda.increment_errors_metric();
-        lambda.increment_timeout_metric();
-        lambda.set_init_duration_metric(100.0);
-        lambda.set_runtime_duration_metric(100.0);
-        lambda.set_post_runtime_duration_metric(100.0);
-        lambda.set_report_log_metrics(&ReportMetrics {
-            duration_ms: 100.0,
-            billed_duration_ms: 100,
-            max_memory_used_mb: 128,
-            memory_size_mb: 256,
-            init_duration_ms: Some(50.0),
-            restore_duration_ms: None,
-        });
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        lambda.increment_invocation_metric(now);
+        lambda.increment_errors_metric(now);
+        lambda.increment_timeout_metric(now);
+        lambda.set_init_duration_metric(100.0, now);
+        lambda.set_runtime_done_metrics(
+            &RuntimeDoneMetrics {
+                duration_ms: 100.0,
+                produced_bytes: Some(42_u64),
+            },
+            now,
+        );
+        lambda.set_post_runtime_duration_metric(100.0, now);
+        lambda.set_report_log_metrics(
+            &ReportMetrics {
+                duration_ms: 100.0,
+                billed_duration_ms: 100,
+                max_memory_used_mb: 128,
+                memory_size_mb: 256,
+                init_duration_ms: Some(50.0),
+                restore_duration_ms: None,
+            },
+            now,
+        );
         let aggr = metrics_aggr.lock().expect("lock poisoned");
         assert!(aggr
-            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), &None)
+            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::ERRORS_METRIC.into(), &None)
+            .get_entry_by_id(constants::ERRORS_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), &None)
+            .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), &None)
+            .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), &None)
+            .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), &None)
+            .get_entry_by_id(constants::PRODUCED_BYTES_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::DURATION_METRIC.into(), &None)
+            .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), &None)
+            .get_entry_by_id(constants::DURATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), &None)
+            .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), &None)
+            .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), &None)
+            .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::RX_BYTES_METRIC.into(), &None)
+            .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::TX_BYTES_METRIC.into(), &None)
+            .get_entry_by_id(constants::RX_BYTES_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), &None)
+            .get_entry_by_id(constants::TX_BYTES_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), &None)
+            .get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), &None)
+            .get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), &None)
+            .get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(), &None)
+            .get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), &None)
+            .get_entry_by_id(
+                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
+                &None,
+                now
+            )
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::NUM_CORES_METRIC.into(), &None)
+            .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), &None)
+            .get_entry_by_id(constants::NUM_CORES_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), &None)
+            .get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::TMP_MAX_METRIC.into(), &None)
+            .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::TMP_USED_METRIC.into(), &None)
+            .get_entry_by_id(constants::TMP_MAX_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::TMP_FREE_METRIC.into(), &None)
+            .get_entry_by_id(constants::TMP_USED_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::FD_MAX_METRIC.into(), &None)
+            .get_entry_by_id(constants::TMP_FREE_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None)
+            .get_entry_by_id(constants::FD_MAX_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::THREADS_MAX_METRIC.into(), &None)
+            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None)
+            .get_entry_by_id(constants::THREADS_MAX_METRIC.into(), &None, now)
             .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
+            .is_none());
+    }
+
+    #[test]
+    fn test_set_runtime_done_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let runtime_done_metrics = RuntimeDoneMetrics {
+            duration_ms: 100.0,
+            produced_bytes: Some(42_u64),
+        };
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        lambda.set_runtime_done_metrics(&runtime_done_metrics, now);
+
+        assert_sketch(
+            &metrics_aggr,
+            constants::RUNTIME_DURATION_METRIC,
+            100.0,
+            now,
+        );
+        assert_sketch(&metrics_aggr, constants::PRODUCED_BYTES_METRIC, 42.0, now);
     }
 
     #[test]
@@ -865,20 +1013,31 @@ mod tests {
             init_duration_ms: Some(50.0),
             restore_duration_ms: None,
         };
-        lambda.set_report_log_metrics(&report_metrics);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        lambda.set_report_log_metrics(&report_metrics, now);
 
-        assert_sketch(&metrics_aggr, constants::DURATION_METRIC, 0.1);
-        assert_sketch(&metrics_aggr, constants::BILLED_DURATION_METRIC, 0.1);
+        assert_sketch(&metrics_aggr, constants::DURATION_METRIC, 0.1, now);
+        assert_sketch(&metrics_aggr, constants::BILLED_DURATION_METRIC, 0.1, now);
 
-        assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0);
-        assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0);
+        assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0, now);
+        assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0, now);
     }
 
     #[test]
     fn test_set_network_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let network_offset = NetworkData {
             rx_bytes: 180.0,
             tx_bytes: 254.0,
@@ -895,16 +1054,21 @@ mod tests {
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0);
-        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0);
-        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0);
+        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0, now);
+        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0, now);
+        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0, now);
     }
 
     #[test]
     fn test_set_cpu_time_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let mut individual_cpu_idle_time_offsets = HashMap::new();
         individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
         individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 20.0);
@@ -932,16 +1096,21 @@ mod tests {
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::CPU_USER_TIME_METRIC, 100.0);
-        assert_sketch(&metrics_aggr, constants::CPU_SYSTEM_TIME_METRIC, 53.0);
-        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_TIME_METRIC, 153.0);
+        assert_sketch(&metrics_aggr, constants::CPU_USER_TIME_METRIC, 100.0, now);
+        assert_sketch(&metrics_aggr, constants::CPU_SYSTEM_TIME_METRIC, 53.0, now);
+        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_TIME_METRIC, 153.0, now);
     }
 
     #[test]
     fn test_set_cpu_utilization_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let mut individual_cpu_idle_time_offsets = HashMap::new();
         individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
         individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 30.0);
@@ -978,18 +1147,39 @@ mod tests {
             &metrics_aggr,
             constants::CPU_TOTAL_UTILIZATION_PCT_METRIC,
             30.0,
+            now,
         );
-        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_UTILIZATION_METRIC, 0.6);
-        assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0);
-        assert_sketch(&metrics_aggr, constants::CPU_MAX_UTILIZATION_METRIC, 30.0);
-        assert_sketch(&metrics_aggr, constants::CPU_MIN_UTILIZATION_METRIC, 28.75);
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_TOTAL_UTILIZATION_METRIC,
+            0.6,
+            now,
+        );
+        assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0, now);
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MAX_UTILIZATION_METRIC,
+            30.0,
+            now,
+        );
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MIN_UTILIZATION_METRIC,
+            28.75,
+            now,
+        );
     }
 
     #[test]
     fn test_set_tmp_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let tmp_max = 550_461_440.0;
         let tmp_used = 12_165_120.0;
 
@@ -1000,16 +1190,26 @@ mod tests {
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0);
-        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0);
-        assert_sketch(&metrics_aggr, constants::TMP_FREE_METRIC, 538_296_320.0);
+        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0, now);
+        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0, now);
+        assert_sketch(
+            &metrics_aggr,
+            constants::TMP_FREE_METRIC,
+            538_296_320.0,
+            now,
+        );
     }
 
     #[test]
     fn test_set_process_enhanced_metrics_valid_use() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let fd_max = 1024.0;
         let fd_use = 175.0;
         let threads_max = 1024.0;
@@ -1024,17 +1224,22 @@ mod tests {
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0);
-        assert_sketch(&metrics_aggr, constants::FD_USE_METRIC, 175.0);
-        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0);
-        assert_sketch(&metrics_aggr, constants::THREADS_USE_METRIC, 40.0);
+        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now);
+        assert_sketch(&metrics_aggr, constants::FD_USE_METRIC, 175.0, now);
+        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now);
+        assert_sketch(&metrics_aggr, constants::THREADS_USE_METRIC, 40.0, now);
     }
 
     #[test]
     fn test_set_process_enhanced_metrics_invalid_use() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
         let fd_max = 1024.0;
         let fd_use = -1.0;
         let threads_max = 1024.0;
@@ -1049,15 +1254,15 @@ mod tests {
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0);
-        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0);
+        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now);
+        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now);
 
         let aggr = lambda.aggregator.lock().expect("lock poisoned");
         assert!(aggr
-            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None)
+            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
-            .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None)
+            .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
             .is_none());
     }
 }

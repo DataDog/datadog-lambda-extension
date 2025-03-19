@@ -1,18 +1,14 @@
 # gomplate template generation pipeline
 
 inputFiles:
-  - .gitlab/templates/bottlecap.yaml.tpl
-  - .gitlab/templates/go-agent.yaml.tpl
-  - .gitlab/templates/lambda-extension.yaml.tpl
+  - .gitlab/templates/pipeline.yaml.tpl
 
 outputFiles:
-  - .gitlab/pipeline-bottlecap.yaml
-  - .gitlab/pipeline-go-agent.yaml
-  - .gitlab/pipeline-lambda-extension.yaml
+  - .gitlab/pipeline.yaml
 
 datasources:
-  architectures:
-    url: .gitlab/datasources/architectures.yaml
+  flavors:
+    url: .gitlab/datasources/flavors.yaml
   
   environments:
     url: .gitlab/datasources/environments.yaml

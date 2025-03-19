@@ -1,0 +1,45 @@
+FROM ubuntu:22.04 AS compresser
+ARG DATADOG_WRAPPER=datadog_wrapper
+ARG FILE_SUFFIX
+
+# Install dependencies
+RUN apt-get update
+RUN apt-get install -y zip binutils wget tar xz-utils
+
+# UPX installation directly from GitHub
+ENV UPX_VERSION=5.0.0
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        ARCH_NAME="amd64"; \
+    elif [ "$ARCH" = "aarch64" ]; then \
+        ARCH_NAME="arm64"; \
+    fi && \
+    wget https://github.com/upx/upx/releases/download/v${UPX_VERSION}/upx-${UPX_VERSION}-${ARCH_NAME}_linux.tar.xz && \
+    tar -xf upx-${UPX_VERSION}-${ARCH_NAME}_linux.tar.xz && \
+    mv upx-${UPX_VERSION}-${ARCH_NAME}_linux/upx /usr/local/bin/ && \
+    rm -rf upx-${UPX_VERSION}-${ARCH_NAME}_linux upx-${UPX_VERSION}-${ARCH_NAME}_linux.tar.xz
+
+# Copy Go Agent binary
+COPY .binaries/datadog-agent-$FILE_SUFFIX /datadog-agent-go
+
+# UPX compress
+RUN upx -1 /datadog-agent-go
+
+RUN mkdir /extensions
+WORKDIR /extensions
+
+# Copy Rust Agent binary
+COPY .binaries/bottlecap-$FILE_SUFFIX /extensions/datadog-agent
+
+# Copy wrapper script
+COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
+RUN chmod +x /$DATADOG_WRAPPER
+
+# Zip all binaries together
+RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent-go
+
+# Use smallest image possible
+FROM scratch
+COPY --from=compresser /extensions/datadog_extension.zip /
+ENTRYPOINT ["/datadog_extension.zip"]
+

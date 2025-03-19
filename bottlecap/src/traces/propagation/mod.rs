@@ -25,21 +25,18 @@ pub struct DatadogCompositePropagator {
     config: Arc<config::Config>,
 }
 
-#[allow(clippy::never_loop)]
 impl Propagator for DatadogCompositePropagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext> {
         if self.config.trace_propagation_extract_first {
             for propagator in &self.propagators {
                 let context = propagator.extract(carrier);
 
-                if self.config.trace_propagation_http_baggage_enabled {
-                    if let Some(mut context) = context {
+                if let Some(mut context) = context {
+                    if self.config.trace_propagation_http_baggage_enabled {
                         Self::attach_baggage(&mut context, carrier);
-                        return Some(context);
                     }
+                    return Some(context);
                 }
-
-                return context;
             }
         }
 

@@ -3,6 +3,7 @@ use tracing::warn;
 
 use crate::logs::constants;
 
+#[derive(Debug, Clone)]
 pub struct Aggregator {
     messages: VecDeque<String>,
     max_batch_entries_size: usize,
