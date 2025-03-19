@@ -104,6 +104,8 @@ if [ "$AUTOMATICALLY_BUMP_VERSION" = "1" ]; then
 else
     if [ -z "$CI_COMMIT_TAG" ]; then
         if [ -n "$VERSION" ]; then
+            # This is used in our publish_govcloud_layers.sh script. We set the
+            # VERSION manually there since we don't have a CI_COMMIT_TAG.
             printf "VERSION exists so we should be okay to continue\n"
         else
             printf "[ERROR]: No CI_COMMIT_TAG found and VERSION is not nuymeric.\n"

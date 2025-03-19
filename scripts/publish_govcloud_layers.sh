@@ -47,6 +47,11 @@ elif [ $ENVIRONMENT = "us1-fed" ]; then
     export ADD_LAYER_VERSION_PERMISSIONS=1
     export AUTOMATICALLY_BUMP_VERSION=0
 
+    if [[ -z "$VERSION" ]]; then
+        printf "[ERROR]: VERSION not specified\n"
+        exit 1
+    fi
+
     if [[ ! "$PACKAGE_NAME" =~ ^datadog_extension-signed-bundle-[0-9]+$ ]]; then
         echo "[ERROR]: Unexpected package name: $PACKAGE_NAME"
         exit 1
