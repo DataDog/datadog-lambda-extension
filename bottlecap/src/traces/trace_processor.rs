@@ -1,8 +1,8 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::lifecycle::invocation::context::ContextBuffer;
 use crate::config;
+use crate::lifecycle::invocation::context::ContextBuffer;
 use crate::tags::provider;
 use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
 use crate::traces::{
