@@ -63,7 +63,7 @@ flavors:
     fips: 1
     needs_layer_sign: false
     needs_layer_publish: false
-    suffix: amd64-fips-alpine
+    suffix: amd64-alpine-fips
 
   - name: arm64, fips, alpine
     arch: arm64
@@ -71,7 +71,7 @@ flavors:
     fips: 1
     needs_layer_sign: false
     needs_layer_publish: false
-    suffix: arm64-fips-alpine
+    suffix: arm64-alpine-fips
 
 # Unfortunately our mutli-arch images don't fit nicely into the flavors
 # structure above. Since we are making multi-arch images, the suffixes here
@@ -103,4 +103,4 @@ multi_arch_image_flavors:
     fips: 1
     platform: linux/amd64,linux/arm64
     dependency_names: ["amd64, fips, alpine", "arm64, fips, alpine"]
-    suffix: "-fips-alpine"
+    suffix: "-alpine-fips"

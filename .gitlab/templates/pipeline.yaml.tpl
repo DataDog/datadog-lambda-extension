@@ -194,7 +194,7 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
-    - .gitlab/scripts/publish_layer.sh
+    - .gitlab/scripts/publish_layers.sh
 
 {{ end }} # end environments
 
@@ -224,7 +224,7 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   {{ end }}
   script:
-    - .gitlab/scripts/publish_layer.sh
+    - .gitlab/scripts/publish_layers.sh
 
 {{ end }} # end needs_layer_publish
 
@@ -325,17 +325,13 @@ signed layer bundle:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
   needs:
-    {{ range (ds "flavors").flavors }}
-    {{ if .needs_layer_sign }}
+    {{ range (ds "flavors").flavors }}{{ if .needs_layer_sign }}
     - sign layer ({{ .name }})
-    {{ end }} # end needs_layer_publish
-    {{ end }} # end flavors
+    {{ end }}{{ end }} # end flavors if needs_layer_sign
   dependencies:
-    {{ range (ds "flavors").flavors }}
-    {{ if .needs_layer_sign }}
+    {{ range (ds "flavors").flavors }}{{ if .needs_layer_sign }}
     - sign layer ({{ .name }})
-    {{ end }} # end needs_layer_publish
-    {{ end }} # end flavors
+    {{ end }}{{ end }} # end flavors if needs_layer_sign
   artifacts:
     expire_in: 1 day
     paths:

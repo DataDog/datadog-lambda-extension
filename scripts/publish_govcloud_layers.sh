@@ -89,7 +89,7 @@ declare -A flavors
 flavors["amd64"]="arch=amd64 suffix=amd64 layer_name_base_suffix="
 flavors["arm64"]="arch=arm64 suffix=arm64 layer_name_base_suffix=-ARM"
 flavors["amd64-fips"]="arch=amd64 suffix=amd64-fips layer_name_base_suffix=-FIPS"
-flavors["arm64-fips"]="arch=arm64 suffix=arm64-fips layer_name_base_suffix=-FIPS-ARM"
+flavors["arm64-fips"]="arch=arm64 suffix=arm64-fips layer_name_base_suffix=-ARM-FIPS"
 
 for region in $REGIONS
 do
@@ -111,7 +111,7 @@ do
         export LAYER_FILE="datadog_extension-$SUFFIX.zip"
         echo "Publishing $LAYER_FILE"
 
-        $AWS_VAULT_PREFIX .gitlab/scripts/publish_layer.sh
+        $AWS_VAULT_PREFIX .gitlab/scripts/publish_layers.sh
     done
 
 done

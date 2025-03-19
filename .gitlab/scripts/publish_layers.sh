@@ -103,8 +103,8 @@ if [ "$AUTOMATICALLY_BUMP_VERSION" = "1" ]; then
 
 else
     if [ -z "$CI_COMMIT_TAG" ]; then
-        if (( VERSION )); then
-            printf "VERSION is numeric so we should be okay to continue\n"
+        if [ -n "$VERSION" ]; then
+            printf "VERSION exists so we should be okay to continue\n"
         else
             printf "[ERROR]: No CI_COMMIT_TAG found and VERSION is not nuymeric.\n"
             printf "Exiting script...\n"
@@ -120,6 +120,9 @@ fi
 
 if [ -z "$VERSION" ]; then
     printf "[ERROR]: Layer VERSION not specified"
+    exit 1
+elif ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
+    printf "[ERROR]: Layer VERSION must be numeric, got '$VERSION'"
     exit 1
 else
     printf "Layer version parsed: $VERSION\n"
