@@ -138,7 +138,7 @@ sign layer ({{ $flavor.name }}):
   dependencies:
     - layer ({{ $flavor.name }})
   artifacts: # Re specify artifacts so the modified signed file is passed
-    expire_in: 1 day # Signed layers should expire after 1 day
+    expire_in: 1 week # Signed layers should expire after 1 week
     paths:
       - .layers/datadog_extension-{{ $flavor.suffix }}.zip
   variables:
@@ -333,7 +333,7 @@ signed layer bundle:
     - sign layer ({{ .name }})
     {{ end }}{{ end }} # end flavors if needs_layer_sign
   artifacts:
-    expire_in: 1 day
+    expire_in: 1 week
     paths:
       - datadog_extension-signed-bundle-${CI_JOB_ID}/
     name: datadog_extension-signed-bundle-${CI_JOB_ID}
