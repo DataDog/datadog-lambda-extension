@@ -276,7 +276,7 @@ impl Processor {
         timestamp: i64,
     ) {
         let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
-        context_buffer.add_runtime_duration(request_id, duration_ms);
+        context_buffer.add_runtime_duration(request_id, metrics.duration_ms);
 
         // Set the runtime duration metric
         self.enhanced_metrics
