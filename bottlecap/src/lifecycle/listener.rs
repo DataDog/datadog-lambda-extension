@@ -13,7 +13,7 @@ use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
-use crate::lifecycle::invocation::processor::{Processor as InvocationProcessor};
+use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 use crate::traces::propagation::text_map_propagator::{
     DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
     DATADOG_TRACE_ID_KEY,
@@ -62,11 +62,12 @@ impl Listener {
         match (req.method(), req.uri().path()) {
             (&Method::POST, START_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
-                Self::start_invocation_handler(parts.headers, body, invocation_processor).await
+                Self::universal_instrumentation_start(&parts.headers, body, invocation_processor).await
             }
             (&Method::POST, END_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
-                match Self::end_invocation_handler(parts.headers, body, invocation_processor).await {
+                match Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await
+                {
                     Ok(response) => Ok(response),
                     Err(e) => {
                         error!("Failed to end invocation {e}");
@@ -86,8 +87,8 @@ impl Listener {
         }
     }
 
-    pub async fn start_invocation_handler(
-        headers: HeaderMap,
+    pub async fn universal_instrumentation_start(
+        headers: &HeaderMap,
         body: Body,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
@@ -138,8 +139,8 @@ impl Listener {
         }
     }
 
-    pub async fn end_invocation_handler(
-        headers: HeaderMap,
+    pub async fn universal_instrumentation_end(
+        headers: &HeaderMap,
         body: Body,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
@@ -174,7 +175,7 @@ impl Listener {
             .body(Body::from(json!({}).to_string()))
     }
 
-    fn headers_to_map(headers: http::HeaderMap) -> HashMap<String, String> {
+    fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
         headers
             .iter()
             .map(|(k, v)| {

@@ -312,7 +312,12 @@ impl TraceAgent {
                 }
             },
         };
-
+        debug!("TA: handle_traces: body_size: {:?}", body_size);
+        for t in traces.iter() {
+            for s in t {
+                debug!("TA: handle_traces: trace: {:?}", s);
+            }
+        }
         let send_data = trace_processor.process_traces(
             config,
             tags_provider,
