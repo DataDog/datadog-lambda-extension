@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-
 use datadog_trace_protobuf::pb::Span;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tracing::debug;
 
-use crate::config::AwsConfig;
+use crate::config::{AwsConfig, Config};
 
 use crate::lifecycle::invocation::{
     generate_span_id,
@@ -22,8 +22,9 @@ use crate::lifecycle::invocation::{
         Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
     },
 };
+use crate::traces::context::SpanContext;
+use crate::traces::propagation::extract_composite;
 use crate::traces::span_pointers::SpanPointer;
-use crate::traces::{context::SpanContext, propagation::Propagator};
 
 #[derive(Default)]
 pub struct SpanInferrer {
@@ -305,13 +306,17 @@ impl SpanInferrer {
     /// If the carrier is set, it will try to extract the span context,
     /// otherwise it will
     ///
-    pub fn get_span_context(&self, propagator: &impl Propagator) -> Option<SpanContext> {
+    pub fn get_span_context(&self, config: &Arc<Config>) -> Option<SpanContext> {
         // Step Functions `SpanContext` is deterministically generated
         if self.generated_span_context.is_some() {
             return self.generated_span_context.clone();
         }
 
-        if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
+        if let Some(sc) = self
+            .carrier
+            .as_ref()
+            .and_then(|c| extract_composite(config, c))
+        {
             debug!("Extracted trace context from inferred span");
             return Some(sc);
         }
