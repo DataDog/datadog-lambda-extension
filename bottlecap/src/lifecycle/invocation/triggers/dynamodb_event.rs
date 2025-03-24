@@ -46,6 +46,8 @@ pub struct DynamoDbEntity {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum AttributeValue {
+    // An attribute value is formatted like this: {"S": "string_value"}
+    // and it can be a string, number, or binary value.
     S {
         #[serde(rename = "S")]
         string_value: String,
@@ -61,7 +63,7 @@ pub enum AttributeValue {
 }
 
 impl AttributeValue {
-    fn get_string_value(&self) -> Option<String> {
+    fn to_string(&self) -> Option<String> {
         match self {
             AttributeValue::S { string_value } => Some(string_value.clone()),
             AttributeValue::N { number_value } => Some(number_value.clone()),
@@ -184,59 +186,49 @@ impl DynamoDbRecord {
         if self.dynamodb.keys.is_empty() {
             return None;
         }
+
         let table_name = self.get_specific_identifier();
 
-        if self.dynamodb.keys.len() == 1 {
-            let (primary_key1, attr_value) = self
+        // DynamoDB tables have either one primary key (partition key) or two primary keys (partition + sort)
+        let (primary_key1, value1, primary_key2, value2) = if self.dynamodb.keys.len() == 1 {
+            // Single primary key case
+            let (key, attr_value) = self
                 .dynamodb
                 .keys
                 .iter()
                 .next()
                 .expect("No DynamoDB keys found");
-            let value1 = attr_value.get_string_value()?;
 
-            let parts = [
-                table_name.as_str(),
-                primary_key1.as_str(),
-                value1.as_str(),
-                "",
-                "",
-            ];
-            let hash = generate_span_pointer_hash(&parts);
-
-            Some(vec![SpanPointer {
-                hash,
-                kind: String::from("aws.dynamodb.item"),
-            }])
+            let value = attr_value.to_string()?;
+            (key.clone(), value, String::new(), String::new())
         } else {
-            let keys: Vec<(&String, &AttributeValue)> = self.dynamodb.keys.iter().collect();
+            // Two keys case, sort lexicographically for consistent ordering
+            let mut keys: Vec<(&String, &AttributeValue)> = self.dynamodb.keys.iter().collect();
+            keys.sort_by(|a, b| a.0.cmp(b.0));
 
-            // Sort lexicographically
-            let ((primary_key1, attribute_value1), (primary_key2, attribute_value2)) =
-                if keys[0].0 < keys[1].0 {
-                    (keys[0], keys[1])
-                } else {
-                    (keys[1], keys[0])
-                };
-
+            let (k1, attr1) = keys[0];
             // If unable to get string value, just return None
-            let value1 = attribute_value1.get_string_value()?;
-            let value2 = attribute_value2.get_string_value()?;
+            let v1 = attr1.to_string()?;
 
-            let parts = [
-                table_name.as_str(),
-                primary_key1.as_str(),
-                value1.as_str(),
-                primary_key2.as_str(),
-                value2.as_str(),
-            ];
-            let hash = generate_span_pointer_hash(&parts);
+            let (k2, attr2) = keys[1];
+            let v2 = attr2.to_string()?;
+            
+            (k1.clone(), v1, k2.clone(), v2)
+        };
 
-            Some(vec![SpanPointer {
-                hash,
-                kind: String::from("aws.dynamodb.item"),
-            }])
-        }
+        let parts = [
+            table_name.as_str(),
+            primary_key1.as_str(),
+            value1.as_str(),
+            primary_key2.as_str(),
+            value2.as_str(),
+        ];
+        let hash = generate_span_pointer_hash(&parts);
+
+        Some(vec![SpanPointer {
+            hash,
+            kind: String::from("aws.dynamodb.item"),
+        }])
     }
 }
 
