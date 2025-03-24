@@ -311,11 +311,14 @@ impl Processor {
                 .meta
                 .insert("request_id".to_string(), request_id.clone());
             // todo(duncanista): add missing tags
-            // - language
             // - metrics tags (for asm)
 
             if let Some(tracer_span) = &context.tracer_span {
                 self.span.meta.extend(tracer_span.meta.clone());
+                self.span
+                    .meta_struct
+                    .extend(tracer_span.meta_struct.clone());
+                self.span.metrics.extend(tracer_span.metrics.clone());
             }
 
             if let Some(offsets) = &context.enhanced_metric_data {
@@ -329,6 +332,7 @@ impl Processor {
                 _ = offsets.process_chan_tx.send(());
             }
         }
+        // Drop the context buffer lock before awaiting
         drop(context_buffer);
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
