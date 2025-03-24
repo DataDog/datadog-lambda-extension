@@ -44,31 +44,21 @@ pub struct DynamoDbEntity {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+// An attribute value is formatted like this: {"S": "string_value"}
+// and it can be a string, number (as a string), or binary value (as a Base64-encoded string).
 pub enum AttributeValue {
-    // An attribute value is formatted like this: {"S": "string_value"}
-    // and it can be a string, number, or binary value.
-    S {
-        #[serde(rename = "S")]
-        string_value: String,
-    },
-    N {
-        #[serde(rename = "N")]
-        number_value: String,
-    },
-    B {
-        #[serde(rename = "B")]
-        binary_value: String,
-    },
+    S(String),
+    N(String),
+    B(String),
 }
 
 impl AttributeValue {
     fn to_string(&self) -> Option<String> {
         match self {
-            AttributeValue::S { string_value } => Some(string_value.clone()),
-            AttributeValue::N { number_value } => Some(number_value.clone()),
-            // Binary values are Base64-encoded in ASCII
-            AttributeValue::B { binary_value } => STANDARD
+            AttributeValue::S(string_value) => Some(string_value.clone()),
+            AttributeValue::N(number_value) => Some(number_value.clone()),
+            // Binary values are Base64-encoded strings
+            AttributeValue::B(binary_value) => STANDARD
                 .decode(binary_value)
                 .ok()
                 .and_then(|bytes| String::from_utf8(bytes).ok()),
@@ -246,9 +236,7 @@ mod tests {
         let mut expected_keys = HashMap::new();
         expected_keys.insert(
             "Id".to_string(),
-            AttributeValue::N {
-                number_value: "101".to_string(),
-            },
+            AttributeValue::N("101".to_string()),
         );
 
         let expected = DynamoDbRecord {
@@ -384,9 +372,7 @@ mod tests {
         let mut keys = HashMap::new();
         keys.insert(
             "id".to_string(),
-            AttributeValue::S {
-                string_value: "abc123".to_string(),
-            },
+            AttributeValue::S("abc123".to_string()),
         );
 
         let event = DynamoDbRecord {
@@ -413,15 +399,11 @@ mod tests {
         let mut keys = HashMap::new();
         keys.insert(
             "num_key".to_string(),
-            AttributeValue::N {
-                number_value: "42".to_string(),
-            },
+            AttributeValue::N("42".to_string()),
         );
         keys.insert(
             "bin_key".to_string(),
-            AttributeValue::B {
-                binary_value: STANDARD.encode("Hello World".as_bytes()),
-            },
+            AttributeValue::B(STANDARD.encode("Hello World".as_bytes())),
         );
 
         let event = DynamoDbRecord {
@@ -449,15 +431,11 @@ mod tests {
         let mut keys = HashMap::new();
         keys.insert(
             "bin_key".to_string(),
-            AttributeValue::B {
-                binary_value: STANDARD.encode("Hello World".as_bytes()),
-            },
+            AttributeValue::B(STANDARD.encode("Hello World".as_bytes())),
         );
         keys.insert(
             "num_key".to_string(),
-            AttributeValue::N {
-                number_value: "42".to_string(),
-            },
+            AttributeValue::N("42".to_string()),
         );
 
         let event = DynamoDbRecord {
