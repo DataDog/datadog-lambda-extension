@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -60,7 +61,11 @@ impl AttributeValue {
         } else if let Some(n) = &self.N {
             Some(n.clone())
         } else if let Some(b) = &self.B {
-            Some(b.clone())
+            // For binary values, convert bytes to string
+            match STANDARD.decode(b) {
+                Ok(bytes) => String::from_utf8(bytes).ok(),
+                Err(_) => None,
+            }
         } else {
             None
         }
