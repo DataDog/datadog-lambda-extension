@@ -57,19 +57,22 @@ pub struct AttributeValue {
 impl AttributeValue {
     fn get_string_value(&self) -> Option<String> {
         if let Some(s) = &self.S {
-            Some(s.clone())
-        } else if let Some(n) = &self.N {
-            Some(n.clone())
-        } else if let Some(b) = &self.B {
+            return Some(s.clone());
+        }
+        
+        if let Some(n) = &self.N {
+            return Some(n.clone());
+        }
+        
+        if let Some(b) = &self.B {
             // Binary values are Base64-encoded in ASCII
-            // Decode the Base64 to get the original binary data
-            match STANDARD.decode(b) {
+            return match STANDARD.decode(b) {
                 Ok(bytes) => String::from_utf8(bytes).ok(),
                 Err(_) => None,
-            }
-        } else {
-            None
+            };
         }
+        
+        None
     }
 }
 
