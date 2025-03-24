@@ -180,30 +180,33 @@ impl DynamoDbRecord {
         let table_name = self.get_specific_identifier();
 
         // DynamoDB tables have either one primary key (partition key) or two primary keys (partition + sort)
-        let (primary_key1, value1, primary_key2, value2) = if self.dynamodb.keys.len() == 1 {
-            // Single primary key case
-            let (key, attr_value) = self
-                .dynamodb
-                .keys
-                .iter()
-                .next()
-                .expect("No DynamoDB keys found");
+        #[allow(clippy::single_match_else)]
+        let (primary_key1, value1, primary_key2, value2) = match self.dynamodb.keys.len() {
+            1 => {
+                let (key, attr_value) = self
+                    .dynamodb
+                    .keys
+                    .iter()
+                    .next()
+                    .expect("No DynamoDB keys found");
 
-            let value = attr_value.to_string()?;
-            (key.clone(), value, String::new(), String::new())
-        } else {
-            // Two keys case, sort lexicographically for consistent ordering
-            let mut keys: Vec<(&String, &AttributeValue)> = self.dynamodb.keys.iter().collect();
-            keys.sort_by(|a, b| a.0.cmp(b.0));
+                let value = attr_value.to_string()?;
+                (key.clone(), value, String::new(), String::new())
+            }
+            _ => {
+                // For two keys, sort lexicographically for consistent ordering
+                let mut keys: Vec<(&String, &AttributeValue)> = self.dynamodb.keys.iter().collect();
+                keys.sort_by(|a, b| a.0.cmp(b.0));
 
-            let (k1, attr1) = keys[0];
-            // If unable to get string value, just return None
-            let v1 = attr1.to_string()?;
+                let (k1, attr1) = keys[0];
+                // If unable to get string value, just return None
+                let v1 = attr1.to_string()?;
 
-            let (k2, attr2) = keys[1];
-            let v2 = attr2.to_string()?;
+                let (k2, attr2) = keys[1];
+                let v2 = attr2.to_string()?;
 
-            (k1.clone(), v1, k2.clone(), v2)
+                (k1.clone(), v1, k2.clone(), v2)
+            }
         };
 
         let parts = [
