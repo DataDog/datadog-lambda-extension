@@ -57,7 +57,7 @@ impl AttributeValue {
         match self {
             AttributeValue::S(string_value) => Some(string_value.clone()),
             AttributeValue::N(number_value) => Some(number_value.clone()),
-            // Binary values are Base64-encoded strings
+            // Convert Base64-encoded string to original string
             AttributeValue::B(binary_value) => STANDARD
                 .decode(binary_value)
                 .ok()
@@ -202,7 +202,7 @@ impl DynamoDbRecord {
 
             let (k2, attr2) = keys[1];
             let v2 = attr2.to_string()?;
-            
+
             (k1.clone(), v1, k2.clone(), v2)
         };
 
@@ -234,10 +234,7 @@ mod tests {
         let result = DynamoDbRecord::new(payload).expect("Failed to deserialize into Record");
 
         let mut expected_keys = HashMap::new();
-        expected_keys.insert(
-            "Id".to_string(),
-            AttributeValue::N("101".to_string()),
-        );
+        expected_keys.insert("Id".to_string(), AttributeValue::N("101".to_string()));
 
         let expected = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
@@ -370,10 +367,7 @@ mod tests {
     #[test]
     fn test_get_span_pointers_single_key() {
         let mut keys = HashMap::new();
-        keys.insert(
-            "id".to_string(),
-            AttributeValue::S("abc123".to_string()),
-        );
+        keys.insert("id".to_string(), AttributeValue::S("abc123".to_string()));
 
         let event = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
@@ -397,10 +391,7 @@ mod tests {
     #[test]
     fn test_get_span_pointers_mixed_keys() {
         let mut keys = HashMap::new();
-        keys.insert(
-            "num_key".to_string(),
-            AttributeValue::N("42".to_string()),
-        );
+        keys.insert("num_key".to_string(), AttributeValue::N("42".to_string()));
         keys.insert(
             "bin_key".to_string(),
             AttributeValue::B(STANDARD.encode("Hello World".as_bytes())),
@@ -433,10 +424,7 @@ mod tests {
             "bin_key".to_string(),
             AttributeValue::B(STANDARD.encode("Hello World".as_bytes())),
         );
-        keys.insert(
-            "num_key".to_string(),
-            AttributeValue::N("42".to_string()),
-        );
+        keys.insert("num_key".to_string(), AttributeValue::N("42".to_string()));
 
         let event = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
