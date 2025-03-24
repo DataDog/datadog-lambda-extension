@@ -13,9 +13,8 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::config_utils::trace_intake_url;
-use datadog_trace_utils::send_data::{RetryBackoffType, RetryStrategy};
-use datadog_trace_utils::trace_utils::SendData;
+use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
+use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{
@@ -24,6 +23,7 @@ use datadog_trace_utils::tracer_payload::{
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::error;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -147,26 +147,31 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 span_pointers,
             },
             true,
-        );
-        match payload {
-            TracerPayloadCollection::V04(_) => {}
-            TracerPayloadCollection::V07(ref mut collection) => {
-                // add function tags to all payloads in this TracerPayloadCollection
-                let tags = tags_provider.get_function_tags_map();
-                for tracer_payload in collection.iter_mut() {
-                    tracer_payload.tags.extend(tags.clone());
-                }
+            false,
+        )
+        .unwrap_or_else(|e| {
+            error!("Error processing traces: {:?}", e);
+            TracerPayloadCollection::V07(vec![])
+        });
+        if let TracerPayloadCollection::V07(ref mut collection) = payload {
+            // add function tags to all payloads in this TracerPayloadCollection
+            let tags = tags_provider.get_function_tags_map();
+            for tracer_payload in collection.iter_mut() {
+                tracer_payload.tags.extend(tags.clone());
             }
         }
-        let intake_url = trace_intake_url(&config.site);
         let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&intake_url).expect("can't parse trace intake URL, exiting"),
+            url: hyper::Uri::from_str(&config.apm_config_apm_dd_url)
+                .expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
             timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
 
-        let mut send_data = SendData::new(body_size, payload, header_tags, &endpoint);
+        let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
+        let mut send_data = send_data_builder
+            .with_compression(Compression::Zstd(6))
+            .build();
         send_data.set_retry_strategy(RetryStrategy::new(
             1,
             100,
@@ -205,6 +210,7 @@ mod tests {
 
     fn create_test_config() -> Arc<Config> {
         Arc::new(Config {
+            apm_config_apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             service: Some("test-service".to_string()),
             tags: Some("test:tag,env:test-env".to_string()),
             ..Config::default()

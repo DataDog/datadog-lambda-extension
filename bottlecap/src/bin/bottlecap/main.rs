@@ -19,10 +19,7 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{
-        agent::LogsAgent,
-        flusher::{build_fqdn_logs, Flusher as LogsFlusher},
-    },
+    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     secrets::decrypt,
     tags::{
         lambda::{self, tags::EXTENSION_VERSION},
@@ -31,7 +28,7 @@ use bottlecap::{
     telemetry::{
         self,
         client::TelemetryApiClient,
-        events::{RuntimeDoneMetrics, Status, TelemetryEvent, TelemetryRecord},
+        events::{TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
     },
     traces::{
@@ -50,7 +47,10 @@ use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
-    datadog::{MetricsIntakeUrlPrefix, Site as MetricsSite},
+    datadog::{
+        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
+        RetryStrategy as DsdRetryStrategy, Site as MetricsSite,
+    },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
@@ -185,7 +185,8 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (mut aws_config, config) = load_configs();
+    let start_time = Instant::now();
+    let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
@@ -202,7 +203,16 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
-        match extension_loop_active(&aws_config, &config, &client, &r, resolved_api_key).await {
+        match extension_loop_active(
+            &aws_config,
+            &config,
+            &client,
+            &r,
+            resolved_api_key,
+            start_time,
+        )
+        .await
+        {
             Ok(()) => {
                 debug!("Extension loop completed successfully");
                 Ok(())
@@ -220,7 +230,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn load_configs() -> (AwsConfig, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     // First load the configuration
     let aws_config = AwsConfig {
         region: env::var("AWS_DEFAULT_REGION").unwrap_or("us-east-1".to_string()),
@@ -232,7 +242,7 @@ fn load_configs() -> (AwsConfig, Arc<Config>) {
         aws_container_authorization_token: env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN")
             .unwrap_or_default(),
         function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
-        sandbox_init_time: Instant::now(),
+        sandbox_init_time: start_time,
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
@@ -290,6 +300,7 @@ async fn extension_loop_active(
     client: &Client,
     r: &RegisterResponse,
     resolved_api_key: String,
+    start_time: Instant,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
@@ -315,17 +326,8 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
-    let flusher_config = MetricsFlusherConfig {
-        api_key: resolved_api_key.clone(),
-        aggregator: Arc::clone(&metrics_aggr),
-        metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
-            .expect("can't parse metrics intake URL from site"),
-        https_proxy: config.https_proxy.clone(),
-        timeout: Duration::from_secs(config.flush_timeout),
-    };
-    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
-
+    let mut metrics_flusher =
+        start_metrics_flusher(resolved_api_key.clone(), &metrics_aggr, config);
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -358,6 +360,10 @@ async fn extension_loop_active(
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
+    debug!(
+        "Datadog Next-Gen Extension ready in {:}ms",
+        start_time.elapsed().as_millis().to_string()
+    );
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
 
@@ -370,24 +376,14 @@ async fn extension_loop_active(
             // flush everything
             // call next
             // optionally flush after tick for long running invos
-            'inner: loop {
+            'flush_end: loop {
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(runtime_done_meta) = handle_event_bus_event(event, invocation_processor.clone()).await {
-                            let mut p = invocation_processor.lock().await;
-                            p.on_platform_runtime_done(
-                                &runtime_done_meta.request_id,
-                                runtime_done_meta.metrics.duration_ms,
-                                runtime_done_meta.status,
-                                config.clone(),
-                                tags_provider.clone(),
-                                trace_processor.clone(),
-                                trace_agent_channel.clone(),
-                                runtime_done_meta.timestamp,
-                            ).await;
-                            drop(p);
-                            break 'inner;
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                break 'flush_end;
+                            }
                         }
                     }
                     _ = race_flush_interval.tick() => {
@@ -412,71 +408,19 @@ async fn extension_loop_active(
             .await;
             let next_response = next_event(client, &r.extension_id).await;
             shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
-        } else if flush_control.should_periodic_flush() {
-            // Should flush at the top of the invocation, which is now
-            // flush
-            //
-            flush_all(
-                &logs_flusher,
-                &mut metrics_flusher,
-                &*trace_flusher,
-                &*stats_flusher,
-                &mut race_flush_interval,
-            )
-            .await;
-            race_flush_interval.reset();
-            // Don't await! Pin it and check in the tokio loop
-            // Tokio select! drops whatever task does not complete first
-            // but the state machine API in Lambda will give us an invalid error
-            // if we call /next twice instead of waiting
-            let next_lambda_response = next_event(client, &r.extension_id);
-            tokio::pin!(next_lambda_response);
-            // call next
-            // optionally flush after tick for long running invos
-            'inner: loop {
-                tokio::select! {
-                biased;
-                    next_response = &mut next_lambda_response => {
-                        // Dear reader this is important, you may be tempted to remove this
-                        // after all, why reset the flush interval if we're not flushing?
-                        // It's because the race_flush_interval is only for the RACE FLUSH
-                        // For long-running txns. The call to `flush_control.should_flush_end()`
-                        // has its own interval which is not reset here.
-                        race_flush_interval.reset();
-                        // Thank you for not removing race_flush_interval.reset();
-
-                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
-                        // Need to break here to re-call next
-                        break 'inner;
-                    }
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(runtime_done_meta) = handle_event_bus_event(event, invocation_processor.clone()).await {
-                            let mut p = invocation_processor.lock().await;
-                            p.on_platform_runtime_done(
-                                &runtime_done_meta.request_id,
-                                runtime_done_meta.metrics.duration_ms,
-                                runtime_done_meta.status,
-                                config.clone(),
-                                tags_provider.clone(),
-                                trace_processor.clone(),
-                                trace_agent_channel.clone(),
-                                runtime_done_meta.timestamp,
-                            ).await;
-                            drop(p);
-                        }
-                    }
-                    _ = race_flush_interval.tick() => {
-                        flush_all(
-                            &logs_flusher,
-                            &mut metrics_flusher,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                        ).await;
-                    }
-                }
-            }
         } else {
+            //Periodic flush scenario, flush at top of invocation
+            if flush_control.should_periodic_flush() {
+                // Should flush at the top of the invocation, which is now
+                flush_all(
+                    &logs_flusher,
+                    &mut metrics_flusher,
+                    &*trace_flusher,
+                    &*stats_flusher,
+                    &mut race_flush_interval,
+                )
+                .await;
+            }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
             // If we get platform.runtimeDone or platform.runtimeReport
@@ -484,7 +428,7 @@ async fn extension_loop_active(
             // and then we break to determine if we'll flush or not
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
-            'inner: loop {
+            'next_invocation: loop {
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
@@ -498,23 +442,10 @@ async fn extension_loop_active(
 
                         shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
-                        break 'inner;
+                        break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(runtime_done_meta) = handle_event_bus_event(event, invocation_processor.clone()).await {
-                            let mut p = invocation_processor.lock().await;
-                            p.on_platform_runtime_done(
-                                &runtime_done_meta.request_id,
-                                runtime_done_meta.metrics.duration_ms,
-                                runtime_done_meta.status,
-                                config.clone(),
-                                tags_provider.clone(),
-                                trace_processor.clone(),
-                                trace_agent_channel.clone(),
-                                runtime_done_meta.timestamp,
-                            ).await;
-                            drop(p);
-                        }
+                        handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
                         flush_all(
@@ -530,6 +461,18 @@ async fn extension_loop_active(
         }
 
         if shutdown {
+            'shutdown: loop {
+                tokio::select! {
+                    Some(event) = event_bus.rx.recv() => {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
+                                // Wait for the report event before shutting down
+                                break 'shutdown;
+                            }
+                        }
+                    }
+                }
+            }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             flush_all(
@@ -561,17 +504,14 @@ async fn flush_all(
     race_flush_interval.reset();
 }
 
-struct RuntimeDoneMeta {
-    request_id: String,
-    status: Status,
-    metrics: RuntimeDoneMetrics,
-    timestamp: i64,
-}
-
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
-) -> Option<RuntimeDoneMeta> {
+    config: Arc<Config>,
+    tags_provider: Arc<TagProvider>,
+    trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
+    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
+) -> Option<TelemetryEvent> {
     match event {
         Event::Metric(event) => {
             debug!("Metric event: {:?}", event);
@@ -603,44 +543,35 @@ async fn handle_event_bus_event(
                 drop(p);
             }
             TelemetryRecord::PlatformRuntimeDone {
-                request_id,
+                ref request_id,
+                metrics: Some(metrics),
                 status,
-                metrics,
-                error_type,
                 ..
             } => {
-                debug!(
-                    "Runtime done for request_id: {:?} with status: {:?} and error: {:?}",
+                let mut p = invocation_processor.lock().await;
+                p.on_platform_runtime_done(
                     request_id,
+                    metrics,
                     status,
-                    error_type.unwrap_or("None".to_string())
-                );
-
-                if let Some(metrics) = metrics {
-                    return Some(RuntimeDoneMeta {
-                        request_id,
-                        status,
-                        metrics,
-                        timestamp: event.time.timestamp(),
-                    });
-                }
+                    config.clone(),
+                    tags_provider.clone(),
+                    trace_processor.clone(),
+                    trace_agent_channel.clone(),
+                    event.time.timestamp(),
+                )
+                .await;
+                drop(p);
+                return Some(event);
             }
             TelemetryRecord::PlatformReport {
-                request_id,
-                status,
+                ref request_id,
                 metrics,
-                error_type,
                 ..
             } => {
-                debug!(
-                    "Platform report for request_id: {:?} with status: {:?} and error: {:?}",
-                    request_id,
-                    status,
-                    error_type.unwrap_or("None".to_string())
-                );
                 let mut p = invocation_processor.lock().await;
-                p.on_platform_report(&request_id, metrics, event.time.timestamp());
+                p.on_platform_report(request_id, metrics, event.time.timestamp());
                 drop(p);
+                return Some(event);
             }
             _ => {
                 debug!("Unforwarded Telemetry event: {:?}", event);
@@ -713,13 +644,44 @@ fn start_logs_agent(
     let logs_flusher = LogsFlusher::new(
         resolved_api_key,
         Arc::clone(&logs_agent.aggregator),
-        build_fqdn_logs(config.site.clone()),
         config.clone(),
     );
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
     (logs_agent_channel, logs_flusher)
+}
+
+fn start_metrics_flusher(
+    resolved_api_key: String,
+    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
+    config: &Arc<Config>,
+) -> MetricsFlusher {
+    let metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else if !config.url.is_empty() {
+        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else {
+        // use site
+        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+    };
+
+    let flusher_config = MetricsFlusherConfig {
+        api_key: resolved_api_key,
+        aggregator: Arc::clone(metrics_aggr),
+        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
+        https_proxy: config.https_proxy.clone(),
+        timeout: Duration::from_secs(config.flush_timeout),
+        retry_strategy: DsdRetryStrategy::Immediate(3),
+    };
+    MetricsFlusher::new(flusher_config)
 }
 
 fn start_trace_agent(
@@ -749,9 +711,14 @@ fn start_trace_agent(
         config: Arc::clone(config),
     });
 
-    let obfuscation_config = obfuscation_config::ObfuscationConfig::new()
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
-        .expect("Failed to create obfuscation config for Trace Agent");
+    let obfuscation_config = obfuscation_config::ObfuscationConfig {
+        tag_replace_rules: config.apm_config_replace_tags.clone(),
+        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
+        obfuscate_memcached: false,
+        obfuscation_redis_enabled: false,
+        obfuscation_redis_remove_all_args: false,
+    };
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),

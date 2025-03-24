@@ -7,6 +7,7 @@ use crate::lifecycle::invocation_times::InvocationTimes;
 
 const DEFAULT_FLUSH_INTERVAL: u64 = 60 * 1000; // 60s
 const TWENTY_SECONDS: u64 = 20 * 1000;
+const FIFTEEN_MINUTES: u64 = 15 * 60 * 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FlushControl {
@@ -63,7 +64,9 @@ impl FlushControl {
             FlushStrategy::Periodically(p) | FlushStrategy::EndPeriodically(p) => {
                 tokio::time::interval(tokio::time::Duration::from_millis(p.interval))
             }
-            FlushStrategy::End => tokio::time::interval(tokio::time::Duration::MAX),
+            FlushStrategy::End => {
+                tokio::time::interval(tokio::time::Duration::from_millis(FIFTEEN_MINUTES))
+            }
         }
     }
 
@@ -165,7 +168,7 @@ mod tests {
         let flush_control = FlushControl::new(FlushStrategy::End);
         assert_eq!(
             flush_control.get_flush_interval().period().as_millis(),
-            tokio::time::Duration::MAX.as_millis()
+            tokio::time::Duration::from_millis(FIFTEEN_MINUTES).as_millis()
         );
     }
 }

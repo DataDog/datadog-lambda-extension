@@ -31,6 +31,13 @@ else
     printf "Alpine compile requested: ${ALPINE}\n"
 fi
 
+if [ -z "$FIPS" ]; then
+    printf "[ERROR]: FIPS not specified\n"
+    exit 1
+else
+    printf "Fips compile requested: ${FIPS}\n"
+fi
+
 if [ -z "$CI_COMMIT_TAG" ]; then
     # Running on dev
     printf "Running on dev environment\n"
@@ -49,9 +56,18 @@ else
     COMPILE_IMAGE=Dockerfile.go_agent.alpine.compile
 fi
 
+if [ -z "$SUFFIX" ]; then
+    printf "No suffix provided, using ${ARCHITECTURE}\n"
+    SUFFIX=$ARCHITECTURE
+fi
+
 # Allow override build tags
 if [ -z "$BUILD_TAGS" ]; then
-    BUILD_TAGS="serverless otlp"
+    if [ "$FIPS" = "0" ]; then
+        BUILD_TAGS="serverless otlp"
+    else
+        BUILD_TAGS="serverless otlp serverlessfips"
+    fi
 fi
 
 # Allow override agent path
@@ -89,6 +105,7 @@ function docker_compile {
         --build-arg EXTENSION_VERSION="${VERSION}" \
         --build-arg AGENT_VERSION="${AGENT_VERSION}" \
         --build-arg BUILD_TAGS="${BUILD_TAGS}" \
+        --build-arg FIPS="${FIPS}" \
         . -o $BINARY_PATH
 
     # Copy the compiled binary to the target directory with the expected name

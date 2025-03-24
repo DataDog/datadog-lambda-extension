@@ -10,7 +10,7 @@ use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
-use crate::telemetry::events::{TelemetryEvent, TelemetryRecord};
+use crate::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::LAMBDA_RUNTIME_SLUG;
 
 use crate::logs::lambda::{IntakeLog, Message};
@@ -155,20 +155,23 @@ impl LambdaProcessor {
                     event.time.timestamp_millis(),
                 ))
             },
-            TelemetryRecord::PlatformRuntimeDone { request_id , metrics, .. } => {  // TODO: check what to do with rest of the fields
+            TelemetryRecord::PlatformRuntimeDone { request_id, status, metrics, .. } => {  // TODO: check what to do with rest of the fields
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
+                let mut message = format!("END RequestId: {request_id}"); 
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
+                    if status == Status::Timeout {
+                        message.push_str(format!(" Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0).as_str());
+                    }
                 }
-
                 // Remove the `request_id` since no more orphan logs will be processed with this one
                 self.invocation_context.request_id = String::new();
 
                 Ok(Message::new(
-                    format!("END RequestId: {request_id}"),
+                    message,
                     Some(request_id),
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
@@ -186,7 +189,7 @@ impl LambdaProcessor {
                 }
 
                 let mut message = format!(
-                    "REPORT RequestId: {} Duration: {} ms Runtime Duration: {} ms Post Runtime Duration: {} ms Billed Duration: {} ms Memory Size: {} MB Max Memory Used: {} MB",
+                    "REPORT RequestId: {} Duration: {:.2} ms Runtime Duration: {:.2} ms Post Runtime Duration: {:.2} ms Billed Duration: {:.2} ms Memory Size: {} MB Max Memory Used: {} MB",
                     request_id,
                     metrics.duration_ms,
                     self.invocation_context.runtime_duration_ms,
@@ -198,7 +201,7 @@ impl LambdaProcessor {
 
                 let init_duration_ms = metrics.init_duration_ms;
                 if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{message} Init Duration: {init_duration_ms} ms");
+                    message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
                 }
 
                 Ok(Message::new(
@@ -226,13 +229,47 @@ impl LambdaProcessor {
         };
 
         lambda_message.lambda.request_id = request_id;
-
-        let log = IntakeLog {
-            hostname: self.function_arn.clone(),
-            source: LAMBDA_RUNTIME_SLUG.to_string(),
-            service: self.service.clone(),
-            tags: self.tags.clone(),
-            message: lambda_message,
+        // Test if message is a JSON object, it may have tags we need to pass along.
+        // Don't care about host, service, and status, since we'll override them.
+        let parsed_message =
+            serde_json::from_str::<serde_json::Value>(lambda_message.message.as_str());
+        let log = match parsed_message {
+            Ok(serde_json::Value::Object(mut obj)) => {
+                let mut tags = self.tags.clone();
+                let final_message = if let Some(inner_message) = obj.get_mut("message") {
+                    if let Some(serde_json::Value::String(message_tags)) =
+                        inner_message.get("ddtags")
+                    {
+                        tags.push(',');
+                        tags.push_str(message_tags);
+                        if let Some(inner_message_object) = inner_message.as_object_mut() {
+                            inner_message_object.remove("ddtags");
+                        }
+                    }
+                    inner_message.to_string()
+                } else {
+                    lambda_message.message.clone()
+                };
+                IntakeLog {
+                    hostname: self.function_arn.clone(),
+                    source: LAMBDA_RUNTIME_SLUG.to_string(),
+                    service: self.service.clone(),
+                    tags,
+                    message: Message {
+                        message: final_message,
+                        lambda: lambda_message.lambda,
+                        timestamp: lambda_message.timestamp,
+                        status: lambda_message.status,
+                    },
+                }
+            }
+            _ => IntakeLog {
+                hostname: self.function_arn.clone(),
+                source: LAMBDA_RUNTIME_SLUG.to_string(),
+                service: self.service.clone(),
+                tags: self.tags.clone(),
+                message: lambda_message,
+            },
         };
 
         if log.message.lambda.request_id.is_some() {
@@ -440,6 +477,31 @@ mod tests {
                 },
         ),
 
+        // platform runtime done
+        platform_runtime_done_timeout: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+                record: TelemetryRecord::PlatformRuntimeDone {
+                    request_id: "test-request-id".to_string(),
+                    status: Status::Timeout,
+                    error_type: None,
+                    metrics: Some(RuntimeDoneMetrics {
+                        duration_ms: 5000.0,
+                        produced_bytes: Some(42)
+                    })
+                }
+            },
+            Message {
+                    message: "END RequestId: test-request-id Task timed out after 5.00 seconds".to_string(),
+                    lambda: Lambda {
+                        arn: "test-arn".to_string(),
+                        request_id: Some("test-request-id".to_string()),
+                    },
+                    timestamp: 1_673_061_827_000,
+                    status: "info".to_string(),
+                },
+        ),
+
         // platform report
         platform_report: (
             &TelemetryEvent {
@@ -459,7 +521,7 @@ mod tests {
                 }
             },
             Message {
-                    message: "REPORT RequestId: test-request-id Duration: 100 ms Runtime Duration: 0 ms Post Runtime Duration: 0 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50 ms".to_string(),
+                    message: "REPORT RequestId: test-request-id Duration: 100.00 ms Runtime Duration: 0.00 ms Post Runtime Duration: 0.00 ms Billed Duration: 128 ms Memory Size: 256 MB Max Memory Used: 64 MB Init Duration: 50.00 ms".to_string(),
                     lambda: Lambda {
                         arn: "test-arn".to_string(),
                         request_id: Some("test-request-id".to_string()),
@@ -822,5 +884,63 @@ mod tests {
             serde_json::to_string(&function_log).unwrap()
         );
         assert_eq!(batch, serialized_log.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn test_process_logs_structured_ddtags() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+
+        let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
+        processor.get_intake_log(start_lambda_message).unwrap();
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details": "my-structured-message","ddtags":"added_tag1:added_value1,added_tag2:added_value2"}}"#.to_string())),
+        };
+
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        assert!(intake_log.tags.contains("added_tag1:added_value1"));
+        let function_log = IntakeLog {
+            message: Message {
+                message: r#"{"custom_details":"my-structured-message"}"#.to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string()
+                + ",added_tag1:added_value1,added_tag2:added_value2",
+        };
+        assert_eq!(intake_log, function_log);
     }
 }

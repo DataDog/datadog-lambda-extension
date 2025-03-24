@@ -14,24 +14,16 @@ use zstd::stream::write::Encoder;
 
 #[derive(Debug, Clone)]
 pub struct Flusher {
-    fqdn_site: String,
     client: reqwest::Client,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
     headers: HeaderMap,
 }
 
-#[inline]
-#[must_use]
-pub fn build_fqdn_logs(site: String) -> String {
-    format!("https://http-intake.logs.{site}")
-}
-
 impl Flusher {
     pub fn new(
         api_key: String,
         aggregator: Arc<Mutex<Aggregator>>,
-        site: String,
         config: Arc<config::Config>,
     ) -> Self {
         let client = http_client::get_client(config.clone());
@@ -57,7 +49,6 @@ impl Flusher {
         }
 
         Flusher {
-            fqdn_site: site,
             client,
             aggregator,
             config,
@@ -94,7 +85,7 @@ impl Flusher {
     }
 
     fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
-        let url = format!("{}/api/v2/logs", self.fqdn_site);
+        let url = format!("{}/api/v2/logs", self.config.logs_config_logs_dd_url);
         let body = self.compress(data);
         self.client
             .post(&url)

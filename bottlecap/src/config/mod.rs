@@ -1,9 +1,12 @@
+pub mod apm_replace_rule;
 pub mod flush_strategy;
 pub mod log_level;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
 
+use datadog_trace_obfuscation::replacer::ReplaceRule;
+use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
@@ -16,6 +19,7 @@ use serde_json::Value;
 use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
 use crate::config::{
+    apm_replace_rule::deserialize_apm_replace_rules,
     flush_strategy::FlushStrategy,
     log_level::{deserialize_log_level, LogLevel},
     processing_rule::{deserialize_processing_rules, ProcessingRule},
@@ -38,12 +42,6 @@ pub struct FallbackConfig {
     trace_otel_enabled: bool,
     otlp_config_receiver_protocols_http_endpoint: Option<String>,
     otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
-    // intake urls
-    url: Option<String>,
-    dd_url: Option<String>,
-    logs_config_logs_dd_url: Option<String>,
-    // APM, as opposed to logs, does not use the `apm_config` prefix for env vars
-    apm_dd_url: Option<String>,
 }
 
 /// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
@@ -52,8 +50,6 @@ pub struct FallbackConfig {
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
 pub struct FallbackYamlConfig {
-    logs_config: Option<Value>,
-    apm_config: Option<Value>,
     otlp_config: Option<Value>,
 }
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -64,6 +60,30 @@ pub struct YamlLogsConfig {
     processing_rules: Option<Vec<ProcessingRule>>,
 }
 
+#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct YamlApmConfig {
+    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
+    replace_tags: Option<Vec<ReplaceRule>>,
+    obfuscation: Option<ApmObfuscation>,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Clone, Copy, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ApmObfuscation {
+    http: ApmHttpObfuscation,
+}
+
+#[derive(Debug, PartialEq, Deserialize, Clone, Copy, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ApmHttpObfuscation {
+    remove_query_string: bool,
+    remove_paths_with_digits: bool,
+}
+
 /// `YamlConfig` is a struct that represents some of the fields in the datadog.yaml file.
 ///
 /// It is used to deserialize the datadog.yaml file into a struct that can be merged with the Config struct.
@@ -72,6 +92,7 @@ pub struct YamlLogsConfig {
 #[allow(clippy::module_name_repetitions)]
 pub struct YamlConfig {
     pub logs_config: YamlLogsConfig,
+    pub apm_config: YamlApmConfig,
     pub proxy: YamlProxyConfig,
 }
 
@@ -91,7 +112,9 @@ pub struct Config {
     pub api_key: String,
     pub api_key_secret_arn: String,
     pub kms_api_key: String,
+    #[serde(deserialize_with = "deserialize_string_or_int")]
     pub env: Option<String>,
+    #[serde(deserialize_with = "deserialize_string_or_int")]
     pub service: Option<String>,
     #[serde(deserialize_with = "deserialize_string_or_int")]
     pub version: Option<String>,
@@ -102,6 +125,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
+    pub logs_config_logs_dd_url: String,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
     //flush timeout in seconds
@@ -119,6 +143,14 @@ pub struct Config {
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
+    pub apm_config_apm_dd_url: String,
+    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
+    pub apm_config_replace_tags: Option<Vec<ReplaceRule>>,
+    pub apm_config_obfuscation_http_remove_query_string: bool,
+    pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
+    // Metrics overrides
+    pub dd_url: String,
+    pub url: String,
 }
 
 impl Default for Config {
@@ -141,6 +173,7 @@ impl Default for Config {
             logs_config_processing_rules: None,
             logs_config_use_compression: true,
             logs_config_compression_level: 6,
+            logs_config_logs_dd_url: String::default(),
             // Metrics
             enhanced_metrics: true,
             https_proxy: None,
@@ -156,6 +189,12 @@ impl Default for Config {
             trace_propagation_style_extract: vec![],
             trace_propagation_extract_first: false,
             trace_propagation_http_baggage_enabled: false,
+            apm_config_apm_dd_url: String::default(),
+            apm_config_replace_tags: None,
+            apm_config_obfuscation_http_remove_query_string: false,
+            apm_config_obfuscation_http_remove_paths_with_digits: false,
+            dd_url: String::default(),
+            url: String::default(),
         }
     }
 }
@@ -219,22 +258,6 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
     {
         log_fallback_reason("otel");
         return Err(ConfigError::UnsupportedField("otel".to_string()));
-    }
-
-    // Intake URLs
-    if config.url.is_some()
-        || config.dd_url.is_some()
-        || config.logs_config_logs_dd_url.is_some()
-        || config.apm_dd_url.is_some()
-        || yaml_config
-            .logs_config
-            .is_some_and(|c| c.get("logs_dd_url").is_some())
-        || yaml_config
-            .apm_config
-            .is_some_and(|c| c.get("apm_dd_url").is_some())
-    {
-        log_fallback_reason("intake_urls");
-        return Err(ConfigError::UnsupportedField("intake_urls".to_string()));
     }
 
     // Govcloud Regions
@@ -314,8 +337,45 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
             .trace_propagation_style_extract
             .clone_from(&config.trace_propagation_style);
     }
+    if config.logs_config_logs_dd_url.is_empty() {
+        config.logs_config_logs_dd_url = build_fqdn_logs(config.site.clone());
+    }
 
+    if config.apm_config_apm_dd_url.is_empty() {
+        config.apm_config_apm_dd_url = trace_intake_url(config.site.clone().as_str());
+    } else {
+        config.apm_config_apm_dd_url =
+            trace_intake_url_prefixed(config.apm_config_apm_dd_url.as_str());
+    }
+
+    if config.apm_config_replace_tags.is_none() {
+        if let Some(rules) = yaml_config.apm_config.replace_tags {
+            config.apm_config_replace_tags = Some(rules);
+        }
+    }
+
+    if !config.apm_config_obfuscation_http_remove_paths_with_digits {
+        if let Some(obfuscation) = yaml_config.apm_config.obfuscation {
+            config.apm_config_obfuscation_http_remove_paths_with_digits =
+                obfuscation.http.remove_paths_with_digits;
+        }
+    }
+
+    if !config.apm_config_obfuscation_http_remove_query_string {
+        if let Some(obfuscation) = yaml_config.apm_config.obfuscation {
+            config.apm_config_obfuscation_http_remove_query_string =
+                obfuscation.http.remove_query_string;
+        }
+    }
+
+    // Metrics are handled by dogstatsd in Main
     Ok(config)
+}
+
+#[inline]
+#[must_use]
+fn build_fqdn_logs(site: String) -> String {
+    format!("https://http-intake.logs.{site}")
 }
 
 fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -360,6 +420,8 @@ pub fn get_aws_partition_by_region(region: &str) -> String {
 
 #[cfg(test)]
 pub mod tests {
+    use datadog_trace_obfuscation::replacer::parse_rules_from_string;
+
     use super::*;
 
     use crate::config::flush_strategy::PeriodicStrategy;
@@ -452,39 +514,86 @@ pub mod tests {
     }
 
     #[test]
-    fn test_fallback_on_intake_urls() {
+    fn test_default_logs_intake_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_APM_DD_URL", "some_url");
 
-            let config =
-                get_config(Path::new(""), MOCK_REGION).expect_err("should reject unknown fields");
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(
-                config,
-                ConfigError::UnsupportedField("intake_urls".to_string())
+                config.logs_config_logs_dd_url,
+                "https://http-intake.logs.datadoghq.com".to_string()
             );
             Ok(())
         });
     }
 
     #[test]
-    fn test_fallback_on_intake_urls_yaml() {
+    fn test_support_pci_logs_intake_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                apm_config:
-                  apm_dd_url: some_url
-            ",
-            )?;
-
-            let config =
-                get_config(Path::new(""), MOCK_REGION).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("intake_urls".to_string())
+            jail.set_env(
+                "DD_LOGS_CONFIG_LOGS_DD_URL",
+                "agent-http-intake-pci.logs.datadoghq.com:443",
             );
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(
+                config.logs_config_logs_dd_url,
+                "agent-http-intake-pci.logs.datadoghq.com:443".to_string()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_support_pci_traces_intake_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env(
+                "DD_APM_CONFIG_APM_DD_URL",
+                "https://trace-pci.agent.datadoghq.com",
+            );
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(
+                config.apm_config_apm_dd_url,
+                "https://trace-pci.agent.datadoghq.com/api/v0.2/traces".to_string()
+            );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_support_dd_dd_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_DD_URL", "custom_proxy:3128");
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.dd_url, "custom_proxy:3128".to_string());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_support_dd_url() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_URL", "custom_proxy:3128");
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.url, "custom_proxy:3128".to_string());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dd_dd_url_default() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.dd_url, String::new());
             Ok(())
         });
     }
@@ -572,6 +681,9 @@ pub mod tests {
                         TracePropagationStyle::Datadog,
                         TracePropagationStyle::TraceContext
                     ],
+                    logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
+                    apm_config_apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
+                    dd_url: String::new(), // We add the prefix in main.rs
                     ..Config::default()
                 }
             );
@@ -700,12 +812,19 @@ pub mod tests {
     }
 
     #[test]
-    fn parse_dd_version() {
+    fn parse_number_or_string_env_vars() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_VERSION", "123");
+            jail.set_env("DD_ENV", "123456890");
+            jail.set_env("DD_SERVICE", "123456");
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(config.version.expect("failed to parse DD_VERSION"), "123");
+            assert_eq!(config.env.expect("failed to parse DD_ENV"), "123456890");
+            assert_eq!(
+                config.service.expect("failed to parse DD_SERVICE"),
+                "123456"
+            );
             Ok(())
         });
     }
@@ -772,6 +891,54 @@ pub mod tests {
         });
     }
 
+    #[test]
+    fn test_parse_apm_replace_tags_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                site: datadoghq.com
+                apm_config:
+                  replace_tags:
+                    - name: '*'
+                      pattern: 'foo'
+                      repl: 'REDACTED'
+            ",
+            )?;
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            let rule = parse_rules_from_string(
+                r#"[
+                        {"name": "*", "pattern": "foo", "repl": "REDACTED"}
+                    ]"#,
+            )
+            .expect("can't parse rules");
+            assert_eq!(config.apm_config_replace_tags, Some(rule),);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_parse_apm_http_obfuscation_from_yaml() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r"
+                site: datadoghq.com
+                apm_config:
+                  obfuscation:
+                    http:
+                      remove_query_string: true
+                      remove_paths_with_digits: true
+            ",
+            )?;
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert!(config.apm_config_obfuscation_http_remove_query_string,);
+            assert!(config.apm_config_obfuscation_http_remove_paths_with_digits,);
+            Ok(())
+        });
+    }
     #[test]
     fn test_parse_trace_propagation_style() {
         figment::Jail::expect_with(|jail| {

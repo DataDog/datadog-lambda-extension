@@ -20,7 +20,7 @@ jobs:
       # scan latest released images
 
       - name: Scan latest released image with trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           image-ref: "public.ecr.aws/datadog/lambda-extension:latest"
           ignore-unfixed: true
@@ -28,7 +28,7 @@ jobs:
           format: table
 
       - name: Scan latest-alpine released image with trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           image-ref: "public.ecr.aws/datadog/lambda-extension:latest-alpine"
           ignore-unfixed: true
@@ -36,7 +36,7 @@ jobs:
           format: table
 
       - name: Scan latest serverless-init image with trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           image-ref: "datadog/serverless-init:latest"
           ignore-unfixed: true
@@ -44,7 +44,7 @@ jobs:
           format: table
 
       - name: Scan latest-alpine serverless-init image with trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           image-ref: "datadog/serverless-init:latest-alpine"
           ignore-unfixed: true
@@ -101,6 +101,13 @@ jobs:
           repository: DataDog/datadog-lambda-extension
           path: go/src/github.com/DataDog/datadog-lambda-extension
 
+      - name: Set up QEMU
+        id: qemu
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+        with:
+          image: tonistiigi/binfmt:qemu-v9.2.2-52 #v3.6.0 latest
+          platforms: amd64,arm64
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d70bba72b1f3fd22344832f00baa16ece964efeb # v3.3.0
 
@@ -110,7 +117,7 @@ jobs:
           ./scripts/build_binary_and_layer_dockerized.sh
 
       - name: Scan amd64 image with trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           image-ref: "datadog/build-lambda-extension-amd64:${{ env.VERSION }}"
           ignore-unfixed: true
@@ -118,7 +125,7 @@ jobs:
           format: table
 
       - name: Scan arm64 image with trivy
-        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb0 # v0.29.0
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
         with:
           image-ref: "datadog/build-lambda-extension-arm64:${{ env.VERSION }}"
           ignore-unfixed: true

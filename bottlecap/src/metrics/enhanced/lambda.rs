@@ -3,7 +3,7 @@ use crate::metrics::enhanced::{
     statfs::statfs_info,
 };
 use crate::proc::{self, CPUData, NetworkData};
-use crate::telemetry::events::ReportMetrics;
+use crate::telemetry::events::{ReportMetrics, RuntimeDoneMetrics};
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator::Aggregator, metric::SortedTags};
@@ -127,13 +127,13 @@ impl Lambda {
         }
     }
 
-    pub fn set_runtime_duration_metric(&self, duration_ms: f64, timestamp: i64) {
+    pub fn set_runtime_done_metrics(&self, metrics: &RuntimeDoneMetrics, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
         }
         let metric = Metric::new(
             constants::RUNTIME_DURATION_METRIC.into(),
-            MetricValue::distribution(duration_ms),
+            MetricValue::distribution(metrics.duration_ms),
             // Datadog expects this value as milliseconds, not seconds
             self.get_dynamic_value_tags(),
             Some(timestamp),
@@ -145,6 +145,24 @@ impl Lambda {
             .insert(metric)
         {
             error!("failed to insert runtime duration metric: {}", e);
+        }
+
+        if let Some(produced_bytes) = metrics.produced_bytes {
+            let metric = Metric::new(
+                constants::PRODUCED_BYTES_METRIC.into(),
+                MetricValue::distribution(produced_bytes as f64),
+                // Datadog expects this value as milliseconds, not seconds
+                self.get_dynamic_value_tags(),
+                Some(timestamp),
+            );
+            if let Err(e) = self
+                .aggregator
+                .lock()
+                .expect("lock poisoned")
+                .insert(metric)
+            {
+                error!("failed to insert produced bytes metric: {}", e);
+            }
         }
     }
 
@@ -842,7 +860,13 @@ mod tests {
         lambda.increment_errors_metric(now);
         lambda.increment_timeout_metric(now);
         lambda.set_init_duration_metric(100.0, now);
-        lambda.set_runtime_duration_metric(100.0, now);
+        lambda.set_runtime_done_metrics(
+            &RuntimeDoneMetrics {
+                duration_ms: 100.0,
+                produced_bytes: Some(42_u64),
+            },
+            now,
+        );
         lambda.set_post_runtime_duration_metric(100.0, now);
         lambda.set_report_log_metrics(
             &ReportMetrics {
@@ -870,6 +894,9 @@ mod tests {
             .is_none());
         assert!(aggr
             .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), &None, now)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::PRODUCED_BYTES_METRIC.into(), &None, now)
             .is_none());
         assert!(aggr
             .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), &None, now)
@@ -947,6 +974,31 @@ mod tests {
         assert!(aggr
             .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
             .is_none());
+    }
+
+    #[test]
+    fn test_set_runtime_done_metrics() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let runtime_done_metrics = RuntimeDoneMetrics {
+            duration_ms: 100.0,
+            produced_bytes: Some(42_u64),
+        };
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        lambda.set_runtime_done_metrics(&runtime_done_metrics, now);
+
+        assert_sketch(
+            &metrics_aggr,
+            constants::RUNTIME_DURATION_METRIC,
+            100.0,
+            now,
+        );
+        assert_sketch(&metrics_aggr, constants::PRODUCED_BYTES_METRIC, 42.0, now);
     }
 
     #[test]
