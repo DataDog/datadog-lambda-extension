@@ -250,12 +250,22 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let result = DynamoDbRecord::new(payload).expect("Failed to deserialize into Record");
 
+        let mut expected_keys = HashMap::new();
+        expected_keys.insert(
+            "Id".to_string(),
+            AttributeValue {
+                S: None,
+                N: Some("101".to_string()),
+                B: None,
+            },
+        );
+
         let expected = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
                 approximate_creation_date_time: 1_428_537_600.0,
                 size_bytes: 26,
                 stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
-                keys: Default::default(),
+                keys: expected_keys,
             },
             event_id: String::from("c4ca4238a0b923820dcc509a6f75849b"),
             event_name: String::from("INSERT"),
