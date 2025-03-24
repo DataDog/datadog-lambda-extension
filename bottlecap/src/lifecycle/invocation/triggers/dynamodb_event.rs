@@ -61,7 +61,8 @@ impl AttributeValue {
         } else if let Some(n) = &self.N {
             Some(n.clone())
         } else if let Some(b) = &self.B {
-            // For binary values, convert bytes to string
+            // Binary values are Base64-encoded in ASCII
+            // Decode the Base64 to get the original binary data
             match STANDARD.decode(b) {
                 Ok(bytes) => String::from_utf8(bytes).ok(),
                 Err(_) => None,
@@ -424,7 +425,7 @@ mod tests {
             AttributeValue {
                 S: None,
                 N: None,
-                B: Some("Hello World".to_string()),
+                B: Some(STANDARD.encode("Hello World".as_bytes())),
             },
         );
 
@@ -456,7 +457,7 @@ mod tests {
             AttributeValue {
                 S: None,
                 N: None,
-                B: Some("Hello World".to_string()),
+                B: Some(STANDARD.encode("Hello World".as_bytes())),
             },
         );
         keys.insert(
