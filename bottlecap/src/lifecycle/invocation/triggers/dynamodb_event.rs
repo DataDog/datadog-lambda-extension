@@ -59,11 +59,11 @@ impl AttributeValue {
         if let Some(s) = &self.S {
             return Some(s.clone());
         }
-        
+
         if let Some(n) = &self.N {
             return Some(n.clone());
         }
-        
+
         if let Some(b) = &self.B {
             // Binary values are Base64-encoded in ASCII
             return match STANDARD.decode(b) {
@@ -71,7 +71,7 @@ impl AttributeValue {
                 Err(_) => None,
             };
         }
-        
+
         None
     }
 }
