@@ -43,36 +43,34 @@ pub struct DynamoDbEntity {
     pub keys: HashMap<String, AttributeValue>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[allow(non_snake_case)]
-pub struct AttributeValue {
-    #[serde(default)]
-    pub S: Option<String>,
-    #[serde(default)]
-    pub N: Option<String>,
-    #[serde(default)]
-    pub B: Option<String>,
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum AttributeValue {
+    S {
+        #[serde(rename = "S")]
+        string_value: String,
+    },
+    N {
+        #[serde(rename = "N")]
+        number_value: String,
+    },
+    B {
+        #[serde(rename = "B")]
+        binary_value: String,
+    },
 }
 
 impl AttributeValue {
     fn get_string_value(&self) -> Option<String> {
-        if let Some(s) = &self.S {
-            return Some(s.clone());
-        }
-
-        if let Some(n) = &self.N {
-            return Some(n.clone());
-        }
-
-        if let Some(b) = &self.B {
+        match self {
+            AttributeValue::S { string_value } => Some(string_value.clone()),
+            AttributeValue::N { number_value } => Some(number_value.clone()),
             // Binary values are Base64-encoded in ASCII
-            return match STANDARD.decode(b) {
-                Ok(bytes) => String::from_utf8(bytes).ok(),
-                Err(_) => None,
-            };
+            AttributeValue::B { binary_value } => STANDARD
+                .decode(binary_value)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok()),
         }
-
-        None
     }
 }
 
@@ -256,10 +254,8 @@ mod tests {
         let mut expected_keys = HashMap::new();
         expected_keys.insert(
             "Id".to_string(),
-            AttributeValue {
-                S: None,
-                N: Some("101".to_string()),
-                B: None,
+            AttributeValue::N {
+                number_value: "101".to_string(),
             },
         );
 
@@ -396,10 +392,8 @@ mod tests {
         let mut keys = HashMap::new();
         keys.insert(
             "id".to_string(),
-            AttributeValue {
-                S: Some("abc123".to_string()),
-                N: None,
-                B: None,
+            AttributeValue::S {
+                string_value: "abc123".to_string(),
             },
         );
 
@@ -427,18 +421,14 @@ mod tests {
         let mut keys = HashMap::new();
         keys.insert(
             "num_key".to_string(),
-            AttributeValue {
-                S: None,
-                N: Some("42".to_string()),
-                B: None,
+            AttributeValue::N {
+                number_value: "42".to_string(),
             },
         );
         keys.insert(
             "bin_key".to_string(),
-            AttributeValue {
-                S: None,
-                N: None,
-                B: Some(STANDARD.encode("Hello World".as_bytes())),
+            AttributeValue::B {
+                binary_value: STANDARD.encode("Hello World".as_bytes()),
             },
         );
 
@@ -467,18 +457,14 @@ mod tests {
         let mut keys = HashMap::new();
         keys.insert(
             "bin_key".to_string(),
-            AttributeValue {
-                S: None,
-                N: None,
-                B: Some(STANDARD.encode("Hello World".as_bytes())),
+            AttributeValue::B {
+                binary_value: STANDARD.encode("Hello World".as_bytes()),
             },
         );
         keys.insert(
             "num_key".to_string(),
-            AttributeValue {
-                S: None,
-                N: Some("42".to_string()),
-                B: None,
+            AttributeValue::N {
+                number_value: "42".to_string(),
             },
         );
 
