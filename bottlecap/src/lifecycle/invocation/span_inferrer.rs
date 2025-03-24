@@ -176,6 +176,7 @@ impl SpanInferrer {
         } else if DynamoDbRecord::is_match(payload_value) {
             if let Some(t) = DynamoDbRecord::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
+                self.span_pointers = t.get_span_pointers();
 
                 trigger = Some(Box::new(t));
             }

@@ -8,6 +8,7 @@ use crate::lifecycle::invocation::{
     processor::S_TO_NS,
     triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
+use crate::traces::span_pointers::{generate_span_pointer_hash, SpanPointer};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct DynamoDbEvent {
@@ -37,6 +38,33 @@ pub struct DynamoDbEntity {
     pub size_bytes: i64,
     #[serde(rename = "StreamViewType")]
     pub stream_view_type: String,
+    #[serde(rename = "Keys")]
+    pub keys: HashMap<String, AttributeValue>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[allow(non_snake_case)]
+pub struct AttributeValue {
+    #[serde(default)]
+    pub S: Option<String>,
+    #[serde(default)]
+    pub N: Option<String>,
+    #[serde(default)]
+    pub B: Option<String>,
+}
+
+impl AttributeValue {
+    fn get_string_value(&self) -> Option<String> {
+        if let Some(s) = &self.S {
+            Some(s.clone())
+        } else if let Some(n) = &self.N {
+            Some(n.clone())
+        } else if let Some(b) = &self.B {
+            Some(b.clone())
+        } else {
+            None
+        }
+    }
 }
 
 impl Trigger for DynamoDbRecord {
@@ -143,6 +171,50 @@ impl ServiceNameResolver for DynamoDbRecord {
     }
 }
 
+impl DynamoDbRecord {
+    #[must_use]
+    pub fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
+        if self.dynamodb.keys.is_empty() {
+            return None;
+        }
+        let table_name = self.get_specific_identifier();
+
+        if self.dynamodb.keys.len() == 1 {
+            let (primary_key1, attr_value) = self.dynamodb.keys.iter().next().expect("No DynamoDB keys found");
+            let value1 = attr_value.get_string_value()?;
+
+            let parts = [table_name.as_str(), primary_key1.as_str(), value1.as_str(), "", ""];
+            let hash = generate_span_pointer_hash(&parts);
+
+            Some(vec![SpanPointer {
+                hash,
+                kind: String::from("aws.dynamodb.item"),
+            }])
+        } else {
+            let keys: Vec<(&String, &AttributeValue)> = self.dynamodb.keys.iter().collect();
+
+            // Sort lexicographically
+            let ((primary_key1, attribute_value1), (primary_key2, attribute_value2)) = if keys[0].0 < keys[1].0 {
+                (keys[0], keys[1])
+            } else {
+                (keys[1], keys[0])
+            };
+
+            // If unable to get string value, just return None
+            let value1 = attribute_value1.get_string_value()?;
+            let value2 = attribute_value2.get_string_value()?;
+
+            let parts = [table_name.as_str(), primary_key1.as_str(), value1.as_str(), primary_key2.as_str(), value2.as_str()];
+            let hash = generate_span_pointer_hash(&parts);
+
+            Some(vec![SpanPointer {
+                hash,
+                kind: String::from("aws.dynamodb.item"),
+            }])
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +231,7 @@ mod tests {
                 approximate_creation_date_time: 1_428_537_600.0,
                 size_bytes: 26,
                 stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys: Default::default(),
             },
             event_id: String::from("c4ca4238a0b923820dcc509a6f75849b"),
             event_name: String::from("INSERT"),
