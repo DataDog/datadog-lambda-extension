@@ -353,4 +353,114 @@ mod tests {
             "generic-service"
         );
     }
+
+    #[test]
+    fn test_get_span_pointers_single_key() {
+        let mut keys = HashMap::new();
+        keys.insert(
+            "id".to_string(),
+            AttributeValue {
+                S: Some("abc123".to_string()),
+                N: None,
+                B: None,
+            },
+        );
+
+        let event = DynamoDbRecord {
+            dynamodb: DynamoDbEntity {
+                approximate_creation_date_time: 0.0,
+                size_bytes: 26,
+                stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys,
+            },
+            event_id: String::from("abc123"),
+            event_name: String::from("INSERT"),
+            event_version: String::from("1.1"),
+            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+        };
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.dynamodb.item");
+        assert_eq!(span_pointers[0].hash, "69706c9e1e41a2f0cf8c0650f91cb0c2");
+    }
+
+    #[test]
+    fn test_get_span_pointers_mixed_keys() {
+        let mut keys = HashMap::new();
+        keys.insert(
+            "num_key".to_string(),
+            AttributeValue {
+                S: None,
+                N: Some("42".to_string()),
+                B: None,
+            },
+        );
+        keys.insert(
+            "bin_key".to_string(),
+            AttributeValue {
+                S: None,
+                N: None,
+                B: Some("Hello World".to_string()),
+            },
+        );
+
+        let event = DynamoDbRecord {
+            dynamodb: DynamoDbEntity {
+                approximate_creation_date_time: 0.0,
+                size_bytes: 26,
+                stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys,
+            },
+            event_id: String::from("123abc"),
+            event_name: String::from("INSERT"),
+            event_version: String::from("1.1"),
+            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+        };
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.dynamodb.item");
+        assert_eq!(span_pointers[0].hash, "2031d2d69b45adc3d5c27691924ddfcc");
+    }
+
+    #[test]
+    fn test_get_span_pointers_lexicographical_ordering() {
+        // Same as previous test but with keys in reverse order to test sorting
+        let mut keys = HashMap::new();
+        keys.insert(
+            "bin_key".to_string(),
+            AttributeValue {
+                S: None,
+                N: None,
+                B: Some("Hello World".to_string()),
+            },
+        );
+        keys.insert(
+            "num_key".to_string(),
+            AttributeValue {
+                S: None,
+                N: Some("42".to_string()),
+                B: None,
+            },
+        );
+
+        let event = DynamoDbRecord {
+            dynamodb: DynamoDbEntity {
+                approximate_creation_date_time: 0.0,
+                size_bytes: 26,
+                stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys,
+            },
+            event_id: String::from("123abc"),
+            event_name: String::from("INSERT"),
+            event_version: String::from("1.1"),
+            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+        };
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.dynamodb.item");
+        assert_eq!(span_pointers[0].hash, "2031d2d69b45adc3d5c27691924ddfcc"); // same as previous test
+    }
 }
