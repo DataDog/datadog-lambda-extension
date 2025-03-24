@@ -185,10 +185,21 @@ impl DynamoDbRecord {
         let table_name = self.get_specific_identifier();
 
         if self.dynamodb.keys.len() == 1 {
-            let (primary_key1, attr_value) = self.dynamodb.keys.iter().next().expect("No DynamoDB keys found");
+            let (primary_key1, attr_value) = self
+                .dynamodb
+                .keys
+                .iter()
+                .next()
+                .expect("No DynamoDB keys found");
             let value1 = attr_value.get_string_value()?;
 
-            let parts = [table_name.as_str(), primary_key1.as_str(), value1.as_str(), "", ""];
+            let parts = [
+                table_name.as_str(),
+                primary_key1.as_str(),
+                value1.as_str(),
+                "",
+                "",
+            ];
             let hash = generate_span_pointer_hash(&parts);
 
             Some(vec![SpanPointer {
@@ -199,17 +210,24 @@ impl DynamoDbRecord {
             let keys: Vec<(&String, &AttributeValue)> = self.dynamodb.keys.iter().collect();
 
             // Sort lexicographically
-            let ((primary_key1, attribute_value1), (primary_key2, attribute_value2)) = if keys[0].0 < keys[1].0 {
-                (keys[0], keys[1])
-            } else {
-                (keys[1], keys[0])
-            };
+            let ((primary_key1, attribute_value1), (primary_key2, attribute_value2)) =
+                if keys[0].0 < keys[1].0 {
+                    (keys[0], keys[1])
+                } else {
+                    (keys[1], keys[0])
+                };
 
             // If unable to get string value, just return None
             let value1 = attribute_value1.get_string_value()?;
             let value2 = attribute_value2.get_string_value()?;
 
-            let parts = [table_name.as_str(), primary_key1.as_str(), value1.as_str(), primary_key2.as_str(), value2.as_str()];
+            let parts = [
+                table_name.as_str(),
+                primary_key1.as_str(),
+                value1.as_str(),
+                primary_key2.as_str(),
+                value2.as_str(),
+            ];
             let hash = generate_span_pointer_hash(&parts);
 
             Some(vec![SpanPointer {
