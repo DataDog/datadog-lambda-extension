@@ -3,6 +3,7 @@
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
+use reqwest;
 use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -13,6 +14,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::config;
+use crate::http_client;
 use crate::tags::provider;
 use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
@@ -25,6 +27,8 @@ const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
 const V5_TRACE_ENDPOINT_PATH: &str = "/v0.5/traces";
 const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
+const DSM_ENDPOINT_PATH: &str = "/api/v0.1/pipeline_stats";
+const DSM_AGENT_PATH: &str = "/v0.1/pipeline_stats";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -204,6 +208,15 @@ impl TraceAgent {
                     ),
                 }
             }
+            (&Method::POST | &Method::PUT, DSM_AGENT_PATH) => {
+                match Self::handle_dsm_proxy(config, req).await {
+                    Ok(result) => Ok(result),
+                    Err(err) => log_and_create_http_response(
+                        &format!("DSM endpoint error: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ),
+                }
+            }
             (_, INFO_ENDPOINT_PATH) => match Self::info_handler() {
                 Ok(result) => Ok(result),
                 Err(err) => log_and_create_http_response(
@@ -288,6 +301,7 @@ impl TraceAgent {
                 "endpoints": [
                     V4_TRACE_ENDPOINT_PATH,
                     STATS_ENDPOINT_PATH,
+                    DSM_AGENT_PATH,
                     INFO_ENDPOINT_PATH
                 ],
                 "client_drop_p0s": true,
@@ -296,6 +310,76 @@ impl TraceAgent {
         Response::builder()
             .status(200)
             .body(Body::from(response_json.to_string()))
+    }
+
+    async fn handle_dsm_proxy(
+        config: Arc<config::Config>,
+        req: Request<Body>,
+    ) -> http::Result<Response<Body>> {
+        let (parts, body) = req.into_parts();
+
+        // TODO: Update this when upgrading hyper
+        #[allow(deprecated)]
+        let body_bytes = match hyper::body::to_bytes(body).await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error reading request body: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        };
+
+        let target_url = format!("https://trace.agent.{}{}", config.site, DSM_ENDPOINT_PATH);
+        let client = http_client::get_client(config.clone());
+        let mut request_builder = client.post(&target_url);
+
+        for (name, value) in &parts.headers {
+            if name.as_str().to_lowercase() != "host"
+                && name.as_str().to_lowercase() != "content-length"
+            {
+                if let Ok(header_value) =
+                    reqwest::header::HeaderValue::from_str(value.to_str().unwrap_or_default())
+                {
+                    request_builder = request_builder.header(name.as_str(), header_value);
+                }
+            }
+        }
+        request_builder = request_builder.header("DD-API-KEY", &config.api_key);
+        let response = match request_builder.body(body_bytes).send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error sending request to DSM backend: {err}"),
+                    StatusCode::BAD_GATEWAY,
+                );
+            }
+        };
+
+        let status = StatusCode::from_u16(response.status().as_u16())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+        let mut builder = Response::builder().status(status);
+
+        for (name, value) in response.headers() {
+            if let Ok(header_value) =
+                http::header::HeaderValue::from_str(value.to_str().unwrap_or_default())
+            {
+                builder = builder.header(name.as_str(), header_value);
+            }
+        }
+
+        let response_body = match response.bytes().await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error reading response from DSM backend: {err}"),
+                    StatusCode::BAD_GATEWAY,
+                );
+            }
+        };
+
+        builder.body(Body::from(response_body))
     }
 
     #[must_use]
