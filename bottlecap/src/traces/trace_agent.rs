@@ -397,9 +397,7 @@ impl TraceAgent {
             Ok(bytes) => bytes,
             Err(err) => {
                 return log_and_create_http_response(
-                    &format!(
-                        "Error reading response from {error_context} backend: {err}"
-                    ),
+                    &format!("Error reading response from {error_context} backend: {err}"),
                     StatusCode::BAD_GATEWAY,
                 );
             }
