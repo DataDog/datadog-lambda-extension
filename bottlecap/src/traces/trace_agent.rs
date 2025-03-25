@@ -6,6 +6,7 @@ use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
 use reqwest;
 use serde_json::json;
 use std::convert::Infallible;
+use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -362,6 +363,7 @@ impl TraceAgent {
             }
         }
         request_builder = request_builder.header("DD-API-KEY", &config.api_key);
+        request_builder = request_builder.header("X-Datadog-Additional-Tags", format!("_dd.origin:lambda;functionname:{}",env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default()));
         let response = match request_builder.body(body_bytes).send().await {
             Ok(resp) => resp,
             Err(err) => {
