@@ -300,7 +300,8 @@ impl Processor {
             }
         }
 
-        { // Scope to drop the lock on context_buffer
+        {
+            // Scope to drop the lock on context_buffer
             let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
             context_buffer.add_runtime_duration(request_id, metrics.duration_ms);
             if let Some(context) = context_buffer.get(request_id) {
