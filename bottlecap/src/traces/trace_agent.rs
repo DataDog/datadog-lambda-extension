@@ -363,12 +363,18 @@ impl TraceAgent {
             }
         }
         request_builder = request_builder.header("DD-API-KEY", &config.api_key);
-        request_builder = request_builder.header("X-Datadog-Additional-Tags", format!("_dd.origin:lambda;functionname:{}",env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default()));
+        request_builder = request_builder.header(
+            "X-Datadog-Additional-Tags",
+            format!(
+                "_dd.origin:lambda;functionname:{}",
+                env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default()
+            ),
+        );
         let response = match request_builder.body(body_bytes).send().await {
             Ok(resp) => resp,
             Err(err) => {
                 return log_and_create_http_response(
-                    &format!("Error sending request to {} backend: {err}", error_context),
+                    &format!("Error sending request to {error_context} backend: {err}"),
                     StatusCode::BAD_GATEWAY,
                 );
             }
@@ -391,7 +397,9 @@ impl TraceAgent {
             Ok(bytes) => bytes,
             Err(err) => {
                 return log_and_create_http_response(
-                    &format!("Error reading response from {} backend: {err}", error_context),
+                    &format!(
+                        "Error reading response from {error_context} backend: {err}"
+                    ),
                     StatusCode::BAD_GATEWAY,
                 );
             }
@@ -411,7 +419,14 @@ impl TraceAgent {
         config: Arc<config::Config>,
         req: Request<Body>,
     ) -> http::Result<Response<Body>> {
-        Self::handle_proxy(config, req, "intake.profile", PROFILING_BACKEND_PATH, "profiling").await
+        Self::handle_proxy(
+            config,
+            req,
+            "intake.profile",
+            PROFILING_BACKEND_PATH,
+            "profiling",
+        )
+        .await
     }
 
     #[must_use]
