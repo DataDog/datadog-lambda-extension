@@ -51,7 +51,7 @@ const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
     // Buffer containing context of the previous 5 invocations
-    pub context_buffer: Arc<Mutex<ContextBuffer>>,
+    context_buffer: Arc<Mutex<ContextBuffer>>,
     // Helper to infer span information
     inferrer: SpanInferrer,
     // Current invocation span
@@ -263,7 +263,6 @@ impl Processor {
 
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::await_holding_lock)] // we are dropping the lock before awaiting
     pub async fn on_platform_runtime_done(
         &mut self,
         request_id: &String,
@@ -275,9 +274,6 @@ impl Processor {
         trace_agent_tx: Sender<SendData>,
         timestamp: i64,
     ) {
-        let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
-        context_buffer.add_runtime_duration(request_id, metrics.duration_ms);
-
         // Set the runtime duration metric
         self.enhanced_metrics
             .set_runtime_done_metrics(&metrics, timestamp);
@@ -304,36 +300,38 @@ impl Processor {
             }
         }
 
-        if let Some(context) = context_buffer.get(request_id) {
-            // `round` is intentionally meant to be a whole integer
-            self.span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
-            self.span
-                .meta
-                .insert("request_id".to_string(), request_id.clone());
-            // todo(duncanista): add missing tags
-            // - metrics tags (for asm)
-
-            if let Some(tracer_span) = &context.tracer_span {
-                self.span.meta.extend(tracer_span.meta.clone());
+        { // Scope to drop the lock on context_buffer
+            let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
+            context_buffer.add_runtime_duration(request_id, metrics.duration_ms);
+            if let Some(context) = context_buffer.get(request_id) {
+                // `round` is intentionally meant to be a whole integer
+                self.span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
                 self.span
-                    .meta_struct
-                    .extend(tracer_span.meta_struct.clone());
-                self.span.metrics.extend(tracer_span.metrics.clone());
-            }
+                    .meta
+                    .insert("request_id".to_string(), request_id.clone());
+                // todo(duncanista): add missing tags
+                // - metrics tags (for asm)
 
-            if let Some(offsets) = &context.enhanced_metric_data {
-                self.enhanced_metrics.set_cpu_utilization_enhanced_metrics(
-                    offsets.cpu_offset.clone(),
-                    offsets.uptime_offset,
-                );
-                // Send the signal to stop monitoring tmp
-                _ = offsets.tmp_chan_tx.send(());
-                // Send the signal to stop monitoring file descriptors and threads
-                _ = offsets.process_chan_tx.send(());
+                if let Some(tracer_span) = &context.tracer_span {
+                    self.span.meta.extend(tracer_span.meta.clone());
+                    self.span
+                        .meta_struct
+                        .extend(tracer_span.meta_struct.clone());
+                    self.span.metrics.extend(tracer_span.metrics.clone());
+                }
+
+                if let Some(offsets) = &context.enhanced_metric_data {
+                    self.enhanced_metrics.set_cpu_utilization_enhanced_metrics(
+                        offsets.cpu_offset.clone(),
+                        offsets.uptime_offset,
+                    );
+                    // Send the signal to stop monitoring tmp
+                    _ = offsets.tmp_chan_tx.send(());
+                    // Send the signal to stop monitoring file descriptors and threads
+                    _ = offsets.process_chan_tx.send(());
+                }
             }
         }
-        // Drop the context buffer lock before awaiting
-        drop(context_buffer);
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
             self.span.meta.extend(trigger_tags);
