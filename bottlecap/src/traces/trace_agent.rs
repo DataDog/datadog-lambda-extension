@@ -29,6 +29,8 @@ const V5_TRACE_ENDPOINT_PATH: &str = "/v0.5/traces";
 const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
 const DSM_ENDPOINT_PATH: &str = "/api/v0.1/pipeline_stats";
 const DSM_AGENT_PATH: &str = "/v0.1/pipeline_stats";
+const PROFILING_ENDPOINT_PATH: &str = "/profiling/v1/input";
+const PROFILING_BACKEND_PATH: &str = "/api/v2/profile";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -217,6 +219,15 @@ impl TraceAgent {
                     ),
                 }
             }
+            (&Method::POST | &Method::PUT, PROFILING_ENDPOINT_PATH) => {
+                match Self::handle_profiling_proxy(config, req).await {
+                    Ok(result) => Ok(result),
+                    Err(err) => log_and_create_http_response(
+                        &format!("Profiling endpoint error: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ),
+                }
+            }
             (_, INFO_ENDPOINT_PATH) => match Self::info_handler() {
                 Ok(result) => Ok(result),
                 Err(err) => log_and_create_http_response(
@@ -302,6 +313,7 @@ impl TraceAgent {
                     V4_TRACE_ENDPOINT_PATH,
                     STATS_ENDPOINT_PATH,
                     DSM_AGENT_PATH,
+                    PROFILING_ENDPOINT_PATH,
                     INFO_ENDPOINT_PATH
                 ],
                 "client_drop_p0s": true,
@@ -312,9 +324,13 @@ impl TraceAgent {
             .body(Body::from(response_json.to_string()))
     }
 
-    async fn handle_dsm_proxy(
+    /// Generic proxy handler for forwarding requests to Datadog backends
+    async fn handle_proxy(
         config: Arc<config::Config>,
         req: Request<Body>,
+        backend_domain: &str,
+        backend_path: &str,
+        error_context: &str,
     ) -> http::Result<Response<Body>> {
         let (parts, body) = req.into_parts();
 
@@ -330,7 +346,7 @@ impl TraceAgent {
             }
         };
 
-        let target_url = format!("https://trace.agent.{}{}", config.site, DSM_ENDPOINT_PATH);
+        let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
         let client = http_client::get_client(config.clone());
         let mut request_builder = client.post(&target_url);
 
@@ -350,7 +366,7 @@ impl TraceAgent {
             Ok(resp) => resp,
             Err(err) => {
                 return log_and_create_http_response(
-                    &format!("Error sending request to DSM backend: {err}"),
+                    &format!("Error sending request to {} backend: {err}", error_context),
                     StatusCode::BAD_GATEWAY,
                 );
             }
@@ -373,13 +389,27 @@ impl TraceAgent {
             Ok(bytes) => bytes,
             Err(err) => {
                 return log_and_create_http_response(
-                    &format!("Error reading response from DSM backend: {err}"),
+                    &format!("Error reading response from {} backend: {err}", error_context),
                     StatusCode::BAD_GATEWAY,
                 );
             }
         };
 
         builder.body(Body::from(response_body))
+    }
+
+    async fn handle_dsm_proxy(
+        config: Arc<config::Config>,
+        req: Request<Body>,
+    ) -> http::Result<Response<Body>> {
+        Self::handle_proxy(config, req, "trace.agent", DSM_ENDPOINT_PATH, "DSM").await
+    }
+
+    async fn handle_profiling_proxy(
+        config: Arc<config::Config>,
+        req: Request<Body>,
+    ) -> http::Result<Response<Body>> {
+        Self::handle_proxy(config, req, "intake.profile", PROFILING_BACKEND_PATH, "profiling").await
     }
 
     #[must_use]
