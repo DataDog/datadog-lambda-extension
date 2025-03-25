@@ -36,7 +36,9 @@ impl Context {
 
     #[must_use]
     pub fn from_request_id(request_id: &str) -> Self {
-        Context::new(request_id.to_owned(), 0f64, 0f64, 0, None, None)
+        let mut context = Self::default();
+        request_id.clone_into(&mut context.request_id);
+        context
     }
 }
 
