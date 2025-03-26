@@ -163,6 +163,12 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args: Vec<String> = env::args().collect();
+    if args.contains(&"--dummy".to_string()) {
+        let _ = run_dummy_mode().await;
+        return Ok(());
+    }
+
     let (mut aws_config, config) = load_configs();
 
     enable_logging_subsystem(&config);
@@ -193,6 +199,49 @@ async fn main() -> Result<()> {
     } else {
         error!("Failed to resolve secrets, Datadog extension will be idle");
         extension_loop_idle(&client, &r).await
+    }
+}
+
+async fn run_dummy_mode() -> Result<()> {
+    let config = Arc::new(Config {
+        site: "datadoghq.com".to_string(),
+        log_level: config::log_level::LogLevel::Debug,
+        flush_timeout: 10,
+        https_proxy: None,
+        serverless_flush_strategy: FlushStrategy::Default,
+        api_key: "".to_string(),
+        api_key_secret_arn: "".to_string(),
+        kms_api_key: "".to_string(),
+        env: None,
+        service: None,
+        version: None,
+        tags: None,
+        logs_config_processing_rules: None,
+        enhanced_metrics: false,
+        capture_lambda_payload: false,
+        capture_lambda_payload_max_depth: 0,
+        service_mapping: HashMap::new(),
+        serverless_logs_enabled: false,
+        trace_propagation_style: Vec::new(),
+        trace_propagation_style_extract: Vec::new(),
+        trace_propagation_extract_first: true,
+        trace_propagation_http_baggage_enabled: false
+    });
+
+    let tags_provider = Arc::new(TagProvider::new(
+        Arc::clone(&config),
+        LAMBDA_RUNTIME_SLUG.to_string(),
+        &HashMap::new(),
+    ));
+
+    let resolved_api_key = "dummy_api_key".to_string();
+
+    let (_trace_agent_channel, trace_flusher, _trace_processor, _stats_flusher) =
+        start_trace_agent(&config, resolved_api_key, &tags_provider);
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        trace_flusher.flush().await;
     }
 }
 
