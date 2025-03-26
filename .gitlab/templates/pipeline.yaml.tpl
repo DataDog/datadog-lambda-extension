@@ -16,35 +16,31 @@ variables:
   CI_DOCKER_TARGET_IMAGE: registry.ddbuild.io/ci/datadog-lambda-extension
   CI_DOCKER_TARGET_VERSION: latest
 
-{{ range $flavor := (ds "flavors").flavors }}
-
-{{ if $flavor.needs_code_checks }}
-
-cargo fmt ({{ $flavor.arch }}):
+cargo fmt:
   stage: test
-  tags: ["arch:{{ $flavor.arch }}"]
+  tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo fmt
 
-cargo check ({{ $flavor.arch }}):
+cargo check:
   stage: test
-  tags: ["arch:{{ $flavor.arch }}"]
+  tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo check
 
-cargo clippy ({{ $flavor.arch }}):
+cargo clippy:
   stage: test
-  tags: ["arch:{{ $flavor.arch }}"]
+  tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
     - cd bottlecap && cargo clippy --all-features
 
-{{ end }} # end needs_code_checks
+{{ range $flavor := (ds "flavors").flavors }}
 
 go agent ({{ $flavor.name }}):
   stage: compile
@@ -59,6 +55,7 @@ go agent ({{ $flavor.name }}):
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
     FILE_SUFFIX: {{ $flavor.suffix }}
+    FIPS: {{ $flavor.fips }}
   script:
     - echo "Building go agent based on $AGENT_BRANCH"
     # TODO: do this clone once in a separate job so that we can make sure that
@@ -79,6 +76,7 @@ bottlecap ({{ $flavor.name }}):
   variables:
     ARCHITECTURE: {{ $flavor.arch }}
     ALPINE: {{ $flavor.alpine }}
+    FIPS: {{ $flavor.fips }}
     FILE_SUFFIX: {{ $flavor.suffix }}
   script:
     - .gitlab/scripts/compile_bottlecap.sh
@@ -90,9 +88,9 @@ layer ({{ $flavor.name }}):
   needs:
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
-    - cargo fmt ({{ $flavor.arch }})
-    - cargo check ({{ $flavor.arch }})
-    - cargo clippy ({{ $flavor.arch }})
+    - cargo fmt
+    - cargo check
+    - cargo clippy
   dependencies:
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
@@ -107,7 +105,7 @@ layer ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/build_layer.sh
 
-{{ if $flavor.needs_layer_publish }}
+{{ if and (index $flavor "max_layer_compressed_size_mb") (index $flavor "max_layer_uncompressed_size_mb") }}
 
 check layer size ({{ $flavor.name }}):
   stage: build
@@ -119,13 +117,14 @@ check layer size ({{ $flavor.name }}):
     - layer ({{ $flavor.name }})
   variables:
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
+    MAX_LAYER_COMPRESSED_SIZE_MB: {{ $flavor.max_layer_compressed_size_mb }}
+    MAX_LAYER_UNCOMPRESSED_SIZE_MB: {{ $flavor.max_layer_uncompressed_size_mb }}
   script:
     - .gitlab/scripts/check_layer_size.sh
 
-{{ range $environment := (ds "environments").environments }}
+{{ end }} # end max_layer_compressed_size_mb
 
-{{ if or (eq $environment.name "prod") }}
-
+{{ if $flavor.needs_layer_sign }}
 sign layer ({{ $flavor.name }}):
   stage: sign
   tags: ["arch:amd64"]
@@ -139,30 +138,35 @@ sign layer ({{ $flavor.name }}):
   dependencies:
     - layer ({{ $flavor.name }})
   artifacts: # Re specify artifacts so the modified signed file is passed
-    expire_in: 1 day # Signed layers should expire after 1 day
+    expire_in: 1 week # Signed layers should expire after 1 week
     paths:
       - .layers/datadog_extension-{{ $flavor.suffix }}.zip
   variables:
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
   before_script:
+    {{ with $environment := (ds "environments").environments.prod }}
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    {{ end }}
   script:
-    - .gitlab/scripts/sign_layers.sh {{ $environment.name }}
+    - .gitlab/scripts/sign_layers.sh prod
+{{ end }} # end needs_layer_sign
 
-{{ end }} # if prod
+{{ if $flavor.needs_layer_publish }}
 
-publish layer {{ $environment.name }} ({{ $flavor.name }}):
+{{ range $environment_name, $environment := (ds "environments").environments }}
+
+publish layer {{ $environment_name }} ({{ $flavor.name }}):
   stage: publish
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
-    - if: '"{{ $environment.name }}" =~ /^(sandbox|staging)/'
+    - if: '"{{ $environment_name }}" == "sandbox"'
       when: manual
       allow_failure: true
     - if: '$CI_COMMIT_TAG =~ /^v.*/'
 
   needs:
-{{ if eq $environment.name "prod" }}
+{{ if eq $environment_name "prod" }}
     - check layer size ({{ $flavor.name }})
     - sign layer ({{ $flavor.name }})
 {{ else }}
@@ -170,7 +174,7 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
 {{ end }} #end if prod
 
   dependencies:
-{{ if or (eq $environment.name "prod") }}
+{{ if or (eq $environment_name "prod") }}
       - sign layer ({{ $flavor.name }})
 {{ else }}
       - layer ({{ $flavor.name }})
@@ -182,15 +186,17 @@ publish layer {{ $environment.name }} ({{ $flavor.name }}):
           - {{ .code }}
         {{- end}}
   variables:
+    LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    STAGE: {{ $environment.name }}
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/publish_layers.sh
 
-{{ if eq $environment.name "sandbox" }}
+{{ end }} # end environments
 
 publish layer sandbox [us-east-1] ({{ $flavor.name }}):
   stage: self-monitoring
@@ -206,29 +212,25 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
   dependencies:
     - layer ({{ $flavor.name }})
 
+  {{ with $environment := (ds "environments").environments.sandbox }}
   variables:
+    LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
     REGION: us-east-1
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
-    STAGE: {{ $environment.name }}
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  {{ end }}
   script:
     - .gitlab/scripts/publish_layers.sh
-
-{{ end }} # if environment sandbox
-
-{{ end }} # end environments
 
 {{ end }} # end needs_layer_publish
 
 {{ end }}  # end flavors
 
 {{ range $multi_arch_image_flavor := (ds "flavors").multi_arch_image_flavors }}
-
-{{ range $environment := (ds "environments").environments }}
-
-{{ if eq $environment.name "sandbox" }}
 
 publish private images ({{ $multi_arch_image_flavor.name }}):
   stage: self-monitoring
@@ -248,13 +250,11 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
     SUFFIX: {{ $multi_arch_image_flavor.suffix }}
     PLATFORM: {{ $multi_arch_image_flavor.platform }}
   before_script:
+    {{ with $environment := (ds "environments").environments.sandbox }}
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    {{ end }}
   script:
     - .gitlab/scripts/build_private_image.sh
-
-{{ end }} # end if environment sandbox
-
-{{ end }} # end environments
 
 image ({{ $multi_arch_image_flavor.name }}):
   stage: build
@@ -295,3 +295,49 @@ publish image ({{ $multi_arch_image_flavor.name }}):
     IMG_SIGNING: false
 
 {{ end }} # end multi_arch_image_flavors
+
+layer bundle:
+  stage: build
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  needs:
+    {{ range (ds "flavors").flavors }}
+    - layer ({{ .name }})
+    {{ end }} # end flavors
+  dependencies:
+    {{ range (ds "flavors").flavors }}
+    - layer ({{ .name }})
+    {{ end }} # end flavors
+  artifacts:
+    expire_in: 1 hr
+    paths:
+      - datadog_extension-bundle-${CI_JOB_ID}/
+    name: datadog_extension-bundle-${CI_JOB_ID}
+  script:
+    - rm -rf datadog_extension-bundle-${CI_JOB_ID}
+    - mkdir -p datadog_extension-bundle-${CI_JOB_ID}
+    - cp .layers/datadog_extension-*.zip datadog_extension-bundle-${CI_JOB_ID}
+
+signed layer bundle:
+  stage: sign
+  image: registry.ddbuild.io/images/docker:20.10
+  tags: ["arch:amd64"]
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^v.*/'
+  needs:
+    {{ range (ds "flavors").flavors }}{{ if .needs_layer_sign }}
+    - sign layer ({{ .name }})
+    {{ end }}{{ end }} # end flavors if needs_layer_sign
+  dependencies:
+    {{ range (ds "flavors").flavors }}{{ if .needs_layer_sign }}
+    - sign layer ({{ .name }})
+    {{ end }}{{ end }} # end flavors if needs_layer_sign
+  artifacts:
+    expire_in: 1 week
+    paths:
+      - datadog_extension-signed-bundle-${CI_JOB_ID}/
+    name: datadog_extension-signed-bundle-${CI_JOB_ID}
+  script:
+    - rm -rf datadog_extension-signed-bundle-${CI_JOB_ID}
+    - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
+    - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}

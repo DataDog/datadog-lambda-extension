@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD, Engine};
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -8,6 +9,7 @@ use crate::lifecycle::invocation::{
     processor::S_TO_NS,
     triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
+use crate::traces::span_pointers::{generate_span_pointer_hash, SpanPointer};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct DynamoDbEvent {
@@ -37,6 +39,31 @@ pub struct DynamoDbEntity {
     pub size_bytes: i64,
     #[serde(rename = "StreamViewType")]
     pub stream_view_type: String,
+    #[serde(rename = "Keys")]
+    pub keys: HashMap<String, AttributeValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// An attribute value is formatted like this: {"S": "string_value"}
+// and it can be a string, number (as a string), or binary value (as a Base64-encoded string).
+pub enum AttributeValue {
+    S(String),
+    N(String),
+    B(String),
+}
+
+impl AttributeValue {
+    fn to_string(&self) -> Option<String> {
+        match self {
+            AttributeValue::S(string_value) => Some(string_value.clone()),
+            AttributeValue::N(number_value) => Some(number_value.clone()),
+            // Convert Base64-encoded string to original string
+            AttributeValue::B(binary_value) => STANDARD
+                .decode(binary_value)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok()),
+        }
+    }
 }
 
 impl Trigger for DynamoDbRecord {
@@ -143,6 +170,61 @@ impl ServiceNameResolver for DynamoDbRecord {
     }
 }
 
+impl DynamoDbRecord {
+    #[must_use]
+    pub fn get_span_pointers(&self) -> Option<Vec<SpanPointer>> {
+        if self.dynamodb.keys.is_empty() {
+            return None;
+        }
+
+        let table_name = self.get_specific_identifier();
+
+        // DynamoDB tables have either one primary key (partition key) or two primary keys (partition + sort)
+        #[allow(clippy::single_match_else)]
+        let (primary_key1, value1, primary_key2, value2) = match self.dynamodb.keys.len() {
+            1 => {
+                let (key, attr_value) = self
+                    .dynamodb
+                    .keys
+                    .iter()
+                    .next()
+                    .expect("No DynamoDB keys found");
+
+                let value = attr_value.to_string()?;
+                (key.clone(), value, String::new(), String::new())
+            }
+            _ => {
+                // For two keys, sort lexicographically for consistent ordering
+                let mut keys: Vec<(&String, &AttributeValue)> = self.dynamodb.keys.iter().collect();
+                keys.sort_by(|a, b| a.0.cmp(b.0));
+
+                let (k1, attr1) = keys[0];
+                // If unable to get string value, just return None
+                let v1 = attr1.to_string()?;
+
+                let (k2, attr2) = keys[1];
+                let v2 = attr2.to_string()?;
+
+                (k1.clone(), v1, k2.clone(), v2)
+            }
+        };
+
+        let parts = [
+            table_name.as_str(),
+            primary_key1.as_str(),
+            value1.as_str(),
+            primary_key2.as_str(),
+            value2.as_str(),
+        ];
+        let hash = generate_span_pointer_hash(&parts);
+
+        Some(vec![SpanPointer {
+            hash,
+            kind: String::from("aws.dynamodb.item"),
+        }])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,11 +236,15 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let result = DynamoDbRecord::new(payload).expect("Failed to deserialize into Record");
 
+        let mut expected_keys = HashMap::new();
+        expected_keys.insert("Id".to_string(), AttributeValue::N("101".to_string()));
+
         let expected = DynamoDbRecord {
             dynamodb: DynamoDbEntity {
                 approximate_creation_date_time: 1_428_537_600.0,
                 size_bytes: 26,
                 stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys: expected_keys,
             },
             event_id: String::from("c4ca4238a0b923820dcc509a6f75849b"),
             event_name: String::from("INSERT"),
@@ -279,5 +365,86 @@ mod tests {
             event.resolve_service_name(&generic_service_mapping, "dynamodb"),
             "generic-service"
         );
+    }
+
+    #[test]
+    fn test_get_span_pointers_single_key() {
+        let mut keys = HashMap::new();
+        keys.insert("id".to_string(), AttributeValue::S("abc123".to_string()));
+
+        let event = DynamoDbRecord {
+            dynamodb: DynamoDbEntity {
+                approximate_creation_date_time: 0.0,
+                size_bytes: 26,
+                stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys,
+            },
+            event_id: String::from("abc123"),
+            event_name: String::from("INSERT"),
+            event_version: String::from("1.1"),
+            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+        };
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.dynamodb.item");
+        assert_eq!(span_pointers[0].hash, "69706c9e1e41a2f0cf8c0650f91cb0c2");
+    }
+
+    #[test]
+    fn test_get_span_pointers_mixed_keys() {
+        let mut keys = HashMap::new();
+        keys.insert("num_key".to_string(), AttributeValue::N("42".to_string()));
+        keys.insert(
+            "bin_key".to_string(),
+            AttributeValue::B(STANDARD.encode("Hello World".as_bytes())),
+        );
+
+        let event = DynamoDbRecord {
+            dynamodb: DynamoDbEntity {
+                approximate_creation_date_time: 0.0,
+                size_bytes: 26,
+                stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys,
+            },
+            event_id: String::from("123abc"),
+            event_name: String::from("INSERT"),
+            event_version: String::from("1.1"),
+            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+        };
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.dynamodb.item");
+        assert_eq!(span_pointers[0].hash, "2031d2d69b45adc3d5c27691924ddfcc");
+    }
+
+    #[test]
+    fn test_get_span_pointers_lexicographical_ordering() {
+        // Same as previous test but with keys in reverse order to test sorting
+        let mut keys = HashMap::new();
+        keys.insert(
+            "bin_key".to_string(),
+            AttributeValue::B(STANDARD.encode("Hello World".as_bytes())),
+        );
+        keys.insert("num_key".to_string(), AttributeValue::N("42".to_string()));
+
+        let event = DynamoDbRecord {
+            dynamodb: DynamoDbEntity {
+                approximate_creation_date_time: 0.0,
+                size_bytes: 26,
+                stream_view_type: String::from("NEW_AND_OLD_IMAGES"),
+                keys,
+            },
+            event_id: String::from("123abc"),
+            event_name: String::from("INSERT"),
+            event_version: String::from("1.1"),
+            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+        };
+
+        let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
+        assert_eq!(span_pointers.len(), 1);
+        assert_eq!(span_pointers[0].kind, "aws.dynamodb.item");
+        assert_eq!(span_pointers[0].hash, "2031d2d69b45adc3d5c27691924ddfcc"); // same as previous test
     }
 }

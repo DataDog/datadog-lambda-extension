@@ -7,8 +7,34 @@
 
 set -e
 
+
+if [ -z "$ADD_LAYER_VERSION_PERMISSIONS" ]; then
+    printf "[ERROR]: ADD_LAYER_VERSION_PERMISSIONS not specified."
+    exit 1
+fi
+
+if [ -z "$AUTOMATICALLY_BUMP_VERSION" ]; then
+    printf "[ERROR]: AUTOMATICALLY_BUMP_VERSION not specified."
+    exit 1
+fi
+
+if [ -z "$ARCHITECTURE" ]; then
+    printf "[ERROR]: ARCHITECTURE not specified."
+    exit 1
+fi
+
+if [ -z "${LAYER_NAME_BASE_SUFFIX+x}" ]; then
+    printf "[ERROR]: LAYER_NAME_BASE_SUFFIX not specified."
+    exit 1
+fi
+
+if [ -z "$LAYER_FILE" ]; then
+    printf "[ERROR]: LAYER_FILE not specified."
+    exit 1
+fi
+
+
 LAYER_DIR=".layers"
-VALID_ACCOUNTS=("sandbox" "prod")
 
 publish_layer() {
     region=$1
@@ -25,7 +51,7 @@ publish_layer() {
     )
 
     # Add permissions only for prod
-    if [ "$STAGE" == "prod" ]; then
+    if [ "$ADD_LAYER_VERSION_PERMISSIONS" = "1" ]; then
         permission=$(aws lambda add-layer-version-permission --layer-name $layer \
             --version-number $version_nbr \
             --statement-id "release-$version_nbr" \
@@ -39,16 +65,6 @@ publish_layer() {
 }
 
 
-if [ -z "$ARCHITECTURE" ]; then
-    printf "[ERROR]: ARCHITECTURE not specified."
-    exit 1
-fi
-
-
-if [ -z "$LAYER_FILE" ]; then
-    printf "[ERROR]: LAYER_FILE not specified."
-    exit 1
-fi
 
 LAYER_PATH="${LAYER_DIR}/${LAYER_FILE}"
 # Check that the layer files exist
@@ -57,15 +73,13 @@ if [ ! -f $LAYER_PATH  ]; then
     exit 1
 fi
 
-if [ "$ARCHITECTURE" == "amd64" ]; then
-    LAYER_NAME="Datadog-Extension"
-else
-    LAYER_NAME="Datadog-Extension-ARM"
-fi
+LAYER_NAME="Datadog-Extension${LAYER_NAME_BASE_SUFFIX}"
 
-if [ -z "$LAYER_NAME" ]; then
-    printf "[ERROR]: LAYER_NAME not specified."
-    exit 1
+if [ -z "$PIPELINE_LAYER_SUFFIX" ]; then
+    printf "[$REGION] Deploying layers without suffix\n"
+else
+    printf "[$REGION] Deploying layers with specified suffix: ${PIPELINE_LAYER_SUFFIX}\n"
+    LAYER_NAME="${LAYER_NAME}-${PIPELINE_LAYER_SUFFIX}"
 fi
 
 AVAILABLE_REGIONS=$(aws ec2 describe-regions | jq -r '.[] | .[] | .RegionName')
@@ -81,40 +95,36 @@ else
     fi
 fi
 
-if [ -z "$STAGE" ]; then
-    printf "[ERROR]: STAGE not specified.\n"
-    exit 1
-fi
-
 printf "[$REGION] Starting publishing layers...\n"
 
-if [ -z "$LAYER_SUFFIX" ]; then
-    printf "[$REGION] Deploying layers without suffix\n"
-else
-    printf "[$REGION] Deploying layers with specified suffix: ${LAYER_SUFFIX}\n"
-    LAYER_NAME="${LAYER_NAME}-${LAYER_SUFFIX}"
-fi
-
-if [[ "$STAGE" =~ ^(staging|sandbox)$ ]]; then
-    # Deploy latest version
+if [ "$AUTOMATICALLY_BUMP_VERSION" = "1" ]; then
     latest_version=$(aws lambda list-layer-versions --region $REGION --layer-name $LAYER_NAME --query 'LayerVersions[0].Version || `0`')
     VERSION=$(($latest_version + 1))
+
 else
-    # Running on prod
     if [ -z "$CI_COMMIT_TAG" ]; then
-        printf "[ERROR]: No CI_COMMIT_TAG found.\n"
-        printf "Exiting script...\n"
-        exit 1
+        if [ -n "$VERSION" ]; then
+            # This is used in our publish_govcloud_layers.sh script. We set the
+            # VERSION manually there since we don't have a CI_COMMIT_TAG.
+            printf "VERSION exists so we should be okay to continue\n"
+        else
+            printf "[ERROR]: No CI_COMMIT_TAG found and VERSION is not nuymeric.\n"
+            printf "Exiting script...\n"
+            exit 1
+        fi
     else
         printf "Tag found in environment: $CI_COMMIT_TAG\n"
-    fi
 
-    VERSION="${CI_COMMIT_TAG//[!0-9]/}"
+        VERSION="${CI_COMMIT_TAG//[!0-9]/}"
+    fi
     printf "Version: ${VERSION}\n"
 fi
 
 if [ -z "$VERSION" ]; then
     printf "[ERROR]: Layer VERSION not specified"
+    exit 1
+elif ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
+    printf "[ERROR]: Layer VERSION must be numeric, got '$VERSION'"
     exit 1
 else
     printf "Layer version parsed: $VERSION\n"

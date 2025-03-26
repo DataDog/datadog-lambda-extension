@@ -1,6 +1,9 @@
 FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
 
+# FIPS is not used for now.
+ARG FIPS
+
 # Install dependencies
 RUN yum install -y curl gcc gcc-c++ make unzip
 

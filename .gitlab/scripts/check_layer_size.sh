@@ -9,6 +9,16 @@
 
 set -e
 
+if [ -z "$MAX_LAYER_COMPRESSED_SIZE_MB" ]; then
+    printf "[ERROR]: MAX_LAYER_COMPRESSED_SIZE_MB not specified\n"
+    exit 1
+fi
+
+if [ -z "$MAX_LAYER_UNCOMPRESSED_SIZE_MB" ]; then
+    printf "[ERROR]: MAX_LAYER_UNCOMPRESSED_SIZE_MB not specified\n"
+    exit 1
+fi
+
 validate_size() {
   local max_size=$1
   local file_size=$2
@@ -23,8 +33,8 @@ if [ -z "$LAYER_FILE" ]; then
     exit 1
 fi
 
-MAX_LAYER_COMPRESSED_SIZE_KB=$(( 24 * 1024)) # 23 MB, amd64 is 22, while arm64 is 20
-MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(( 54 * 1024 )) # 53 MB, amd is 53, while arm64 is 47
+MAX_LAYER_COMPRESSED_SIZE_KB=$(( $MAX_LAYER_COMPRESSED_SIZE_MB * 1024))
+MAX_LAYER_UNCOMPRESSED_SIZE_KB=$(( $MAX_LAYER_UNCOMPRESSED_SIZE_MB * 1024 ))
 
 FILE=".layers"/$LAYER_FILE
 FILE_SIZE=$(stat --printf="%s" "$FILE")
