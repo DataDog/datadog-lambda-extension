@@ -49,10 +49,8 @@ if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]
 then
   debug_log "Configuring for the .NET runtime!"
 
-  if [ -n "$CORECLR_PROFILER_PATH" ]; then
-    debug_log "CORECLR_PROFILER_PATH is already set to $CORECLR_PROFILER_PATH"
-  else
-    # Handle CORECLR_PROFILER_PATH: try to load the library from these paths, in order:
+  if [ -z "$CORECLR_PROFILER_PATH" ]; then
+    # CORECLR_PROFILER_PATH is not set, try to find the library in these paths, in order:
     PROFILER_PATHS=(
       # use the shared loader if it's present
       "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
@@ -87,6 +85,12 @@ then
   export CORECLR_ENABLE_PROFILING="${CORECLR_ENABLE_PROFILING:-"1"}"
   export CORECLR_PROFILER="${CORECLR_PROFILER:-"{846F5F1C-F9AE-4B07-969E-05C26BC060D8}"}"
   export DD_DOTNET_TRACER_HOME="${DD_DOTNET_TRACER_HOME:-"/opt/datadog"}"
+
+  # log the environment variables for troubleshooting
+  debug_log "CORECLR_PROFILER_PATH: $CORECLR_PROFILER_PATH"
+  debug_log "CORECLR_ENABLE_PROFILING: $CORECLR_ENABLE_PROFILING"
+  debug_log "CORECLR_PROFILER: $CORECLR_PROFILER"
+  debug_log "DD_DOTNET_TRACER_HOME: $DD_DOTNET_TRACER_HOME"
 fi # .NET
 
 # if it is java
