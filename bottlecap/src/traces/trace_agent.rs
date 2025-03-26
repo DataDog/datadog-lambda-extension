@@ -6,7 +6,6 @@ use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
 use reqwest;
 use serde_json::json;
 use std::convert::Infallible;
-use std::env;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
@@ -32,6 +31,7 @@ const DSM_ENDPOINT_PATH: &str = "/api/v0.1/pipeline_stats";
 const DSM_AGENT_PATH: &str = "/v0.1/pipeline_stats";
 const PROFILING_ENDPOINT_PATH: &str = "/profiling/v1/input";
 const PROFILING_BACKEND_PATH: &str = "/api/v2/profile";
+const DD_ADDITIONAL_TAGS_HEADER: &str = "X-Datadog-Additional-Tags";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -43,6 +43,7 @@ pub struct TraceAgent {
     pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
+    http_client: reqwest::Client,
     tx: Sender<SendData>,
 }
 
@@ -80,11 +81,12 @@ impl TraceAgent {
         });
 
         TraceAgent {
-            config,
+            config: config.clone(),
             trace_processor,
             stats_aggregator,
             stats_processor,
             tags_provider,
+            http_client: http_client::get_client(config),
             tx: trace_tx,
         }
     }
@@ -113,6 +115,7 @@ impl TraceAgent {
         let stats_processor = self.stats_processor.clone();
         let endpoint_config = self.config.clone();
         let tags_provider = self.tags_provider.clone();
+        let client = self.http_client.clone();
 
         let make_svc = make_service_fn(move |_| {
             let trace_processor = trace_processor.clone();
@@ -123,6 +126,7 @@ impl TraceAgent {
 
             let endpoint_config = endpoint_config.clone();
             let tags_provider = tags_provider.clone();
+            let client = client.clone();
 
             let service = service_fn(move |req| {
                 TraceAgent::trace_endpoint_handler(
@@ -133,6 +137,7 @@ impl TraceAgent {
                     stats_processor.clone(),
                     stats_tx.clone(),
                     tags_provider.clone(),
+                    client.clone(),
                 )
             });
 
@@ -160,6 +165,7 @@ impl TraceAgent {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn trace_endpoint_handler(
         config: Arc<config::Config>,
         req: Request<Body>,
@@ -168,6 +174,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
         tags_provider: Arc<provider::Provider>,
+        client: reqwest::Client,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
@@ -212,7 +219,7 @@ impl TraceAgent {
                 }
             }
             (&Method::POST | &Method::PUT, DSM_AGENT_PATH) => {
-                match Self::handle_dsm_proxy(config, req).await {
+                match Self::handle_dsm_proxy(config, tags_provider, client, req).await {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("DSM endpoint error: {err}"),
@@ -221,7 +228,7 @@ impl TraceAgent {
                 }
             }
             (&Method::POST | &Method::PUT, PROFILING_ENDPOINT_PATH) => {
-                match Self::handle_profiling_proxy(config, req).await {
+                match Self::handle_profiling_proxy(config, tags_provider, client, req).await {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("Profiling endpoint error: {err}"),
@@ -328,6 +335,8 @@ impl TraceAgent {
     /// Generic proxy handler for forwarding requests to Datadog backends
     async fn handle_proxy(
         config: Arc<config::Config>,
+        client: reqwest::Client,
+        tags_provider: Arc<provider::Provider>,
         req: Request<Body>,
         backend_domain: &str,
         backend_path: &str,
@@ -348,7 +357,6 @@ impl TraceAgent {
         };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
-        let client = http_client::get_client(config.clone());
         let mut request_builder = client.post(&target_url);
 
         for (name, value) in &parts.headers {
@@ -364,10 +372,12 @@ impl TraceAgent {
         }
         request_builder = request_builder.header("DD-API-KEY", &config.api_key);
         request_builder = request_builder.header(
-            "X-Datadog-Additional-Tags",
+            DD_ADDITIONAL_TAGS_HEADER,
             format!(
                 "_dd.origin:lambda;functionname:{}",
-                env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default()
+                tags_provider
+                    .get_canonical_resource_name()
+                    .unwrap_or_default()
             ),
         );
         let response = match request_builder.body(body_bytes).send().await {
@@ -408,17 +418,32 @@ impl TraceAgent {
 
     async fn handle_dsm_proxy(
         config: Arc<config::Config>,
-        req: Request<Body>,
-    ) -> http::Result<Response<Body>> {
-        Self::handle_proxy(config, req, "trace.agent", DSM_ENDPOINT_PATH, "DSM").await
-    }
-
-    async fn handle_profiling_proxy(
-        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        client: reqwest::Client,
         req: Request<Body>,
     ) -> http::Result<Response<Body>> {
         Self::handle_proxy(
             config,
+            client,
+            tags_provider,
+            req,
+            "trace.agent",
+            DSM_ENDPOINT_PATH,
+            "DSM",
+        )
+        .await
+    }
+
+    async fn handle_profiling_proxy(
+        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        client: reqwest::Client,
+        req: Request<Body>,
+    ) -> http::Result<Response<Body>> {
+        Self::handle_proxy(
+            config,
+            client,
+            tags_provider,
             req,
             "intake.profile",
             PROFILING_BACKEND_PATH,
