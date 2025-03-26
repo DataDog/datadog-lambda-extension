@@ -225,7 +225,7 @@ impl TraceAgent {
                     ),
                 }
             }
-            (&Method::POST | &Method::PUT, DSM_AGENT_PATH) => {
+            (&Method::POST, DSM_AGENT_PATH) => {
                 match Self::handle_dsm_proxy(config, tags_provider, api_key, client, req).await {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
@@ -234,7 +234,7 @@ impl TraceAgent {
                     ),
                 }
             }
-            (&Method::POST | &Method::PUT, PROFILING_ENDPOINT_PATH) => {
+            (&Method::POST, PROFILING_ENDPOINT_PATH) => {
                 match Self::handle_profiling_proxy(config, tags_provider, api_key, client, req)
                     .await
                 {
