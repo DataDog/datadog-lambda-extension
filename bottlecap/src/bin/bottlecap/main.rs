@@ -722,7 +722,7 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        resolved_api_key,
+        resolved_api_key: resolved_api_key.clone(),
     });
 
     let trace_agent = Box::new(trace_agent::TraceAgent::new(
@@ -732,6 +732,7 @@ fn start_trace_agent(
         stats_aggregator,
         stats_processor,
         Arc::clone(tags_provider),
+        resolved_api_key,
     ));
     let trace_agent_channel = trace_agent.get_sender_copy();
 

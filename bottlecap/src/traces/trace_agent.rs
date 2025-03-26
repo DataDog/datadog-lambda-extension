@@ -44,6 +44,7 @@ pub struct TraceAgent {
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
     http_client: reqwest::Client,
+    api_key: String,
     tx: Sender<SendData>,
 }
 
@@ -63,6 +64,7 @@ impl TraceAgent {
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
+        resolved_api_key: String,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -88,6 +90,7 @@ impl TraceAgent {
             tags_provider,
             http_client: http_client::get_client(config),
             tx: trace_tx,
+            api_key: resolved_api_key,
         }
     }
 
@@ -116,6 +119,7 @@ impl TraceAgent {
         let endpoint_config = self.config.clone();
         let tags_provider = self.tags_provider.clone();
         let client = self.http_client.clone();
+        let api_key = self.api_key.clone();
 
         let make_svc = make_service_fn(move |_| {
             let trace_processor = trace_processor.clone();
@@ -127,6 +131,7 @@ impl TraceAgent {
             let endpoint_config = endpoint_config.clone();
             let tags_provider = tags_provider.clone();
             let client = client.clone();
+            let api_key = api_key.clone();
 
             let service = service_fn(move |req| {
                 TraceAgent::trace_endpoint_handler(
@@ -138,6 +143,7 @@ impl TraceAgent {
                     stats_tx.clone(),
                     tags_provider.clone(),
                     client.clone(),
+                    api_key.clone(),
                 )
             });
 
@@ -175,6 +181,7 @@ impl TraceAgent {
         stats_tx: Sender<pb::ClientStatsPayload>,
         tags_provider: Arc<provider::Provider>,
         client: reqwest::Client,
+        api_key: String,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
@@ -219,7 +226,7 @@ impl TraceAgent {
                 }
             }
             (&Method::POST | &Method::PUT, DSM_AGENT_PATH) => {
-                match Self::handle_dsm_proxy(config, tags_provider, client, req).await {
+                match Self::handle_dsm_proxy(config, tags_provider, api_key, client, req).await {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("DSM endpoint error: {err}"),
@@ -228,7 +235,9 @@ impl TraceAgent {
                 }
             }
             (&Method::POST | &Method::PUT, PROFILING_ENDPOINT_PATH) => {
-                match Self::handle_profiling_proxy(config, tags_provider, client, req).await {
+                match Self::handle_profiling_proxy(config, tags_provider, api_key, client, req)
+                    .await
+                {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("Profiling endpoint error: {err}"),
@@ -333,9 +342,11 @@ impl TraceAgent {
     }
 
     /// Generic proxy handler for forwarding requests to Datadog backends
+    #[allow(clippy::too_many_arguments)]
     async fn handle_proxy(
         config: Arc<config::Config>,
         client: reqwest::Client,
+        api_key: String,
         tags_provider: Arc<provider::Provider>,
         req: Request<Body>,
         backend_domain: &str,
@@ -370,7 +381,7 @@ impl TraceAgent {
                 }
             }
         }
-        request_builder = request_builder.header("DD-API-KEY", &config.api_key);
+        request_builder = request_builder.header("DD-API-KEY", api_key);
         request_builder = request_builder.header(
             DD_ADDITIONAL_TAGS_HEADER,
             format!(
@@ -419,12 +430,14 @@ impl TraceAgent {
     async fn handle_dsm_proxy(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
+        api_key: String,
         client: reqwest::Client,
         req: Request<Body>,
     ) -> http::Result<Response<Body>> {
         Self::handle_proxy(
             config,
             client,
+            api_key,
             tags_provider,
             req,
             "trace.agent",
@@ -437,12 +450,14 @@ impl TraceAgent {
     async fn handle_profiling_proxy(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
+        api_key: String,
         client: reqwest::Client,
         req: Request<Body>,
     ) -> http::Result<Response<Body>> {
         Self::handle_proxy(
             config,
             client,
+            api_key,
             tags_provider,
             req,
             "intake.profile",
