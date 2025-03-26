@@ -49,34 +49,38 @@ if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]
 then
   debug_log "Configuring for the .NET runtime!"
 
-  # Handle CORECLR_PROFILER_PATH: try to load the library from these paths, in order:
-  PROFILER_PATHS=(
-    # use the shared loader if it's present
-    "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
-    "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
-    # if shared loader is not found, use the tracer library directly (not recommended)
-    "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
-    "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
-    # keep this as a fallback for backwards compatibility with older .NET layers
-    "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
-  )
+  if [ -n "$CORECLR_PROFILER_PATH" ]; then
+    debug_log "CORECLR_PROFILER_PATH is already set to $CORECLR_PROFILER_PATH"
+  else
+    # Handle CORECLR_PROFILER_PATH: try to load the library from these paths, in order:
+    PROFILER_PATHS=(
+      # use the shared loader if it's present
+      "/opt/datadog/linux-x64/Datadog.Trace.ClrProfiler.Native.so"
+      "/opt/datadog/linux-arm64/Datadog.Trace.ClrProfiler.Native.so"
+      # if shared loader is not found, use the tracer library directly (not recommended)
+      "/opt/datadog/linux-x64/Datadog.Tracer.Native.so"
+      "/opt/datadog/linux-arm64/Datadog.Tracer.Native.so"
+      # keep this as a fallback for backwards compatibility with older .NET layers
+      "/opt/datadog/Datadog.Trace.ClrProfiler.Native.so"
+    )
 
-  PROFILER_FOUND=false
+    PROFILER_FOUND=false
 
-  ## Search from all possible places
-  for PROFILER_PATH in "${PROFILER_PATHS[@]}"
-  do
-  if [ -f "$PROFILER_PATH" ]
-  then
-    export CORECLR_PROFILER_PATH="$PROFILER_PATH"
-    PROFILER_FOUND=true
-    break
-  fi
-  done
+    ## Search from all possible places
+    for PROFILER_PATH in "${PROFILER_PATHS[@]}"
+    do
+    if [ -f "$PROFILER_PATH" ]
+    then
+      export CORECLR_PROFILER_PATH="$PROFILER_PATH"
+      PROFILER_FOUND=true
+      break
+    fi
+    done
 
-  if [ $PROFILER_FOUND == false ]
-  then
-    echo ".NET library not found. APM instrumentation may not work correctly."
+    if [ $PROFILER_FOUND == false ]
+    then
+      echo ".NET library not found. APM instrumentation may not work correctly."
+    fi
   fi
 
   # Required environment variables for .NET library
