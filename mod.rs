@@ -37,7 +37,6 @@ pub struct FallbackConfig {
     extension_version: Option<String>,
     serverless_appsec_enabled: bool,
     appsec_enabled: bool,
-    profiling_enabled: bool,
     // otel
     trace_otel_enabled: bool,
     otlp_config_receiver_protocols_http_endpoint: Option<String>,
@@ -237,13 +236,6 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
     if config.serverless_appsec_enabled || config.appsec_enabled {
         log_fallback_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
-    }
-
-    if config.profiling_enabled {
-        log_fallback_reason("profiling_enabled");
-        return Err(ConfigError::UnsupportedField(
-            "profiling_enabled".to_string(),
-        ));
     }
 
     // OTEL env
