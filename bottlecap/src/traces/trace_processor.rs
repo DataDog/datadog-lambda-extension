@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::config;
-use crate::lifecycle::invocation::context::ContextBuffer;
 use crate::tags::provider;
 use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
 use crate::traces::{
@@ -23,7 +22,7 @@ use datadog_trace_utils::tracer_payload::{
 };
 use ddcommon::Endpoint;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::error;
 
 #[derive(Clone)]
@@ -37,14 +36,13 @@ struct ChunkProcessor {
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
-    context_buffer: Arc<Mutex<ContextBuffer>>,
 }
 
 impl TraceChunkProcessor for ChunkProcessor {
     fn process(&mut self, chunk: &mut pb::TraceChunk, root_span_index: usize) {
-        chunk.spans.retain(|span| {
-            !filter_span_from_lambda_library_or_runtime(span, self.context_buffer.clone())
-        });
+        chunk
+            .spans
+            .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
         for span in &mut chunk.spans {
             // Service name could be incorrectly set to 'aws.lambda'
             // in datadog lambda libraries
@@ -70,10 +68,8 @@ impl TraceChunkProcessor for ChunkProcessor {
     }
 }
 
-fn filter_span_from_lambda_library_or_runtime(
-    span: &Span,
-    context_buffer: Arc<Mutex<ContextBuffer>>,
-) -> bool {
+#[must_use]
+pub fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
     if let Some(url) = span.meta.get("http.url") {
         if url.starts_with(LAMBDA_RUNTIME_URL_PREFIX)
             || url.starts_with(LAMBDA_EXTENSION_URL_PREFIX)
@@ -107,10 +103,6 @@ fn filter_span_from_lambda_library_or_runtime(
         }
     }
     if span.resource == INVOCATION_SPAN_RESOURCE {
-        let mut guard = context_buffer.lock().expect("lock poisoned");
-        if let Some(request_id) = span.meta.get("request_id") {
-            guard.add_tracer_span(request_id, Some(span.clone()));
-        }
         return true;
     }
 
@@ -125,7 +117,6 @@ fn filter_span_from_lambda_library_or_runtime(
 }
 
 #[allow(clippy::module_name_repetitions)]
-#[allow(clippy::too_many_arguments)]
 pub trait TraceProcessor {
     fn process_traces(
         &self,
@@ -135,7 +126,6 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-        context_buffer: Arc<Mutex<ContextBuffer>>,
     ) -> SendData;
 }
 
@@ -148,7 +138,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-        context_buffer: Arc<Mutex<ContextBuffer>>,
     ) -> SendData {
         let mut payload = trace_utils::collect_trace_chunks(
             V07(traces),
@@ -157,7 +146,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
-                context_buffer,
             },
             true,
             false,
@@ -200,14 +188,14 @@ mod tests {
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
     use std::{
         collections::HashMap,
-        sync::{Arc, Mutex},
+        sync::Arc,
         time::{SystemTime, UNIX_EPOCH},
     };
 
+    use crate::config::Config;
     use crate::tags::provider::Provider;
     use crate::traces::trace_processor::{self, TraceProcessor};
     use crate::LAMBDA_RUNTIME_SLUG;
-    use crate::{config::Config, lifecycle::invocation::context::ContextBuffer};
     use datadog_trace_protobuf::pb;
     use datadog_trace_utils::{tracer_header_tags, tracer_payload::TracerPayloadCollection};
 
@@ -319,7 +307,6 @@ mod tests {
             traces,
             100,
             None,
-            Arc::new(Mutex::new(ContextBuffer::default())),
         );
 
         let expected_tracer_payload = pb::TracerPayload {

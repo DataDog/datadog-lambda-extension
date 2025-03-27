@@ -8,7 +8,6 @@ use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::sync::Mutex as SyncMutex;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
@@ -16,9 +15,11 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::http_client;
-use crate::lifecycle::invocation::context::ContextBuffer;
+use crate::lifecycle::invocation::processor::Processor;
 use crate::tags::provider;
-use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
+use crate::traces::{
+    stats_aggregator, stats_processor, trace_aggregator, trace_processor, INVOCATION_SPAN_RESOURCE,
+};
 use datadog_trace_mini_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
@@ -45,7 +46,7 @@ pub struct TraceAgent {
     pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
-    pub context_buffer: Arc<SyncMutex<ContextBuffer>>,
+    invocation_processor: Arc<Mutex<Processor>>,
     http_client: reqwest::Client,
     api_key: String,
     tx: Sender<SendData>,
@@ -62,12 +63,12 @@ impl TraceAgent {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Arc<config::Config>,
+        invocation_processor: Arc<Mutex<Processor>>,
         trace_aggregator: Arc<Mutex<trace_aggregator::TraceAggregator>>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
-        context_buffer: Arc<SyncMutex<ContextBuffer>>,
         resolved_api_key: String,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
@@ -92,10 +93,10 @@ impl TraceAgent {
             stats_aggregator,
             stats_processor,
             tags_provider,
-            context_buffer,
             http_client: http_client::get_client(config),
             tx: trace_tx,
             api_key: resolved_api_key,
+            invocation_processor,
         }
     }
 
@@ -119,15 +120,17 @@ impl TraceAgent {
         });
 
         // setup our hyper http server, where the endpoint_handler handles incoming requests
+        let invocation_processor = Arc::clone(&self.invocation_processor);
         let trace_processor = self.trace_processor.clone();
         let stats_processor = self.stats_processor.clone();
         let endpoint_config = self.config.clone();
         let tags_provider = self.tags_provider.clone();
-        let context_buffer = self.context_buffer.clone();
         let client = self.http_client.clone();
         let api_key = self.api_key.clone();
 
         let make_svc = make_service_fn(move |_| {
+            let invocation_processor = Arc::clone(&invocation_processor);
+
             let trace_processor = trace_processor.clone();
             let trace_tx = trace_tx.clone();
 
@@ -136,20 +139,19 @@ impl TraceAgent {
 
             let endpoint_config = endpoint_config.clone();
             let tags_provider = tags_provider.clone();
-            let context_buffer = context_buffer.clone();
             let client = client.clone();
             let api_key = api_key.clone();
 
-            let service = service_fn(move |req: Request<Body>| {
+            let service = service_fn(move |req| {
                 TraceAgent::trace_endpoint_handler(
                     endpoint_config.clone(),
                     req,
+                    Arc::clone(&invocation_processor),
                     trace_processor.clone(),
                     trace_tx.clone(),
                     stats_processor.clone(),
                     stats_tx.clone(),
                     tags_provider.clone(),
-                    context_buffer.clone(),
                     client.clone(),
                     api_key.clone(),
                 )
@@ -183,12 +185,12 @@ impl TraceAgent {
     async fn trace_endpoint_handler(
         config: Arc<config::Config>,
         req: Request<Body>,
+        invocation_processor: Arc<Mutex<Processor>>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendData>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
         tags_provider: Arc<provider::Provider>,
-        context_buffer: Arc<SyncMutex<ContextBuffer>>,
         client: reqwest::Client,
         api_key: String,
     ) -> http::Result<Response<Body>> {
@@ -200,7 +202,7 @@ impl TraceAgent {
                 trace_tx,
                 tags_provider,
                 ApiVersion::V04,
-                context_buffer.clone(),
+                invocation_processor,
             )
             .await
             {
@@ -217,7 +219,7 @@ impl TraceAgent {
                 trace_tx,
                 tags_provider,
                 ApiVersion::V05,
-                context_buffer.clone(),
+                invocation_processor,
             )
             .await
             {
@@ -278,7 +280,7 @@ impl TraceAgent {
         trace_tx: Sender<SendData>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
-        context_buffer: Arc<SyncMutex<ContextBuffer>>,
+        invocation_processor: Arc<Mutex<Processor>>,
     ) -> http::Result<Response<Body>> {
         let (parts, body) = req.into_parts();
 
@@ -313,6 +315,17 @@ impl TraceAgent {
             },
         };
 
+        for t in &traces {
+            for span in t {
+                if span.resource == INVOCATION_SPAN_RESOURCE {
+                    if let Some(request_id) = span.meta.get("request_id") {
+                        let mut guard = invocation_processor.lock().await;
+                        guard.add_tracer_span(request_id, Some(span.clone()));
+                    }
+                }
+            }
+        }
+
         let send_data = trace_processor.process_traces(
             config,
             tags_provider,
@@ -320,7 +333,6 @@ impl TraceAgent {
             traces,
             body_size,
             None,
-            context_buffer,
         );
 
         // send trace payload to our trace flusher

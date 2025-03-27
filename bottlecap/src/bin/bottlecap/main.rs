@@ -15,8 +15,7 @@ use bottlecap::{
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
-        flush_control::FlushControl,
-        invocation::{context::ContextBuffer, processor::Processor as InvocationProcessor},
+        flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
     },
     logger,
@@ -330,20 +329,18 @@ async fn extension_loop_active(
     let mut metrics_flusher =
         start_metrics_flusher(resolved_api_key.clone(), &metrics_aggr, config);
     // Lifecycle Invocation Processor
-    let context_buffer = Arc::new(Mutex::new(ContextBuffer::default()));
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
         Arc::clone(config),
         aws_config,
         Arc::clone(&metrics_aggr),
-        Arc::clone(&context_buffer),
     )));
 
     let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) = start_trace_agent(
         config,
         resolved_api_key.clone(),
         &tags_provider,
-        context_buffer.clone(),
+        Arc::clone(&invocation_processor),
     );
 
     let lifecycle_listener = LifecycleListener {
@@ -695,7 +692,7 @@ fn start_trace_agent(
     config: &Arc<Config>,
     resolved_api_key: String,
     tags_provider: &Arc<TagProvider>,
-    context_buffer: Arc<Mutex<ContextBuffer>>,
+    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
 ) -> (
     Sender<datadog_trace_utils::send_data::SendData>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
@@ -735,12 +732,12 @@ fn start_trace_agent(
 
     let trace_agent = Box::new(trace_agent::TraceAgent::new(
         Arc::clone(config),
+        invocation_processor,
         trace_aggregator,
         trace_processor.clone(),
         stats_aggregator,
         stats_processor,
         Arc::clone(tags_provider),
-        context_buffer,
         resolved_api_key,
     ));
     let trace_agent_channel = trace_agent.get_sender_copy();
