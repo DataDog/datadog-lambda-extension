@@ -20,8 +20,8 @@ use crate::traces::propagation::text_map_propagator::{
 };
 
 const HELLO_PATH: &str = "/lambda/hello";
-const START_INVOCATION_PATH: &str = "/lambda/start-invocation";
-const END_INVOCATION_PATH: &str = "/lambda/end-invocation";
+const UNIVERSAL_INSTRUMENTATION_START_INVOCATION_PATH: &str = "/lambda/start-invocation";
+const UNIVERSAL_INSTRUMENTATION_END_INVOCATION_PATH: &str = "/lambda/end-invocation";
 const AGENT_PORT: usize = 8124;
 
 pub struct Listener {
@@ -60,12 +60,12 @@ impl Listener {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
-            (&Method::POST, START_INVOCATION_PATH) => {
+            (&Method::POST, UNIVERSAL_INSTRUMENTATION_START_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
                 Self::universal_instrumentation_start(&parts.headers, body, invocation_processor)
                     .await
             }
-            (&Method::POST, END_INVOCATION_PATH) => {
+            (&Method::POST, UNIVERSAL_INSTRUMENTATION_END_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
                 match Self::universal_instrumentation_end(
                     &parts.headers,
