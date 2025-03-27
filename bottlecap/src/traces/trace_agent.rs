@@ -550,7 +550,7 @@ impl TraceAgent {
             tags_provider,
             req,
             "llmobs-intake",
-            "/api/intake/llm-obs",
+            "/api/v2/llm-obs",
             "LLM OBS Spans",
         )
         .await
