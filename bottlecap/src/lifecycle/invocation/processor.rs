@@ -310,11 +310,11 @@ impl Processor {
                 // - metrics tags (for asm)
 
                 if let Some(tracer_span) = &context.tracer_span {
-                    self.span.meta.extend(tracer_span.meta.clone());
-                    self.span
+                    self.aws_lambda_span.meta.extend(tracer_span.meta.clone());
+                    self.aws_lambda_span
                         .meta_struct
                         .extend(tracer_span.meta_struct.clone());
-                    self.span.metrics.extend(tracer_span.metrics.clone());
+                    self.aws_lambda_span.metrics.extend(tracer_span.metrics.clone());
                 }
 
                 if let Some(offsets) = &context.enhanced_metric_data {
@@ -435,7 +435,7 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn universal_instrumentation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -514,7 +514,7 @@ impl Processor {
 
     /// Given trace context information, set it to the current span.
     ///
-    pub fn on_invocation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn universal_instrumentation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
@@ -862,7 +862,7 @@ mod tests {
        }
        "#;
 
-        p.on_invocation_end(HashMap::new(), response.as_bytes().to_vec());
+        p.universal_instrumentation_end(HashMap::new(), response.as_bytes().to_vec());
 
         assert_eq!(
             p.aws_lambda_span
