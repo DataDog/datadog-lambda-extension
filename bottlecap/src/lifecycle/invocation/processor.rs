@@ -306,7 +306,8 @@ impl Processor {
             context_buffer.add_runtime_duration(request_id, metrics.duration_ms);
             if let Some(context) = context_buffer.get(request_id) {
                 // `round` is intentionally meant to be a whole integer
-                self.aws_lambda_span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
+                self.aws_lambda_span.duration =
+                    (context.runtime_duration_ms * MS_TO_NS).round() as i64;
                 self.aws_lambda_span
                     .meta
                     .insert("request_id".to_string(), request_id.clone());
@@ -318,7 +319,9 @@ impl Processor {
                     self.aws_lambda_span
                         .meta_struct
                         .extend(tracer_span.meta_struct.clone());
-                    self.aws_lambda_span.metrics.extend(tracer_span.metrics.clone());
+                    self.aws_lambda_span
+                        .metrics
+                        .extend(tracer_span.metrics.clone());
                 }
 
                 if let Some(offsets) = &context.enhanced_metric_data {
@@ -776,7 +779,11 @@ mod tests {
 
         assert_eq!(p.aws_lambda_span.trace_id, 999);
         assert_eq!(p.aws_lambda_span.parent_id, 1000);
-        let priority = p.aws_lambda_span.metrics.get(TAG_SAMPLING_PRIORITY).copied();
+        let priority = p
+            .aws_lambda_span
+            .metrics
+            .get(TAG_SAMPLING_PRIORITY)
+            .copied();
         assert_eq!(priority, Some(-1.0));
     }
 
@@ -794,7 +801,10 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(!p.aws_lambda_span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
+        assert!(!p
+            .aws_lambda_span
+            .metrics
+            .contains_key(TAG_SAMPLING_PRIORITY));
         assert_eq!(p.aws_lambda_span.trace_id, 888);
         assert_eq!(p.aws_lambda_span.parent_id, 999);
     }
@@ -809,7 +819,10 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(!p.aws_lambda_span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
+        assert!(!p
+            .aws_lambda_span
+            .metrics
+            .contains_key(TAG_SAMPLING_PRIORITY));
         assert_eq!(p.aws_lambda_span.trace_id, 111);
         assert_eq!(p.aws_lambda_span.parent_id, 222);
     }
