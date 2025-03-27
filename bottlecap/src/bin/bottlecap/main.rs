@@ -49,7 +49,8 @@ use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
     constants::CONTEXTS,
     datadog::{
-        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride, Site as MetricsSite,
+        DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
+        RetryStrategy as DsdRetryStrategy, Site as MetricsSite,
     },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
@@ -685,6 +686,7 @@ fn start_metrics_flusher(
         metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
         https_proxy: config.https_proxy.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
+        retry_strategy: DsdRetryStrategy::Immediate(3),
     };
     MetricsFlusher::new(flusher_config)
 }
@@ -728,7 +730,7 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        resolved_api_key,
+        resolved_api_key: resolved_api_key.clone(),
     });
 
     let trace_agent = Box::new(trace_agent::TraceAgent::new(
@@ -739,6 +741,7 @@ fn start_trace_agent(
         stats_processor,
         Arc::clone(tags_provider),
         context_buffer,
+        resolved_api_key,
     ));
     let trace_agent_channel = trace_agent.get_sender_copy();
 

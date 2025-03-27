@@ -3,6 +3,7 @@
 
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
+use reqwest;
 use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
@@ -15,6 +16,7 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::lifecycle::invocation::context::ContextBuffer;
+use crate::http_client;
 use crate::tags::provider;
 use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
@@ -27,6 +29,11 @@ const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
 const V5_TRACE_ENDPOINT_PATH: &str = "/v0.5/traces";
 const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
+const DSM_ENDPOINT_PATH: &str = "/api/v0.1/pipeline_stats";
+const DSM_AGENT_PATH: &str = "/v0.1/pipeline_stats";
+const PROFILING_ENDPOINT_PATH: &str = "/profiling/v1/input";
+const PROFILING_BACKEND_PATH: &str = "/api/v2/profile";
+const DD_ADDITIONAL_TAGS_HEADER: &str = "X-Datadog-Additional-Tags";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -39,6 +46,8 @@ pub struct TraceAgent {
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
     pub context_buffer: Arc<SyncMutex<ContextBuffer>>,
+    http_client: reqwest::Client,
+    api_key: String,
     tx: Sender<SendData>,
 }
 
@@ -59,6 +68,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
         context_buffer: Arc<SyncMutex<ContextBuffer>>,
+        resolved_api_key: String,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -77,13 +87,15 @@ impl TraceAgent {
         });
 
         TraceAgent {
-            config,
+            config: config.clone(),
             trace_processor,
             stats_aggregator,
             stats_processor,
             tags_provider,
             context_buffer,
+            http_client: http_client::get_client(config),
             tx: trace_tx,
+            api_key: resolved_api_key,
         }
     }
 
@@ -112,6 +124,8 @@ impl TraceAgent {
         let endpoint_config = self.config.clone();
         let tags_provider = self.tags_provider.clone();
         let context_buffer = self.context_buffer.clone();
+        let client = self.http_client.clone();
+        let api_key = self.api_key.clone();
 
         let make_svc = make_service_fn(move |_| {
             let trace_processor = trace_processor.clone();
@@ -123,6 +137,8 @@ impl TraceAgent {
             let endpoint_config = endpoint_config.clone();
             let tags_provider = tags_provider.clone();
             let context_buffer = context_buffer.clone();
+            let client = client.clone();
+            let api_key = api_key.clone();
 
             let service = service_fn(move |req: Request<Body>| {
                 TraceAgent::trace_endpoint_handler(
@@ -134,6 +150,8 @@ impl TraceAgent {
                     stats_tx.clone(),
                     tags_provider.clone(),
                     context_buffer.clone(),
+                    client.clone(),
+                    api_key.clone(),
                 )
             });
 
@@ -171,6 +189,8 @@ impl TraceAgent {
         stats_tx: Sender<pb::ClientStatsPayload>,
         tags_provider: Arc<provider::Provider>,
         context_buffer: Arc<SyncMutex<ContextBuffer>>,
+        client: reqwest::Client,
+        api_key: String,
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
@@ -212,6 +232,26 @@ impl TraceAgent {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("Error processing trace stats: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ),
+                }
+            }
+            (&Method::POST, DSM_AGENT_PATH) => {
+                match Self::handle_dsm_proxy(config, tags_provider, api_key, client, req).await {
+                    Ok(result) => Ok(result),
+                    Err(err) => log_and_create_http_response(
+                        &format!("DSM endpoint error: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ),
+                }
+            }
+            (&Method::POST, PROFILING_ENDPOINT_PATH) => {
+                match Self::handle_profiling_proxy(config, tags_provider, api_key, client, req)
+                    .await
+                {
+                    Ok(result) => Ok(result),
+                    Err(err) => log_and_create_http_response(
+                        &format!("Profiling endpoint error: {err}"),
                         StatusCode::INTERNAL_SERVER_ERROR,
                     ),
                 }
@@ -302,6 +342,8 @@ impl TraceAgent {
                 "endpoints": [
                     V4_TRACE_ENDPOINT_PATH,
                     STATS_ENDPOINT_PATH,
+                    DSM_AGENT_PATH,
+                    PROFILING_ENDPOINT_PATH,
                     INFO_ENDPOINT_PATH
                 ],
                 "client_drop_p0s": true,
@@ -310,6 +352,132 @@ impl TraceAgent {
         Response::builder()
             .status(200)
             .body(Body::from(response_json.to_string()))
+    }
+
+    /// Generic proxy handler for forwarding requests to Datadog backends
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_proxy(
+        config: Arc<config::Config>,
+        client: reqwest::Client,
+        api_key: String,
+        tags_provider: Arc<provider::Provider>,
+        req: Request<Body>,
+        backend_domain: &str,
+        backend_path: &str,
+        error_context: &str,
+    ) -> http::Result<Response<Body>> {
+        let (parts, body) = req.into_parts();
+
+        // TODO: Update this when upgrading hyper
+        #[allow(deprecated)]
+        let body_bytes = match hyper::body::to_bytes(body).await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error reading request body: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        };
+
+        let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
+        let mut request_builder = client.post(&target_url);
+
+        for (name, value) in &parts.headers {
+            if name.as_str().to_lowercase() != "host"
+                && name.as_str().to_lowercase() != "content-length"
+            {
+                if let Ok(header_value) =
+                    reqwest::header::HeaderValue::from_str(value.to_str().unwrap_or_default())
+                {
+                    request_builder = request_builder.header(name.as_str(), header_value);
+                }
+            }
+        }
+        request_builder = request_builder.header("DD-API-KEY", api_key);
+        request_builder = request_builder.header(
+            DD_ADDITIONAL_TAGS_HEADER,
+            format!(
+                "_dd.origin:lambda;functionname:{}",
+                tags_provider
+                    .get_canonical_resource_name()
+                    .unwrap_or_default()
+            ),
+        );
+        let response = match request_builder.body(body_bytes).send().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error sending request to {error_context} backend: {err}"),
+                    StatusCode::BAD_GATEWAY,
+                );
+            }
+        };
+
+        let status = StatusCode::from_u16(response.status().as_u16())
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+        let mut builder = Response::builder().status(status);
+
+        for (name, value) in response.headers() {
+            if let Ok(header_value) =
+                http::header::HeaderValue::from_str(value.to_str().unwrap_or_default())
+            {
+                builder = builder.header(name.as_str(), header_value);
+            }
+        }
+
+        let response_body = match response.bytes().await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error reading response from {error_context} backend: {err}"),
+                    StatusCode::BAD_GATEWAY,
+                );
+            }
+        };
+
+        builder.body(Body::from(response_body))
+    }
+
+    async fn handle_dsm_proxy(
+        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        api_key: String,
+        client: reqwest::Client,
+        req: Request<Body>,
+    ) -> http::Result<Response<Body>> {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            req,
+            "trace.agent",
+            DSM_ENDPOINT_PATH,
+            "DSM",
+        )
+        .await
+    }
+
+    async fn handle_profiling_proxy(
+        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        api_key: String,
+        client: reqwest::Client,
+        req: Request<Body>,
+    ) -> http::Result<Response<Body>> {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            req,
+            "intake.profile",
+            PROFILING_BACKEND_PATH,
+            "profiling",
+        )
+        .await
     }
 
     #[must_use]
