@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use hyper::body::HttpBody;
 use hyper::service::{make_service_fn, service_fn};
-use hyper::{http, Body, Method, Request, Response, StatusCode};
+use hyper::{http, Body, HeaderMap, Method, Request, Response, StatusCode};
 use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
@@ -61,10 +61,13 @@ impl Listener {
     ) -> http::Result<Response<Body>> {
         match (req.method(), req.uri().path()) {
             (&Method::POST, START_INVOCATION_PATH) => {
-                Self::start_invocation_handler(req, invocation_processor).await
+                let (parts, body) = req.into_parts();
+                Self::universal_instrumentation_start(&parts.headers, body, invocation_processor).await
             }
             (&Method::POST, END_INVOCATION_PATH) => {
-                match Self::end_invocation_handler(req, invocation_processor).await {
+                let (parts, body) = req.into_parts();
+                match Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await
+                {
                     Ok(response) => Ok(response),
                     Err(e) => {
                         error!("Failed to end invocation {e}");
@@ -84,20 +87,20 @@ impl Listener {
         }
     }
 
-    async fn start_invocation_handler(
-        req: Request<Body>,
+    pub async fn universal_instrumentation_start(
+        headers: &HeaderMap,
+        body: Body,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         debug!("Received start invocation request");
-        let (parts, body) = req.into_parts();
         match body.collect().await {
             Ok(b) => {
                 let body = b.to_bytes().to_vec();
                 let mut processor = invocation_processor.lock().await;
 
-                let headers = Self::headers_to_map(parts.headers);
+                let headers = Self::headers_to_map(headers);
 
-                processor.on_invocation_start(headers, body);
+                processor.universal_instrumentation_start(headers, body);
 
                 let mut response = Response::builder().status(200);
 
@@ -136,19 +139,19 @@ impl Listener {
         }
     }
 
-    async fn end_invocation_handler(
-        req: Request<Body>,
+    pub async fn universal_instrumentation_end(
+        headers: &HeaderMap,
+        body: Body,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<Response<Body>> {
         debug!("Received end invocation request");
-        let (parts, body) = req.into_parts();
         match body.collect().await {
             Ok(b) => {
                 let body = b.to_bytes().to_vec();
                 let mut processor = invocation_processor.lock().await;
 
-                let headers = Self::headers_to_map(parts.headers);
-                processor.on_invocation_end(headers, body);
+                let headers = Self::headers_to_map(headers);
+                processor.universal_instrumentation_end(headers, body);
                 drop(processor);
 
                 Response::builder()
@@ -172,7 +175,7 @@ impl Listener {
             .body(Body::from(json!({}).to_string()))
     }
 
-    fn headers_to_map(headers: http::HeaderMap) -> HashMap<String, String> {
+    fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
         headers
             .iter()
             .map(|(k, v)| {

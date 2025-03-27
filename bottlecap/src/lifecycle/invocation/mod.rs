@@ -40,7 +40,8 @@ fn create_empty_span(name: String, resource: String, service: String) -> Span {
     }
 }
 
-fn generate_span_id() -> u64 {
+#[must_use]
+pub fn generate_span_id() -> u64 {
     if std::env::var(INIT_TYPE).map_or(false, |it| it == SNAP_START_VALUE) {
         return OsRng.next_u64();
     }
