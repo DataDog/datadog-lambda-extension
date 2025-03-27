@@ -277,7 +277,7 @@ impl TraceAgent {
             }
             (&Method::POST, LLM_OBS_SPANS_ENDPOINT_PATH) => {
                 match Self::handle_llm_obs_spans_proxy(config, tags_provider, api_key, client, req)
-                .await
+                    .await
                 {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
