@@ -195,7 +195,7 @@ impl Listener {
                 let mut processor = invocation_processor.lock().await;
 
                 let headers = Self::headers_to_map(headers);
-                processor.on_invocation_end(headers, body);
+                processor.universal_instrumentation_end(headers, body);
                 drop(processor);
 
                 Response::builder()
