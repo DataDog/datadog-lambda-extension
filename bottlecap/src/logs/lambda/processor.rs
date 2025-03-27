@@ -220,65 +220,89 @@ impl LambdaProcessor {
     }
 
     fn get_intake_log(&mut self, mut lambda_message: Message) -> Result<IntakeLog, Box<dyn Error>> {
-        let request_id = match lambda_message.lambda.request_id {
-            // Log already has a `request_id`
+        // Assign request_id from message or context if available
+        lambda_message.lambda.request_id = match lambda_message.lambda.request_id {
             Some(request_id) => Some(request_id.clone()),
-            // Default to the `request_id` we've seen so far, if any.
-            None => (!&self.invocation_context.request_id.is_empty())
-                .then(|| self.invocation_context.request_id.clone()),
-        };
-
-        lambda_message.lambda.request_id = request_id;
-        // Test if message is a JSON object, it may have tags we need to pass along.
-        // Don't care about host, service, and status, since we'll override them.
-        let parsed_message =
-            serde_json::from_str::<serde_json::Value>(lambda_message.message.as_str());
-        let log = match parsed_message {
-            Ok(serde_json::Value::Object(mut obj)) => {
-                let mut tags = self.tags.clone();
-                let final_message = if let Some(inner_message) = obj.get_mut("message") {
-                    if let Some(serde_json::Value::String(message_tags)) =
-                        inner_message.get("ddtags")
-                    {
-                        tags.push(',');
-                        tags.push_str(message_tags);
-                        if let Some(inner_message_object) = inner_message.as_object_mut() {
-                            inner_message_object.remove("ddtags");
-                        }
-                    }
-                    inner_message.to_string()
+            None => {
+                if self.invocation_context.request_id.is_empty() {
+                    None
                 } else {
-                    lambda_message.message.clone()
-                };
-                IntakeLog {
-                    hostname: self.function_arn.clone(),
-                    source: LAMBDA_RUNTIME_SLUG.to_string(),
-                    service: self.service.clone(),
-                    tags,
-                    message: Message {
-                        message: final_message,
-                        lambda: lambda_message.lambda,
-                        timestamp: lambda_message.timestamp,
-                        status: lambda_message.status,
-                    },
+                    Some(self.invocation_context.request_id.clone())
                 }
             }
-            _ => IntakeLog {
+        };
+
+        // Check if message is a JSON object that might have tags to extract
+        let parsed_json =
+            serde_json::from_str::<serde_json::Value>(lambda_message.message.as_str());
+
+        let log = if let Ok(serde_json::Value::Object(mut json_obj)) = parsed_json {
+            let mut tags = self.tags.clone();
+            let final_message = Self::extract_tags_and_get_message(
+                &mut json_obj,
+                &mut tags,
+                lambda_message.message.clone(),
+            );
+
+            IntakeLog {
+                hostname: self.function_arn.clone(),
+                source: LAMBDA_RUNTIME_SLUG.to_string(),
+                service: self.service.clone(),
+                tags,
+                message: Message {
+                    message: final_message,
+                    lambda: lambda_message.lambda,
+                    timestamp: lambda_message.timestamp,
+                    status: lambda_message.status,
+                },
+            }
+        } else {
+            // Not JSON or not an object - use message as-is
+            IntakeLog {
                 hostname: self.function_arn.clone(),
                 source: LAMBDA_RUNTIME_SLUG.to_string(),
                 service: self.service.clone(),
                 tags: self.tags.clone(),
                 message: lambda_message,
-            },
+            }
         };
 
         if log.message.lambda.request_id.is_some() {
             Ok(log)
         } else {
-            // We haven't seen a `request_id`, this is an orphan log
+            // No request_id available, queue as orphan log
             self.orphan_logs.push(log);
             Err("No request_id available, queueing for later".into())
         }
+    }
+
+    fn extract_tags_and_get_message(
+        json_obj: &mut serde_json::Map<String, serde_json::Value>,
+        tags: &mut String,
+        original_message: String,
+    ) -> String {
+        // Check for top-level ddtags
+        if let Some(serde_json::Value::String(message_tags)) = json_obj.get("ddtags") {
+            tags.push(',');
+            tags.push_str(message_tags);
+            json_obj.remove("ddtags");
+            return serde_json::to_string(json_obj).unwrap_or(original_message);
+        }
+
+        // Check for nested ddtags inside a "message" field
+        if let Some(inner_message) = json_obj.get_mut("message") {
+            if let Some(serde_json::Value::String(message_tags)) = inner_message.get("ddtags") {
+                tags.push(',');
+                tags.push_str(message_tags);
+                if let Some(inner_obj) = inner_message.as_object_mut() {
+                    inner_obj.remove("ddtags");
+                }
+                return inner_message.to_string();
+            }
+        }
+
+        // No ddtags found, use original message
+        original_message
     }
 
     async fn make_log(&mut self, event: TelemetryEvent) -> Result<IntakeLog, Box<dyn Error>> {
@@ -940,6 +964,61 @@ mod tests {
             service: "test-service".to_string(),
             tags: tags_provider.get_tags_string()
                 + ",added_tag1:added_value1,added_tag2:added_value2",
+        };
+        assert_eq!(intake_log, function_log);
+    }
+    #[tokio::test]
+    async fn test_process_logs_structured_no_ddtags() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: Some("test:tags".to_string()),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let mut processor =
+            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+
+        let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
+        processor.get_intake_log(start_lambda_message).unwrap();
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string())),
+        };
+
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        let function_log = IntakeLog {
+            message: Message {
+                message: r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string(),
         };
         assert_eq!(intake_log, function_log);
     }
