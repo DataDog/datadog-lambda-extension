@@ -1,6 +1,7 @@
 use crate::metrics::enhanced::lambda::EnhancedMetricData;
 use std::collections::VecDeque;
 
+use datadog_trace_protobuf::pb::Span;
 use tracing::debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -10,6 +11,7 @@ pub struct Context {
     pub init_duration_ms: f64,
     pub start_time: i64,
     pub enhanced_metric_data: Option<EnhancedMetricData>,
+    pub tracer_span: Option<Span>,
 }
 
 impl Context {
@@ -20,6 +22,7 @@ impl Context {
         init_duration_ms: f64,
         start_time: i64,
         enhanced_metric_data: Option<EnhancedMetricData>,
+        tracer_span: Option<Span>,
     ) -> Self {
         Context {
             request_id,
@@ -27,6 +30,27 @@ impl Context {
             init_duration_ms,
             start_time,
             enhanced_metric_data,
+            tracer_span,
+        }
+    }
+
+    #[must_use]
+    pub fn from_request_id(request_id: &str) -> Self {
+        let mut context = Self::default();
+        request_id.clone_into(&mut context.request_id);
+        context
+    }
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Context {
+            request_id: String::new(),
+            runtime_duration_ms: 0f64,
+            init_duration_ms: 0f64,
+            start_time: 0,
+            enhanced_metric_data: None,
+            tracer_span: None,
         }
     }
 }
@@ -95,8 +119,8 @@ impl ContextBuffer {
 
     /// Creates a new `Context` and adds it to the buffer.
     ///
-    pub fn create_context(&mut self, request_id: String) {
-        self.insert(Context::new(request_id, 0f64, 0f64, 0, None));
+    pub fn create_context(&mut self, request_id: &str) {
+        self.insert(Context::from_request_id(request_id));
     }
 
     /// Adds the init duration to a `Context` in the buffer.
@@ -159,6 +183,20 @@ impl ContextBuffer {
         }
     }
 
+    /// Adds the tracer span to a `Context` in the buffer.
+    ///
+    pub fn add_tracer_span(&mut self, request_id: &String, tracer_span: Option<Span>) {
+        if let Some(context) = self
+            .buffer
+            .iter_mut()
+            .find(|context| context.request_id == *request_id)
+        {
+            context.tracer_span = tracer_span;
+        } else {
+            debug!("Could not add tracer span - context not found");
+        }
+    }
+
     /// Returns the size of the buffer.
     ///
     #[must_use]
@@ -188,20 +226,20 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id_2);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
 
         // This should replace the first context
         let request_id_3 = String::from("3");
-        let context = Context::new(request_id_3.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id_3);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_3).unwrap(), &context);
@@ -215,13 +253,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id_2);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -242,13 +280,13 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
 
         let request_id_2 = String::from("2");
-        let context = Context::new(request_id_2.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id_2);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 2);
         assert_eq!(buffer.get(&request_id_2).unwrap(), &context);
@@ -263,7 +301,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
@@ -277,7 +315,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
@@ -291,7 +329,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
@@ -307,7 +345,7 @@ mod tests {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         let request_id = String::from("1");
-        let context = Context::new(request_id.clone(), 0f64, 0f64, 0, None);
+        let context = Context::from_request_id(&request_id);
         buffer.insert(context.clone());
         assert_eq!(buffer.size(), 1);
         assert_eq!(buffer.get(&request_id).unwrap(), &context);
