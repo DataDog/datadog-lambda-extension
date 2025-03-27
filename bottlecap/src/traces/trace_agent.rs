@@ -182,6 +182,7 @@ impl TraceAgent {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::pedantic)]
     async fn trace_endpoint_handler(
         config: Arc<config::Config>,
         req: Request<Body>,
