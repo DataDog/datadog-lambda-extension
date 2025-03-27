@@ -51,7 +51,7 @@ const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
     // Buffer containing context of the previous 5 invocations
-    context_buffer: Arc<Mutex<ContextBuffer>>,
+    context_buffer: ContextBuffer,
     // Helper to infer span information
     inferrer: SpanInferrer,
     // Current invocation span
@@ -79,7 +79,6 @@ impl Processor {
         config: Arc<config::Config>,
         aws_config: &AwsConfig,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
-        context_buffer: Arc<Mutex<ContextBuffer>>,
     ) -> Self {
         let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
@@ -89,7 +88,7 @@ impl Processor {
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
-            context_buffer,
+            context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(config.service_mapping.clone()),
             span: create_empty_span(String::from("aws.lambda"), resource, service),
             cold_start_span: None,
@@ -115,8 +114,7 @@ impl Processor {
         self.reset_state();
         self.set_init_tags();
 
-        let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
-        context_buffer.create_context(&request_id);
+        self.context_buffer.create_context(&request_id);
         if self.config.enhanced_metrics {
             // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
@@ -139,9 +137,9 @@ impl Processor {
                 tmp_chan_tx,
                 process_chan_tx,
             });
-            context_buffer.add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
+            self.context_buffer
+                .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
         }
-        drop(context_buffer);
 
         // Increment the invocation metric
         self.enhanced_metrics.increment_invocation_metric(timestamp);
@@ -173,8 +171,7 @@ impl Processor {
         let mut cold_start = false;
 
         // If it's empty, then we are in a cold start
-        let context_buffer = self.context_buffer.lock().expect("lock poisoned");
-        if context_buffer.is_empty() {
+        if self.context_buffer.is_empty() {
             let now = Instant::now();
             let time_since_sandbox_init = now.duration_since(self.aws_config.sandbox_init_time);
             if time_since_sandbox_init.as_millis() > PROACTIVE_INITIALIZATION_THRESHOLD_MS.into() {
@@ -188,7 +185,6 @@ impl Processor {
             self.enhanced_metrics.set_runtime_tag(&runtime);
             self.runtime = Some(runtime);
         }
-        drop(context_buffer);
 
         if proactive_initialization {
             self.span.meta.insert(
@@ -256,8 +252,7 @@ impl Processor {
             .as_nanos()
             .try_into()
             .unwrap_or_default();
-        let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
-        context_buffer.add_start_time(&request_id, start_time);
+        self.context_buffer.add_start_time(&request_id, start_time);
         self.span.start = start_time;
     }
 
@@ -302,9 +297,9 @@ impl Processor {
 
         {
             // Scope to drop the lock on context_buffer
-            let mut context_buffer = self.context_buffer.lock().expect("lock poisoned");
-            context_buffer.add_runtime_duration(request_id, metrics.duration_ms);
-            if let Some(context) = context_buffer.get(request_id) {
+            self.context_buffer
+                .add_runtime_duration(request_id, metrics.duration_ms);
+            if let Some(context) = self.context_buffer.get(request_id) {
                 // `round` is intentionally meant to be a whole integer
                 self.span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
                 self.span
@@ -385,7 +380,6 @@ impl Processor {
                 vec![traces],
                 body_size,
                 self.inferrer.span_pointers.clone(),
-                self.context_buffer.clone(),
             );
 
             if let Err(e) = trace_agent_tx.send(send_data).await {
@@ -410,8 +404,7 @@ impl Processor {
         self.enhanced_metrics
             .set_report_log_metrics(&metrics, timestamp);
 
-        let context_buffer = self.context_buffer.lock().expect("lock poisoned");
-        if let Some(context) = context_buffer.get(request_id) {
+        if let Some(context) = self.context_buffer.get(request_id) {
             if context.runtime_duration_ms != 0.0 {
                 let post_runtime_duration_ms = metrics.duration_ms - context.runtime_duration_ms;
 
@@ -655,6 +648,17 @@ impl Processor {
     pub fn on_out_of_memory_error(&mut self, timestamp: i64) {
         self.enhanced_metrics.increment_oom_metric(timestamp);
     }
+
+    /// Add a tracer span to the context buffer for the given request_id, if present.
+    ///
+    /// This is used to enrich the invocation span with additional metadata from the tracers
+    /// top level span, since we discard the tracer span when we create the invocation span.
+    pub fn add_tracer_span(&mut self, tracer_top_level_span: &Span) {
+        if let Some(request_id) = tracer_top_level_span.meta.get("request_id") {
+            self.context_buffer
+                .add_tracer_span(request_id, Some(tracer_top_level_span.clone()));
+        }
+    }
 }
 
 #[cfg(test)]
@@ -693,13 +697,7 @@ mod tests {
             Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
         ));
 
-        Processor::new(
-            tags_provider,
-            config,
-            &aws_config,
-            metrics_aggregator,
-            Arc::new(Mutex::new(ContextBuffer::default())),
-        )
+        Processor::new(tags_provider, config, &aws_config, metrics_aggregator)
     }
 
     #[test]
