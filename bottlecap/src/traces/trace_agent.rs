@@ -15,8 +15,8 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::config;
-use crate::lifecycle::invocation::context::ContextBuffer;
 use crate::http_client;
+use crate::lifecycle::invocation::context::ContextBuffer;
 use crate::tags::provider;
 use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
