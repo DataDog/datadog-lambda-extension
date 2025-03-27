@@ -8,6 +8,7 @@ use serde_json::json;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex as SyncMutex;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
@@ -15,6 +16,7 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::http_client;
+use crate::lifecycle::invocation::context::ContextBuffer;
 use crate::tags::provider;
 use crate::traces::{stats_aggregator, stats_processor, trace_aggregator, trace_processor};
 use datadog_trace_mini_agent::http_utils::{
@@ -43,6 +45,7 @@ pub struct TraceAgent {
     pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub tags_provider: Arc<provider::Provider>,
+    pub context_buffer: Arc<SyncMutex<ContextBuffer>>,
     http_client: reqwest::Client,
     api_key: String,
     tx: Sender<SendData>,
@@ -64,6 +67,7 @@ impl TraceAgent {
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         tags_provider: Arc<provider::Provider>,
+        context_buffer: Arc<SyncMutex<ContextBuffer>>,
         resolved_api_key: String,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
@@ -88,6 +92,7 @@ impl TraceAgent {
             stats_aggregator,
             stats_processor,
             tags_provider,
+            context_buffer,
             http_client: http_client::get_client(config),
             tx: trace_tx,
             api_key: resolved_api_key,
@@ -118,6 +123,7 @@ impl TraceAgent {
         let stats_processor = self.stats_processor.clone();
         let endpoint_config = self.config.clone();
         let tags_provider = self.tags_provider.clone();
+        let context_buffer = self.context_buffer.clone();
         let client = self.http_client.clone();
         let api_key = self.api_key.clone();
 
@@ -130,10 +136,11 @@ impl TraceAgent {
 
             let endpoint_config = endpoint_config.clone();
             let tags_provider = tags_provider.clone();
+            let context_buffer = context_buffer.clone();
             let client = client.clone();
             let api_key = api_key.clone();
 
-            let service = service_fn(move |req| {
+            let service = service_fn(move |req: Request<Body>| {
                 TraceAgent::trace_endpoint_handler(
                     endpoint_config.clone(),
                     req,
@@ -142,6 +149,7 @@ impl TraceAgent {
                     stats_processor.clone(),
                     stats_tx.clone(),
                     tags_provider.clone(),
+                    context_buffer.clone(),
                     client.clone(),
                     api_key.clone(),
                 )
@@ -180,6 +188,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
         tags_provider: Arc<provider::Provider>,
+        context_buffer: Arc<SyncMutex<ContextBuffer>>,
         client: reqwest::Client,
         api_key: String,
     ) -> http::Result<Response<Body>> {
@@ -191,6 +200,7 @@ impl TraceAgent {
                 trace_tx,
                 tags_provider,
                 ApiVersion::V04,
+                context_buffer.clone(),
             )
             .await
             {
@@ -207,6 +217,7 @@ impl TraceAgent {
                 trace_tx,
                 tags_provider,
                 ApiVersion::V05,
+                context_buffer.clone(),
             )
             .await
             {
@@ -267,6 +278,7 @@ impl TraceAgent {
         trace_tx: Sender<SendData>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
+        context_buffer: Arc<SyncMutex<ContextBuffer>>,
     ) -> http::Result<Response<Body>> {
         let (parts, body) = req.into_parts();
 
@@ -308,6 +320,7 @@ impl TraceAgent {
             traces,
             body_size,
             None,
+            context_buffer,
         );
 
         // send trace payload to our trace flusher
