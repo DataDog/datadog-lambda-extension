@@ -416,18 +416,6 @@ impl TraceAgent {
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
         let mut request_builder = client.post(&target_url);
 
-        debug!("Sending request to {target_url}");
-        debug!("Request headers: {:#?}", parts.headers);
-        if let Ok(json_str) = String::from_utf8(body_bytes.to_vec()) {
-            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_str) {
-                debug!("Request body JSON: {:#?}", json_value);
-            } else {
-                debug!("Request body: {:#?}", body_bytes);
-            }
-        } else {
-            debug!("Request body: {:#?}", body_bytes);
-        }
-
         for (name, value) in &parts.headers {
             if name.as_str().to_lowercase() != "host"
                 && name.as_str().to_lowercase() != "content-length"
@@ -461,8 +449,6 @@ impl TraceAgent {
 
         let status = StatusCode::from_u16(response.status().as_u16())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-
-        debug!("Got response from {target_url} backend: {status}");
 
         let mut builder = Response::builder().status(status);
 
@@ -554,7 +540,6 @@ impl TraceAgent {
         client: reqwest::Client,
         req: Request<Body>,
     ) -> http::Result<Response<Body>> {
-        debug!("Sending request to llmobs-intake");
         Self::handle_proxy(
             config,
             client,
@@ -562,7 +547,7 @@ impl TraceAgent {
             tags_provider,
             req,
             "llmobs-intake",
-            "/api/v2/llm-obs",
+            "/api/v2/llmobs",
             "llm_obs_spans",
         )
         .await
