@@ -375,7 +375,9 @@ impl TraceAgent {
                     STATS_ENDPOINT_PATH,
                     DSM_AGENT_PATH,
                     PROFILING_ENDPOINT_PATH,
-                    INFO_ENDPOINT_PATH
+                    INFO_ENDPOINT_PATH,
+                    LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
+                    LLM_OBS_SPANS_ENDPOINT_PATH,
                 ],
                 "client_drop_p0s": true,
             }
