@@ -80,27 +80,23 @@ multi_arch_image_flavors:
   - name: basic
     alpine: 0
     fips: 0
-    platform: linux/amd64,linux/arm64
     dependency_names: [amd64, arm64]
     suffix: ""
 
   - name: alpine
     alpine: 1
     fips: 0
-    platform: linux/amd64,linux/arm64
     dependency_names: ["amd64, alpine", "arm64, alpine"]
     suffix: "-alpine"
 
   - name: fips
     alpine: 0
     fips: 1
-    platform: linux/amd64,linux/arm64
     dependency_names: ["amd64, fips", "arm64, fips"]
     suffix: "-fips"
 
   - name: fips, alpine
     alpine: 1
     fips: 1
-    platform: linux/amd64,linux/arm64
     dependency_names: ["amd64, fips, alpine", "arm64, fips, alpine"]
     suffix: "-alpine-fips"
