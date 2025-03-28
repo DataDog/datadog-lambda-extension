@@ -649,14 +649,14 @@ impl Processor {
         self.enhanced_metrics.increment_oom_metric(timestamp);
     }
 
-    /// Add a tracer span to the context buffer for the given request_id, if present.
+    /// Add a tracer span to the context buffer for the given `request_id`, if present.
     ///
     /// This is used to enrich the invocation span with additional metadata from the tracers
     /// top level span, since we discard the tracer span when we create the invocation span.
-    pub fn add_tracer_span(&mut self, tracer_top_level_span: &Span) {
-        if let Some(request_id) = tracer_top_level_span.meta.get("request_id") {
+    pub fn add_tracer_span(&mut self, span: &Span) {
+        if let Some(request_id) = span.meta.get("request_id") {
             self.context_buffer
-                .add_tracer_span(request_id, Some(tracer_top_level_span.clone()));
+                .add_tracer_span(request_id, Some(span.clone()));
         }
     }
 }
