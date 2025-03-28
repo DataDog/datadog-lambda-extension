@@ -417,6 +417,16 @@ impl TraceAgent {
         let mut request_builder = client.post(&target_url);
 
         debug!("Sending request to {target_url}");
+        debug!("Request headers: {:#?}", parts.headers);
+        if let Ok(json_str) = String::from_utf8(body_bytes.to_vec()) {
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&json_str) {
+                debug!("Request body JSON: {:#?}", json_value);
+            } else {
+                debug!("Request body: {:#?}", body_bytes);
+            }
+        } else {
+            debug!("Request body: {:#?}", body_bytes);
+        }
 
         for (name, value) in &parts.headers {
             if name.as_str().to_lowercase() != "host"
