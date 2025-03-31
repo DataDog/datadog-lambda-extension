@@ -866,8 +866,8 @@ dependencies = [
 
 [[package]]
 name = "dogstatsd"
-version = "16.0.3"
-source = "git+https://github.com/DataDog/libdatadog?rev=7982adc0c6966925f66625ca57759c0d7089a54d#7982adc0c6966925f66625ca57759c0d7089a54d"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=4dfe72ab1850680f41dd79d30a937eb68e7ba6da#4dfe72ab1850680f41dd79d30a937eb68e7ba6da"
 dependencies = [
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
