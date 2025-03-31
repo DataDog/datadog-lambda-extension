@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 AS compresser
+FROM registry.ddbuild.io/images/ubuntu:22.04 AS compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
 ARG FILE_SUFFIX
 
