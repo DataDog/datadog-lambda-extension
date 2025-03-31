@@ -8,7 +8,7 @@ ARG FIPS
 
 # Install dependencies
 RUN apk add --no-cache git make musl-dev gcc
-COPY --from=registry.ddbuild.io/images/mirror/golang:1.24.0-alpine /usr/local/go/ /usr/lib/go
+COPY --from=registry.ddbuild.io/images/mirror/golang:1.23.0-alpine /usr/local/go/ /usr/lib/go
 
 ENV GOROOT=/usr/lib/go
 ENV GOPATH=/go

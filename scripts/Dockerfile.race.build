@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile:experimental
 
-FROM registry.ddbuild.io/images/mirror/golang:1.24.0 as builder
+FROM registry.ddbuild.io/images/mirror/golang:1.23.0 as builder
 ARG EXTENSION_VERSION
 ARG ENABLE_RACE_DETECTION
 ARG AGENT_VERSION
