@@ -37,7 +37,8 @@ const LLM_OBS_SPANS_INTAKE_PATH: &str = "/api/v2/llmobs";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH: &str = "/api/intake/llm-obs/v1/eval-metric";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2: &str = "/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/intake/llm-obs/v1/eval-metric";
-const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str = "/evp_proxy/v2/api/intake/llm-obs/v2/eval-metric";
+const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
+    "/evp_proxy/v2/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
 const DD_ADDITIONAL_TAGS_HEADER: &str = "X-Datadog-Additional-Tags";
 const INFO_ENDPOINT_PATH: &str = "/info";
@@ -574,7 +575,6 @@ impl TraceAgent {
         )
         .await
     }
-    
 
     async fn handle_llm_obs_spans_proxy(
         config: Arc<config::Config>,
