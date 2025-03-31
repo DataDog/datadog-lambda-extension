@@ -246,9 +246,7 @@ publish private images ({{ $multi_arch_image_flavor.name }}):
     - layer ({{ . }})
     {{ end }} # end dependency_names
   variables:
-    ALPINE: {{ $multi_arch_image_flavor.alpine }}
     SUFFIX: {{ $multi_arch_image_flavor.suffix }}
-    PLATFORM: {{ $multi_arch_image_flavor.platform }}
   before_script:
     {{ with $environment := (ds "environments").environments.sandbox }}
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
@@ -271,9 +269,7 @@ image ({{ $multi_arch_image_flavor.name }}):
     - layer ({{ . }})
     {{ end }} # end dependency_names
   variables:
-    ALPINE: {{ $multi_arch_image_flavor.alpine }}
     SUFFIX: {{ $multi_arch_image_flavor.suffix }}
-    PLATFORM: {{ $multi_arch_image_flavor.platform }}
   script:
     - .gitlab/scripts/build_image.sh
 

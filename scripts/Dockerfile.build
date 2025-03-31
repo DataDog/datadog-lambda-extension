@@ -47,7 +47,7 @@ RUN /usr/local/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/dat
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension
-FROM ubuntu:22.04 as compresser
+FROM registry.ddbuild.io/images/mirror/ubuntu:22.04 as compresser
 ARG CMD_PATH
 ARG DATADOG_WRAPPER=datadog_wrapper
 
