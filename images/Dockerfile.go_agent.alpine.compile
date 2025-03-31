@@ -1,4 +1,4 @@
-FROM alpine:3.16 AS compiler
+FROM registry.ddbuild.io/images/mirror/alpine:3.16 AS compiler
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG BUILD_TAGS
@@ -8,7 +8,7 @@ ARG FIPS
 
 # Install dependencies
 RUN apk add --no-cache git make musl-dev gcc
-COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
+COPY --from=registry.ddbuild.io/images/mirror/golang:1.23.0-alpine /usr/local/go/ /usr/lib/go
 
 ENV GOROOT=/usr/lib/go
 ENV GOPATH=/go

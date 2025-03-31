@@ -1,4 +1,4 @@
-FROM alpine:3.16 AS compiler
+FROM registry.ddbuild.io/images/mirror/alpine:3.16 AS compiler
 ARG PLATFORM
 
 # FIPS is not used for now.
