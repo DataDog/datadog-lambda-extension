@@ -1,13 +1,13 @@
 # syntax = docker/dockerfile:experimental
 
-FROM alpine:3.16 as builder
+FROM registry.ddbuild.io/images/mirror/alpine:3.16 as builder
 ARG EXTENSION_VERSION
 ARG AGENT_VERSION
 ARG CMD_PATH
 ARG BUILD_TAGS
 
 RUN apk add --no-cache git make musl-dev gcc
-COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
+COPY --from=registry.ddbuild.io/images/mirror/golang:1.23.0-alpine /usr/local/go/ /usr/lib/go
 
 ENV GOROOT /usr/lib/go
 ENV GOPATH /go
@@ -45,7 +45,7 @@ RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datad
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension
-FROM ubuntu:22.04 as compresser
+FROM registry.ddbuild.io/images/mirror/ubuntu:22.04 as compresser
 ARG CMD_PATH
 ARG DATADOG_WRAPPER=datadog_wrapper
 RUN apt-get update
