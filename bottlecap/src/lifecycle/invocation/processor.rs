@@ -543,7 +543,6 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
-            debug!("LIP: found span context in headers {:?}", sc);
             self.aws_lambda_span.trace_id = sc.trace_id;
             self.aws_lambda_span.parent_id = sc.span_id;
 
