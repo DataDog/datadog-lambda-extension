@@ -124,7 +124,7 @@ impl Listener {
     ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received start invocation request");
         let (parts, body) = req.into_parts();
-        let hyper_migration::Body::Single(body_bytes) = body else {
+        let hyper_migration::Body::Incoming(body_bytes) = body else {
             unimplemented!()
         };
         match body_bytes.collect().await {
