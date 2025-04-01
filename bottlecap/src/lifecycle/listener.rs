@@ -1,15 +1,15 @@
 // Copyright 2024-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use ddcommon::hyper_migration;
+use http_body_util::BodyExt;
+use hyper::service::service_fn;
+use hyper::{http, Method, Response, StatusCode};
+use serde_json::json;
 use std::collections::HashMap;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use http_body_util::BodyExt;
-use ddcommon::hyper_migration;
-use hyper::service::service_fn;
-use hyper::{http, Method, StatusCode, Response};
-use std::io;
-use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
@@ -35,7 +35,10 @@ impl Listener {
         let service = service_fn(move |req| {
             let invocation_processor = invocation_processor.clone();
 
-            Self::handler(req.map(hyper_migration::Body::incoming), invocation_processor.clone())
+            Self::handler(
+                req.map(hyper_migration::Body::incoming),
+                invocation_processor.clone(),
+            )
         });
 
         let port = u16::try_from(AGENT_PORT).expect("AGENT_PORT is too large");
@@ -82,7 +85,7 @@ impl Listener {
                 if let Err(e) = server.serve_connection(conn, service).await {
                     error!("Connection error: {e}");
                 }
-            }); 
+            });
         }
     }
 
@@ -121,10 +124,7 @@ impl Listener {
     ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received start invocation request");
         let (parts, body) = req.into_parts();
-        let body_bytes = match body {
-            hyper_migration::Body::Single(body) => body,
-            _ => unimplemented!()
-        };
+        let hyper_migration::Body::Single(body_bytes) = body else { unimplemented!() };
         match body_bytes.collect().await {
             Ok(b) => {
                 let body = b.to_bytes().to_vec();
@@ -166,7 +166,9 @@ impl Listener {
 
                 Response::builder()
                     .status(400)
-                    .body(hyper_migration::Body::from("Could not read start invocation request body"))
+                    .body(hyper_migration::Body::from(
+                        "Could not read start invocation request body",
+                    ))
             }
         }
     }
@@ -195,7 +197,9 @@ impl Listener {
 
                 Response::builder()
                     .status(400)
-                    .body(hyper_migration::Body::from("Could not read end invocation request body"))
+                    .body(hyper_migration::Body::from(
+                        "Could not read end invocation request body",
+                    ))
             }
         }
     }

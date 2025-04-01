@@ -24,14 +24,14 @@ impl TelemetryListener {
         config: &TelemetryListenerConfig,
         event_bus: Sender<TelemetryEvent>,
         _cancel_token: tokio_util::sync::CancellationToken, // todo cancel token
-    ) -> Result<(), Box<dyn std::error::Error>>{
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
         let service = service_fn(move |req| {
             let event_bus = event_bus.clone();
             Self::handle(req.map(hyper_migration::Body::incoming), event_bus.clone())
         });
-        
+
         let listener = tokio::net::TcpListener::bind(&addr).await?;
 
         let server = hyper::server::conn::http1::Builder::new();
@@ -74,7 +74,7 @@ impl TelemetryListener {
                 if let Err(e) = server.serve_connection(conn, service).await {
                     error!("Connection error: {e}");
                 }
-            }); 
+            });
         }
     }
 
@@ -82,10 +82,7 @@ impl TelemetryListener {
         req: hyper_migration::HttpRequest,
         event_bus: Sender<TelemetryEvent>,
     ) -> Result<hyper_migration::HttpResponse, hyper::Error> {
-        let body_bytes = match req.into_body() {
-            hyper_migration::Body::Single(body) => body,
-            _ => unimplemented!()
-        };
+        let hyper_migration::Body::Single(body_bytes) = req.into_body() else { unimplemented!() };
         let body = match body_bytes.collect().await {
             Ok(body_bytes_collected) => body_bytes_collected.to_bytes().to_vec(),
             Err(e) => {
@@ -109,7 +106,9 @@ impl TelemetryListener {
                 debug!("Failed to parse telemetry events: {:?}", e);
                 return Ok(Response::builder()
                     .status(hyper::StatusCode::OK)
-                    .body(hyper_migration::Body::from("Failed to parse telemetry events"))
+                    .body(hyper_migration::Body::from(
+                        "Failed to parse telemetry events",
+                    ))
                     .expect("infallible"));
             }
         };

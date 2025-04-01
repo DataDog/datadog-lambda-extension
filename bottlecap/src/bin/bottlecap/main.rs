@@ -788,7 +788,8 @@ async fn setup_telemetry_client(
     let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
     let ct_clone = telemetry_listener_cancel_token.clone();
     tokio::spawn(async move {
-        let _ = TelemetryListener::spin(&telemetry_listener_config, logs_agent_channel, ct_clone).await;
+        let _ =
+            TelemetryListener::spin(&telemetry_listener_config, logs_agent_channel, ct_clone).await;
     });
 
     let telemetry_client = TelemetryApiClient::new(extension_id.to_string(), TELEMETRY_PORT);

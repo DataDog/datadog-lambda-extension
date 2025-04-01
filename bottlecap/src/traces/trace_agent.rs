@@ -7,10 +7,10 @@ use hyper::service::service_fn;
 use hyper::{http, Method, Response, StatusCode};
 use reqwest;
 use serde_json::json;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
-use std::io;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
@@ -162,7 +162,6 @@ impl TraceAgent {
                 client.clone(),
                 api_key.clone(),
             )
-
         });
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
@@ -214,7 +213,7 @@ impl TraceAgent {
                 if let Err(e) = server.serve_connection(conn, service).await {
                     error!("Connection error: {e}");
                 }
-            }); 
+            });
         }
     }
 
@@ -491,7 +490,7 @@ impl TraceAgent {
         );
         let body_bytes = match body {
             hyper_migration::Body::Single(bytes) => bytes.collect().await?.to_bytes(),
-            _ => unimplemented!()
+            _ => unimplemented!(),
         };
         let response = match request_builder.body(body_bytes).send().await {
             Ok(resp) => resp,
