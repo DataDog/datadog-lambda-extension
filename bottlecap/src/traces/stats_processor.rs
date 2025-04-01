@@ -4,7 +4,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use hyper::{http, Body, Request, Response, StatusCode};
+use ddcommon::hyper_migration;
+use hyper::{http, StatusCode};
 use tokio::sync::mpsc::Sender;
 use tracing::debug;
 
@@ -20,9 +21,9 @@ pub trait StatsProcessor {
     /// the provided tokio mpsc Sender.
     async fn process_stats(
         &self,
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         tx: Sender<pb::ClientStatsPayload>,
-    ) -> http::Result<Response<Body>>;
+    ) -> http::Result<hyper_migration::HttpResponse>;
 }
 
 #[derive(Clone, Copy)]
@@ -33,9 +34,9 @@ pub struct ServerlessStatsProcessor {}
 impl StatsProcessor for ServerlessStatsProcessor {
     async fn process_stats(
         &self,
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         tx: Sender<pb::ClientStatsPayload>,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received trace stats to process");
         let (parts, body) = req.into_parts();
 
