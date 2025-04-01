@@ -72,7 +72,7 @@ impl SpanInferrer {
         self.generated_span_context = None;
         self.trigger_tags = None;
 
-        let mut trigger: Option<impl Trigger> = None;
+        let mut trigger: Option<Box<dyn Trigger>> = None;
         let mut inferred_span = Span {
             span_id: generate_span_id(),
             ..Default::default()

@@ -55,7 +55,13 @@ pub struct Processor {
     /// Helper class to infer upstream span information and
     /// extract trace context if available.
     inferrer: SpanInferrer,
-    /// Propagator to extract span context from carriers.
+    // Current invocation span
+    pub aws_lambda_span: Span,
+    // Cold start span
+    cold_start_span: Option<Span>,
+    // Extracted span context from inferred span, headers, or payload
+    pub extracted_span_context: Option<SpanContext>,
+    // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
     /// Helper class to send enhanced metrics.
     enhanced_metrics: EnhancedMetrics,
@@ -98,6 +104,9 @@ impl Processor {
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(config.service_mapping.clone()),
+            aws_lambda_span: create_empty_span(String::from("aws.lambda"), resource, service),
+            cold_start_span: None,
+            extracted_span_context: None,
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config: aws_config.clone(),
@@ -155,16 +164,21 @@ impl Processor {
         // Increment the invocation metric
         self.enhanced_metrics.increment_invocation_metric(timestamp);
 
-        // If `UniversalInstrumentationStart` event happened first, process it
-        if let Some((headers, payload)) = self.context_buffer.pair_invoke_event(&request_id) {
-            let payload_value =
-                serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
-            // Infer span
-            self.inferrer.infer_span(&payload_value, &self.aws_config);
-            let span_context = self.extract_span_context(&headers, &payload_value);
-
-            self.process_on_universal_instrumentation_start(request_id, payload, span_context);
-        }
+    /// Resets the state of the processor to default values.
+    ///
+    fn reset_state(&mut self) {
+        // Reset Span Context on Span
+        self.aws_lambda_span.trace_id = 0;
+        self.aws_lambda_span.parent_id = 0;
+        self.aws_lambda_span.span_id = 0;
+        // Error
+        self.aws_lambda_span.error = 0;
+        // Meta tags
+        self.aws_lambda_span.meta.clear();
+        // Extracted Span Context
+        self.extracted_span_context = None;
+        // Cold Start Span
+        self.cold_start_span = None;
     }
 
     /// On the first invocation, determine if it's a cold start or proactive init.
@@ -380,6 +394,13 @@ impl Processor {
             cold_start_span.parent_id = context.invocation_span.parent_id;
         }
 
+        let log = &self.aws_lambda_span;
+
+        println!("AG: Sending invocation span to agent {log:?}");
+        println!(
+            "AG: Sending invocation span to agent {:?}",
+            self.tracer_detected
+        );
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&context.invocation_span);
             let mut traces = vec![context.invocation_span.clone()];
@@ -390,7 +411,7 @@ impl Processor {
             }
 
             if let Some(ws) = &self.inferrer.wrapped_inferred_span {
-                body_size += std::mem::size_of_val(ws);
+                body_size += size_of_val(ws);
                 traces.push(ws.clone());
             }
 
@@ -466,11 +487,7 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(
-        &mut self,
-        headers: HashMap<String, String>,
-        payload: Vec<u8>,
-    ) -> (u64, u64, u64) {
+    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -523,8 +540,8 @@ impl Processor {
         // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
             debug!("LIP: found span context in headers {:?}", sc);
-            self.span.trace_id = sc.trace_id;
-            self.span.parent_id = sc.span_id;
+            self.aws_lambda_span.trace_id = sc.trace_id;
+            self.aws_lambda_span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
@@ -535,7 +552,6 @@ impl Processor {
                 context.invocation_span.meta.extend(sc.tags.clone());
             }
         }
-
         // If we have an inferred span, set the invocation span parent id
         // to be the inferred span id, even if we don't have an extracted trace context
         if let Some(inferred_span) = &self.inferrer.inferred_span {
@@ -614,9 +630,6 @@ impl Processor {
             );
             context.invocation_span.meta.extend(metadata);
         }
-
-        debug!("AG: at end invocation headers: {:?}", headers);
-        debug!("AG: at end invocation payload: {:?}", payload_value);
 
         if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_i64) {
             let status_code_as_string = status_code.to_string();

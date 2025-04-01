@@ -101,7 +101,8 @@ impl Listener {
         match (req.method(), req.uri().path()) {
             (&Method::POST, START_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
-                Self::start_invocation_handler(parts.headers, body, invocation_processor).await
+                Self::universal_instrumentation_start(&parts.headers, body, invocation_processor)
+                    .await
             }
             (&Method::POST, END_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
@@ -126,8 +127,8 @@ impl Listener {
         }
     }
 
-    async fn start_invocation_handler(
-        headers: HeaderMap,
+    pub async fn universal_instrumentation_start(
+        headers: &HeaderMap,
         body: Body,
         req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
@@ -181,8 +182,8 @@ impl Listener {
         }
     }
 
-    pub async fn end_invocation_handler(
-        headers: HeaderMap,
+    pub async fn universal_instrumentation_end(
+        headers: &HeaderMap,
         body: Body,
         req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
@@ -220,7 +221,7 @@ impl Listener {
             .body(hyper_migration::Body::from(json!({}).to_string()))
     }
 
-    fn headers_to_map(headers: http::HeaderMap) -> HashMap<String, String> {
+    fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
         headers
             .iter()
             .map(|(k, v)| {
