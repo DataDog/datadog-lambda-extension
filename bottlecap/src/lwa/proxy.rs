@@ -1,27 +1,33 @@
-use crate::{
-    lifecycle::invocation::processor::Processor,
-    lifecycle::listener::Listener,
-};
-use hyper::{http::request::Parts, body::HttpBody, client::HttpConnector, service::{make_service_fn, service_fn}, Body, Client, Error, Request, Response, Server, Uri, HeaderMap};
-use hyper_proxy::{Intercept, Proxy, ProxyConnector};
-use serde_json::{json, Value};
-use std::{net::SocketAddr, sync::Arc};
-use std::collections::HashMap;
-use hyper::header::HeaderValue;
-use hyper::http::HeaderName;
-use nix::libc::sock_fprog;
-use tokio::{sync::Mutex, task::JoinHandle};
-use tracing::{debug, error};
 use crate::config::Config;
+use crate::lifecycle::invocation::generate_span_id;
 use crate::lifecycle::invocation::span_inferrer::SpanInferrer;
 use crate::traces::context::SpanContext;
+use crate::traces::propagation::text_map_propagator::{
+    DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
+};
 use crate::traces::propagation::{DatadogCompositePropagator, Propagator};
+use crate::{lifecycle::invocation::processor::Processor, lifecycle::listener::Listener};
+use hyper::body::Bytes;
+use hyper::header::{HeaderName, HeaderValue};
+use hyper::{
+    body::HttpBody,
+    client::HttpConnector,
+    http,
+    http::request::Parts,
+    service::{make_service_fn, service_fn},
+    Body, Client, Error, HeaderMap, Request, Response, Server, Uri,
+};
+use hyper_proxy::{Intercept, Proxy, ProxyConnector};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::{net::SocketAddr, sync::Arc};
+use tokio::{sync::Mutex, task::JoinHandle};
+use tracing::{debug, error};
 
 #[must_use]
 pub fn start_lwa_proxy(
     config: Arc<Config>,
     invocation_processor: Arc<Mutex<Processor>>,
-    // trace_processor: Arc<Mutex<ServerlessTraceProcessor>>,
 ) -> Option<JoinHandle<()>> {
     if let Some((proxy_socket, aws_runtime_uri)) = parse_env_addresses() {
         debug!(
@@ -36,8 +42,8 @@ pub fn start_lwa_proxy(
         let proxy_task_handle = tokio::spawn({
             async move {
                 let proxy_server = Server::bind(&proxy_socket).serve(make_service_fn(move |_| {
-                    // let trace_processor = Arc::clone(&trace_processor);
                     let processor = Arc::clone(&invocation_processor);
+                    let config = Arc::clone(&config);
                     let uri = aws_runtime_uri.clone();
                     let client = Arc::clone(&proxied_client);
                     async move {
@@ -92,12 +98,12 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                     }
                     format!("{host}:{port}")
                         .parse::<SocketAddr>()
-                        .or_else(|e| {
+                        .map_err(|e| {
                             error!(
                                 "LWA: cannot parse socket address from host and port {}: {}",
                                 uri, e
                             );
-                            Err(())
+                            ();
                         })
                         .ok()
                 } else {
@@ -113,9 +119,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                 None
             }
         },
-        Err(_) => {
-            None
-        }
+        Err(_) => None,
     };
     let aws_runtime_api = match std::env::var("AWS_LAMBDA_RUNTIME_API") {
         Ok(env_uri) => match format!("http://{env_uri}").parse() {
@@ -145,7 +149,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
 //  AWS lambda service returns from GET /invocation/next with the incoming invocation. LWA wraps it into the body. LWA proxy intercepts it
 //     LWA: Intercepted resp: Parts { status: 200, version: HTTP/1.1, headers: {"content-type": "application/json", "lambda-runtime-aws-request-id": "8442603f-da10-42d2-bf58-c33a31978aad", "lambda-runtime-deadline-ms": "1741965555094", "lambda-runtime-invoked-function-arn": "arn:aws:lambda:us-east-1:425362996713:function:ag-lwa-stack-lambda", "lambda-runtime-trace-id": "Root=1-67d448e8-3ae320be0e2cdf2f53ccdaba;Lineage=1:73f724a8:0", "date": "Fri, 14 Mar 2025 15:19:06 GMT", "content-length": "927"} }
 //     LWA: Intercepted resp body: b"{\"version\":\"2.0\",\"routeKey\":\"$default\",\"rawPath\":\"/\",\"rawQueryString\":\"\",\"headers\":{\"x-amzn-tls-cipher-suite\":\"TLS_AES_128_GCM_SHA256\",\"x-amzn-tls-version\":\"TLSv1.3\",\"x-amzn-trace-id\":\"Root=1-67d448e8-3ae320be0e2cdf2f53ccdaba\",\"x-forwarded-proto\":\"https\",\"host\":\"e366vgzulqwityxor4e6nfkdam0axzew.lambda-url.us-east-1.on.aws\",\"x-forwarded-port\":\"443\",\"x-forwarded-for\":\"70.107.97.101\",\"accept\":\"*/*\",\"user-agent\":\"curl/7.81.0\"},\"requestContext\":{\"accountId\":\"anonymous\",\"apiId\":\"e366vgzulqwityxor4e6nfkdam0axzew\",\"domainName\":\"e366vgzulqwityxor4e6nfkdam0axzew.lambda-url.us-east-1.on.aws\",\"domainPrefix\":\"e366vgzulqwityxor4e6nfkdam0axzew\",\"http\":{\"method\":\"GET\",\"path\":\"/\",\"protocol\":\"HTTP/1.1\",\"sourceIp\":\"70.107.97.101\",\"userAgent\":\"curl/7.81.0\"},\"requestId\":\"8442603f-da10-42d2-bf58-c33a31978aad\",\"routeKey\":\"$default\",\"stage\":\"$default\",\"time\":\"14/Mar/2025:15:19:04 +0000\",\"timeEpoch\":1741965544908},\"isBase64Encoded\":false}"
-//  Lambda Runtime processes the request and when it's done,  POST to runtime/invocation/REQ_ID/response. The body has the response. LWA proxy intercepts it
+//  Lambda Runtime processes the request and when it's done, LWA invokes POST to runtime/invocation/REQ_ID/response. The body has the response. LWA proxy intercepts it
 //     LWA: Intercepted request: Parts { method: POST, uri: /2018-06-01/runtime/invocation/8442603f-da10-42d2-bf58-c33a31978aad/response, version: HTTP/1.1, headers: {"user-agent": "aws-lambda-rust/aws-lambda-adapter/0.9.0", "host": "127.0.0.1:9002", "content-length": "238"} }
 //     LWA: Intercepted request body: b"{\"statusCode\":200,\"headers\":{\"date\":\"Fri, 14 Mar 2025 15:19:06 GMT\",\"content-length\":\"34\",\"content-type\":\"text/html; charset=utf-8\"},\"multiValueHeaders\":{},\"body\":\"<h1>Hello, Website with span!<h1>\\n\",\"isBase64Encoded\":false,\"cookies\":[]}
 //  AWS Lambda service responds to the POST with a 202. LWA proxy intercepts it
@@ -156,28 +160,32 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
 //     LWA: Intercepted request body: b""
 
 async fn intercept_payload(
-    config: Arc<Config>,
     intercepted: Request<Body>,
     client: Arc<Client<ProxyConnector<HttpConnector>>>,
-    // span_generator: Arc<Mutex<ServerlessTraceProcessor>>,
+    config: Arc<Config>,
     processor: Arc<Mutex<Processor>>,
     aws_runtime_addr: Uri,
 ) -> Result<Response<Body>, Error> {
     // request received from lambda handler directed to AWS runtime API
     // it can be either invocation/next, or a lambda handler response to it
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
-
     let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
 
     debug!("LWA: Intercepted request: {:?}", intercepted_parts);
-    debug!("LWA: Intercepted request body: {:?}", waited_intercepted_body);
+    debug!(
+        "LWA: Intercepted request body: {:?}",
+        waited_intercepted_body
+    );
 
-    let forward_intercepted =
-        forward_request(aws_runtime_addr, &intercepted_parts, waited_intercepted_body.clone().into()).await?;
+    let forward_intercepted = forward_request(
+        aws_runtime_addr,
+        &intercepted_parts,
+        waited_intercepted_body.clone().into(),
+    )
+    .await?;
 
     // response after forwarding to AWS runtime API
     let response_to_intercepted_req = client.request(forward_intercepted).await?;
-
 
     let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
     let resp_payload = resp_body.collect().await?.to_bytes();
@@ -192,66 +200,115 @@ async fn intercept_payload(
         .unwrap();
     *response_to_intercepted_req.headers_mut() = resp_part.headers.clone();
 
-
     match (intercepted_parts.method, intercepted_parts.uri.path()) {
         (hyper::Method::GET, "/2018-06-01/runtime/invocation/next") => {
-            // intercepted invocation/next. The *response body* contains the payload of
-            // the request that the lambda handler will see
-            // let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
-            // let resp_payload = resp_body.collect().await?.to_bytes();
-
-            let inner_payload = serde_json::from_slice::<Value>(&resp_payload).unwrap_or_else(|_| json!({}));
-            debug!("LWA: payload wrapped in body {}", inner_payload);
-
-            let body_bytes = inner_payload.get("body")
-                .map(|body| serde_json::to_vec(body)
-                    .unwrap_or_else(|_| vec![]))
-                .unwrap_or_else(|| vec![]);
-
-            let header_map = inner_header(&inner_payload);
-
-            if let Some(span_context) = extract_span_context(Arc::clone(&config), &header_map, &inner_payload.clone()){
-                // re parent with aws lambda span
-            } else {
-                // inject aws lambda span
-            }
-
-            // Response is not cloneable, so it must be built again
-            let mut rebuild_response = Response::builder()
-                .status(resp_part.status)
-                .version(resp_part.version)
-                .body(Body::from(resp_payload))
-                .unwrap();
-            *rebuild_response.headers_mut() = resp_part.headers;
-
-            // complete forwarding to the lambda handler
-            Ok(rebuild_response)
+            on_get_next_response(
+                &config,
+                &processor,
+                resp_part,
+                &resp_payload,
+            )
+            .await
         }
         (hyper::Method::POST, path)
             if path.starts_with("/2018-06-01/runtime/invocation/")
                 && path.ends_with("/response") =>
         {
-            let inner_payload = serde_json::from_slice::<Value>(&waited_intercepted_body).unwrap_or_else(|_| json!({}));
-
-            let body_bytes = inner_payload.get("body")
-                .map(|body| serde_json::to_vec(body)
-                    .unwrap_or_else(|_| vec![]))
-                .unwrap_or_else(|| vec![]);
-
-            let header_map = inner_header(inner_payload);
-
-            let _ = Listener::end_invocation_handler(
-                header_map,
-                body_bytes.into(),
-                Arc::clone(&processor),
-            )
-                .await;
+            on_post_invocation(&processor, &waited_intercepted_body).await;
             // only parsing of the original request (handler -> runtime API) is needed so
             // the original response can be used
             Ok(response_to_intercepted_req)
         }
         _ => Ok(response_to_intercepted_req),
     }
+}
+
+async fn on_get_next_response(
+    config: &Arc<Config>,
+    processor: &Arc<Mutex<Processor>>,
+    resp_part: http::response::Parts,
+    resp_payload: &Bytes,
+) -> Result<Response<Body>, Error> {
+    // intercepted invocation/next. The *response body* contains the payload of
+    // the request that the lambda handler will see
+    // let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
+    // let resp_payload = resp_body.collect().await?.to_bytes();
+
+    let mut inner_payload =
+        serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|_| json!({}));
+
+    debug!("LWA: payload wrapped in body {}", inner_payload);
+
+    let _body_bytes = inner_payload
+        .get("body")
+        .map(|body| serde_json::to_vec(body).unwrap_or_else(|_| vec![]))
+        .unwrap_or_default();
+
+    let mut header_map = inner_header(&inner_payload);
+
+    let trace_id = generate_span_id();
+    let trace_id = trace_id.to_string();
+
+    let span_id = generate_span_id();
+    if let Some(_span_context) =
+        extract_span_context(Arc::clone(config), &header_map, &inner_payload.clone())
+    {
+        // re parent with aws lambda span
+    } else {
+        // inject aws lambda span
+
+        debug!("LWA: inserting span with trace_id {trace_id} and span_id {span_id}");
+        header_map.insert(DATADOG_TRACE_ID_KEY.to_string(), trace_id);
+        header_map.insert(DATADOG_PARENT_ID_KEY.to_string(), span_id.to_string());
+        header_map.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), format!("{}", 2));
+        inner_payload["headers"] = serde_json::to_value(header_map).unwrap();
+    }
+    // Response is not cloneable, so it must be built again
+    let body = serde_json::to_vec(&inner_payload).unwrap();
+    let body_length = body.len();
+    let mut rebuild_response = Response::builder()
+        .status(resp_part.status)
+        .version(resp_part.version)
+        .body(Body::from(body.clone()))
+        .unwrap();
+    *rebuild_response.headers_mut() = resp_part.headers;
+    rebuild_response.headers_mut().insert(
+        hyper::header::CONTENT_LENGTH,
+        HeaderValue::from_str(&body_length.to_string()).unwrap(),
+    );
+    let _ = Listener::universal_instrumentation_start(
+        rebuild_response.headers(),
+        body.into(),
+        Arc::clone(processor),
+    )
+    .await;
+
+    processor.lock().await.set_aws_span_id(span_id);
+    // complete forwarding to the lambda handler
+    Ok(rebuild_response)
+}
+
+async fn on_post_invocation(
+    processor: &Arc<Mutex<Processor>>,
+    waited_intercepted_body: &Bytes,
+) {
+    let inner_payload =
+        serde_json::from_slice::<Value>(waited_intercepted_body).unwrap_or_else(|_| json!({}));
+
+    let body_bytes = inner_payload
+        .get("body")
+        .map(|body| serde_json::to_vec(body).unwrap_or_else(|_| vec![]))
+        .unwrap_or_default();
+
+    let header_map = inner_header(&inner_payload);
+    let mut headers = HeaderMap::new();
+    for (k, v) in header_map {
+        let header_name = HeaderName::from_bytes(k.as_bytes()).unwrap();
+        headers.insert(header_name, HeaderValue::from_str(&v).unwrap());
+    }
+
+    let _ =
+        Listener::universal_instrumentation_end(&headers, body_bytes.into(), Arc::clone(processor)).await;
 }
 
 fn extract_span_context(
@@ -263,9 +320,9 @@ fn extract_span_context(
     let inferrer = SpanInferrer::new(config.service_mapping.clone());
 
     if let Some(sc) = inferrer.get_span_context(&propagator) {
+        debug!("LWA: Extracted trace context from span inferrer {:?}", sc);
         return Some(sc);
     }
-
 
     if let Some(payload_headers) = payload_value.get("headers") {
         if let Some(sc) = propagator.extract(payload_headers) {
@@ -278,13 +335,14 @@ fn extract_span_context(
         debug!("Extracted trace context from headers");
         return Some(sc);
     }
-
+    debug!("LWA: No trace context found in headers or payload");
     None
 }
 
 fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
     let headers = if let Some(body) = inner_payload.get("headers") {
-        serde_json::from_value::<HashMap<String, String>>(body.clone()).unwrap_or_else(|_| HashMap::new())
+        serde_json::from_value::<HashMap<String, String>>(body.clone())
+            .unwrap_or_else(|_| HashMap::new())
     } else {
         HashMap::new()
     };
@@ -319,62 +377,12 @@ async fn forward_request(
     Ok(redirected_request)
 }
 
-// async fn invoke_universal_instrumentation_start(
-//     trace_processor: Arc<Mutex<impl TraceProcessor>>,
-//     processor: Arc<Mutex<Processor>>,
-//     resp_body: Bytes,
-// ) {
-// let req_wrapper_in_resp_body = deserialize_json(Ok(resp_body.clone())).unwrap();
-// let vec = serde_json::to_vec(&req_wrapper_in_resp_body);
-// if vec.is_ok() {
-//     let headers = req_wrapper_in_resp_body.get("headers").unwrap();
-//     let headers_map: HashMap<String, String> = headers
-//         .as_object()
-//         .unwrap()
-//         .iter()
-//         .map(|(k, v)| (k.clone(), v.as_str().unwrap().to_string()))
-//         .collect();
-//
-//     // let (mut span_id, mut trace_id, parent_id, _) =
-//         Listener::start_invocation_handler(
-//             resp_body.clone(),
-//             Arc::clone(&processor),
-//         )
-//         .await;
-
-// if span_id == 0 {
-//     span_id = random();
-// }
-//
-// if trace_id == 0 {
-//     trace_id = random();
-// }
-//
-// trace_processor
-//     .lock()
-//     .await
-//     .override_ids(trace_id, parent_id, span_id);
-// }
-// }
-
-// fn deserialize_json(response: Result<Bytes, Error>) -> Option<Value> {
-//     match response {
-//         Ok(bytes) => serde_json::from_slice(bytes.as_ref()).unwrap_or_else(|e| {
-//             error!("Error deserializing response body: {}", e);
-//             None
-//         }),
-//         Err(e) => {
-//             error!("Error reading response body: {}", e);
-//             None
-//         }
-//     }
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{AwsConfig, Config};
     use crate::tags::provider::Provider;
+    use crate::traces::trace_processor::ServerlessTraceProcessor;
     use crate::LAMBDA_RUNTIME_SLUG;
     use datadog_trace_obfuscation::obfuscation_config;
     use dogstatsd::aggregator::Aggregator;
@@ -428,8 +436,8 @@ mod tests {
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
-                aws_container_credentials_full_uri: "".to_string(),
-                aws_container_authorization_token: "".to_string(),
+                aws_container_credentials_full_uri: String::new(),
+                aws_container_authorization_token: String::new(),
             },
             metrics_aggregator,
         )));
@@ -439,9 +447,8 @@ mod tests {
             resolved_api_key: "api_key".to_string(),
         }));
 
-        let proxy_task_handle =
-            // start_lwa_proxy(invocation_processor, trace_processor)
-            start_lwa_proxy(invocation_processor).expect("Failed to start proxy");
+        let proxy_task_handle = start_lwa_proxy(Arc::clone(&config), invocation_processor)
+            .expect("Failed to start proxy");
 
         let client = Client::builder().build_http::<Body>();
         let uri_with_schema = format!("http://{proxy_uri}");
