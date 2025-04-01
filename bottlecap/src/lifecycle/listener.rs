@@ -40,7 +40,7 @@ impl Listener {
 
         let port = u16::try_from(AGENT_PORT).expect("AGENT_PORT is too large");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
-       let listener = tokio::net::TcpListener::bind(&addr).await?;
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
 
         let server = hyper::server::conn::http1::Builder::new();
         let mut joinset = tokio::task::JoinSet::new();
