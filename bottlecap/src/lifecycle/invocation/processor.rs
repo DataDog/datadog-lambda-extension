@@ -55,7 +55,7 @@ pub struct Processor {
     // Helper to infer span information
     inferrer: SpanInferrer,
     // Current invocation span
-    pub span: Span,
+    pub aws_lambda_span: Span,
     // Cold start span
     cold_start_span: Option<Span>,
     // Extracted span context from inferred span, headers, or payload
@@ -90,7 +90,7 @@ impl Processor {
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(config.service_mapping.clone()),
-            span: create_empty_span(String::from("aws.lambda"), resource, service),
+            aws_lambda_span: create_empty_span(String::from("aws.lambda"), resource, service),
             cold_start_span: None,
             extracted_span_context: None,
             propagator,
@@ -149,13 +149,13 @@ impl Processor {
     ///
     fn reset_state(&mut self) {
         // Reset Span Context on Span
-        self.span.trace_id = 0;
-        self.span.parent_id = 0;
-        self.span.span_id = 0;
+        self.aws_lambda_span.trace_id = 0;
+        self.aws_lambda_span.parent_id = 0;
+        self.aws_lambda_span.span_id = 0;
         // Error
-        self.span.error = 0;
+        self.aws_lambda_span.error = 0;
         // Meta tags
-        self.span.meta.clear();
+        self.aws_lambda_span.meta.clear();
         // Extracted Span Context
         self.extracted_span_context = None;
         // Cold Start Span
@@ -187,19 +187,19 @@ impl Processor {
         }
 
         if proactive_initialization {
-            self.span.meta.insert(
+            self.aws_lambda_span.meta.insert(
                 String::from("proactive_initialization"),
                 proactive_initialization.to_string(),
             );
         }
 
         if let Some(runtime) = &self.runtime {
-            self.span
+            self.aws_lambda_span
                 .meta
                 .insert(String::from("runtime"), runtime.to_string());
         }
 
-        self.span
+        self.aws_lambda_span
             .meta
             .insert(String::from("cold_start"), cold_start.to_string());
 
@@ -211,8 +211,8 @@ impl Processor {
         // Create a cold start span
         let mut cold_start_span = create_empty_span(
             String::from("aws.lambda.cold_start"),
-            self.span.resource.clone(),
-            self.span.service.clone(),
+            self.aws_lambda_span.resource.clone(),
+            self.aws_lambda_span.service.clone(),
         );
 
         let start_time: i64 = SystemTime::from(time)
@@ -282,14 +282,14 @@ impl Processor {
                 self.enhanced_metrics.increment_timeout_metric(timestamp);
 
                 // Invocation Span will never have the `trace_id` or `span_id` set
-                self.span.trace_id = generate_span_id();
-                self.span.span_id = generate_span_id();
-                self.span.error = 1;
-                self.span.meta.insert(
+                self.aws_lambda_span.trace_id = generate_span_id();
+                self.aws_lambda_span.span_id = generate_span_id();
+                self.aws_lambda_span.error = 1;
+                self.aws_lambda_span.meta.insert(
                     "error.msg".to_string(),
                     "Datadog detected an Impending Timeout".to_string(),
                 );
-                self.span
+                self.aws_lambda_span
                     .meta
                     .insert("error.type".to_string(), "Impending Timeout".to_string());
             }
@@ -301,8 +301,9 @@ impl Processor {
                 .add_runtime_duration(request_id, metrics.duration_ms);
             if let Some(context) = self.context_buffer.get(request_id) {
                 // `round` is intentionally meant to be a whole integer
-                self.span.duration = (context.runtime_duration_ms * MS_TO_NS).round() as i64;
-                self.span
+                self.aws_lambda_span.duration =
+                    (context.runtime_duration_ms * MS_TO_NS).round() as i64;
+                self.aws_lambda_span
                     .meta
                     .insert("request_id".to_string(), request_id.clone());
                 // todo(duncanista): add missing tags
@@ -330,19 +331,27 @@ impl Processor {
         }
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
-            self.span.meta.extend(trigger_tags);
+            self.aws_lambda_span.meta.extend(trigger_tags);
         }
 
-        self.inferrer.complete_inferred_spans(&self.span);
+        self.inferrer.complete_inferred_spans(&self.aws_lambda_span);
 
         if let Some(cold_start_span) = &mut self.cold_start_span {
-            cold_start_span.trace_id = self.span.trace_id;
-            cold_start_span.parent_id = self.span.parent_id;
+            cold_start_span.trace_id = self.aws_lambda_span.trace_id;
+            cold_start_span.parent_id = self.aws_lambda_span.parent_id;
         }
 
+        let log = &self.aws_lambda_span;
+
+        println!("AG: Sending invocation span to agent {log:?}");
+        println!(
+            "AG: Sending invocation span to agent {:?}",
+            self.tracer_detected
+        );
         if self.tracer_detected {
-            let mut body_size = std::mem::size_of_val(&self.span);
-            let mut traces = vec![self.span.clone()];
+            println!("AG: Sending invocation span to agent");
+            let mut body_size = size_of_val(&self.aws_lambda_span);
+            let mut traces = vec![self.aws_lambda_span.clone()];
 
             if let Some(inferred_span) = &self.inferrer.inferred_span {
                 body_size += std::mem::size_of_val(inferred_span);
@@ -350,12 +359,12 @@ impl Processor {
             }
 
             if let Some(ws) = &self.inferrer.wrapped_inferred_span {
-                body_size += std::mem::size_of_val(ws);
+                body_size += size_of_val(ws);
                 traces.push(ws.clone());
             }
 
             if let Some(cold_start_span) = &self.cold_start_span {
-                body_size += std::mem::size_of_val(cold_start_span);
+                body_size += size_of_val(cold_start_span);
                 traces.push(cold_start_span.clone());
             }
 
@@ -426,22 +435,15 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(
-        &mut self,
-        headers: HashMap<String, String>,
-        payload: Vec<u8>,
-    ) -> (u64, u64, u64) {
+    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
-        debug!("AG: at start invocation headers: {:?}", headers);
-        debug!("AG: at start invocation payload: {:?}", payload_value);
-
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
             tag_span_from_value(
-                &mut self.span,
+                &mut self.aws_lambda_span,
                 "function.request",
                 &payload_value,
                 0,
@@ -455,8 +457,8 @@ impl Processor {
         // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
             debug!("LIP: found span context in headers {:?}", sc);
-            self.span.trace_id = sc.trace_id;
-            self.span.parent_id = sc.span_id;
+            self.aws_lambda_span.trace_id = sc.trace_id;
+            self.aws_lambda_span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
@@ -464,19 +466,26 @@ impl Processor {
                 self.inferrer.set_parent_id(sc.span_id);
                 self.inferrer.extend_meta(sc.tags.clone());
             } else {
-                self.span.meta.extend(sc.tags.clone());
+                self.aws_lambda_span.meta.extend(sc.tags.clone());
             }
         }
-
         // If we have an inferred span, set the invocation span parent id
         // to be the inferred span id, even if we don't have an extracted trace context
         if let Some(inferred_span) = &self.inferrer.inferred_span {
-            self.span.parent_id = inferred_span.span_id;
+            debug!("LIP: found inferred span, setting aws.lambda.parent_it of inferred_span_id");
+            self.aws_lambda_span.parent_id = inferred_span.span_id;
         }
 
-        debug!("LIP: trace context found trace_id:{trace_id} span_id:{span_id} parent_id:{parent_id}",
-            trace_id = self.span.trace_id, span_id = self.span.span_id, parent_id = self.span.parent_id);
-        (self.span.span_id, self.span.trace_id, self.span.parent_id)
+        debug!(
+            "LIP: trace context found trace_id:{trace_id} span_id:{span_id} parent_id:{parent_id}",
+            trace_id = self.aws_lambda_span.trace_id,
+            span_id = self.aws_lambda_span.span_id,
+            parent_id = self.aws_lambda_span.parent_id
+        );
+    }
+
+    pub fn set_aws_span_id(&mut self, span_id: u64) {
+        self.aws_lambda_span.span_id = span_id;
     }
 
     fn extract_span_context(
@@ -511,7 +520,7 @@ impl Processor {
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
             tag_span_from_value(
-                &mut self.span,
+                &mut self.aws_lambda_span,
                 "function.response",
                 &payload_value,
                 0,
@@ -519,18 +528,15 @@ impl Processor {
             );
         }
 
-        debug!("AG: at end invocation headers: {:?}", headers);
-        debug!("AG: at end invocation payload: {:?}", payload_value);
-
         if let Some(status_code) = payload_value.get("statusCode").and_then(Value::as_i64) {
             let status_code_as_string = status_code.to_string();
-            self.span.meta.insert(
+            self.aws_lambda_span.meta.insert(
                 "http.status_code".to_string(),
                 status_code_as_string.clone(),
             );
 
             if status_code_as_string.len() == 3 && status_code_as_string.starts_with('5') {
-                self.span.error = 1;
+                self.aws_lambda_span.error = 1;
             }
 
             // If we have an inferred span, set the status code to it
@@ -540,7 +546,7 @@ impl Processor {
         self.update_span_context_from_headers(&headers);
         self.set_span_error_from_headers(headers);
 
-        if self.span.error == 1 {
+        if self.aws_lambda_span.error == 1 {
             let now = std::time::UNIX_EPOCH
                 .elapsed()
                 .expect("can't poll clock")
@@ -580,7 +586,7 @@ impl Processor {
 
             if let Some(priority_str) = headers.get(DATADOG_SAMPLING_PRIORITY_KEY) {
                 if let Ok(priority) = priority_str.parse::<f64>() {
-                    self.span
+                    self.aws_lambda_span
                         .metrics
                         .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
                 }
@@ -593,16 +599,17 @@ impl Processor {
 
         // We should always use the generated span id from the tracer
         if let Some(header) = headers.get(DATADOG_SPAN_ID_KEY) {
-            self.span.span_id = header.parse::<u64>().unwrap_or(0);
+            debug!("LIP: setting span_id from headers {:?}", header);
+            self.aws_lambda_span.span_id = header.parse::<u64>().unwrap_or(0);
         }
 
-        self.span.trace_id = trace_id;
+        self.aws_lambda_span.trace_id = trace_id;
 
         if self.inferrer.inferred_span.is_some() {
             self.inferrer.extend_meta(tags);
         } else {
-            self.span.parent_id = parent_id;
-            self.span.meta.extend(tags);
+            self.aws_lambda_span.parent_id = parent_id;
+            self.aws_lambda_span.meta.extend(tags);
         }
     }
 
@@ -619,9 +626,9 @@ impl Processor {
             || message.is_some()
             || stack.is_some()
             || r#type.is_some()
-            || self.span.error == 1;
+            || self.aws_lambda_span.error == 1;
         if is_error {
-            self.span.error = 1;
+            self.aws_lambda_span.error = 1;
 
             if let Some(m) = message {
                 let decoded_message = base64_to_string(m).unwrap_or_else(|_| {
@@ -629,7 +636,7 @@ impl Processor {
                     m.to_string()
                 });
 
-                self.span
+                self.aws_lambda_span
                     .meta
                     .insert(String::from("error.msg"), decoded_message);
             }
@@ -640,7 +647,7 @@ impl Processor {
                     t.to_string()
                 });
 
-                self.span
+                self.aws_lambda_span
                     .meta
                     .insert(String::from("error.type"), decoded_type);
             }
@@ -651,7 +658,7 @@ impl Processor {
                     s.to_string()
                 });
 
-                self.span
+                self.aws_lambda_span
                     .meta
                     .insert(String::from("error.stack"), decoded_stack);
             }
@@ -741,10 +748,10 @@ mod tests {
 
         p.set_span_error_from_headers(headers);
 
-        assert_eq!(p.span.error, 1);
-        assert_eq!(p.span.meta["error.msg"], error_message);
-        assert_eq!(p.span.meta["error.type"], error_type);
-        assert_eq!(p.span.meta["error.stack"], error_stack);
+        assert_eq!(p.aws_lambda_span.error, 1);
+        assert_eq!(p.aws_lambda_span.meta["error.msg"], error_message);
+        assert_eq!(p.aws_lambda_span.meta["error.type"], error_type);
+        assert_eq!(p.aws_lambda_span.meta["error.stack"], error_stack);
     }
 
     #[test]
@@ -770,10 +777,10 @@ mod tests {
 
         p.set_span_error_from_headers(headers);
 
-        assert_eq!(p.span.error, 1);
-        assert_eq!(p.span.meta["error.msg"], error_message);
-        assert_eq!(p.span.meta["error.type"], error_type);
-        assert_eq!(p.span.meta["error.stack"], error_stack);
+        assert_eq!(p.aws_lambda_span.error, 1);
+        assert_eq!(p.aws_lambda_span.meta["error.msg"], error_message);
+        assert_eq!(p.aws_lambda_span.meta["error.type"], error_type);
+        assert_eq!(p.aws_lambda_span.meta["error.stack"], error_stack);
     }
 
     #[test]
@@ -787,9 +794,13 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert_eq!(p.span.trace_id, 999);
-        assert_eq!(p.span.parent_id, 1000);
-        let priority = p.span.metrics.get(TAG_SAMPLING_PRIORITY).copied();
+        assert_eq!(p.aws_lambda_span.trace_id, 999);
+        assert_eq!(p.aws_lambda_span.parent_id, 1000);
+        let priority = p
+            .aws_lambda_span
+            .metrics
+            .get(TAG_SAMPLING_PRIORITY)
+            .copied();
         assert_eq!(priority, Some(-1.0));
     }
 
@@ -807,9 +818,12 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(!p.span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
-        assert_eq!(p.span.trace_id, 888);
-        assert_eq!(p.span.parent_id, 999);
+        assert!(!p
+            .aws_lambda_span
+            .metrics
+            .contains_key(TAG_SAMPLING_PRIORITY));
+        assert_eq!(p.aws_lambda_span.trace_id, 888);
+        assert_eq!(p.aws_lambda_span.parent_id, 999);
     }
 
     #[test]
@@ -822,9 +836,12 @@ mod tests {
 
         p.update_span_context_from_headers(&headers);
 
-        assert!(!p.span.metrics.contains_key(TAG_SAMPLING_PRIORITY));
-        assert_eq!(p.span.trace_id, 111);
-        assert_eq!(p.span.parent_id, 222);
+        assert!(!p
+            .aws_lambda_span
+            .metrics
+            .contains_key(TAG_SAMPLING_PRIORITY));
+        assert_eq!(p.aws_lambda_span.trace_id, 111);
+        assert_eq!(p.aws_lambda_span.parent_id, 222);
     }
 
     #[test]
@@ -848,7 +865,7 @@ mod tests {
         p.on_invocation_end(HashMap::new(), response.as_bytes().to_vec());
 
         assert_eq!(
-            p.span
+            p.aws_lambda_span
                 .meta
                 .get("http.status_code")
                 .expect("Status code not parsed!"),
