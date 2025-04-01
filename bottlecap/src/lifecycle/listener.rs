@@ -62,11 +62,17 @@ impl Listener {
         match (req.method(), req.uri().path()) {
             (&Method::POST, START_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
-                Self::universal_instrumentation_start(&parts.headers, body, invocation_processor).await
+                Self::universal_instrumentation_start(&parts.headers, body, invocation_processor)
+                    .await
             }
             (&Method::POST, END_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
-                match Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await
+                match Self::universal_instrumentation_end(
+                    &parts.headers,
+                    body,
+                    invocation_processor,
+                )
+                .await
                 {
                     Ok(response) => Ok(response),
                     Err(e) => {

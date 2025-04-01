@@ -253,7 +253,7 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
         self.context_buffer.add_start_time(&request_id, start_time);
-        self.span.start = start_time;
+        self.aws_lambda_span.start = start_time;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -314,7 +314,9 @@ impl Processor {
                     self.aws_lambda_span
                         .meta_struct
                         .extend(tracer_span.meta_struct.clone());
-                    self.aws_lambda_span.metrics.extend(tracer_span.metrics.clone());
+                    self.aws_lambda_span
+                        .metrics
+                        .extend(tracer_span.metrics.clone());
                 }
 
                 if let Some(offsets) = &context.enhanced_metric_data {
@@ -435,7 +437,11 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn universal_instrumentation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn universal_instrumentation_start(
+        &mut self,
+        headers: HashMap<String, String>,
+        payload: Vec<u8>,
+    ) {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -514,7 +520,11 @@ impl Processor {
 
     /// Given trace context information, set it to the current span.
     ///
-    pub fn universal_instrumentation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn universal_instrumentation_end(
+        &mut self,
+        headers: HashMap<String, String>,
+        payload: Vec<u8>,
+    ) {
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
