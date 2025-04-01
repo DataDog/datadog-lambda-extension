@@ -1,14 +1,16 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{http, Body, Method, Request, Response, Server, StatusCode};
+use ddcommon::hyper_migration;
+use http_body_util::BodyExt;
+use hyper::service::service_fn;
+use hyper::{http, Method, Response, StatusCode};
 use reqwest;
 use serde_json::json;
-use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
+use std::io;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
@@ -135,7 +137,7 @@ impl TraceAgent {
         let client = self.http_client.clone();
         let api_key = self.api_key.clone();
 
-        let make_svc = make_service_fn(move |_| {
+        let service = service_fn(move |req| {
             let trace_processor = trace_processor.clone();
             let trace_tx = trace_tx.clone();
 
@@ -148,50 +150,79 @@ impl TraceAgent {
             let client = client.clone();
             let api_key = api_key.clone();
 
-            let service = service_fn(move |req: Request<Body>| {
-                TraceAgent::trace_endpoint_handler(
-                    endpoint_config.clone(),
-                    req,
-                    trace_processor.clone(),
-                    trace_tx.clone(),
-                    stats_processor.clone(),
-                    stats_tx.clone(),
-                    invocation_processor.clone(),
-                    tags_provider.clone(),
-                    client.clone(),
-                    api_key.clone(),
-                )
-            });
+            TraceAgent::trace_endpoint_handler(
+                endpoint_config.clone(),
+                req.map(hyper_migration::Body::incoming),
+                trace_processor.clone(),
+                trace_tx.clone(),
+                stats_processor.clone(),
+                stats_tx.clone(),
+                invocation_processor.clone(),
+                tags_provider.clone(),
+                client.clone(),
+                api_key.clone(),
+            )
 
-            async move { Ok::<_, Infallible>(service) }
         });
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        let server_builder = Server::try_bind(&addr)?;
-
-        let server = server_builder.serve(make_svc);
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
 
         debug!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
         debug!(
-            "Time taken start the Trace Agent: {} ms",
+            "Time taken start the Mini Agent: {} ms",
             now.elapsed().as_millis()
         );
-
-        // start hyper http server
-        if let Err(e) = server.await {
-            error!("Server error: {e}");
-            return Err(e.into());
+        let server = hyper::server::conn::http1::Builder::new();
+        let mut joinset = tokio::task::JoinSet::new();
+        loop {
+            let conn = tokio::select! {
+                con_res = listener.accept() => match con_res {
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            io::ErrorKind::ConnectionAborted
+                                | io::ErrorKind::ConnectionReset
+                                | io::ErrorKind::ConnectionRefused
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Server error: {e}");
+                        return Err(e.into());
+                    }
+                    Ok((conn, _)) => conn,
+                },
+                finished = async {
+                    match joinset.join_next().await {
+                        Some(finished) => finished,
+                        None => std::future::pending().await,
+                    }
+                } => match finished {
+                    Err(e) if e.is_panic() => {
+                        std::panic::resume_unwind(e.into_panic());
+                    },
+                    Ok(()) | Err(_) => continue,
+                },
+            };
+            let conn = hyper_util::rt::TokioIo::new(conn);
+            let server = server.clone();
+            let service = service.clone();
+            joinset.spawn(async move {
+                if let Err(e) = server.serve_connection(conn, service).await {
+                    error!("Connection error: {e}");
+                }
+            }); 
         }
-
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::pedantic)]
     async fn trace_endpoint_handler(
         config: Arc<config::Config>,
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendData>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
@@ -200,7 +231,7 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         client: reqwest::Client,
         api_key: String,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
                 config,
@@ -327,13 +358,13 @@ impl TraceAgent {
 
     async fn handle_traces(
         config: Arc<config::Config>,
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendData>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<hyper_migration::HttpResponse> {
         let (parts, body) = req.into_parts();
 
         if let Some(response) = http_utils::verify_request_content_length(
@@ -399,7 +430,7 @@ impl TraceAgent {
         }
     }
 
-    fn info_handler() -> http::Result<Response<Body>> {
+    fn info_handler() -> http::Result<hyper_migration::HttpResponse> {
         let response_json = json!(
             {
                 "endpoints": [
@@ -417,7 +448,7 @@ impl TraceAgent {
         );
         Response::builder()
             .status(200)
-            .body(Body::from(response_json.to_string()))
+            .body(hyper_migration::Body::from(response_json.to_string()))
     }
 
     /// Generic proxy handler for forwarding requests to Datadog backends
@@ -427,24 +458,12 @@ impl TraceAgent {
         client: reqwest::Client,
         api_key: String,
         tags_provider: Arc<provider::Provider>,
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         backend_domain: &str,
         backend_path: &str,
         error_context: &str,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<hyper_migration::HttpResponse> {
         let (parts, body) = req.into_parts();
-
-        // TODO: Update this when upgrading hyper
-        #[allow(deprecated)]
-        let body_bytes = match hyper::body::to_bytes(body).await {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error reading request body: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
         let mut request_builder = client.post(&target_url);
@@ -470,6 +489,10 @@ impl TraceAgent {
                     .unwrap_or_default()
             ),
         );
+        let body_bytes = match body {
+            hyper_migration::Body::Single(bytes) => bytes.collect().await?.to_bytes(),
+            _ => unimplemented!()
+        };
         let response = match request_builder.body(body_bytes).send().await {
             Ok(resp) => resp,
             Err(err) => {
@@ -503,7 +526,7 @@ impl TraceAgent {
             }
         };
 
-        builder.body(Body::from(response_body))
+        builder.body(hyper_migration::Body::from_bytes(response_body))
     }
 
     async fn handle_dsm_proxy(
@@ -511,8 +534,8 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         api_key: String,
         client: reqwest::Client,
-        req: Request<Body>,
-    ) -> http::Result<Response<Body>> {
+        req: hyper_migration::HttpRequest,
+    ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
@@ -531,8 +554,8 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         api_key: String,
         client: reqwest::Client,
-        req: Request<Body>,
-    ) -> http::Result<Response<Body>> {
+        req: hyper_migration::HttpRequest,
+    ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
@@ -551,8 +574,8 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         api_key: String,
         client: reqwest::Client,
-        req: Request<Body>,
-    ) -> http::Result<Response<Body>> {
+        req: hyper_migration::HttpRequest,
+    ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
@@ -571,8 +594,8 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         api_key: String,
         client: reqwest::Client,
-        req: Request<Body>,
-    ) -> http::Result<Response<Body>> {
+        req: hyper_migration::HttpRequest,
+    ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
@@ -591,8 +614,8 @@ impl TraceAgent {
         tags_provider: Arc<provider::Provider>,
         api_key: String,
         client: reqwest::Client,
-        req: Request<Body>,
-    ) -> http::Result<Response<Body>> {
+        req: hyper_migration::HttpRequest,
+    ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
