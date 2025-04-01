@@ -462,7 +462,6 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
-            debug!("LIP: found span context in headers {:?}", sc);
             self.aws_lambda_span.trace_id = sc.trace_id;
             self.aws_lambda_span.parent_id = sc.span_id;
 
@@ -478,16 +477,8 @@ impl Processor {
         // If we have an inferred span, set the invocation span parent id
         // to be the inferred span id, even if we don't have an extracted trace context
         if let Some(inferred_span) = &self.inferrer.inferred_span {
-            debug!("LIP: found inferred span, setting aws.lambda.parent_it of inferred_span_id");
             self.aws_lambda_span.parent_id = inferred_span.span_id;
         }
-
-        debug!(
-            "LIP: trace context found trace_id:{trace_id} span_id:{span_id} parent_id:{parent_id}",
-            trace_id = self.aws_lambda_span.trace_id,
-            span_id = self.aws_lambda_span.span_id,
-            parent_id = self.aws_lambda_span.parent_id
-        );
     }
 
     pub fn set_aws_span_id(&mut self, span_id: u64) {
@@ -609,7 +600,6 @@ impl Processor {
 
         // We should always use the generated span id from the tracer
         if let Some(header) = headers.get(DATADOG_SPAN_ID_KEY) {
-            debug!("LIP: setting span_id from headers {:?}", header);
             self.aws_lambda_span.span_id = header.parse::<u64>().unwrap_or(0);
         }
 

@@ -364,7 +364,7 @@ impl TraceAgent {
 
         let tracer_header_tags = (&parts.headers).into();
 
-        let (body_size, traces) = match version {
+        let (body_size, mut traces) = match version {
             ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
                 Ok(result) => result,
                 Err(err) => {
@@ -386,11 +386,22 @@ impl TraceAgent {
         };
 
         // Search for trace invocation span and send it to the invocation processor
-        for chunk in &traces {
-            for span in chunk {
-                if span.resource == INVOCATION_SPAN_RESOURCE {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    invocation_processor.add_tracer_span(span);
+        // Use a mutable reference to modify traces in-place
+        {
+            let mut invocation_processor = invocation_processor.lock().await;
+
+            // Iterate over chunks and spans with mutable references to modify in-place
+            for chunk in traces.iter_mut() {
+                for span in chunk.iter_mut() {
+                    if span.resource == INVOCATION_SPAN_RESOURCE {
+                        invocation_processor.add_tracer_span(span);
+                    }
+                    if invocation_processor.aws_lambda_span.trace_id == 0 {
+                        invocation_processor.aws_lambda_span.trace_id = span.trace_id;
+                    }
+                    if span.parent_id == 0 {
+                        span.parent_id = invocation_processor.aws_lambda_span.span_id;
+                    }
                 }
             }
         }
