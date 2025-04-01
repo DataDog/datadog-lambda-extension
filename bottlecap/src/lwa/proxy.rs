@@ -1,11 +1,4 @@
-use crate::config::Config;
 use crate::lifecycle::invocation::generate_span_id;
-use crate::lifecycle::invocation::span_inferrer::SpanInferrer;
-use crate::traces::context::SpanContext;
-use crate::traces::propagation::text_map_propagator::{
-    DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TRACE_ID_KEY,
-};
-use crate::traces::propagation::{DatadogCompositePropagator, Propagator};
 use crate::{lifecycle::invocation::processor::Processor, lifecycle::listener::Listener};
 use hyper::body::Bytes;
 use hyper::header::{HeaderName, HeaderValue};
@@ -25,10 +18,7 @@ use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{debug, error};
 
 #[must_use]
-pub fn start_lwa_proxy(
-    config: Arc<Config>,
-    invocation_processor: Arc<Mutex<Processor>>,
-) -> Option<JoinHandle<()>> {
+pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<JoinHandle<()>> {
     if let Some((proxy_socket, aws_runtime_uri)) = parse_env_addresses() {
         debug!(
             "LWA: proxy enabled with proxy URI: {} and AWS runtime: {}",
@@ -43,7 +33,6 @@ pub fn start_lwa_proxy(
             async move {
                 let proxy_server = Server::bind(&proxy_socket).serve(make_service_fn(move |_| {
                     let processor = Arc::clone(&invocation_processor);
-                    let config = Arc::clone(&config);
                     let uri = aws_runtime_uri.clone();
                     let client = Arc::clone(&proxied_client);
                     async move {
@@ -51,7 +40,6 @@ pub fn start_lwa_proxy(
                             intercept_payload(
                                 req,
                                 Arc::clone(&client),
-                                Arc::clone(&config),
                                 Arc::clone(&processor),
                                 uri.clone(),
                             )
@@ -162,7 +150,6 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
 async fn intercept_payload(
     intercepted: Request<Body>,
     client: Arc<Client<ProxyConnector<HttpConnector>>>,
-    config: Arc<Config>,
     processor: Arc<Mutex<Processor>>,
     aws_runtime_addr: Uri,
 ) -> Result<Response<Body>, Error> {
@@ -202,13 +189,7 @@ async fn intercept_payload(
 
     match (intercepted_parts.method, intercepted_parts.uri.path()) {
         (hyper::Method::GET, "/2018-06-01/runtime/invocation/next") => {
-            on_get_next_response(
-                &config,
-                &processor,
-                resp_part,
-                &resp_payload,
-            )
-            .await
+            on_get_next_response(&processor, resp_part, &resp_payload).await
         }
         (hyper::Method::POST, path)
             if path.starts_with("/2018-06-01/runtime/invocation/")
@@ -224,7 +205,6 @@ async fn intercept_payload(
 }
 
 async fn on_get_next_response(
-    config: &Arc<Config>,
     processor: &Arc<Mutex<Processor>>,
     resp_part: http::response::Parts,
     resp_payload: &Bytes,
@@ -234,8 +214,7 @@ async fn on_get_next_response(
     // let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
     // let resp_payload = resp_body.collect().await?.to_bytes();
 
-    let mut inner_payload =
-        serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|_| json!({}));
+    let inner_payload = serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|_| json!({}));
 
     debug!("LWA: payload wrapped in body {}", inner_payload);
 
@@ -244,25 +223,7 @@ async fn on_get_next_response(
         .map(|body| serde_json::to_vec(body).unwrap_or_else(|_| vec![]))
         .unwrap_or_default();
 
-    let mut header_map = inner_header(&inner_payload);
-
-    let trace_id = generate_span_id();
-    let trace_id = trace_id.to_string();
-
     let span_id = generate_span_id();
-    if let Some(_span_context) =
-        extract_span_context(Arc::clone(config), &header_map, &inner_payload.clone())
-    {
-        // re parent with aws lambda span
-    } else {
-        // inject aws lambda span
-
-        debug!("LWA: inserting span with trace_id {trace_id} and span_id {span_id}");
-        header_map.insert(DATADOG_TRACE_ID_KEY.to_string(), trace_id);
-        header_map.insert(DATADOG_PARENT_ID_KEY.to_string(), span_id.to_string());
-        header_map.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), format!("{}", 2));
-        inner_payload["headers"] = serde_json::to_value(header_map).unwrap();
-    }
     // Response is not cloneable, so it must be built again
     let body = serde_json::to_vec(&inner_payload).unwrap();
     let body_length = body.len();
@@ -288,10 +249,7 @@ async fn on_get_next_response(
     Ok(rebuild_response)
 }
 
-async fn on_post_invocation(
-    processor: &Arc<Mutex<Processor>>,
-    waited_intercepted_body: &Bytes,
-) {
+async fn on_post_invocation(processor: &Arc<Mutex<Processor>>, waited_intercepted_body: &Bytes) {
     let inner_payload =
         serde_json::from_slice::<Value>(waited_intercepted_body).unwrap_or_else(|_| json!({}));
 
@@ -308,35 +266,8 @@ async fn on_post_invocation(
     }
 
     let _ =
-        Listener::universal_instrumentation_end(&headers, body_bytes.into(), Arc::clone(processor)).await;
-}
-
-fn extract_span_context(
-    config: Arc<Config>,
-    headers: &HashMap<String, String>,
-    payload_value: &Value,
-) -> Option<SpanContext> {
-    let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
-    let inferrer = SpanInferrer::new(config.service_mapping.clone());
-
-    if let Some(sc) = inferrer.get_span_context(&propagator) {
-        debug!("LWA: Extracted trace context from span inferrer {:?}", sc);
-        return Some(sc);
-    }
-
-    if let Some(payload_headers) = payload_value.get("headers") {
-        if let Some(sc) = propagator.extract(payload_headers) {
-            debug!("Extracted trace context from event headers");
-            return Some(sc);
-        }
-    }
-
-    if let Some(sc) = propagator.extract(headers) {
-        debug!("Extracted trace context from headers");
-        return Some(sc);
-    }
-    debug!("LWA: No trace context found in headers or payload");
-    None
+        Listener::universal_instrumentation_end(&headers, body_bytes.into(), Arc::clone(processor))
+            .await;
 }
 
 fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
@@ -346,12 +277,6 @@ fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
     } else {
         HashMap::new()
     };
-
-    // let mut header_map = HeaderMap::new();
-    // for (k, v) in headers.into_iter() {
-    //     let header_name = HeaderName::from_bytes(k.as_bytes()).unwrap();
-    //     header_map.insert(header_name, HeaderValue::from_str(&v).unwrap());
-    // }
     headers
 }
 
@@ -379,16 +304,19 @@ async fn forward_request(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::config::{AwsConfig, Config};
+    use crate::lifecycle::invocation::processor::Processor;
+    use crate::lwa::proxy::start_lwa_proxy;
     use crate::tags::provider::Provider;
-    use crate::traces::trace_processor::ServerlessTraceProcessor;
-    use crate::LAMBDA_RUNTIME_SLUG;
-    use datadog_trace_obfuscation::obfuscation_config;
-    use dogstatsd::aggregator::Aggregator;
+    use crate::traces::propagation::error::Error;
     use dogstatsd::metric::EMPTY_TAGS;
-    use hyper::Uri;
-    use std::sync::Mutex;
+    use hyper::service::{make_service_fn, service_fn};
+
+    use crate::LAMBDA_RUNTIME_SLUG;
+
+    use dogstatsd::aggregator::Aggregator;
+    use hyper::{Body, Client, Response, Uri};
+    use std::sync::{Arc, Mutex};
     use std::{
         collections::HashMap,
         env,
@@ -442,13 +370,8 @@ mod tests {
             metrics_aggregator,
         )));
 
-        let trace_processor = Arc::new(TokioMutex::new(ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(obfuscation_config::ObfuscationConfig::new().unwrap()),
-            resolved_api_key: "api_key".to_string(),
-        }));
-
-        let proxy_task_handle = start_lwa_proxy(Arc::clone(&config), invocation_processor)
-            .expect("Failed to start proxy");
+        let proxy_task_handle =
+            start_lwa_proxy(invocation_processor).expect("Failed to start proxy");
 
         let client = Client::builder().build_http::<Body>();
         let uri_with_schema = format!("http://{proxy_uri}");
@@ -469,7 +392,7 @@ mod tests {
 
         let ask_proxy = ask_proxy.unwrap();
 
-        let body_bytes = ask_proxy.into_body().collect().await.unwrap().to_bytes();
+        let body_bytes = hyper::body::to_bytes(ask_proxy.into_body()).await.unwrap();
         let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
         assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
 

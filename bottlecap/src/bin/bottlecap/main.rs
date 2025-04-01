@@ -344,8 +344,7 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
     );
 
-    // let _ = start_lwa_proxy(Arc::clone(&invocation_processor), Arc::clone(&trace_processor));
-    let _ = start_lwa_proxy(Arc::clone(config), Arc::clone(&invocation_processor));
+    let _ = start_lwa_proxy(Arc::clone(&invocation_processor));
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
