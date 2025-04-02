@@ -384,26 +384,35 @@ impl TraceAgent {
                 }
             },
         };
+        let (reparenting_id, aws_lambda_span_id, aws_lambda_span_needs_trace_id) = {
+            let invocation_processor = invocation_processor.lock().await;
+            (
+                invocation_processor.reparenting_id.unwrap_or(0),
+                invocation_processor.aws_lambda_span.span_id,
+                invocation_processor.aws_lambda_span_needs_reparenting,
+            )
+        };
+        let mut trace_id_from_spans = 0;
 
-        // Search for trace invocation span and send it to the invocation processor
-        // Use a mutable reference to modify traces in-place
-        {
-            let mut invocation_processor = invocation_processor.lock().await;
-
-            // Iterate over chunks and spans with mutable references to modify in-place
-            for chunk in traces.iter_mut() {
-                for span in chunk.iter_mut() {
-                    if span.resource == INVOCATION_SPAN_RESOURCE {
-                        invocation_processor.add_tracer_span(span);
-                    }
-                    if invocation_processor.aws_lambda_span.trace_id == 0 {
-                        invocation_processor.aws_lambda_span.trace_id = span.trace_id;
-                    }
-                    if span.parent_id == 0 {
-                        span.parent_id = invocation_processor.aws_lambda_span.span_id;
-                    }
+        for chunk in &mut traces {
+            for span in chunk.iter_mut() {
+                if span.resource == INVOCATION_SPAN_RESOURCE {
+                    let mut invocation_processor = invocation_processor.lock().await;
+                    invocation_processor.add_tracer_span(span);
+                }
+                if trace_id_from_spans == 0 && aws_lambda_span_needs_trace_id {
+                    trace_id_from_spans = span.trace_id;
+                }
+                if span.parent_id == reparenting_id {
+                    span.parent_id = aws_lambda_span_id;
                 }
             }
+        }
+
+        if aws_lambda_span_needs_trace_id && trace_id_from_spans != 0 {
+            let mut invocation_processor = invocation_processor.lock().await;
+            invocation_processor.aws_lambda_span.trace_id = trace_id_from_spans;
+            invocation_processor.aws_lambda_span_needs_reparenting = false;
         }
 
         let send_data = trace_processor.process_traces(
