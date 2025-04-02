@@ -82,10 +82,7 @@ impl TelemetryListener {
         req: hyper_migration::HttpRequest,
         event_bus: Sender<TelemetryEvent>,
     ) -> Result<hyper_migration::HttpResponse, hyper::Error> {
-        let hyper_migration::Body::Incoming(body_bytes) = req.into_body() else {
-            unimplemented!()
-        };
-        let body = match body_bytes.collect().await {
+        let body = match req.collect().await {
             Ok(body_bytes_collected) => body_bytes_collected.to_bytes().to_vec(),
             Err(e) => {
                 error!("Failed to collect body: {:?}", e);
