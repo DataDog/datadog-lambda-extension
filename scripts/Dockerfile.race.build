@@ -1,6 +1,6 @@
 # syntax = docker/dockerfile:experimental
 
-FROM registry.ddbuild.io/images/mirror/golang:1.23.0 as builder
+FROM golang:1.22 as builder
 ARG EXTENSION_VERSION
 ARG ENABLE_RACE_DETECTION
 ARG AGENT_VERSION
@@ -36,7 +36,7 @@ RUN go tool nm datadog-agent | grep -w 'github.com/DataDog/datadog-agent/pkg/ver
     (echo "agentVersionDefault variable doesn't exist" && exit 1)
 
 # zip the extension
-FROM registry.ddbuild.io/images/mirror/ubuntu:22.04 as compresser
+FROM ubuntu:22.04 as compresser
 RUN apt-get update
 RUN apt-get install -y zip
 RUN mkdir /extensions
