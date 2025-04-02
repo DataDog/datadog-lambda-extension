@@ -158,11 +158,11 @@ async fn intercept_payload(
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
     let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
 
-    debug!("LWA: Intercepted request: {:?}", intercepted_parts);
-    debug!(
-        "LWA: Intercepted request body: {:?}",
-        waited_intercepted_body
-    );
+    error!("LWA: Intercepted request: {:?}", intercepted_parts);
+    // error!(
+    //     "LWA: Intercepted request body: {:?}",
+    //     waited_intercepted_body
+    // );
 
     let forward_intercepted = forward_request(
         aws_runtime_addr,
@@ -177,8 +177,8 @@ async fn intercept_payload(
     let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
     let resp_payload = resp_body.collect().await?.to_bytes();
 
-    debug!("LWA: Intercepted resp: {:?}", &resp_part);
-    debug!("LWA: Intercepted resp body: {:?}", resp_payload);
+    error!("LWA: Intercepted resp: {:?}", &resp_part);
+    // error!("LWA: Intercepted resp body: {:?}", resp_payload);
 
     let mut response_to_intercepted_req = Response::builder()
         .status(resp_part.status)
@@ -211,40 +211,29 @@ async fn on_get_next_response(
 ) -> Result<Response<Body>, Error> {
     // intercepted invocation/next. The *response body* contains the payload of
     // the request that the lambda handler will see
-    // let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
-    // let resp_payload = resp_body.collect().await?.to_bytes();
 
     let inner_payload = serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|_| json!({}));
 
-    debug!("LWA: payload wrapped in body {}", inner_payload);
-
-    let _body_bytes = inner_payload
-        .get("body")
-        .map(|body| serde_json::to_vec(body).unwrap_or_else(|_| vec![]))
-        .unwrap_or_default();
-
-    let span_id = generate_span_id();
+    // error!("LWA: payload wrapped in body {}", inner_payload);
     // Response is not cloneable, so it must be built again
     let body = serde_json::to_vec(&inner_payload).unwrap();
-    let body_length = body.len();
     let mut rebuild_response = Response::builder()
         .status(resp_part.status)
         .version(resp_part.version)
         .body(Body::from(body.clone()))
         .unwrap();
     *rebuild_response.headers_mut() = resp_part.headers;
-    rebuild_response.headers_mut().insert(
-        hyper::header::CONTENT_LENGTH,
-        HeaderValue::from_str(&body_length.to_string()).unwrap(),
-    );
-    let _ = Listener::universal_instrumentation_start(
+    let (parent_id, _) = Listener::universal_instrumentation_start(
         rebuild_response.headers(),
         body.into(),
         Arc::clone(processor),
     )
     .await;
 
-    processor.lock().await.set_aws_span_id(span_id);
+    {
+        let mut invocation_processor = processor.lock().await;
+        invocation_processor.set_reparenting(generate_span_id(), parent_id);
+    }
     // complete forwarding to the lambda handler
     Ok(rebuild_response)
 }

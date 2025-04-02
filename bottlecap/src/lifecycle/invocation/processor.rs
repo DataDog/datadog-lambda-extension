@@ -60,6 +60,8 @@ pub struct Processor {
     cold_start_span: Option<Span>,
     // Extracted span context from inferred span, headers, or payload
     pub extracted_span_context: Option<SpanContext>,
+    pub reparenting_id: Option<u64>,
+    pub aws_lambda_span_needs_reparenting: bool,
     // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
     // Helper to send enhanced metrics
@@ -95,6 +97,8 @@ impl Processor {
             extracted_span_context: None,
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
+            reparenting_id: None,
+            aws_lambda_span_needs_reparenting: false,
             aws_config: aws_config.clone(),
             tracer_detected: false,
             runtime: None,
@@ -160,6 +164,9 @@ impl Processor {
         self.extracted_span_context = None;
         // Cold Start Span
         self.cold_start_span = None;
+        // LWA reset
+        self.aws_lambda_span_needs_reparenting = false;
+        self.reparenting_id = None;
     }
 
     /// On the first invocation, determine if it's a cold start or proactive init.
@@ -441,7 +448,7 @@ impl Processor {
         &mut self,
         headers: HashMap<String, String>,
         payload: Vec<u8>,
-    ) {
+    ) -> u64 {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -479,10 +486,13 @@ impl Processor {
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.aws_lambda_span.parent_id = inferred_span.span_id;
         }
+        self.aws_lambda_span.parent_id
     }
 
-    pub fn set_aws_span_id(&mut self, span_id: u64) {
+    pub fn set_reparenting(&mut self, span_id: u64, parent_id: u64) {
         self.aws_lambda_span.span_id = span_id;
+        self.reparenting_id = Some(parent_id);
+        self.aws_lambda_span_needs_reparenting = true;
     }
 
     fn extract_span_context(

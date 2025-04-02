@@ -64,6 +64,7 @@ impl Listener {
                 let (parts, body) = req.into_parts();
                 Self::universal_instrumentation_start(&parts.headers, body, invocation_processor)
                     .await
+                    .1
             }
             (&Method::POST, END_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
@@ -97,7 +98,7 @@ impl Listener {
         headers: &HeaderMap,
         body: Body,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> http::Result<Response<Body>> {
+    ) -> (u64, http::Result<Response<Body>>) {
         debug!("Received start invocation request");
         match body.collect().await {
             Ok(b) => {
@@ -112,6 +113,7 @@ impl Listener {
                 };
                 let mut response = Response::builder().status(200);
 
+                let found_parent_span_id;
                 // If a `SpanContext` exists, then tell the tracer to use it.
                 // todo: update this whole code with DatadogHeaderPropagator::inject
                 // since this logic looks messy
@@ -131,16 +133,25 @@ impl Listener {
                         format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
                     );
                     }
+                    found_parent_span_id = sp.span_id;
+                } else {
+                    found_parent_span_id = 0;
                 }
 
-                response.body(Body::from(json!({}).to_string()))
+                (
+                    found_parent_span_id,
+                    response.body(Body::from(json!({}).to_string())),
+                )
             }
             Err(e) => {
                 error!("Could not read start invocation request body {e}");
 
-                Response::builder()
-                    .status(400)
-                    .body(Body::from("Could not read start invocation request body"))
+                (
+                    0,
+                    Response::builder()
+                        .status(400)
+                        .body(Body::from("Could not read start invocation request body")),
+                )
             }
         }
     }
