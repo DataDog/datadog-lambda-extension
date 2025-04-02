@@ -170,7 +170,7 @@ impl TraceAgent {
 
         debug!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
         debug!(
-            "Time taken start the Mini Agent: {} ms",
+            "Time taken start the Trace Agent: {} ms",
             now.elapsed().as_millis()
         );
         let server = hyper::server::conn::http1::Builder::new();
