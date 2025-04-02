@@ -137,18 +137,20 @@ impl Listener {
         match body.collect().await {
             Ok(b) => {
                 let body = b.to_bytes().to_vec();
-                let mut processor = invocation_processor.lock().await;
 
                 let headers = Self::headers_to_map(headers);
 
-                let span_context = processor.on_universal_instrumentation_start(headers, body);
-
+                let extracted_span_context = {
+                    let mut processor = invocation_processor.lock().await;
+                    processor.universal_instrumentation_start(headers, body);
+                    processor.extracted_span_context.clone()
+                };
                 let mut response = Response::builder().status(200);
 
                 // If a `SpanContext` exists, then tell the tracer to use it.
                 // todo: update this whole code with DatadogHeaderPropagator::inject
                 // since this logic looks messy
-                if let Some(sp) = &span_context {
+                if let Some(sp) = extracted_span_context {
                     response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
                     if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
                         response =
@@ -160,9 +162,9 @@ impl Listener {
                         sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
                     {
                         response = response.header(
-                            DATADOG_TAGS_KEY,
-                            format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
-                        );
+                        DATADOG_TAGS_KEY,
+                        format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
+                    );
                     }
                 }
 
