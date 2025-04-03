@@ -158,7 +158,7 @@ async fn intercept_payload(
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
     let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
 
-    error!("LWA: Intercepted request: {:?}", intercepted_parts);
+    // error!("LWA: Intercepted request: {:?}", intercepted_parts);
     // error!(
     //     "LWA: Intercepted request body: {:?}",
     //     waited_intercepted_body
@@ -177,7 +177,7 @@ async fn intercept_payload(
     let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
     let resp_payload = resp_body.collect().await?.to_bytes();
 
-    error!("LWA: Intercepted resp: {:?}", &resp_part);
+    // error!("LWA: Intercepted resp: {:?}", &resp_part);
     // error!("LWA: Intercepted resp body: {:?}", resp_payload);
 
     let mut response_to_intercepted_req = Response::builder()
