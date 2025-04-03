@@ -14,7 +14,6 @@ use tracing::debug;
 pub struct Context {
     /// The timestamp when the context was created.
     created_at: i64,
-    /// The unique identifier for the request.
     pub request_id: String,
     pub runtime_duration_ms: f64,
     pub enhanced_metric_data: Option<EnhancedMetricData>,
@@ -22,10 +21,6 @@ pub struct Context {
     ///
     /// Known as the `aws.lambda` span.
     pub invocation_span: Span,
-    /// The span representing the cold start of the Lambda sandbox.
-    ///
-    /// This span is only present if the function is being invoked for the first time.
-    pub cold_start_span: Option<Span>,
     /// The span used as placeholder for the invocation span by the tracer.
     ///
     /// In the tracer, this is created in order to have all children spans parented
@@ -34,48 +29,22 @@ pub struct Context {
     ///
     /// This span is filtered out during chunk processing.
     pub tracer_span: Option<Span>,
-    /// The extracted span context from the incoming request, if any.
+    /// The span representing the cold start of the Lambda sandbox.
     ///
-    pub span_context: Option<SpanContext>,
+    /// This span is only present if the function is being invoked for the first time.
+    pub cold_start_span: Option<Span>,
+    /// The extracted span context from the incoming request, used for distributed
+    /// tracing.
+    ///
+    pub extracted_span_context: Option<SpanContext>,
 }
 
 #[allow(clippy::too_many_arguments)]
 impl Context {
     #[must_use]
-    pub fn new(
-        created_at: i64,
-        request_id: String,
-        runtime_duration_ms: f64,
-        enhanced_metric_data: Option<EnhancedMetricData>,
-        invocation_span: Span,
-        cold_start_span: Option<Span>,
-        tracer_span: Option<Span>,
-        span_context: Option<SpanContext>,
-    ) -> Self {
-        Context {
-            created_at,
-            request_id,
-            runtime_duration_ms,
-            enhanced_metric_data,
-            invocation_span,
-            cold_start_span,
-            tracer_span,
-            span_context,
-        }
-    }
-
-    #[must_use]
     pub fn from_request_id(request_id: &str) -> Self {
         let mut context = Self::default();
         request_id.clone_into(&mut context.request_id);
-
-        let now: i64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos()
-            .try_into()
-            .unwrap_or_default();
-        context.created_at = now;
 
         context
     }
@@ -83,15 +52,22 @@ impl Context {
 
 impl Default for Context {
     fn default() -> Self {
+        let now: i64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+            .try_into()
+            .unwrap_or_default();
+
         Context {
-            created_at: 0,
+            created_at: now,
             request_id: String::new(),
             runtime_duration_ms: 0f64,
             enhanced_metric_data: None,
             invocation_span: Span::default(),
             cold_start_span: None,
             tracer_span: None,
-            span_context: None,
+            extracted_span_context: None,
         }
     }
 }
@@ -100,8 +76,8 @@ impl Default for Context {
 pub struct ContextBuffer {
     /// The buffer of invocation contexts.
     ///
-    /// The buffer is a queue of contexts that are used to store the context of the
-    /// previous invocations.
+    /// The buffer is a queue of the last 5 invocation contexts, including
+    /// the current one.
     buffer: VecDeque<Context>,
     /// The buffer of unordered events.
     ///
@@ -110,27 +86,27 @@ pub struct ContextBuffer {
     ///
     /// The expected order of events is:
     /// ```
-    /// Invoke -> InvocationStart -> InvocationEnd -> PlatformRuntimeDone
+    /// Invoke -> UniversalInstrumentationStart -> UniversalInstrumentationEnd -> PlatformRuntimeDone
     /// ```
     ///
-    /// 1. The `Invoke` event is used to pair the `InvocationStart` event.
+    /// 1. The `Invoke` event is used to pair the `UniversalInstrumentationStart` event.
     ///
-    ///    If the `InvocationStart` event occurs before the `Invoke` event, it is stored in the buffer.
-    ///    When the `Invoke` event occurs, the `InvocationStart` event is popped from the buffer and paired.
+    ///    If the `UniversalInstrumentationStart` event occurs before the `Invoke` event, it is stored in the buffer.
+    ///    When the `Invoke` event occurs, the `UniversalInstrumentationStart` event is popped from the buffer and paired.
     ///
-    /// 2. The `InvocationEnd` event is used to pair the `PlatformRuntimeDone` event.
+    /// 2. The `UniversalInstrumentationEnd` event is used to pair the `PlatformRuntimeDone` event.
     ///
-    ///    Similarly, `PlatformRuntimeDone` occurs before `InvocationEnd` event, it is stored the buffer.
-    ///    Once `InvocationEnd` happens, the event is popped from the buffer and paired for processing.
-    unordered_events_buffer: Vec<UnorderedEvents>,
+    ///    Similarly, `PlatformRuntimeDone` occurs before `UniversalInstrumentationEnd` event, it is stored the buffer.
+    ///    Once `UniversalInstrumentationEnd` happens, the event is popped from the buffer and paired for processing.
+    unordered_events: Vec<UnorderedEvents>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum UnorderedEvents {
     Invoke(String),
     PlatformRuntimeDone(String),
-    InvocationStart(HashMap<String, String>, Vec<u8>),
-    InvocationEnd(HashMap<String, String>, Vec<u8>),
+    UniversalInstrumentationStart(HashMap<String, String>, Vec<u8>),
+    UniversalInstrumentationEnd(HashMap<String, String>, Vec<u8>),
 }
 
 impl Default for ContextBuffer {
@@ -139,7 +115,7 @@ impl Default for ContextBuffer {
     fn default() -> Self {
         ContextBuffer {
             buffer: VecDeque::<Context>::with_capacity(5),
-            unordered_events_buffer: Vec::with_capacity(20),
+            unordered_events: Vec::with_capacity(20),
         }
     }
 }
@@ -149,7 +125,7 @@ impl ContextBuffer {
     fn with_capacity(capacity: usize) -> Self {
         ContextBuffer {
             buffer: VecDeque::<Context>::with_capacity(capacity),
-            unordered_events_buffer: Vec::with_capacity(capacity),
+            unordered_events: Vec::with_capacity(capacity),
         }
     }
 
@@ -221,41 +197,41 @@ impl ContextBuffer {
         closest_context
     }
 
-    /// Returns the `InvocationStart` event from the buffer if found.
+    /// Returns the `UniversalInstrumentationStart` event from the buffer if found.
     ///
     /// This is supposed to be called only inside the `on_invoke_event` method.
     ///
-    /// If the `InvocationStart` event has occurred before, remove it from the queue
+    /// If the `UniversalInstrumentationStart` event has occurred before, remove it from the queue
     /// and return the event, so the `on_invoke_event` method can process the
-    /// `InvocationStart` event.
+    /// `UniversalInstrumentationStart` event.
     ///
-    /// If the `InvocationStart` event hasn't occurred yet, push the `Invoke` event to
+    /// If the `UniversalInstrumentationStart` event hasn't occurred yet, push the `Invoke` event to
     /// the queue so the `request_id` can be later used. Returns `None` in this case.
-    pub fn get_invocation_start_event_data(
+    pub fn get_universal_instrumentation_start_event_data(
         &mut self,
         request_id: &str,
     ) -> Option<(HashMap<String, String>, Vec<u8>)> {
         let mut found_index = usize::MAX;
 
-        for (i, event) in self.unordered_events_buffer.iter().enumerate() {
-            if let UnorderedEvents::InvocationStart(_, _) = event {
+        for (i, event) in self.unordered_events.iter().enumerate() {
+            if let UnorderedEvents::UniversalInstrumentationStart(_, _) = event {
                 found_index = i;
                 break;
             }
         }
 
-        // `InvocationStart` event hasn't occurred yet, this is good,
+        // `UniversalInstrumentationStart` event hasn't occurred yet, this is good,
         // push the Invoke event to the queue and return `None`
         if found_index == usize::MAX {
-            self.unordered_events_buffer
+            self.unordered_events
                 .push(UnorderedEvents::Invoke(request_id.to_owned()));
             return None;
         }
 
-        // Bad scenario, we found an `InvocationStart`
-        match self.unordered_events_buffer.remove(found_index) {
-            UnorderedEvents::InvocationStart(headers, payload) => {
-                Some((headers.clone(), payload.clone()))
+        // Bad scenario, we found an `UniversalInstrumentationStart`
+        match self.unordered_events.remove(found_index) {
+            UnorderedEvents::UniversalInstrumentationStart(headers, payload) => {
+                Some((headers, payload))
             }
             _ => None,
         }
@@ -269,7 +245,7 @@ impl ContextBuffer {
     /// return the event, so the `on_invocation_start` method can get the `request_id`
     /// to process the invocation start data.
     ///
-    /// If the `Invoke` event hasn't occurred yet, push the `InvocationStart` event to
+    /// If the `Invoke` event hasn't occurred yet, push the `UniversalInstrumentationStart` event to
     /// the queue so the `headers` and `payload` can be later used. Returns `None` in this case.
     pub fn get_invoke_event_request_id(
         &mut self,
@@ -277,7 +253,7 @@ impl ContextBuffer {
         payload: &[u8],
     ) -> Option<String> {
         let mut found_index = usize::MAX;
-        for (i, event) in self.unordered_events_buffer.iter().enumerate() {
+        for (i, event) in self.unordered_events.iter().enumerate() {
             if let UnorderedEvents::Invoke(_) = event {
                 found_index = i;
                 break;
@@ -285,10 +261,10 @@ impl ContextBuffer {
         }
 
         // `Invoke` event hasn't occurred yet, this is bad,
-        // push the `InvocationStart` event to the queue and return `None`
+        // push the `UniversalInstrumentationStart` event to the queue and return `None`
         if found_index == usize::MAX {
-            self.unordered_events_buffer
-                .push(UnorderedEvents::InvocationStart(
+            self.unordered_events
+                .push(UnorderedEvents::UniversalInstrumentationStart(
                     headers.clone(),
                     payload.to_vec(),
                 ));
@@ -296,8 +272,8 @@ impl ContextBuffer {
         }
 
         // Pop the Invoke event from the queue
-        match self.unordered_events_buffer.remove(found_index) {
-            UnorderedEvents::Invoke(request_id) => Some(request_id.clone()),
+        match self.unordered_events.remove(found_index) {
+            UnorderedEvents::Invoke(request_id) => Some(request_id),
             _ => None,
         }
     }
@@ -309,7 +285,7 @@ impl ContextBuffer {
     /// If the `PlatformRuntimeDone` event has occurred before, remove it from the queue
     /// and return the event, so the `on_invocation_end` method can process itself with.
     ///
-    /// If the `PlatformRuntimeDone` event hasn't occurred yet, push the `InvocationEnd` event
+    /// If the `PlatformRuntimeDone` event hasn't occurred yet, push the `UniversalInstrumentationEnd` event
     /// to the queue so the `headers` and `payload` can be later used. Returns `None` in this case.
     pub fn get_platform_runtime_done_event_request_id(
         &mut self,
@@ -317,7 +293,7 @@ impl ContextBuffer {
         payload: &[u8],
     ) -> Option<String> {
         let mut found_index = usize::MAX;
-        for (i, event) in self.unordered_events_buffer.iter().enumerate() {
+        for (i, event) in self.unordered_events.iter().enumerate() {
             if let UnorderedEvents::PlatformRuntimeDone(_) = event {
                 found_index = i;
                 break;
@@ -325,10 +301,10 @@ impl ContextBuffer {
         }
 
         // `PlatformRuntimeDone` hasn't occurred yet, this is good,
-        // push the `InvocationEnd` event to the queue and return `None`
+        // push the `UniversalInstrumentationEnd` event to the queue and return `None`
         if found_index == usize::MAX {
-            self.unordered_events_buffer
-                .push(UnorderedEvents::InvocationEnd(
+            self.unordered_events
+                .push(UnorderedEvents::UniversalInstrumentationEnd(
                     headers.clone(),
                     payload.to_vec(),
                 ));
@@ -336,45 +312,45 @@ impl ContextBuffer {
         }
 
         // Bad scenario, we found a `PlatformRuntimeDone`
-        match self.unordered_events_buffer.remove(found_index) {
+        match self.unordered_events.remove(found_index) {
             UnorderedEvents::PlatformRuntimeDone(request_id) => Some(request_id),
             _ => None,
         }
     }
 
-    /// Returns the `InvocationEnd` event from the buffer if found.
+    /// Returns the `UniversalInstrumentationEnd` event from the buffer if found.
     ///
     /// This is supposed to be called only inside the `on_platform_runtime_done` method.
     ///
-    /// If the `InvocationEnd` event has occurred before, remove it from the queue and
+    /// If the `UniversalInstrumentationEnd` event has occurred before, remove it from the queue and
     /// return the event, so the `on_platform_runtime_done` can process the invocation end data.
     ///
-    /// If the `InvocationEnd` event hasn't occurred yet, push the `PlatformRuntimeDone` event
+    /// If the `UniversalInstrumentationEnd` event hasn't occurred yet, push the `PlatformRuntimeDone` event
     /// so the `request_id` can be later used. Returns `None` in this case.
-    pub fn get_invocation_end_event_data(
+    pub fn get_universal_instrumentation_end_event_data(
         &mut self,
         request_id: &str,
     ) -> Option<(HashMap<String, String>, Vec<u8>)> {
         let mut found_index = usize::MAX;
-        for (i, event) in self.unordered_events_buffer.iter().enumerate() {
-            if let UnorderedEvents::InvocationEnd(_, _) = event {
+        for (i, event) in self.unordered_events.iter().enumerate() {
+            if let UnorderedEvents::UniversalInstrumentationEnd(_, _) = event {
                 found_index = i;
                 break;
             }
         }
 
-        // `InvocationEnd` hasn't occurred yet, this is bad,
+        // `UniversalInstrumentationEnd` hasn't occurred yet, this is bad,
         // push the `PlatformRuntimeDone` event to the queue and return `None`
         if found_index == usize::MAX {
-            self.unordered_events_buffer
+            self.unordered_events
                 .push(UnorderedEvents::PlatformRuntimeDone(request_id.to_owned()));
             return None;
         }
 
-        // Good scenario, we found an `InvocationEnd`
-        match self.unordered_events_buffer.remove(found_index) {
-            UnorderedEvents::InvocationEnd(headers, payload) => {
-                Some((headers.clone(), payload.clone()))
+        // Good scenario, we found an `UniversalInstrumentationEnd`
+        match self.unordered_events.remove(found_index) {
+            UnorderedEvents::UniversalInstrumentationEnd(headers, payload) => {
+                Some((headers, payload))
             }
             _ => None,
         }
@@ -383,7 +359,7 @@ impl ContextBuffer {
     /// Creates a new `Context` and adds it to the buffer given the `request_id`
     /// and the `invocation_span`.
     ///
-    pub fn create_context(&mut self, request_id: &str, invocation_span: Span) {
+    pub fn start_context(&mut self, request_id: &str, invocation_span: Span) {
         let mut context = Context::from_request_id(request_id);
         context.invocation_span = invocation_span;
         context

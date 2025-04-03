@@ -116,7 +116,7 @@ impl Processor {
         let invocation_span =
             create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
         self.context_buffer
-            .create_context(&request_id, invocation_span);
+            .start_context(&request_id, invocation_span);
 
         let timestamp = std::time::UNIX_EPOCH
             .elapsed()
@@ -158,7 +158,7 @@ impl Processor {
         // If `InvocationStart` event happened first, process it
         if let Some((headers, payload)) = self
             .context_buffer
-            .get_invocation_start_event_data(&request_id)
+            .get_universal_instrumentation_start_event_data(&request_id)
         {
             let payload_value =
                 serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -304,7 +304,7 @@ impl Processor {
         // If `InvocationEnd` event happened first, process it first
         if let Some((headers, payload)) = self
             .context_buffer
-            .get_invocation_end_event_data(request_id)
+            .get_universal_instrumentation_end_event_data(request_id)
         {
             self.process_on_invocation_end(request_id.clone(), headers, payload);
         }
@@ -513,10 +513,10 @@ impl Processor {
             context.invocation_span.meta.extend(metadata);
         }
 
-        context.span_context = span_context;
+        context.extracted_span_context = span_context;
 
         // Set the extracted trace context to the spans
-        if let Some(sc) = &context.span_context {
+        if let Some(sc) = &context.extracted_span_context {
             context.invocation_span.trace_id = sc.trace_id;
             context.invocation_span.parent_id = sc.span_id;
 
@@ -618,7 +618,7 @@ impl Processor {
 
         // If we have a trace context, this means we got it from
         // distributed tracing
-        if let Some(sc) = &context.span_context {
+        if let Some(sc) = &context.extracted_span_context {
             trace_id = sc.trace_id;
             parent_id = sc.span_id;
             tags.extend(sc.tags.clone());
@@ -859,8 +859,7 @@ mod tests {
         headers.insert(DATADOG_SAMPLING_PRIORITY_KEY.to_string(), "-1".to_string());
 
         let request_id = String::from("request_id");
-        p.context_buffer
-            .create_context(&request_id, Span::default());
+        p.context_buffer.start_context(&request_id, Span::default());
 
         p.process_on_invocation_end(request_id.clone(), headers, vec![]);
 
@@ -892,8 +891,7 @@ mod tests {
         );
 
         let request_id = String::from("request_id");
-        p.context_buffer
-            .create_context(&request_id, Span::default());
+        p.context_buffer.start_context(&request_id, Span::default());
 
         p.process_on_invocation_end(request_id.clone(), headers, vec![]);
 
@@ -919,8 +917,7 @@ mod tests {
         headers.insert(DATADOG_PARENT_ID_KEY.to_string(), "222".to_string());
 
         let request_id = String::from("request_id");
-        p.context_buffer
-            .create_context(&request_id, Span::default());
+        p.context_buffer.start_context(&request_id, Span::default());
 
         p.process_on_invocation_end(request_id.clone(), headers, vec![]);
 
@@ -956,8 +953,7 @@ mod tests {
        "#;
 
         let request_id = String::from("request_id");
-        p.context_buffer
-            .create_context(&request_id, Span::default());
+        p.context_buffer.start_context(&request_id, Span::default());
         p.context_buffer.add_start_time(&request_id, 1);
         p.process_on_invocation_end(
             request_id.clone(),
