@@ -138,18 +138,6 @@ impl TraceAgent {
         let api_key = self.api_key.clone();
 
         let service = service_fn(move |req| {
-            let trace_processor = trace_processor.clone();
-            let trace_tx = trace_tx.clone();
-
-            let stats_processor = stats_processor.clone();
-            let stats_tx = stats_tx.clone();
-
-            let endpoint_config = endpoint_config.clone();
-            let tags_provider = tags_provider.clone();
-            let invocation_processor = invocation_processor.clone();
-            let client = client.clone();
-            let api_key = api_key.clone();
-
             TraceAgent::trace_endpoint_handler(
                 endpoint_config.clone(),
                 req.map(hyper_migration::Body::incoming),
