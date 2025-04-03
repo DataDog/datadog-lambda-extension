@@ -97,14 +97,14 @@ impl Listener {
 
                 let headers = Self::headers_to_map(parts.headers);
 
-                processor.on_invocation_start(headers, body);
+                let span_context = processor.on_invocation_start(headers, body);
 
                 let mut response = Response::builder().status(200);
 
                 // If a `SpanContext` exists, then tell the tracer to use it.
                 // todo: update this whole code with DatadogHeaderPropagator::inject
                 // since this logic looks messy
-                if let Some(sp) = &processor.extracted_span_context {
+                if let Some(sp) = &span_context {
                     response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
                     if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
                         response =
