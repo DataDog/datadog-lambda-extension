@@ -254,8 +254,22 @@ impl SpanInferrer {
     // TODO: add status tag and other info from response
     pub fn complete_inferred_spans(&mut self, invocation_span: &Span) {
         if let Some(s) = &mut self.inferred_span {
+            s.trace_id = invocation_span.trace_id;
+            s.error = invocation_span.error;
+            s.meta.insert(
+                String::from("peer.service"),
+                invocation_span.service.clone(),
+            );
+
             if let Some(ws) = &mut self.wrapped_inferred_span {
-                // Set correct Parent ID for multiple inferred spans
+                ws.trace_id = invocation_span.trace_id;
+                ws.error = invocation_span.error;
+                ws.meta
+                    .insert(String::from("peer.service"), s.service.clone());
+
+                // The wrapper span should be the parent of the inferred span,
+                // therefore the `parent_id` of the inferred span should be the
+                // `span_id` of the wrapper span.
                 ws.parent_id = s.parent_id;
                 s.parent_id = ws.span_id;
 
@@ -270,13 +284,6 @@ impl SpanInferrer {
                     let duration = s.start - ws.start;
                     ws.duration = duration;
                 }
-
-                // Set error
-                ws.error = invocation_span.error;
-                ws.meta
-                    .insert(String::from("peer.service"), s.service.clone());
-
-                ws.trace_id = invocation_span.trace_id;
             }
 
             if self.is_async_span {
@@ -289,22 +296,13 @@ impl SpanInferrer {
                 let duration = (invocation_span.start + invocation_span.duration) - s.start;
                 s.duration = duration;
             }
-
-            // Set error
-            s.error = invocation_span.error;
-            s.meta.insert(
-                String::from("peer.service"),
-                invocation_span.service.clone(),
-            );
-
-            s.trace_id = invocation_span.trace_id;
         }
     }
 
-    /// Returns a clone of the carrier associated with the inferred span
+    /// Returns the span context from the inferred span if it exist.
     ///
     /// If the carrier is set, it will try to extract the span context,
-    /// otherwise it will
+    /// otherwise it will return `None`.
     ///
     pub fn get_span_context(&self, propagator: &impl Propagator) -> Option<SpanContext> {
         // Step Functions `SpanContext` is deterministically generated
