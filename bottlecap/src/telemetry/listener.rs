@@ -1,12 +1,14 @@
 use crate::telemetry::events::TelemetryEvent;
 
-use hyper::body::HttpBody;
+use ddcommon::hyper_migration;
 use std::net::SocketAddr;
 use tokio::sync::mpsc::Sender;
 
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Request, Response, Server};
-use tracing::debug;
+use http_body_util::BodyExt;
+use hyper::service::service_fn;
+use hyper::Response;
+use std::io;
+use tracing::{debug, error};
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone, Copy)]
@@ -21,36 +23,75 @@ impl TelemetryListener {
     pub async fn spin(
         config: &TelemetryListenerConfig,
         event_bus: Sender<TelemetryEvent>,
-        cancel_token: tokio_util::sync::CancellationToken,
-    ) {
+        _cancel_token: tokio_util::sync::CancellationToken, // todo cancel token
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
 
-        let service = make_service_fn(move |_| {
+        let service = service_fn(move |req| {
             let event_bus = event_bus.clone();
-            async move {
-                Ok::<_, hyper::Error>(service_fn(move |req| Self::handle(req, event_bus.clone())))
-            }
+            Self::handle(req.map(hyper_migration::Body::incoming), event_bus.clone())
         });
-        let listener = Server::bind(&addr);
 
-        let server = listener.serve(service);
-        debug!("Starting Telemetry API listener on {}", addr);
-        tokio::select! {
-            biased;
-            _ = server => {}
-            () = cancel_token.cancelled() => {
-                debug!("Telemetry API listener cancelled");
-            }
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+        let server = hyper::server::conn::http1::Builder::new();
+        let mut joinset = tokio::task::JoinSet::new();
+        loop {
+            let conn = tokio::select! {
+                con_res = listener.accept() => match con_res {
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            io::ErrorKind::ConnectionAborted
+                                | io::ErrorKind::ConnectionReset
+                                | io::ErrorKind::ConnectionRefused
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Server error: {e}");
+                        return Err(e.into());
+                    }
+                    Ok((conn, _)) => conn,
+                },
+                finished = async {
+                    match joinset.join_next().await {
+                        Some(finished) => finished,
+                        None => std::future::pending().await,
+                    }
+                } => match finished {
+                    Err(e) if e.is_panic() => {
+                        std::panic::resume_unwind(e.into_panic());
+                    },
+                    Ok(()) | Err(_) => continue,
+                },
+            };
+            let conn = hyper_util::rt::TokioIo::new(conn);
+            let server = server.clone();
+            let service = service.clone();
+            joinset.spawn(async move {
+                if let Err(e) = server.serve_connection(conn, service).await {
+                    error!("Connection error: {e}");
+                }
+            });
         }
     }
 
     pub async fn handle(
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         event_bus: Sender<TelemetryEvent>,
-    ) -> Result<Response<Body>, hyper::Error> {
-        let whole_body = req.into_body().collect().await?;
-
-        let body = whole_body.to_bytes().to_vec();
+    ) -> Result<hyper_migration::HttpResponse, hyper::Error> {
+        let body = match req.collect().await {
+            Ok(body_bytes_collected) => body_bytes_collected.to_bytes().to_vec(),
+            Err(e) => {
+                error!("Failed to collect body: {:?}", e);
+                return Ok(Response::builder()
+                    .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(hyper_migration::Body::from("Failed to collect body"))
+                    .expect("infallible"));
+            }
+        };
         let body = std::str::from_utf8(&body).expect("infallible");
 
         let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_str(body) {
@@ -64,7 +105,9 @@ impl TelemetryListener {
                 debug!("Failed to parse telemetry events: {:?}", e);
                 return Ok(Response::builder()
                     .status(hyper::StatusCode::OK)
-                    .body(Body::from("Failed to parse telemetry events"))
+                    .body(hyper_migration::Body::from(
+                        "Failed to parse telemetry events",
+                    ))
                     .expect("infallible"));
             }
         };
@@ -72,20 +115,21 @@ impl TelemetryListener {
             event_bus.send(event).await.expect("infallible");
         }
 
-        Ok(Response::new(Body::from("OK")))
+        Ok(Response::new(hyper_migration::Body::from("OK")))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use chrono::DateTime;
+    use ddcommon::hyper_migration;
 
     use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
 
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
     async fn test_handle() {
-        let event_body = hyper::Body::from(
+        let event_body = hyper_migration::Body::from(
             r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init","runtimeVersion":"nodejs:20.v22","runtimeVersionArn":"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72","functionName":"hello-world","functionVersion":"$LATEST"}}]"#,
         );
         let req = hyper::Request::builder()

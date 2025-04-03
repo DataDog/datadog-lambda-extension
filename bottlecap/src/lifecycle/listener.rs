@@ -1,15 +1,15 @@
 // Copyright 2024-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use ddcommon::hyper_migration;
+use http_body_util::BodyExt;
+use hyper::service::service_fn;
+use hyper::{http, Method, Response, StatusCode};
+use serde_json::json;
 use std::collections::HashMap;
-use std::convert::Infallible;
+use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-
-use hyper::body::HttpBody;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{http, Body, Method, Request, Response, StatusCode};
-use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
@@ -32,33 +32,67 @@ impl Listener {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let invocation_processor = self.invocation_processor.clone();
 
-        let make_svc = make_service_fn(move |_| {
+        let service = service_fn(move |req| {
             let invocation_processor = invocation_processor.clone();
 
-            let service = service_fn(move |req| Self::handler(req, invocation_processor.clone()));
-
-            async move { Ok::<_, Infallible>(service) }
+            Self::handler(
+                req.map(hyper_migration::Body::incoming),
+                invocation_processor.clone(),
+            )
         });
 
         let port = u16::try_from(AGENT_PORT).expect("AGENT_PORT is too large");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        let server_builder = hyper::Server::try_bind(&addr)?;
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-        let server = server_builder.serve(make_svc);
-
-        // start hyper http server
-        if let Err(e) = server.await {
-            error!("Failed to start the Lifecycle Listener {e}");
-            return Err(e.into());
+        let server = hyper::server::conn::http1::Builder::new();
+        let mut joinset = tokio::task::JoinSet::new();
+        loop {
+            let conn = tokio::select! {
+                con_res = listener.accept() => match con_res {
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            io::ErrorKind::ConnectionAborted
+                                | io::ErrorKind::ConnectionReset
+                                | io::ErrorKind::ConnectionRefused
+                        ) =>
+                    {
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Server error: {e}");
+                        return Err(e.into());
+                    }
+                    Ok((conn, _)) => conn,
+                },
+                finished = async {
+                    match joinset.join_next().await {
+                        Some(finished) => finished,
+                        None => std::future::pending().await,
+                    }
+                } => match finished {
+                    Err(e) if e.is_panic() => {
+                        std::panic::resume_unwind(e.into_panic());
+                    },
+                    Ok(()) | Err(_) => continue,
+                },
+            };
+            let conn = hyper_util::rt::TokioIo::new(conn);
+            let server = server.clone();
+            let service = service.clone();
+            joinset.spawn(async move {
+                if let Err(e) = server.serve_connection(conn, service).await {
+                    error!("Connection error: {e}");
+                }
+            });
         }
-
-        Ok(())
     }
 
     async fn handler(
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
             (&Method::POST, START_INVOCATION_PATH) => {
                 Self::start_invocation_handler(req, invocation_processor).await
@@ -70,7 +104,7 @@ impl Listener {
                         error!("Failed to end invocation {e}");
                         Ok(Response::builder()
                             .status(500)
-                            .body(Body::empty())
+                            .body(hyper_migration::Body::empty())
                             .expect("no body"))
                     }
                 }
@@ -85,9 +119,9 @@ impl Listener {
     }
 
     async fn start_invocation_handler(
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received start invocation request");
         let (parts, body) = req.into_parts();
         match body.collect().await {
@@ -124,22 +158,24 @@ impl Listener {
 
                 drop(processor);
 
-                response.body(Body::from(json!({}).to_string()))
+                response.body(hyper_migration::Body::from(json!({}).to_string()))
             }
             Err(e) => {
                 error!("Could not read start invocation request body {e}");
 
                 Response::builder()
                     .status(400)
-                    .body(Body::from("Could not read start invocation request body"))
+                    .body(hyper_migration::Body::from(
+                        "Could not read start invocation request body",
+                    ))
             }
         }
     }
 
     async fn end_invocation_handler(
-        req: Request<Body>,
+        req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> http::Result<Response<Body>> {
+    ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received end invocation request");
         let (parts, body) = req.into_parts();
         match body.collect().await {
@@ -153,23 +189,25 @@ impl Listener {
 
                 Response::builder()
                     .status(200)
-                    .body(Body::from(json!({}).to_string()))
+                    .body(hyper_migration::Body::from(json!({}).to_string()))
             }
             Err(e) => {
                 error!("Could not read end invocation request body {e}");
 
                 Response::builder()
                     .status(400)
-                    .body(Body::from("Could not read end invocation request body"))
+                    .body(hyper_migration::Body::from(
+                        "Could not read end invocation request body",
+                    ))
             }
         }
     }
 
-    fn hello_handler() -> http::Result<Response<Body>> {
+    fn hello_handler() -> http::Result<hyper_migration::HttpResponse> {
         warn!("[DEPRECATED] Please upgrade your tracing library, the /hello route is deprecated");
         Response::builder()
             .status(200)
-            .body(Body::from(json!({}).to_string()))
+            .body(hyper_migration::Body::from(json!({}).to_string()))
     }
 
     fn headers_to_map(headers: http::HeaderMap) -> HashMap<String, String> {
