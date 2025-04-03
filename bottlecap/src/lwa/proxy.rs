@@ -13,11 +13,13 @@ use hyper::{
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::time::Instant;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{debug, error};
 
 #[must_use]
+#[allow(clippy::module_name_repetitions)]
 pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<JoinHandle<()>> {
     let (proxy_socket, aws_runtime_uri) = parse_env_addresses()?;
     debug!(
@@ -81,7 +83,6 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                                 "LWA: cannot parse socket address from host and port {}: {}",
                                 uri, e
                             );
-                            ();
                         })
                         .ok()
                 } else {
@@ -143,12 +144,27 @@ async fn intercept_payload(
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
     let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
 
+    let path = intercepted_parts.uri.path();
+    let method = intercepted_parts.method.clone();
+    let mut uni_instr_start = None;
+    if hyper::Method::POST == method
+        && path.starts_with("/2018-06-01/runtime/invocation/")
+        && path.ends_with("/response")
+    {
+        uni_instr_start = Some(tokio::spawn({
+            let processor = Arc::clone(&processor);
+            let waited_intercepted_body = waited_intercepted_body.clone();
+            async move {
+                on_post_invocation(&processor, &waited_intercepted_body).await;
+            }
+        }));
+    }
+
     let forward_intercepted = build_forward_request(
         aws_runtime_addr,
         &intercepted_parts,
         waited_intercepted_body.clone(),
-    )
-    .await?;
+    );
 
     // response after forwarding to AWS runtime API
     let response_to_intercepted = client.request(forward_intercepted).await?;
@@ -156,31 +172,66 @@ async fn intercept_payload(
     let (resp_part, resp_body) = response_to_intercepted.into_parts();
     let resp_payload = resp_body.collect().await?.to_bytes();
 
+    let mut uni_instr_end = None;
+    if hyper::Method::GET == method && path == "/2018-06-01/runtime/invocation/next" {
+        let status_async = resp_part.status;
+        let version_async = resp_part.version;
+        let headers_async = resp_part.headers.clone();
+        let resp_payload_async = resp_payload.clone();
+
+        uni_instr_end = Some(tokio::spawn({
+            async move {
+                on_get_next_response(
+                    &processor,
+                    status_async,
+                    version_async,
+                    &headers_async,
+                    &resp_payload_async,
+                )
+                .await;
+            }
+        }));
+    }
+
     let mut forward_response_to_intercepted = Response::builder()
         .status(resp_part.status)
         .version(resp_part.version)
-        .body(Body::from(resp_payload.clone()))
-        .unwrap();
+        .body(Body::from(resp_payload))
+        .unwrap_or_else(|e| {
+            error!("LWA: Error building forwarded response: {}", e);
+            Response::new(Body::empty())
+        });
+
     *forward_response_to_intercepted.headers_mut() = resp_part.headers.clone();
 
-    match (intercepted_parts.method, intercepted_parts.uri.path()) {
-        (hyper::Method::GET, "/2018-06-01/runtime/invocation/next") => {
-            on_get_next_response(&processor, resp_part, &resp_payload).await
-        }
-        (hyper::Method::POST, path)
-            if path.starts_with("/2018-06-01/runtime/invocation/")
-                && path.ends_with("/response") =>
-        {
-            on_post_invocation(&processor, &waited_intercepted_body).await;
-        }
-        _ => {}
-    }
+    wait_for_uni_instr(uni_instr_start, "start").await;
+    wait_for_uni_instr(uni_instr_end, "end").await;
+
     Ok(forward_response_to_intercepted)
+}
+
+async fn wait_for_uni_instr(uni_instr_task: Option<JoinHandle<()>>, instr_type: &str) {
+    if let Some(handle) = uni_instr_task {
+        let before_universal_instrumentation = Instant::now();
+        if let Err(e) = handle.await {
+            error!(
+                "LWA: Error waiting for async universal instrumentation {} task: {}",
+                instr_type, e
+            );
+        }
+        debug!(
+            "LWA: Time taken for universal instrumentation {} : {}ms",
+            instr_type,
+            before_universal_instrumentation.elapsed().as_millis()
+        );
+    }
 }
 
 async fn on_get_next_response(
     processor: &Arc<Mutex<Processor>>,
-    resp_part: http::response::Parts,
+    status: http::StatusCode,
+    version: http::Version,
+    headers: &HeaderMap,
     resp_payload: &Bytes,
 ) {
     // intercepted invocation/next. The *response body* contains the payload of
@@ -189,13 +240,22 @@ async fn on_get_next_response(
     let inner_payload = serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|_| json!({}));
 
     // Response is not cloneable, so it must be built again
-    let body = serde_json::to_vec(&inner_payload).unwrap();
+    let body = serde_json::to_vec(&inner_payload).unwrap_or_else(|e| {
+        error!("LWA: Error serializing GET response body: {}", e);
+        vec![]
+    });
     let mut rebuild_response = Response::builder()
-        .status(resp_part.status)
-        .version(resp_part.version)
+        .status(status)
+        .version(version)
         .body(Body::from(body.clone()))
-        .unwrap();
-    *rebuild_response.headers_mut() = resp_part.headers;
+        .unwrap_or_else(|e| {
+            error!(
+                "LWA: Error building universal instrumentation start request: {}",
+                e
+            );
+            Response::new(Body::empty())
+        });
+    *rebuild_response.headers_mut() = headers.clone();
 
     let (parent_id, _) = Listener::universal_instrumentation_start(
         rebuild_response.headers(),
@@ -222,8 +282,17 @@ async fn on_post_invocation(processor: &Arc<Mutex<Processor>>, waited_intercepte
     let header_map = inner_header(&inner_payload);
     let mut headers = HeaderMap::new();
     for (k, v) in header_map {
-        let header_name = HeaderName::from_bytes(k.as_bytes()).unwrap();
-        headers.insert(header_name, HeaderValue::from_str(&v).unwrap());
+        let header_name = HeaderName::from_bytes(k.as_bytes()).unwrap_or_else(|e| {
+            error!("LWA: Error creating header name: {}", e);
+            HeaderName::from_static("x-unknown-header")
+        });
+        headers.insert(
+            header_name,
+            HeaderValue::from_str(&v).unwrap_or_else(|e| {
+                error!("LWA: Error creating header value: {}", e);
+                HeaderValue::from_static("")
+            }),
+        );
     }
 
     let _ =
@@ -241,27 +310,31 @@ fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
     headers
 }
 
-async fn build_forward_request(
+fn build_forward_request(
     aws_runtime_addr: Uri,
     req_parts: &Parts,
     req_body: Bytes,
-) -> Result<Request<Body>, Error> {
-    let mut redirect_uri = aws_runtime_addr.into_parts();
-    redirect_uri.path_and_query = Some(req_parts.uri.path_and_query().unwrap().clone());
-    let new_uri = Uri::from_parts(redirect_uri).unwrap();
+) -> Request<Body> {
+    let mut redirect_uri = aws_runtime_addr.clone().into_parts();
+    redirect_uri.path_and_query = req_parts.uri.path_and_query().cloned();
 
-    let redirected_request = Request::builder()
+    let new_uri = Uri::from_parts(redirect_uri).unwrap_or_else(|e| {
+        error!("LWA: Error building new URI{}", e);
+        aws_runtime_addr
+    });
+
+    Request::builder()
         .method(req_parts.method.clone())
         .uri(new_uri)
         .body(Body::from(req_body))
         .unwrap_or_else(|e| {
             error!("LWA: Error building redirected request: {}", e);
             Request::new(Body::empty())
-        });
-    Ok(redirected_request)
+        })
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use crate::config::{AwsConfig, Config};
     use crate::lifecycle::invocation::processor::Processor;
