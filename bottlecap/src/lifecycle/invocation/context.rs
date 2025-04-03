@@ -114,12 +114,14 @@ pub struct ContextBuffer {
     /// ```
     ///
     /// 1. The `Invoke` event is used to pair the `InvocationStart` event.
-    /// If the `InvocationStart` event occurs before the `Invoke` event, it is stored in the buffer.
-    /// When the `Invoke` event occurs, the `InvocationStart` event is popped from the buffer and paired.
+    ///
+    ///    If the `InvocationStart` event occurs before the `Invoke` event, it is stored in the buffer.
+    ///    When the `Invoke` event occurs, the `InvocationStart` event is popped from the buffer and paired.
     ///
     /// 2. The `InvocationEnd` event is used to pair the `PlatformRuntimeDone` event.
-    /// Similarly, `PlatformRuntimeDone` occurs before `InvocationEnd` event, it is stored the buffer.
-    /// Once `InvocationEnd` happens, the event is popped from the buffer and paired for processing.
+    ///
+    ///    Similarly, `PlatformRuntimeDone` occurs before `InvocationEnd` event, it is stored the buffer.
+    ///    Once `InvocationEnd` happens, the event is popped from the buffer and paired for processing.
     unordered_events_buffer: Vec<UnorderedEvents>,
 }
 
