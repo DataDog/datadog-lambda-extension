@@ -564,7 +564,11 @@ impl Processor {
 
     /// Given trace context information, set it to the current span.
     ///
-    pub fn on_universal_instrumentation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn on_universal_instrumentation_end(
+        &mut self,
+        headers: HashMap<String, String>,
+        payload: Vec<u8>,
+    ) {
         // If `PlatformRuntimeDone` event happened first, process
         if let Some(request_id) = self
             .context_buffer
