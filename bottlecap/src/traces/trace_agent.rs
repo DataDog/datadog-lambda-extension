@@ -384,12 +384,12 @@ impl TraceAgent {
                 }
             },
         };
-        let (reparenting_id, aws_lambda_span_id, aws_lambda_span_needs_trace_id) = {
+        let (maybe_reparent, aws_lambda_span_id, aws_lambda_span_needs_trace_id) = {
             let invocation_processor = invocation_processor.lock().await;
             (
-                invocation_processor.reparenting_id.unwrap_or(0),
-                invocation_processor.aws_lambda_span.span_id,
-                invocation_processor.aws_lambda_span_needs_reparenting,
+                invocation_processor.reparenting_id,
+                invocation_processor.span.span_id,
+                invocation_processor.aws_lambda_span_needs_trace_id,
             )
         };
         let mut trace_id_from_spans = 0;
@@ -403,16 +403,18 @@ impl TraceAgent {
                 if trace_id_from_spans == 0 && aws_lambda_span_needs_trace_id {
                     trace_id_from_spans = span.trace_id;
                 }
-                if span.parent_id == reparenting_id {
-                    span.parent_id = aws_lambda_span_id;
+                if let Some(reparenting_id) = maybe_reparent {
+                    if span.parent_id == reparenting_id {
+                        span.parent_id = aws_lambda_span_id;
+                    }
                 }
             }
         }
 
         if aws_lambda_span_needs_trace_id && trace_id_from_spans != 0 {
             let mut invocation_processor = invocation_processor.lock().await;
-            invocation_processor.aws_lambda_span.trace_id = trace_id_from_spans;
-            invocation_processor.aws_lambda_span_needs_reparenting = false;
+            invocation_processor.span.trace_id = trace_id_from_spans;
+            invocation_processor.aws_lambda_span_needs_trace_id = false;
         }
 
         let send_data = trace_processor.process_traces(

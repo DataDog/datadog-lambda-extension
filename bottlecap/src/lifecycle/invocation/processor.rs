@@ -56,13 +56,13 @@ pub struct Processor {
     /// extract trace context if available.
     inferrer: SpanInferrer,
     // Current invocation span
-    pub aws_lambda_span: Span,
+    pub span: Span,
     // Cold start span
     cold_start_span: Option<Span>,
     // Extracted span context from inferred span, headers, or payload
     pub extracted_span_context: Option<SpanContext>,
     pub reparenting_id: Option<u64>,
-    pub aws_lambda_span_needs_reparenting: bool,
+    pub aws_lambda_span_needs_trace_id: bool,
     // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
     /// Helper class to send enhanced metrics.
@@ -95,7 +95,7 @@ impl Processor {
         config: Arc<config::Config>,
         aws_config: &AwsConfig,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
-    ) -> Self {
+    ) -> Self 
         let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -106,13 +106,13 @@ impl Processor {
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(config.service_mapping.clone()),
-            aws_lambda_span: create_empty_span(String::from("aws.lambda"), resource, service),
+            span: create_empty_span(String::from("aws.lambda"), resource, service),
             cold_start_span: None,
             extracted_span_context: None,
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             reparenting_id: None,
-            aws_lambda_span_needs_reparenting: false,
+            aws_lambda_span_needs_trace_id: false,
             aws_config: aws_config.clone(),
             tracer_detected: false,
             runtime: None,
@@ -172,19 +172,19 @@ impl Processor {
     ///
     fn reset_state(&mut self) {
         // Reset Span Context on Span
-        self.aws_lambda_span.trace_id = 0;
-        self.aws_lambda_span.parent_id = 0;
-        self.aws_lambda_span.span_id = 0;
+        self.span.trace_id = 0;
+        self.span.parent_id = 0;
+        self.span.span_id = 0;
         // Error
-        self.aws_lambda_span.error = 0;
+        self.span.error = 0;
         // Meta tags
-        self.aws_lambda_span.meta.clear();
+        self.span.meta.clear();
         // Extracted Span Context
         self.extracted_span_context = None;
         // Cold Start Span
         self.cold_start_span = None;
         // LWA reset
-        self.aws_lambda_span_needs_reparenting = false;
+        self.aws_lambda_span_needs_trace_id = false;
         self.reparenting_id = None;
     }
 
@@ -543,8 +543,8 @@ impl Processor {
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &self.extracted_span_context {
-            self.aws_lambda_span.trace_id = sc.trace_id;
-            self.aws_lambda_span.parent_id = sc.span_id;
+            self.span.trace_id = sc.trace_id;
+            self.span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
@@ -571,9 +571,9 @@ impl Processor {
     }
 
     pub fn set_reparenting(&mut self, span_id: u64, parent_id: u64) {
-        self.aws_lambda_span.span_id = span_id;
+        self.span.span_id = span_id;
         self.reparenting_id = Some(parent_id);
-        self.aws_lambda_span_needs_reparenting = true;
+        self.aws_lambda_span_needs_trace_id = true;
     }
 
     fn extract_span_context(
