@@ -79,9 +79,9 @@ pub struct ContextBuffer {
     /// The buffer is a queue of the last 5 invocation contexts, including
     /// the current one.
     buffer: VecDeque<Context>,
-    /// The buffer of unordered events.
+    /// The buffers of unordered events.
     ///
-    /// This buffer holds events that might not be ordered by the time they are processed.
+    /// These buffers hold events that might not be ordered by the time they are processed.
     /// For correct processing, events are paired based on a common pattern.
     ///
     /// The expected order of events is:
@@ -98,24 +98,28 @@ pub struct ContextBuffer {
     ///
     ///    Similarly, `PlatformRuntimeDone` occurs before `UniversalInstrumentationEnd` event, it is stored the buffer.
     ///    Once `UniversalInstrumentationEnd` happens, the event is popped from the buffer and paired for processing.
-    unordered_events: Vec<UnorderedEvents>,
+    invoke_events_request_ids: VecDeque<String>,
+    platform_runtime_done_events_request_ids: VecDeque<String>,
+    universal_instrumentation_start_events: VecDeque<UniversalInstrumentationData>,
+    universal_instrumentation_end_events: VecDeque<UniversalInstrumentationData>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum UnorderedEvents {
-    Invoke(String),
-    PlatformRuntimeDone(String),
-    UniversalInstrumentationStart(HashMap<String, String>, Vec<u8>),
-    UniversalInstrumentationEnd(HashMap<String, String>, Vec<u8>),
+struct UniversalInstrumentationData {
+    headers: HashMap<String, String>,
+    payload: Vec<u8>,
 }
 
 impl Default for ContextBuffer {
     /// Creates a new `ContextBuffer` with a default capacity of 5.
     ///
     fn default() -> Self {
+        let capacity = 5;
         ContextBuffer {
-            buffer: VecDeque::<Context>::with_capacity(5),
-            unordered_events: Vec::with_capacity(20),
+            buffer: VecDeque::<Context>::with_capacity(capacity),
+            invoke_events_request_ids: VecDeque::with_capacity(capacity),
+            platform_runtime_done_events_request_ids: VecDeque::with_capacity(capacity),
+            universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
+            universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
         }
     }
 }
@@ -125,7 +129,10 @@ impl ContextBuffer {
     fn with_capacity(capacity: usize) -> Self {
         ContextBuffer {
             buffer: VecDeque::<Context>::with_capacity(capacity),
-            unordered_events: Vec::with_capacity(capacity),
+            invoke_events_request_ids: VecDeque::with_capacity(capacity),
+            platform_runtime_done_events_request_ids: VecDeque::with_capacity(capacity),
+            universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
+            universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
         }
     }
 
@@ -199,160 +206,89 @@ impl ContextBuffer {
 
     /// Returns the `UniversalInstrumentationStart` event from the buffer if found.
     ///
-    /// This is supposed to be called only inside the `on_invoke_event` method.
-    ///
-    /// If the `UniversalInstrumentationStart` event has occurred before, remove it from the queue
-    /// and return the event, so the `on_invoke_event` method can process the
-    /// `UniversalInstrumentationStart` event.
-    ///
-    /// If the `UniversalInstrumentationStart` event hasn't occurred yet, push the `Invoke` event to
-    /// the queue so the `request_id` can be later used. Returns `None` in this case.
-    pub fn get_universal_instrumentation_start_event_data(
+    /// None if the `Invoke` event hasn't occurred yet.
+    pub fn pair_invoke_event(
         &mut self,
         request_id: &str,
     ) -> Option<(HashMap<String, String>, Vec<u8>)> {
-        let mut found_index = usize::MAX;
-
-        for (i, event) in self.unordered_events.iter().enumerate() {
-            if let UnorderedEvents::UniversalInstrumentationStart(_, _) = event {
-                found_index = i;
-                break;
-            }
-        }
-
-        // `UniversalInstrumentationStart` event hasn't occurred yet, this is good,
-        // push the Invoke event to the queue and return `None`
-        if found_index == usize::MAX {
-            self.unordered_events
-                .push(UnorderedEvents::Invoke(request_id.to_owned()));
-            return None;
-        }
-
-        // Bad scenario, we found an `UniversalInstrumentationStart`
-        match self.unordered_events.remove(found_index) {
-            UnorderedEvents::UniversalInstrumentationStart(headers, payload) => {
-                Some((headers, payload))
-            }
-            _ => None,
+        if let Some(UniversalInstrumentationData { headers, payload }) =
+            self.universal_instrumentation_start_events.pop_front()
+        {
+            // Bad scenario, we found an `UniversalInstrumentationStart`
+            Some((headers, payload))
+        } else {
+            // `UniversalInstrumentationStart` event hasn't occurred yet, this is good,
+            // push the Invoke event to the queue and return `None`
+            self.invoke_events_request_ids
+                .push_back(request_id.to_owned());
+            None
         }
     }
 
     /// Returns the `Invoke` event from the buffer if found.
     ///
-    /// This is supposed to be called only inside the `on_invocation_start` method.
-    ///
-    /// If the `Invoke` event has occurred before, remove it from the queue and
-    /// return the event, so the `on_invocation_start` method can get the `request_id`
-    /// to process the invocation start data.
-    ///
-    /// If the `Invoke` event hasn't occurred yet, push the `UniversalInstrumentationStart` event to
-    /// the queue so the `headers` and `payload` can be later used. Returns `None` in this case.
-    pub fn get_invoke_event_request_id(
+    /// None if the `UniversalInstrumentationStart` event hasn't occurred yet.
+    pub fn pair_universal_instrumentation_start_event(
         &mut self,
         headers: &HashMap<String, String>,
         payload: &[u8],
     ) -> Option<String> {
-        let mut found_index = usize::MAX;
-        for (i, event) in self.unordered_events.iter().enumerate() {
-            if let UnorderedEvents::Invoke(_) = event {
-                found_index = i;
-                break;
-            }
-        }
-
-        // `Invoke` event hasn't occurred yet, this is bad,
-        // push the `UniversalInstrumentationStart` event to the queue and return `None`
-        if found_index == usize::MAX {
-            self.unordered_events
-                .push(UnorderedEvents::UniversalInstrumentationStart(
-                    headers.clone(),
-                    payload.to_vec(),
-                ));
-            return None;
-        }
-
-        // Pop the Invoke event from the queue
-        match self.unordered_events.remove(found_index) {
-            UnorderedEvents::Invoke(request_id) => Some(request_id),
-            _ => None,
+        if let Some(request_id) = self.invoke_events_request_ids.pop_front() {
+            // Bad scenario, we found an `UniversalInstrumentationStart`
+            Some(request_id)
+        } else {
+            // `Invoke` event hasn't occurred yet, this is bad,
+            // push the `UniversalInstrumentationStart` event to the queue and return `None`
+            self.universal_instrumentation_start_events
+                .push_back(UniversalInstrumentationData {
+                    headers: headers.clone(),
+                    payload: payload.to_vec(),
+                });
+            None
         }
     }
 
     /// Returns the `PlatformRuntimeDone` event from the buffer if found.
     ///
-    /// This is supposed to be called only inside the `on_invocation_end` method.
-    ///
-    /// If the `PlatformRuntimeDone` event has occurred before, remove it from the queue
-    /// and return the event, so the `on_invocation_end` method can process itself with.
-    ///
-    /// If the `PlatformRuntimeDone` event hasn't occurred yet, push the `UniversalInstrumentationEnd` event
-    /// to the queue so the `headers` and `payload` can be later used. Returns `None` in this case.
-    pub fn get_platform_runtime_done_event_request_id(
+    /// None if the `UniversalInstrumentationEnd` event hasn't occurred yet.
+    pub fn pair_universal_instrumentation_end_event(
         &mut self,
         headers: &HashMap<String, String>,
         payload: &[u8],
     ) -> Option<String> {
-        let mut found_index = usize::MAX;
-        for (i, event) in self.unordered_events.iter().enumerate() {
-            if let UnorderedEvents::PlatformRuntimeDone(_) = event {
-                found_index = i;
-                break;
-            }
-        }
-
-        // `PlatformRuntimeDone` hasn't occurred yet, this is good,
-        // push the `UniversalInstrumentationEnd` event to the queue and return `None`
-        if found_index == usize::MAX {
-            self.unordered_events
-                .push(UnorderedEvents::UniversalInstrumentationEnd(
-                    headers.clone(),
-                    payload.to_vec(),
-                ));
-            return None;
-        }
-
-        // Bad scenario, we found a `PlatformRuntimeDone`
-        match self.unordered_events.remove(found_index) {
-            UnorderedEvents::PlatformRuntimeDone(request_id) => Some(request_id),
-            _ => None,
+        if let Some(request_id) = self.platform_runtime_done_events_request_ids.pop_front() {
+            // Bad scenario, we found a `PlatformRuntimeDone`
+            Some(request_id)
+        } else {
+            // `PlatformRuntimeDone` hasn't occurred yet, this is good,
+            // push the `UniversalInstrumentationEnd` event to the queue and return `None`
+            self.universal_instrumentation_end_events
+                .push_back(UniversalInstrumentationData {
+                    headers: headers.clone(),
+                    payload: payload.to_vec(),
+                });
+            None
         }
     }
 
     /// Returns the `UniversalInstrumentationEnd` event from the buffer if found.
     ///
-    /// This is supposed to be called only inside the `on_platform_runtime_done` method.
-    ///
-    /// If the `UniversalInstrumentationEnd` event has occurred before, remove it from the queue and
-    /// return the event, so the `on_platform_runtime_done` can process the invocation end data.
-    ///
-    /// If the `UniversalInstrumentationEnd` event hasn't occurred yet, push the `PlatformRuntimeDone` event
-    /// so the `request_id` can be later used. Returns `None` in this case.
-    pub fn get_universal_instrumentation_end_event_data(
+    /// None if the `PlatformRuntimeDone` event hasn't occurred yet.
+    pub fn pair_platform_runtime_done_event(
         &mut self,
         request_id: &str,
     ) -> Option<(HashMap<String, String>, Vec<u8>)> {
-        let mut found_index = usize::MAX;
-        for (i, event) in self.unordered_events.iter().enumerate() {
-            if let UnorderedEvents::UniversalInstrumentationEnd(_, _) = event {
-                found_index = i;
-                break;
-            }
-        }
-
-        // `UniversalInstrumentationEnd` hasn't occurred yet, this is bad,
-        // push the `PlatformRuntimeDone` event to the queue and return `None`
-        if found_index == usize::MAX {
-            self.unordered_events
-                .push(UnorderedEvents::PlatformRuntimeDone(request_id.to_owned()));
-            return None;
-        }
-
-        // Good scenario, we found an `UniversalInstrumentationEnd`
-        match self.unordered_events.remove(found_index) {
-            UnorderedEvents::UniversalInstrumentationEnd(headers, payload) => {
-                Some((headers, payload))
-            }
-            _ => None,
+        if let Some(UniversalInstrumentationData { headers, payload }) =
+            self.universal_instrumentation_end_events.pop_front()
+        {
+            // Good scenario, we found an `UniversalInstrumentationEnd`
+            Some((headers, payload))
+        } else {
+            // `UniversalInstrumentationEnd` hasn't occurred yet, this is bad,
+            // push the `PlatformRuntimeDone` event to the queue and return `None`
+            self.platform_runtime_done_events_request_ids
+                .push_back(request_id.to_owned());
+            None
         }
     }
 

@@ -155,18 +155,15 @@ impl Processor {
         // Increment the invocation metric
         self.enhanced_metrics.increment_invocation_metric(timestamp);
 
-        // If `InvocationStart` event happened first, process it
-        if let Some((headers, payload)) = self
-            .context_buffer
-            .get_universal_instrumentation_start_event_data(&request_id)
-        {
+        // If `UniversalInstrumentationStart` event happened first, process it
+        if let Some((headers, payload)) = self.context_buffer.pair_invoke_event(&request_id) {
             let payload_value =
                 serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
             // Infer span
             self.inferrer.infer_span(&payload_value, &self.aws_config);
             let span_context = self.extract_span_context(&headers, &payload_value);
 
-            self.process_on_invocation_start(request_id, payload, span_context);
+            self.process_on_universal_instrumentation_start(request_id, payload, span_context);
         }
     }
 
@@ -301,12 +298,12 @@ impl Processor {
         self.context_buffer
             .add_runtime_duration(request_id, metrics.duration_ms);
 
-        // If `InvocationEnd` event happened first, process it first
+        // If `UniversalInstrumentationEnd` event happened first, process it first
         if let Some((headers, payload)) = self
             .context_buffer
-            .get_universal_instrumentation_end_event_data(request_id)
+            .pair_platform_runtime_done_event(request_id)
         {
-            self.process_on_invocation_end(request_id.clone(), headers, payload);
+            self.process_on_universal_instrumentation_end(request_id.clone(), headers, payload);
         }
 
         self.process_on_platform_runtime_done(
@@ -465,7 +462,7 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(
+    pub fn on_universal_instrumentation_start(
         &mut self,
         headers: HashMap<String, String>,
         payload: Vec<u8>,
@@ -482,15 +479,19 @@ impl Processor {
         // If `Invoke` event happened first, process right away
         if let Some(request_id) = self
             .context_buffer
-            .get_invoke_event_request_id(&headers, &payload)
+            .pair_universal_instrumentation_start_event(&headers, &payload)
         {
-            self.process_on_invocation_start(request_id, payload, span_context.clone());
+            self.process_on_universal_instrumentation_start(
+                request_id,
+                payload,
+                span_context.clone(),
+            );
         }
 
         span_context
     }
 
-    fn process_on_invocation_start(
+    fn process_on_universal_instrumentation_start(
         &mut self,
         request_id: String,
         payload: Vec<u8>,
@@ -563,17 +564,17 @@ impl Processor {
 
     /// Given trace context information, set it to the current span.
     ///
-    pub fn on_invocation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn on_universal_instrumentation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
         // If `PlatformRuntimeDone` event happened first, process
         if let Some(request_id) = self
             .context_buffer
-            .get_platform_runtime_done_event_request_id(&headers, &payload)
+            .pair_universal_instrumentation_end_event(&headers, &payload)
         {
-            self.process_on_invocation_end(request_id, headers, payload);
+            self.process_on_universal_instrumentation_end(request_id, headers, payload);
         }
     }
 
-    fn process_on_invocation_end(
+    fn process_on_universal_instrumentation_end(
         &mut self,
         request_id: String,
         headers: HashMap<String, String>,
@@ -850,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_on_invocation_end_headers_with_sampling_priority() {
+    fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -861,7 +862,7 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
 
-        p.process_on_invocation_end(request_id.clone(), headers, vec![]);
+        p.process_on_universal_instrumentation_end(request_id.clone(), headers, vec![]);
 
         let context = p
             .context_buffer
@@ -879,7 +880,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_on_invocation_end_headers_with_invalid_priority() {
+    fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -893,7 +894,7 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
 
-        p.process_on_invocation_end(request_id.clone(), headers, vec![]);
+        p.process_on_universal_instrumentation_end(request_id.clone(), headers, vec![]);
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
@@ -909,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn test_process_on_invocation_end_headers_no_sampling_priority() {
+    fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -919,7 +920,7 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
 
-        p.process_on_invocation_end(request_id.clone(), headers, vec![]);
+        p.process_on_universal_instrumentation_end(request_id.clone(), headers, vec![]);
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
@@ -955,7 +956,7 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
         p.context_buffer.add_start_time(&request_id, 1);
-        p.process_on_invocation_end(
+        p.process_on_universal_instrumentation_end(
             request_id.clone(),
             HashMap::new(),
             response.as_bytes().to_vec(),

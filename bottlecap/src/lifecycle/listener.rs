@@ -97,7 +97,7 @@ impl Listener {
 
                 let headers = Self::headers_to_map(parts.headers);
 
-                let span_context = processor.on_invocation_start(headers, body);
+                let span_context = processor.on_universal_instrumentation_start(headers, body);
 
                 let mut response = Response::builder().status(200);
 
@@ -148,7 +148,7 @@ impl Listener {
                 let mut processor = invocation_processor.lock().await;
 
                 let headers = Self::headers_to_map(parts.headers);
-                processor.on_invocation_end(headers, body);
+                processor.on_universal_instrumentation_end(headers, body);
                 drop(processor);
 
                 Response::builder()
