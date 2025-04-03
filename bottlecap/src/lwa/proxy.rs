@@ -2,14 +2,6 @@ use crate::lifecycle::invocation::generate_span_id;
 use crate::{lifecycle::invocation::processor::Processor, lifecycle::listener::Listener};
 use hyper::body::Bytes;
 use hyper::header::{HeaderName, HeaderValue};
-use hyper::{
-    body::HttpBody,
-    client::HttpConnector,
-    http,
-    http::request::Parts,
-    service::{make_service_fn, service_fn},
-    Body, Client, Error, HeaderMap, Request, Response, Server, Uri,
-};
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 use serde_json::{json, Value};
 use std::collections::HashMap;
