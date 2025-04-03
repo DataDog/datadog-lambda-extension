@@ -19,63 +19,53 @@ use tracing::{debug, error};
 
 #[must_use]
 pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<JoinHandle<()>> {
-    if let Some((proxy_socket, aws_runtime_uri)) = parse_env_addresses() {
-        debug!(
-            "LWA: proxy enabled with proxy URI: {} and AWS runtime: {}",
-            proxy_socket, aws_runtime_uri
-        );
-        let proxied_client = match build_proxy(aws_runtime_uri.clone()) {
-            Some(client) => client,
-            None => return None,
-        };
+    let (proxy_socket, aws_runtime_uri) = parse_env_addresses()?;
+    debug!(
+        "LWA: proxy enabled with proxy URI: {} and AWS runtime: {}",
+        proxy_socket, aws_runtime_uri
+    );
+    let proxied_client = build_proxy(aws_runtime_uri.clone())?;
 
-        let proxy_task_handle = tokio::spawn({
-            async move {
-                let proxy_server = Server::bind(&proxy_socket).serve(make_service_fn(move |_| {
-                    let processor = Arc::clone(&invocation_processor);
-                    let uri = aws_runtime_uri.clone();
-                    let client = Arc::clone(&proxied_client);
-                    async move {
-                        Ok::<_, Error>(service_fn(move |req| {
-                            intercept_payload(
-                                req,
-                                Arc::clone(&client),
-                                Arc::clone(&processor),
-                                uri.clone(),
-                            )
-                        }))
-                    }
-                }));
-
-                if let Err(e) = proxy_server.await {
-                    error!("LWA: proxy server error: {}", e);
+    let proxy_task_handle = tokio::spawn({
+        async move {
+            let proxy_server = Server::bind(&proxy_socket).serve(make_service_fn(move |_| {
+                let processor = Arc::clone(&invocation_processor);
+                let uri = aws_runtime_uri.clone();
+                let client = Arc::clone(&proxied_client);
+                async move {
+                    Ok::<_, Error>(service_fn(move |req| {
+                        intercept_payload(
+                            req,
+                            Arc::clone(&client),
+                            Arc::clone(&processor),
+                            uri.clone(),
+                        )
+                    }))
                 }
+            }));
+
+            if let Err(e) = proxy_server.await {
+                error!("LWA: proxy server error: {}", e);
             }
-        });
-        Some(proxy_task_handle)
-    } else {
-        None
-    }
+        }
+    });
+    Some(proxy_task_handle)
 }
 
 fn build_proxy(uri_to_intercept: Uri) -> Option<Arc<Client<ProxyConnector<HttpConnector>>>> {
-    match ProxyConnector::from_proxy(
+    ProxyConnector::from_proxy(
         HttpConnector::new(),
         Proxy::new(Intercept::All, uri_to_intercept),
-    ) {
-        Ok(proxy_connector) => Some(Arc::new(
-            Client::builder().build::<_, Body>(proxy_connector),
-        )),
-        Err(e) => {
-            error!("LWA: Error creating proxy connector: {}", e);
-            None
-        }
-    }
+    )
+    .map(|proxy_connector| Arc::new(Client::builder().build::<_, Body>(proxy_connector)))
+    .map_err(|_| error!("LWA: Error creating proxy connector"))
+    .ok()
 }
 
 fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
-    let aws_lwa_proxy_lambda_runtime_api = match std::env::var("AWS_LWA_PROXY_LAMBDA_RUNTIME_API") {
-        Ok(uri) => match uri.parse::<Uri>() {
+    let aws_lwa_proxy_lambda_runtime_api = std::env::var("AWS_LWA_PROXY_LAMBDA_RUNTIME_API")
+    .ok()
+    .and_then(|uri| match uri.parse::<Uri>() {
             Ok(parsed_uri) => {
                 let host = parsed_uri.host();
                 let port = parsed_uri.port_u16();
@@ -106,9 +96,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                 );
                 None
             }
-        },
-        Err(_) => None,
-    };
+        });
     let aws_runtime_api = match std::env::var("AWS_LAMBDA_RUNTIME_API") {
         Ok(env_uri) => match format!("http://{env_uri}").parse() {
             Ok(parsed_uri) => Some(parsed_uri),
@@ -122,10 +110,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
             None
         }
     };
-    match (aws_lwa_proxy_lambda_runtime_api, aws_runtime_api) {
-        (Some(proxy_uri), Some(aws_runtime_addr)) => Some((proxy_uri, aws_runtime_addr)),
-        _ => None,
-    }
+    aws_lwa_proxy_lambda_runtime_api.zip(aws_runtime_api)
 }
 
 // Example of flow
@@ -158,34 +143,25 @@ async fn intercept_payload(
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
     let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
 
-    // error!("LWA: Intercepted request: {:?}", intercepted_parts);
-    // error!(
-    //     "LWA: Intercepted request body: {:?}",
-    //     waited_intercepted_body
-    // );
-
-    let forward_intercepted = forward_request(
+    let forward_intercepted = build_forward_request(
         aws_runtime_addr,
         &intercepted_parts,
-        waited_intercepted_body.clone().into(),
+        waited_intercepted_body.clone(),
     )
     .await?;
 
     // response after forwarding to AWS runtime API
-    let response_to_intercepted_req = client.request(forward_intercepted).await?;
+    let response_to_intercepted = client.request(forward_intercepted).await?;
 
-    let (resp_part, resp_body) = response_to_intercepted_req.into_parts();
+    let (resp_part, resp_body) = response_to_intercepted.into_parts();
     let resp_payload = resp_body.collect().await?.to_bytes();
 
-    // error!("LWA: Intercepted resp: {:?}", &resp_part);
-    // error!("LWA: Intercepted resp body: {:?}", resp_payload);
-
-    let mut response_to_intercepted_req = Response::builder()
+    let mut forward_response_to_intercepted = Response::builder()
         .status(resp_part.status)
         .version(resp_part.version)
         .body(Body::from(resp_payload.clone()))
         .unwrap();
-    *response_to_intercepted_req.headers_mut() = resp_part.headers.clone();
+    *forward_response_to_intercepted.headers_mut() = resp_part.headers.clone();
 
     match (intercepted_parts.method, intercepted_parts.uri.path()) {
         (hyper::Method::GET, "/2018-06-01/runtime/invocation/next") => {
@@ -196,25 +172,22 @@ async fn intercept_payload(
                 && path.ends_with("/response") =>
         {
             on_post_invocation(&processor, &waited_intercepted_body).await;
-            // only parsing of the original request (handler -> runtime API) is needed so
-            // the original response can be used
-            Ok(response_to_intercepted_req)
         }
-        _ => Ok(response_to_intercepted_req),
+        _ => {}
     }
+    Ok(forward_response_to_intercepted)
 }
 
 async fn on_get_next_response(
     processor: &Arc<Mutex<Processor>>,
     resp_part: http::response::Parts,
     resp_payload: &Bytes,
-) -> Result<Response<Body>, Error> {
+) {
     // intercepted invocation/next. The *response body* contains the payload of
     // the request that the lambda handler will see
 
     let inner_payload = serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|_| json!({}));
 
-    // error!("LWA: payload wrapped in body {}", inner_payload);
     // Response is not cloneable, so it must be built again
     let body = serde_json::to_vec(&inner_payload).unwrap();
     let mut rebuild_response = Response::builder()
@@ -223,6 +196,7 @@ async fn on_get_next_response(
         .body(Body::from(body.clone()))
         .unwrap();
     *rebuild_response.headers_mut() = resp_part.headers;
+
     let (parent_id, _) = Listener::universal_instrumentation_start(
         rebuild_response.headers(),
         body.into(),
@@ -234,8 +208,6 @@ async fn on_get_next_response(
         let mut invocation_processor = processor.lock().await;
         invocation_processor.set_reparenting(generate_span_id(), parent_id);
     }
-    // complete forwarding to the lambda handler
-    Ok(rebuild_response)
 }
 
 async fn on_post_invocation(processor: &Arc<Mutex<Processor>>, waited_intercepted_body: &Bytes) {
@@ -269,21 +241,19 @@ fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
     headers
 }
 
-async fn forward_request(
+async fn build_forward_request(
     aws_runtime_addr: Uri,
     req_parts: &Parts,
-    req_body: Body,
+    req_body: Bytes,
 ) -> Result<Request<Body>, Error> {
     let mut redirect_uri = aws_runtime_addr.into_parts();
     redirect_uri.path_and_query = Some(req_parts.uri.path_and_query().unwrap().clone());
     let new_uri = Uri::from_parts(redirect_uri).unwrap();
 
-    let request_body_waited = req_body.collect().await?.to_bytes();
-
     let redirected_request = Request::builder()
         .method(req_parts.method.clone())
         .uri(new_uri)
-        .body(Body::from(request_body_waited.clone()))
+        .body(Body::from(req_body))
         .unwrap_or_else(|e| {
             error!("LWA: Error building redirected request: {}", e);
             Request::new(Body::empty())
@@ -299,6 +269,7 @@ mod tests {
     use crate::tags::provider::Provider;
     use crate::traces::propagation::error::Error;
     use dogstatsd::metric::EMPTY_TAGS;
+    use hyper::body::HttpBody;
     use hyper::service::{make_service_fn, service_fn};
 
     use crate::LAMBDA_RUNTIME_SLUG;
@@ -379,9 +350,14 @@ mod tests {
                 .await;
         }
 
-        let ask_proxy = ask_proxy.unwrap();
+        let body_bytes = ask_proxy
+            .unwrap()
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
 
-        let body_bytes = hyper::body::to_bytes(ask_proxy.into_body()).await.unwrap();
         let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
         assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
 
