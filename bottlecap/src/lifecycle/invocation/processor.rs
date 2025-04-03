@@ -350,8 +350,6 @@ impl Processor {
             cold_start_span.parent_id = self.aws_lambda_span.parent_id;
         }
 
-        let log = &self.aws_lambda_span;
-
         if self.tracer_detected {
             let mut body_size = size_of_val(&self.aws_lambda_span);
             let mut traces = vec![self.aws_lambda_span.clone()];
