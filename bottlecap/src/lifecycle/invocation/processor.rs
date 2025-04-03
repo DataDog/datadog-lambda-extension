@@ -401,8 +401,6 @@ impl Processor {
             cold_start_span.parent_id = context.invocation_span.parent_id;
         }
 
-        let log = &self.aws_lambda_span;
-
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&context.invocation_span);
             let mut traces = vec![context.invocation_span.clone()];
