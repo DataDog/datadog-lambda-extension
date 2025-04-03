@@ -403,11 +403,6 @@ impl Processor {
 
         let log = &self.aws_lambda_span;
 
-        println!("AG: Sending invocation span to agent {log:?}");
-        println!(
-            "AG: Sending invocation span to agent {:?}",
-            self.tracer_detected
-        );
         if self.tracer_detected {
             let mut body_size = std::mem::size_of_val(&context.invocation_span);
             let mut traces = vec![context.invocation_span.clone()];
