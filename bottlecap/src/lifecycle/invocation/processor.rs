@@ -352,13 +352,7 @@ impl Processor {
 
         let log = &self.aws_lambda_span;
 
-        println!("AG: Sending invocation span to agent {log:?}");
-        println!(
-            "AG: Sending invocation span to agent {:?}",
-            self.tracer_detected
-        );
         if self.tracer_detected {
-            println!("AG: Sending invocation span to agent");
             let mut body_size = size_of_val(&self.aws_lambda_span);
             let mut traces = vec![self.aws_lambda_span.clone()];
 
