@@ -384,7 +384,7 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                 break 'flush_end;
                             }
@@ -449,7 +449,7 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
                         flush_all(
@@ -468,7 +468,7 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
                                 // Wait for the report event before shutting down
                                 break 'shutdown;
@@ -511,7 +511,6 @@ async fn flush_all(
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
-    config: Arc<Config>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
@@ -557,7 +556,6 @@ async fn handle_event_bus_event(
                     request_id,
                     metrics,
                     status,
-                    config.clone(),
                     tags_provider.clone(),
                     trace_processor.clone(),
                     trace_agent_channel.clone(),

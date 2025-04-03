@@ -285,10 +285,11 @@ impl ContextBuffer {
         // `Invoke` event hasn't occurred yet, this is bad,
         // push the `InvocationStart` event to the queue and return `None`
         if found_index == usize::MAX {
-            self.unordered_events_buffer.push(UnorderedEvents::InvocationStart(
-                headers.clone(),
-                payload.to_vec(),
-            ));
+            self.unordered_events_buffer
+                .push(UnorderedEvents::InvocationStart(
+                    headers.clone(),
+                    payload.to_vec(),
+                ));
             return None;
         }
 
@@ -324,10 +325,11 @@ impl ContextBuffer {
         // `PlatformRuntimeDone` hasn't occurred yet, this is good,
         // push the `InvocationEnd` event to the queue and return `None`
         if found_index == usize::MAX {
-            self.unordered_events_buffer.push(UnorderedEvents::InvocationEnd(
-                headers.clone(),
-                payload.to_vec(),
-            ));
+            self.unordered_events_buffer
+                .push(UnorderedEvents::InvocationEnd(
+                    headers.clone(),
+                    payload.to_vec(),
+                ));
             return None;
         }
 
