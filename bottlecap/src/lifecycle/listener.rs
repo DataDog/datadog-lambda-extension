@@ -2,19 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use ddcommon::hyper_migration;
+use ddcommon::hyper_migration::Body;
 use http_body_util::BodyExt;
 use hyper::service::service_fn;
-use hyper::{http, Method, Response, StatusCode};
+use hyper::{http, HeaderMap, Method, Response, StatusCode};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
-
-use hyper::body::HttpBody;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{http, Body, HeaderMap, Method, Request, Response, StatusCode};
-use serde_json::json;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
@@ -131,7 +127,6 @@ impl Listener {
     pub async fn universal_instrumentation_start(
         headers: &HeaderMap,
         body: Body,
-        req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> (u64, http::Result<hyper_migration::HttpResponse>) {
         debug!("Received start invocation request");
@@ -173,21 +168,22 @@ impl Listener {
                     found_parent_span_id = 0;
                 }
 
-                drop(processor);
                 (
                     found_parent_span_id,
-                response.body(hyper_migration::Body::from(json!({}).to_string()))
+                    response.body(hyper_migration::Body::from(json!({}).to_string())),
                 )
             }
             Err(e) => {
                 error!("Could not read start invocation request body {e}");
 
-                ( 0,
-                Response::builder()
-                    .status(400)
-                    .body(hyper_migration::Body::from(
-                        "Could not read start invocation request body",
-                    )))
+                (
+                    0,
+                    Response::builder()
+                        .status(400)
+                        .body(hyper_migration::Body::from(
+                            "Could not read start invocation request body",
+                        )),
+                )
             }
         }
     }
@@ -195,7 +191,6 @@ impl Listener {
     pub async fn universal_instrumentation_end(
         headers: &HeaderMap,
         body: Body,
-        req: hyper_migration::HttpRequest,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received end invocation request");
