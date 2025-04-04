@@ -554,4 +554,167 @@ mod tests {
             enhanced_metric_data,
         );
     }
+
+    #[test]
+    fn test_pair_invoke_event() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+        let request_id = "test-request-1".to_string();
+        let mut headers = HashMap::new();
+        headers.insert("test-header".to_string(), "test-value".to_string());
+        let payload = vec![1, 2, 3];
+
+        // Test case 1: UniversalInstrumentationStart arrives before Invoke
+        buffer
+            .universal_instrumentation_start_events
+            .push_back(UniversalInstrumentationData {
+                headers: headers.clone(),
+                payload: payload.clone(),
+            });
+
+        // When Invoke arrives, it should pair with the existing UniversalInstrumentationStart
+        let result = buffer.pair_invoke_event(&request_id);
+        assert!(result.is_some());
+        let (paired_headers, paired_payload) = result.unwrap();
+        assert_eq!(paired_headers, headers);
+        assert_eq!(paired_payload, payload);
+
+        // Test case 2: Invoke arrives before UniversalInstrumentationStart
+        let request_id2 = "test-request-2".to_string();
+        let result = buffer.pair_invoke_event(&request_id2);
+        assert!(result.is_none());
+        assert_eq!(buffer.invoke_events_request_ids.len(), 1);
+        assert_eq!(
+            buffer.invoke_events_request_ids.front().unwrap(),
+            &request_id2
+        );
+    }
+
+    #[test]
+    fn test_pair_universal_instrumentation_start_event() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+        let request_id = "test-request-1".to_string();
+        let mut headers = HashMap::new();
+        headers.insert("test-header".to_string(), "test-value".to_string());
+        let payload = vec![1, 2, 3];
+
+        // Test case 1: Invoke arrives before UniversalInstrumentationStart
+        buffer
+            .invoke_events_request_ids
+            .push_back(request_id.clone());
+
+        // When UniversalInstrumentationStart arrives, it should pair with the existing Invoke
+        let result = buffer.pair_universal_instrumentation_start_event(&headers, &payload);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), request_id);
+
+        // Test case 2: UniversalInstrumentationStart arrives before Invoke
+        let result = buffer.pair_universal_instrumentation_start_event(&headers, &payload);
+        assert!(result.is_none());
+        assert_eq!(buffer.universal_instrumentation_start_events.len(), 1);
+        let stored_event = buffer
+            .universal_instrumentation_start_events
+            .front()
+            .unwrap();
+        assert_eq!(stored_event.headers, headers);
+        assert_eq!(stored_event.payload, payload);
+    }
+
+    #[test]
+    fn test_pair_universal_instrumentation_end_event() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+        let request_id = "test-request-1".to_string();
+        let mut headers = HashMap::new();
+        headers.insert("test-header".to_string(), "test-value".to_string());
+        let payload = vec![1, 2, 3];
+
+        // Test case 1: PlatformRuntimeDone arrives before UniversalInstrumentationEnd
+        buffer
+            .platform_runtime_done_events_request_ids
+            .push_back(request_id.clone());
+
+        // When UniversalInstrumentationEnd arrives, it should pair with the existing PlatformRuntimeDone
+        let result = buffer.pair_universal_instrumentation_end_event(&headers, &payload);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), request_id);
+
+        // Test case 2: UniversalInstrumentationEnd arrives before PlatformRuntimeDone
+        let result = buffer.pair_universal_instrumentation_end_event(&headers, &payload);
+        assert!(result.is_none());
+        assert_eq!(buffer.universal_instrumentation_end_events.len(), 1);
+        let stored_event = buffer.universal_instrumentation_end_events.front().unwrap();
+        assert_eq!(stored_event.headers, headers);
+        assert_eq!(stored_event.payload, payload);
+    }
+
+    #[test]
+    fn test_pair_platform_runtime_done_event() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+        let request_id = "test-request-1".to_string();
+        let mut headers = HashMap::new();
+        headers.insert("test-header".to_string(), "test-value".to_string());
+        let payload = vec![1, 2, 3];
+
+        // Test case 1: UniversalInstrumentationEnd arrives before PlatformRuntimeDone
+        buffer
+            .universal_instrumentation_end_events
+            .push_back(UniversalInstrumentationData {
+                headers: headers.clone(),
+                payload: payload.clone(),
+            });
+
+        // When PlatformRuntimeDone arrives, it should pair with the existing UniversalInstrumentationEnd
+        let result = buffer.pair_platform_runtime_done_event(&request_id);
+        assert!(result.is_some());
+        let (paired_headers, paired_payload) = result.unwrap();
+        assert_eq!(paired_headers, headers);
+        assert_eq!(paired_payload, payload);
+
+        // Test case 2: PlatformRuntimeDone arrives before UniversalInstrumentationEnd
+        let request_id2 = "test-request-2".to_string();
+        let result = buffer.pair_platform_runtime_done_event(&request_id2);
+        assert!(result.is_none());
+        assert_eq!(buffer.platform_runtime_done_events_request_ids.len(), 1);
+        assert_eq!(
+            buffer
+                .platform_runtime_done_events_request_ids
+                .front()
+                .unwrap(),
+            &request_id2
+        );
+    }
+
+    #[test]
+    fn test_event_ordering() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+        let request_id = "test-request-1".to_string();
+        let mut headers = HashMap::new();
+        headers.insert("test-header".to_string(), "test-value".to_string());
+        let payload = vec![1, 2, 3];
+
+        // Test the complete flow with events arriving in different orders
+        // Case 1: Events arrive in reverse order
+        buffer
+            .universal_instrumentation_end_events
+            .push_back(UniversalInstrumentationData {
+                headers: headers.clone(),
+                payload: payload.clone(),
+            });
+        buffer
+            .platform_runtime_done_events_request_ids
+            .push_back(request_id.clone());
+
+        // When UniversalInstrumentationEnd arrives, it should pair with PlatformRuntimeDone
+        let result = buffer.pair_universal_instrumentation_end_event(&headers, &payload);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), request_id);
+
+        // Case 2: Events arrive in correct order
+        let request_id2 = "test-request-2".to_string();
+        buffer
+            .invoke_events_request_ids
+            .push_back(request_id2.clone());
+        let result = buffer.pair_universal_instrumentation_start_event(&headers, &payload);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap(), request_id2);
+    }
 }
