@@ -62,7 +62,7 @@ pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<Jo
                         // .with_upgrades()
                         .await
                     {
-                        println!("LWA: Failed to serve connection: {:?}", err);
+                        println!("LWA: Failed to serve connection: {err:?}");
                     }
                 });
             }
@@ -357,21 +357,26 @@ mod tests {
     use crate::lifecycle::invocation::processor::Processor;
     use crate::lwa::proxy::start_lwa_proxy;
     use crate::tags::provider::Provider;
+    use http_body_util::BodyExt;
 
     use bytes::Bytes;
     use dogstatsd::metric::EMPTY_TAGS;
     use http_body_util::Full;
-    use hyper::{body::HttpBody, service::service_fn};
+    use hyper::server::conn::http1;
+    use hyper::service::service_fn;
+    use hyper_util::client::legacy::connect::HttpConnector;
+    use hyper_util::client::legacy::Client;
+    use hyper_util::rt::TokioIo;
+    use tokio::net::TcpListener;
 
     use crate::LAMBDA_RUNTIME_SLUG;
 
     use dogstatsd::aggregator::Aggregator;
-    use hyper::{Body, Client, Response, Uri};
+    use hyper::{Response, Uri};
     use std::sync::{Arc, Mutex};
     use std::{
         collections::HashMap,
         env,
-        net::SocketAddr,
         time::{Duration, Instant},
     };
     use tokio::sync::Mutex as TokioMutex;
@@ -385,15 +390,26 @@ mod tests {
         env::set_var("AWS_LWA_PROXY_LAMBDA_RUNTIME_API", proxy_uri);
         env::set_var("AWS_LAMBDA_RUNTIME_API", final_uri);
 
-        let final_destination = tokio::spawn(async {
-            hyper::Server::bind(&SocketAddr::from(([127, 0, 0, 1], 12344)))
-                .serve(make_service_fn(|_| async {
-                    Ok::<_, std::convert::Infallible>(service_fn(|_| async {
+        let final_destination = tokio::spawn(async move {
+            let listener = TcpListener::bind(final_uri)
+                .await
+                .expect("Failed to bind final destination socket");
+            let (tcp_stream, _) = listener
+                .accept()
+                .await
+                .expect("LWA: Failed to accept LWA connection");
+            let io = TokioIo::new(tcp_stream);
+            http1::Builder::new()
+                .preserve_header_case(true)
+                .title_case_headers(true)
+                .serve_connection(
+                    io,
+                    service_fn(move |_req| async move {
                         Ok::<_, std::convert::Infallible>(Response::new(Full::new(Bytes::from(
                             "Response from AWS LAMBDA RUNTIME API",
                         ))))
-                    }))
-                }))
+                    }),
+                )
                 .await
                 .unwrap();
         });
@@ -424,7 +440,10 @@ mod tests {
         let proxy_task_handle =
             start_lwa_proxy(invocation_processor).expect("Failed to start proxy");
 
-        let client = Client::builder().build_http::<Full<Bytes>>();
+        let https = HttpConnector::new();
+        let client = Client::builder(hyper_util::rt::TokioExecutor::new())
+            .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https);
+
         let uri_with_schema = format!("http://{proxy_uri}");
         let mut ask_proxy = client
             .get(Uri::try_from(uri_with_schema.clone()).unwrap())
