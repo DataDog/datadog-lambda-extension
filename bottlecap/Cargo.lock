@@ -439,7 +439,6 @@ dependencies = [
  "http-body-util",
  "httpmock",
  "hyper 1.6.0",
- "hyper-proxy2",
  "hyper-util",
  "lazy_static",
  "log",
@@ -1482,23 +1481,6 @@ dependencies = [
  "tokio-rustls",
  "tower-service",
  "webpki-roots",
-]
-
-[[package]]
-name = "hyper-proxy2"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9043b7b23fb0bc4a1c7014c27b50a4fc42cc76206f71d34fc0dfe5b28ddc3faf"
-dependencies = [
- "bytes 1.10.1",
- "futures-util",
- "headers",
- "http 1.3.1",
- "hyper 1.6.0",
- "hyper-util",
- "pin-project-lite",
- "tokio",
- "tower-service",
 ]
 
 [[package]]
