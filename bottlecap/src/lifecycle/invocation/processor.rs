@@ -60,6 +60,8 @@ pub struct Processor {
     cold_start_span: Option<Span>,
     // Extracted span context from inferred span, headers, or payload
     pub extracted_span_context: Option<SpanContext>,
+    pub reparenting_id: Option<u64>,
+    pub aws_lambda_span_needs_trace_id: bool,
     // Used to extract the trace context from inferred span, headers, or payload
     propagator: DatadogCompositePropagator,
     // Helper to send enhanced metrics
@@ -95,6 +97,8 @@ impl Processor {
             extracted_span_context: None,
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
+            reparenting_id: None,
+            aws_lambda_span_needs_trace_id: false,
             aws_config: aws_config.clone(),
             tracer_detected: false,
             runtime: None,
@@ -160,6 +164,9 @@ impl Processor {
         self.extracted_span_context = None;
         // Cold Start Span
         self.cold_start_span = None;
+        // LWA reset
+        self.aws_lambda_span_needs_trace_id = false;
+        self.reparenting_id = None;
     }
 
     /// On the first invocation, determine if it's a cold start or proactive init.
@@ -341,7 +348,7 @@ impl Processor {
         }
 
         if self.tracer_detected {
-            let mut body_size = std::mem::size_of_val(&self.span);
+            let mut body_size = size_of_val(&self.span);
             let mut traces = vec![self.span.clone()];
 
             if let Some(inferred_span) = &self.inferrer.inferred_span {
@@ -350,12 +357,12 @@ impl Processor {
             }
 
             if let Some(ws) = &self.inferrer.wrapped_inferred_span {
-                body_size += std::mem::size_of_val(ws);
+                body_size += size_of_val(ws);
                 traces.push(ws.clone());
             }
 
             if let Some(cold_start_span) = &self.cold_start_span {
-                body_size += std::mem::size_of_val(cold_start_span);
+                body_size += size_of_val(cold_start_span);
                 traces.push(cold_start_span.clone());
             }
 
@@ -426,7 +433,11 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn on_invocation_start(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn universal_instrumentation_start(
+        &mut self,
+        headers: HashMap<String, String>,
+        payload: Vec<u8>,
+    ) -> u64 {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -459,12 +470,18 @@ impl Processor {
                 self.span.meta.extend(sc.tags.clone());
             }
         }
-
         // If we have an inferred span, set the invocation span parent id
         // to be the inferred span id, even if we don't have an extracted trace context
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             self.span.parent_id = inferred_span.span_id;
         }
+        self.span.parent_id
+    }
+
+    pub fn set_reparenting(&mut self, span_id: u64, parent_id: u64) {
+        self.span.span_id = span_id;
+        self.reparenting_id = Some(parent_id);
+        self.aws_lambda_span_needs_trace_id = true;
     }
 
     fn extract_span_context(
@@ -493,7 +510,11 @@ impl Processor {
 
     /// Given trace context information, set it to the current span.
     ///
-    pub fn on_invocation_end(&mut self, headers: HashMap<String, String>, payload: Vec<u8>) {
+    pub fn universal_instrumentation_end(
+        &mut self,
+        headers: HashMap<String, String>,
+        payload: Vec<u8>,
+    ) {
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
@@ -830,7 +851,7 @@ mod tests {
        }
        "#;
 
-        p.on_invocation_end(HashMap::new(), response.as_bytes().to_vec());
+        p.universal_instrumentation_end(HashMap::new(), response.as_bytes().to_vec());
 
         assert_eq!(
             p.span

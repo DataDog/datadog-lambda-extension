@@ -364,7 +364,7 @@ impl TraceAgent {
 
         let tracer_header_tags = (&parts.headers).into();
 
-        let (body_size, traces) = match version {
+        let (body_size, mut traces) = match version {
             ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
                 Ok(result) => result,
                 Err(err) => {
@@ -384,15 +384,37 @@ impl TraceAgent {
                 }
             },
         };
+        let (maybe_reparent, aws_lambda_span_id, aws_lambda_span_needs_trace_id) = {
+            let invocation_processor = invocation_processor.lock().await;
+            (
+                invocation_processor.reparenting_id,
+                invocation_processor.span.span_id,
+                invocation_processor.aws_lambda_span_needs_trace_id,
+            )
+        };
+        let mut trace_id_from_spans = 0;
 
-        // Search for trace invocation span and send it to the invocation processor
-        for chunk in &traces {
-            for span in chunk {
+        for chunk in &mut traces {
+            for span in chunk.iter_mut() {
                 if span.resource == INVOCATION_SPAN_RESOURCE {
                     let mut invocation_processor = invocation_processor.lock().await;
                     invocation_processor.add_tracer_span(span);
                 }
+                if trace_id_from_spans == 0 && aws_lambda_span_needs_trace_id {
+                    trace_id_from_spans = span.trace_id;
+                }
+                if let Some(reparenting_id) = maybe_reparent {
+                    if span.parent_id == reparenting_id {
+                        span.parent_id = aws_lambda_span_id;
+                    }
+                }
             }
+        }
+
+        if aws_lambda_span_needs_trace_id && trace_id_from_spans != 0 {
+            let mut invocation_processor = invocation_processor.lock().await;
+            invocation_processor.span.trace_id = trace_id_from_spans;
+            invocation_processor.aws_lambda_span_needs_trace_id = false;
         }
 
         let send_data = trace_processor.process_traces(

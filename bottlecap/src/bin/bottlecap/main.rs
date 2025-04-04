@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::lwa::proxy::start_lwa_proxy;
 use bottlecap::{
     base_url,
     config::{self, get_aws_partition_by_region, AwsConfig, Config},
@@ -343,6 +344,8 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
     );
 
+    let lwa_proxy_handle = start_lwa_proxy(Arc::clone(&invocation_processor));
+
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
     };
@@ -477,6 +480,10 @@ async fn extension_loop_active(
                     }
                 }
             }
+            if let Some(lwa_proxy_task) = lwa_proxy_handle {
+                // use with graceful shutdown after rebase with hyper 1
+                lwa_proxy_task.abort();
+            }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             flush_all(
@@ -495,8 +502,8 @@ async fn extension_loop_active(
 async fn flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flusher: &mut MetricsFlusher,
-    trace_flusher: &dyn TraceFlusher,
-    stats_flusher: &dyn StatsFlusher,
+    trace_flusher: &impl TraceFlusher,
+    stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
