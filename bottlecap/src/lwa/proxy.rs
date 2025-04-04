@@ -1,14 +1,25 @@
-use crate::lifecycle::invocation::generate_span_id;
-use crate::{lifecycle::invocation::processor::Processor, lifecycle::listener::Listener};
-use hyper::body::Bytes;
-use hyper::header::{HeaderName, HeaderValue};
-use hyper_proxy::{Intercept, Proxy, ProxyConnector};
+use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Full};
+use hyper::header::{HeaderMap, HeaderName, HeaderValue};
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{http, Request, Response, Uri};
+use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioIo;
+use lifecycle::invocation::{generate_span_id, processor::Processor};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::time::Instant;
+use std::convert::Infallible;
 use std::{net::SocketAddr, sync::Arc};
+use tokio::net::TcpListener;
+use tokio::time::Instant;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{debug, error};
+
+use crate::lifecycle;
+use crate::lifecycle::listener::Listener;
 
 #[must_use]
 #[allow(clippy::module_name_repetitions)]
@@ -18,42 +29,46 @@ pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<Jo
         "LWA: proxy enabled with proxy URI: {} and AWS runtime: {}",
         proxy_socket, aws_runtime_uri
     );
-    let proxied_client = build_proxy(aws_runtime_uri.clone())?;
 
     let proxy_task_handle = tokio::spawn({
         async move {
-            let proxy_server = Server::bind(&proxy_socket).serve(make_service_fn(move |_| {
-                let processor = Arc::clone(&invocation_processor);
-                let uri = aws_runtime_uri.clone();
-                let client = Arc::clone(&proxied_client);
-                async move {
-                    Ok::<_, Error>(service_fn(move |req| {
-                        intercept_payload(
-                            req,
-                            Arc::clone(&client),
-                            Arc::clone(&processor),
-                            uri.clone(),
-                        )
-                    }))
-                }
-            }));
+            let proxy_server = TcpListener::bind(&proxy_socket)
+                .await
+                .expect("LWA: Failed to bind LWA proxy socket");
 
-            if let Err(e) = proxy_server.await {
-                error!("LWA: proxy server error: {}", e);
+            loop {
+                let (tcp_stream, _) = proxy_server
+                    .accept()
+                    .await
+                    .expect("LWA: Failed to accept LWA connection");
+                let io = TokioIo::new(tcp_stream);
+                let async_invocation_processor_cp = Arc::clone(&invocation_processor);
+                let async_aws_runtime_uri_cp = aws_runtime_uri.clone();
+
+                tokio::task::spawn(async move {
+                    if let Err(err) = http1::Builder::new()
+                        .preserve_header_case(true)
+                        .title_case_headers(true)
+                        .serve_connection(
+                            io,
+                            service_fn(move |req| {
+                                intercept_payload(
+                                    req,
+                                    Arc::clone(&async_invocation_processor_cp),
+                                    async_aws_runtime_uri_cp.clone(),
+                                )
+                            }),
+                        )
+                        // .with_upgrades()
+                        .await
+                    {
+                        println!("LWA: Failed to serve connection: {:?}", err);
+                    }
+                });
             }
         }
     });
     Some(proxy_task_handle)
-}
-
-fn build_proxy(uri_to_intercept: Uri) -> Option<Arc<Client<ProxyConnector<HttpConnector>>>> {
-    ProxyConnector::from_proxy(
-        HttpConnector::new(),
-        Proxy::new(Intercept::All, uri_to_intercept),
-    )
-    .map(|proxy_connector| Arc::new(Client::builder().build::<_, Body>(proxy_connector)))
-    .map_err(|_| error!("LWA: Error creating proxy connector"))
-    .ok()
 }
 
 fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
@@ -126,15 +141,14 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
 //     LWA: Intercepted request body: b""
 
 async fn intercept_payload(
-    intercepted: Request<Body>,
-    client: Arc<Client<ProxyConnector<HttpConnector>>>,
+    intercepted: Request<hyper::body::Incoming>,
     processor: Arc<Mutex<Processor>>,
     aws_runtime_addr: Uri,
-) -> Result<Response<Body>, Error> {
+) -> Result<Response<BoxBody<Bytes, Infallible>>, hyper::Error> {
     // request received from lambda handler directed to AWS runtime API
     // it can be either invocation/next, or a lambda handler response to it
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
-    let waited_intercepted_body = intercepted_body.collect().await?.to_bytes();
+    let waited_intercepted_body = BodyExt::collect(intercepted_body).await?.to_bytes();
 
     let path = intercepted_parts.uri.path();
     let method = intercepted_parts.method.clone();
@@ -158,11 +172,22 @@ async fn intercept_payload(
         waited_intercepted_body.clone(),
     );
 
+    // Create HTTP client
+    let https = HttpConnector::new();
+    let client = Client::builder(hyper_util::rt::TokioExecutor::new())
+        .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https);
+
     // response after forwarding to AWS runtime API
-    let response_to_intercepted = client.request(forward_intercepted).await?;
+    let response_to_intercepted = match client.request(forward_intercepted).await {
+        Ok(response) => response,
+        Err(e) => {
+            error!("LWA: Error forwarding request to AWS runtime: {}", e);
+            return Ok(Response::new(BoxBody::new(Full::new(Bytes::new()))));
+        }
+    };
 
     let (resp_part, resp_body) = response_to_intercepted.into_parts();
-    let resp_payload = resp_body.collect().await?.to_bytes();
+    let resp_payload = BodyExt::collect(resp_body).await?.to_bytes();
 
     let mut uni_instr_end = None;
     if hyper::Method::GET == method && path == "/2018-06-01/runtime/invocation/next" {
@@ -185,21 +210,21 @@ async fn intercept_payload(
         }));
     }
 
-    let mut forward_response_to_intercepted = Response::builder()
+    let mut forward_response = Response::builder()
         .status(resp_part.status)
         .version(resp_part.version)
-        .body(Body::from(resp_payload))
+        .body(BoxBody::new(Full::new(resp_payload)))
         .unwrap_or_else(|e| {
             error!("LWA: Error building forwarded response: {}", e);
-            Response::new(Body::empty())
+            Response::new(BoxBody::new(Full::new(Bytes::new())))
         });
 
-    *forward_response_to_intercepted.headers_mut() = resp_part.headers.clone();
+    *forward_response.headers_mut() = resp_part.headers.clone();
 
     wait_for_uni_instr(uni_instr_start, "start").await;
     wait_for_uni_instr(uni_instr_end, "end").await;
 
-    Ok(forward_response_to_intercepted)
+    Ok(forward_response)
 }
 
 async fn wait_for_uni_instr(uni_instr_task: Option<JoinHandle<()>>, instr_type: &str) {
@@ -239,13 +264,13 @@ async fn on_get_next_response(
     let mut rebuild_response = Response::builder()
         .status(status)
         .version(version)
-        .body(Body::from(body.clone()))
+        .body(Full::new(Bytes::from(body.clone())))
         .unwrap_or_else(|e| {
             error!(
                 "LWA: Error building universal instrumentation start request: {}",
                 e
             );
-            Response::new(Body::empty())
+            Response::new(Full::new(Bytes::new()))
         });
     *rebuild_response.headers_mut() = headers.clone();
 
@@ -304,9 +329,9 @@ fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
 
 fn build_forward_request(
     aws_runtime_addr: Uri,
-    req_parts: &Parts,
+    req_parts: &http::request::Parts,
     req_body: Bytes,
-) -> Request<Body> {
+) -> hyper::Request<http_body_util::Full<prost::bytes::Bytes>> {
     let mut redirect_uri = aws_runtime_addr.clone().into_parts();
     redirect_uri.path_and_query = req_parts.uri.path_and_query().cloned();
 
@@ -318,10 +343,10 @@ fn build_forward_request(
     Request::builder()
         .method(req_parts.method.clone())
         .uri(new_uri)
-        .body(Body::from(req_body))
+        .body(Full::new(req_body))
         .unwrap_or_else(|e| {
             error!("LWA: Error building redirected request: {}", e);
-            Request::new(Body::empty())
+            Request::new(Full::new(Bytes::new()))
         })
 }
 
@@ -332,10 +357,11 @@ mod tests {
     use crate::lifecycle::invocation::processor::Processor;
     use crate::lwa::proxy::start_lwa_proxy;
     use crate::tags::provider::Provider;
-    use crate::traces::propagation::error::Error;
+
+    use bytes::Bytes;
     use dogstatsd::metric::EMPTY_TAGS;
-    use hyper::body::HttpBody;
-    use hyper::service::{make_service_fn, service_fn};
+    use http_body_util::Full;
+    use hyper::{body::HttpBody, service::service_fn};
 
     use crate::LAMBDA_RUNTIME_SLUG;
 
@@ -362,10 +388,10 @@ mod tests {
         let final_destination = tokio::spawn(async {
             hyper::Server::bind(&SocketAddr::from(([127, 0, 0, 1], 12344)))
                 .serve(make_service_fn(|_| async {
-                    Ok::<_, Error>(service_fn(|_| async {
-                        Ok::<_, Error>(Response::new(hyper::Body::from(
+                    Ok::<_, std::convert::Infallible>(service_fn(|_| async {
+                        Ok::<_, std::convert::Infallible>(Response::new(Full::new(Bytes::from(
                             "Response from AWS LAMBDA RUNTIME API",
-                        )))
+                        ))))
                     }))
                 }))
                 .await
@@ -398,7 +424,7 @@ mod tests {
         let proxy_task_handle =
             start_lwa_proxy(invocation_processor).expect("Failed to start proxy");
 
-        let client = Client::builder().build_http::<Body>();
+        let client = Client::builder().build_http::<Full<Bytes>>();
         let uri_with_schema = format!("http://{proxy_uri}");
         let mut ask_proxy = client
             .get(Uri::try_from(uri_with_schema.clone()).unwrap())
