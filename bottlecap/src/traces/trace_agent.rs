@@ -477,9 +477,7 @@ impl TraceAgent {
             ),
         );
         let body_bytes = match body.collect().await {
-            Ok(b) => {
-                b.to_bytes()
-            }
+            Ok(b) => b.to_bytes(),
             Err(err) => {
                 return log_and_create_http_response(
                     &format!("Error collecting request body: {err}"),
