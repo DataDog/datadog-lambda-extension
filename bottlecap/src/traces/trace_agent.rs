@@ -393,25 +393,36 @@ impl TraceAgent {
 
         for chunk in &mut traces {
             for span in chunk.iter_mut() {
+                debug!("Processing span: {span:?}");
                 if span.resource == INVOCATION_SPAN_RESOURCE {
                     let mut invocation_processor = invocation_processor.lock().await;
                     invocation_processor.add_tracer_span(span);
                 }
 
-                for rep_info in &mut reparenting_info {
+                'reparent_first_match: for rep_info in &mut reparenting_info {
                     if rep_info.needs_trace_id {
                         rep_info.guessed_trace_id = span.trace_id;
                         rep_info.needs_trace_id = false;
+                        debug!(
+                            "Guessed trace ID: {} for reparenting {rep_info:?}",
+                            span.trace_id
+                        );
                     }
-                    if let Some(reparenting_id) = rep_info.parent_id_to_reparent {
-                        if span.parent_id == reparenting_id {
+                    if span.trace_id == rep_info.guessed_trace_id {
+                        if span.parent_id == rep_info.parent_id_to_reparent {
+                            debug!(
+                                "Reparenting span {} to {}",
+                                span.parent_id, rep_info.invocation_span_id
+                            );
                             span.parent_id = rep_info.invocation_span_id;
                         }
+                        break 'reparent_first_match;
                     }
                 }
             }
         }
 
+        debug!("Reparenting info after processing: {reparenting_info:?}");
         {
             let mut invocation_processor = invocation_processor.lock().await;
             invocation_processor.apply_guessed_trace_id(reparenting_info);

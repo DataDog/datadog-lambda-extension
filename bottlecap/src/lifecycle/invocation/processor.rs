@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -10,7 +10,7 @@ use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc::Sender, watch};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::{
     config::{self, AwsConfig},
@@ -544,33 +544,59 @@ impl Processor {
         }
     }
 
-    pub fn set_reparenting(&mut self, request_id: String, span_id: u64, parent_id: u64) {
-        if let Some(invocation_ctx) = self.context_buffer.get_mut(&request_id) {
-            invocation_ctx.invocation_span.span_id = span_id;
-            invocation_ctx.reparenting_id = Some(parent_id);
-            invocation_ctx.invocation_needs_trace_id = true;
-        } else {
-            error!("No reparenting context found for request_id: {request_id}");
+    pub fn add_reparenting(&mut self, request_id: String, span_id: u64, parent_id: u64) {
+        for rep_info in &self.context_buffer.sorted_reparenting_info {
+            if rep_info.request_id == request_id {
+                warn!("Reparenting already exists for request_id: {request_id}, ignoring new one");
+                return;
+            }
         }
+        if self.context_buffer.sorted_reparenting_info.len()
+            == self.context_buffer.sorted_reparenting_info.capacity()
+        {
+            self.context_buffer.sorted_reparenting_info.pop_front();
+        }
+
+        self.context_buffer
+            .sorted_reparenting_info
+            .push_back(ReparentingInfo {
+                request_id: request_id.clone(),
+                invocation_span_id: span_id,
+                parent_id_to_reparent: parent_id,
+                guessed_trace_id: 0,
+                needs_trace_id: true,
+            });
     }
 
     #[must_use]
-    pub fn get_reparenting_info(&self) -> Vec<ReparentingInfo> {
-        self.context_buffer.get_reparenting_info()
+    pub fn get_reparenting_info(&self) -> VecDeque<ReparentingInfo> {
+        self.context_buffer.sorted_reparenting_info.clone()
     }
 
-    pub fn apply_guessed_trace_id(&mut self, reparenting_info: Vec<ReparentingInfo>) {
+    pub fn apply_guessed_trace_id(&mut self, reparenting_info: VecDeque<ReparentingInfo>) {
         for rep_info in reparenting_info {
             if let Some(ctx) = self.context_buffer.get_mut(&rep_info.request_id) {
-                if ctx.invocation_needs_trace_id {
+                if ctx.invocation_span.trace_id == 0 {
                     ctx.invocation_span.trace_id = rep_info.guessed_trace_id;
-                    ctx.invocation_needs_trace_id = false;
+                    debug!(
+                        "Set trace id to {} for request_id: {}",
+                        rep_info.guessed_trace_id, rep_info.request_id
+                    );
                 }
             } else {
                 warn!(
-                    "Mismatched request info. Context found for request_id: {}",
+                    "Mismatched request info. Context not found for request_id: {}",
                     rep_info.request_id
                 );
+            }
+            if let Some(existing_info) = self
+                .context_buffer
+                .sorted_reparenting_info
+                .iter_mut()
+                .find(|info| info.request_id == rep_info.request_id)
+            {
+                existing_info.needs_trace_id = false;
+                existing_info.guessed_trace_id = rep_info.guessed_trace_id;
             }
         }
     }
@@ -697,6 +723,9 @@ impl Processor {
             context.invocation_span.span_id = header.parse::<u64>().unwrap_or(0);
         }
 
+        if trace_id == 0 {
+            trace_id = context.invocation_span.trace_id;
+        }
         context.invocation_span.trace_id = trace_id;
 
         if self.inferrer.inferred_span.is_some() {

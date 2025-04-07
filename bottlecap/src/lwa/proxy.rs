@@ -290,7 +290,7 @@ async fn on_get_next_response(
 
     {
         let mut invocation_processor = processor.lock().await;
-        invocation_processor.set_reparenting(request_id, generate_span_id(), parent_id);
+        invocation_processor.add_reparenting(request_id, generate_span_id(), parent_id);
     }
 }
 

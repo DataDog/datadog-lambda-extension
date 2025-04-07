@@ -22,9 +22,6 @@ pub struct Context {
     /// Known as the `aws.lambda` span.
     pub invocation_span: Span,
     /// The span used as placeholder for the invocation span by the tracer.
-    ///
-    pub reparenting_id: Option<u64>,
-    pub invocation_needs_trace_id: bool,
     /// In the tracer, this is created in order to have all children spans parented
     /// to a single span. This is useful when we reparent the tracer span children to
     /// the invocation span.
@@ -41,11 +38,11 @@ pub struct Context {
     pub extracted_span_context: Option<SpanContext>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ReparentingInfo {
     pub request_id: String,
     pub invocation_span_id: u64,
-    pub parent_id_to_reparent: Option<u64>,
+    pub parent_id_to_reparent: u64,
 
     pub guessed_trace_id: u64,
     pub needs_trace_id: bool,
@@ -80,8 +77,6 @@ impl Default for Context {
             cold_start_span: None,
             tracer_span: None,
             extracted_span_context: None,
-            reparenting_id: None,
-            invocation_needs_trace_id: false,
         }
     }
 }
@@ -100,7 +95,7 @@ pub struct ContextBuffer {
     ///
     /// The expected order of events is:
     ///
-    /// Invoke -> UniversalInstrumentationStart -> UniversalInstrumentationEnd -> PlatformRuntimeDone
+    /// Invoke -> `UniversalInstrumentationStart` -> `UniversalInstrumentationEnd` -> `PlatformRuntimeDone`
     ///
     ///
     /// 1. The `Invoke` event is used to pair the `UniversalInstrumentationStart` event.
@@ -116,6 +111,7 @@ pub struct ContextBuffer {
     platform_runtime_done_events_request_ids: VecDeque<String>,
     universal_instrumentation_start_events: VecDeque<UniversalInstrumentationData>,
     universal_instrumentation_end_events: VecDeque<UniversalInstrumentationData>,
+    pub sorted_reparenting_info: VecDeque<ReparentingInfo>,
 }
 
 struct UniversalInstrumentationData {
@@ -127,14 +123,7 @@ impl Default for ContextBuffer {
     /// Creates a new `ContextBuffer` with a default capacity of 5.
     ///
     fn default() -> Self {
-        let capacity = 5;
-        ContextBuffer {
-            buffer: VecDeque::<Context>::with_capacity(capacity),
-            invoke_events_request_ids: VecDeque::with_capacity(capacity),
-            platform_runtime_done_events_request_ids: VecDeque::with_capacity(capacity),
-            universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
-            universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
-        }
+        ContextBuffer::with_capacity(5)
     }
 }
 
@@ -147,6 +136,7 @@ impl ContextBuffer {
             platform_runtime_done_events_request_ids: VecDeque::with_capacity(capacity),
             universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
             universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
+            sorted_reparenting_info: VecDeque::with_capacity(capacity),
         }
     }
 
@@ -399,22 +389,6 @@ impl ContextBuffer {
             debug!("Could not add tracer span - context not found");
         }
     }
-
-    #[must_use]
-    pub fn get_reparenting_info(&self) -> Vec<ReparentingInfo> {
-        self.buffer
-            .iter()
-            .filter(|ctx| ctx.reparenting_id.is_some() || ctx.invocation_needs_trace_id)
-            .map(|ctx| ReparentingInfo {
-                invocation_span_id: ctx.invocation_span.span_id,
-                parent_id_to_reparent: ctx.reparenting_id,
-                guessed_trace_id: 0,
-                request_id: ctx.request_id.clone(),
-                needs_trace_id: ctx.invocation_needs_trace_id,
-            })
-            .collect()
-    }
-
     /// Returns the size of the buffer.
     ///
     #[must_use]
