@@ -476,9 +476,16 @@ impl TraceAgent {
                     .unwrap_or_default()
             ),
         );
-        let body_bytes = match body {
-            hyper_migration::Body::Single(bytes) => bytes.collect().await?.to_bytes(),
-            _ => unimplemented!(),
+        let body_bytes = match body.collect().await {
+            Ok(b) => {
+                b.to_bytes()
+            }
+            Err(err) => {
+                return log_and_create_http_response(
+                    &format!("Error collecting request body: {err}"),
+                    StatusCode::BAD_REQUEST,
+                );
+            }
         };
         let response = match request_builder.body(body_bytes).send().await {
             Ok(resp) => resp,
