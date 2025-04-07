@@ -902,11 +902,12 @@ mod tests {
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
-        assert!(
-            !context
+        assert_eq!(
+            context
                 .invocation_span
                 .metrics
-                .contains_key(TAG_SAMPLING_PRIORITY)
+                .contains_key(TAG_SAMPLING_PRIORITY),
+            false
         );
         assert_eq!(context.invocation_span.trace_id, 888);
         assert_eq!(context.invocation_span.parent_id, 999);
@@ -927,11 +928,12 @@ mod tests {
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
-        assert!(
-            !context
+        assert_eq!(
+            context
                 .invocation_span
                 .metrics
-                .contains_key(TAG_SAMPLING_PRIORITY)
+                .contains_key(TAG_SAMPLING_PRIORITY),
+            false
         );
         assert_eq!(context.invocation_span.trace_id, 111);
         assert_eq!(context.invocation_span.parent_id, 222);
