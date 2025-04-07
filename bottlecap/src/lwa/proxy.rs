@@ -281,9 +281,16 @@ async fn on_get_next_response(
     )
     .await;
 
+    let request_id = headers
+        .get("lambda-runtime-aws-request-id")
+        .unwrap_or(&HeaderValue::from_static(""))
+        .to_str()
+        .unwrap_or_default()
+        .to_string();
+
     {
         let mut invocation_processor = processor.lock().await;
-        invocation_processor.set_reparenting(generate_span_id(), parent_id);
+        invocation_processor.set_reparenting(request_id, generate_span_id(), parent_id);
     }
 }
 

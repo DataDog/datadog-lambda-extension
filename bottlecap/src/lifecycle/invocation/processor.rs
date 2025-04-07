@@ -10,7 +10,7 @@ use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc::Sender, watch};
-use tracing::debug;
+use tracing::{debug, error, warn};
 
 use crate::{
     config::{self, AwsConfig},
@@ -39,6 +39,8 @@ use crate::{
     },
 };
 
+use super::context::ReparentingInfo;
+
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
@@ -55,15 +57,7 @@ pub struct Processor {
     /// Helper class to infer upstream span information and
     /// extract trace context if available.
     inferrer: SpanInferrer,
-    // Current invocation span
-    pub span: Span,
-    // Cold start span
-    cold_start_span: Option<Span>,
-    // Extracted span context from inferred span, headers, or payload
-    pub extracted_span_context: Option<SpanContext>,
-    pub reparenting_id: Option<u64>,
-    pub aws_lambda_span_needs_trace_id: bool,
-    // Used to extract the trace context from inferred span, headers, or payload
+    /// Propagator to extract span context from carriers.
     propagator: DatadogCompositePropagator,
     /// Helper class to send enhanced metrics.
     enhanced_metrics: EnhancedMetrics,
@@ -95,7 +89,7 @@ impl Processor {
         config: Arc<config::Config>,
         aws_config: &AwsConfig,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
-    ) -> Self 
+    ) -> Self {
         let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -106,13 +100,8 @@ impl Processor {
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(config.service_mapping.clone()),
-            span: create_empty_span(String::from("aws.lambda"), resource, service),
-            cold_start_span: None,
-            extracted_span_context: None,
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
-            reparenting_id: None,
-            aws_lambda_span_needs_trace_id: false,
             aws_config: aws_config.clone(),
             tracer_detected: false,
             runtime: None,
@@ -168,24 +157,16 @@ impl Processor {
         // Increment the invocation metric
         self.enhanced_metrics.increment_invocation_metric(timestamp);
 
-    /// Resets the state of the processor to default values.
-    ///
-    fn reset_state(&mut self) {
-        // Reset Span Context on Span
-        self.span.trace_id = 0;
-        self.span.parent_id = 0;
-        self.span.span_id = 0;
-        // Error
-        self.span.error = 0;
-        // Meta tags
-        self.span.meta.clear();
-        // Extracted Span Context
-        self.extracted_span_context = None;
-        // Cold Start Span
-        self.cold_start_span = None;
-        // LWA reset
-        self.aws_lambda_span_needs_trace_id = false;
-        self.reparenting_id = None;
+        // If `UniversalInstrumentationStart` event happened first, process it
+        if let Some((headers, payload)) = self.context_buffer.pair_invoke_event(&request_id) {
+            let payload_value =
+                serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
+            // Infer span
+            self.inferrer.infer_span(&payload_value, &self.aws_config);
+            let span_context = self.extract_span_context(&headers, &payload_value);
+
+            self.process_on_universal_instrumentation_start(request_id, payload, span_context);
+        }
     }
 
     /// On the first invocation, determine if it's a cold start or proactive init.
@@ -411,7 +392,7 @@ impl Processor {
             }
 
             if let Some(ws) = &self.inferrer.wrapped_inferred_span {
-                body_size += size_of_val(ws);
+                body_size += std::mem::size_of_val(ws);
                 traces.push(ws.clone());
             }
 
@@ -487,11 +468,11 @@ impl Processor {
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///
-    pub fn universal_instrumentation_start(
+    pub fn on_universal_instrumentation_start(
         &mut self,
         headers: HashMap<String, String>,
         payload: Vec<u8>,
-    ) -> u64 {
+    ) -> Option<SpanContext> {
         self.tracer_detected = true;
 
         let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
@@ -542,9 +523,9 @@ impl Processor {
         context.extracted_span_context = span_context;
 
         // Set the extracted trace context to the spans
-        if let Some(sc) = &self.extracted_span_context {
-            self.span.trace_id = sc.trace_id;
-            self.span.parent_id = sc.span_id;
+        if let Some(sc) = &context.extracted_span_context {
+            context.invocation_span.trace_id = sc.trace_id;
+            context.invocation_span.parent_id = sc.span_id;
 
             // Set the right data to the correct root level span,
             // If there's an inferred span, then that should be the root.
@@ -555,25 +536,43 @@ impl Processor {
                 context.invocation_span.meta.extend(sc.tags.clone());
             }
         }
+
         // If we have an inferred span, set the invocation span parent id
         // to be the inferred span id, even if we don't have an extracted trace context
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             context.invocation_span.parent_id = inferred_span.span_id;
         }
-
-        debug!(
-            "LIP: trace context found trace_id:{trace_id} span_id:{span_id} parent_id:{parent_id}",
-            trace_id = self.span.trace_id,
-            span_id = self.span.span_id,
-            parent_id = self.span.parent_id
-        );
-        (self.span.span_id, self.span.trace_id, self.span.parent_id)
     }
 
-    pub fn set_reparenting(&mut self, span_id: u64, parent_id: u64) {
-        self.span.span_id = span_id;
-        self.reparenting_id = Some(parent_id);
-        self.aws_lambda_span_needs_trace_id = true;
+    pub fn set_reparenting(&mut self, request_id: String, span_id: u64, parent_id: u64) {
+        if let Some(invocation_ctx) = self.context_buffer.get_mut(&request_id) {
+            invocation_ctx.invocation_span.span_id = span_id;
+            invocation_ctx.reparenting_id = Some(parent_id);
+            invocation_ctx.invocation_needs_trace_id = true;
+        } else {
+            error!("No reparenting context found for request_id: {request_id}");
+        }
+    }
+
+    #[must_use]
+    pub fn get_reparenting_info(&self) -> Vec<ReparentingInfo> {
+        self.context_buffer.get_reparenting_info()
+    }
+
+    pub fn apply_guessed_trace_id(&mut self, reparenting_info: Vec<ReparentingInfo>) {
+        for rep_info in reparenting_info {
+            if let Some(ctx) = self.context_buffer.get_mut(&rep_info.request_id) {
+                if ctx.invocation_needs_trace_id {
+                    ctx.invocation_span.trace_id = rep_info.guessed_trace_id;
+                    ctx.invocation_needs_trace_id = false;
+                }
+            } else {
+                warn!(
+                    "Mismatched request info. Context found for request_id: {}",
+                    rep_info.request_id
+                );
+            }
+        }
     }
 
     fn extract_span_context(
@@ -795,6 +794,7 @@ impl Processor {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;

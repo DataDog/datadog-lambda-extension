@@ -384,15 +384,12 @@ impl TraceAgent {
                 }
             },
         };
-        let (maybe_reparent, aws_lambda_span_id, aws_lambda_span_needs_trace_id) = {
+        let mut reparenting_info = {
             let invocation_processor = invocation_processor.lock().await;
-            (
-                invocation_processor.reparenting_id,
-                invocation_processor.span.span_id,
-                invocation_processor.aws_lambda_span_needs_trace_id,
-            )
+            invocation_processor.get_reparenting_info()
         };
-        let mut trace_id_from_spans = 0;
+
+        debug!("Applying reparenting: {reparenting_info:?}");
 
         for chunk in &mut traces {
             for span in chunk.iter_mut() {
@@ -400,21 +397,24 @@ impl TraceAgent {
                     let mut invocation_processor = invocation_processor.lock().await;
                     invocation_processor.add_tracer_span(span);
                 }
-                if trace_id_from_spans == 0 && aws_lambda_span_needs_trace_id {
-                    trace_id_from_spans = span.trace_id;
-                }
-                if let Some(reparenting_id) = maybe_reparent {
-                    if span.parent_id == reparenting_id {
-                        span.parent_id = aws_lambda_span_id;
+
+                for rep_info in &mut reparenting_info {
+                    if rep_info.needs_trace_id {
+                        rep_info.guessed_trace_id = span.trace_id;
+                        rep_info.needs_trace_id = false;
+                    }
+                    if let Some(reparenting_id) = rep_info.parent_id_to_reparent {
+                        if span.parent_id == reparenting_id {
+                            span.parent_id = rep_info.invocation_span_id;
+                        }
                     }
                 }
             }
         }
 
-        if aws_lambda_span_needs_trace_id && trace_id_from_spans != 0 {
+        {
             let mut invocation_processor = invocation_processor.lock().await;
-            invocation_processor.span.trace_id = trace_id_from_spans;
-            invocation_processor.aws_lambda_span_needs_trace_id = false;
+            invocation_processor.apply_guessed_trace_id(reparenting_info);
         }
 
         let send_data = trace_processor.process_traces(

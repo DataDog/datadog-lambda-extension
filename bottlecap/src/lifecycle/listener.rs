@@ -103,7 +103,12 @@ impl Listener {
             }
             (&Method::POST, END_INVOCATION_PATH) => {
                 let (parts, body) = req.into_parts();
-                match Self::end_invocation_handler(parts.headers, body, invocation_processor).await
+                match Self::universal_instrumentation_end(
+                    &parts.headers,
+                    body,
+                    invocation_processor,
+                )
+                .await
                 {
                     Ok(response) => Ok(response),
                     Err(e) => {
@@ -138,8 +143,7 @@ impl Listener {
 
                 let extracted_span_context = {
                     let mut processor = invocation_processor.lock().await;
-                    processor.universal_instrumentation_start(headers, body);
-                    processor.extracted_span_context.clone()
+                    processor.on_universal_instrumentation_start(headers, body)
                 };
                 let mut response = Response::builder().status(200);
 
@@ -200,7 +204,7 @@ impl Listener {
                 let mut processor = invocation_processor.lock().await;
 
                 let headers = Self::headers_to_map(headers);
-                processor.universal_instrumentation_end(headers, body);
+                processor.on_universal_instrumentation_end(headers, body);
                 drop(processor);
 
                 Response::builder()

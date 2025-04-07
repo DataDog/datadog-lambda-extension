@@ -8,7 +8,7 @@ use std::{
 };
 
 use datadog_trace_protobuf::pb::Span;
-use tracing::debug;
+use tracing::{debug, warn};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Context {
@@ -23,6 +23,8 @@ pub struct Context {
     pub invocation_span: Span,
     /// The span used as placeholder for the invocation span by the tracer.
     ///
+    pub reparenting_id: Option<u64>,
+    pub invocation_needs_trace_id: bool,
     /// In the tracer, this is created in order to have all children spans parented
     /// to a single span. This is useful when we reparent the tracer span children to
     /// the invocation span.
@@ -37,6 +39,16 @@ pub struct Context {
     /// tracing.
     ///
     pub extracted_span_context: Option<SpanContext>,
+}
+
+#[derive(Debug)]
+pub struct ReparentingInfo {
+    pub request_id: String,
+    pub invocation_span_id: u64,
+    pub parent_id_to_reparent: Option<u64>,
+
+    pub guessed_trace_id: u64,
+    pub needs_trace_id: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -68,6 +80,8 @@ impl Default for Context {
             cold_start_span: None,
             tracer_span: None,
             extracted_span_context: None,
+            reparenting_id: None,
+            invocation_needs_trace_id: false,
         }
     }
 }
@@ -85,9 +99,9 @@ pub struct ContextBuffer {
     /// For correct processing, events are paired based on a common pattern.
     ///
     /// The expected order of events is:
-    /// ```
+    ///
     /// Invoke -> UniversalInstrumentationStart -> UniversalInstrumentationEnd -> PlatformRuntimeDone
-    /// ```
+    ///
     ///
     /// 1. The `Invoke` event is used to pair the `UniversalInstrumentationStart` event.
     ///
@@ -144,6 +158,10 @@ impl ContextBuffer {
             self.buffer.push_back(context);
         } else {
             if self.get(&context.request_id).is_some() {
+                warn!(
+                    "Context with request_id: {:?} already exists in the buffer",
+                    context.request_id
+                );
                 self.remove(&context.request_id);
             }
 
@@ -380,6 +398,21 @@ impl ContextBuffer {
         } else {
             debug!("Could not add tracer span - context not found");
         }
+    }
+
+    #[must_use]
+    pub fn get_reparenting_info(&self) -> Vec<ReparentingInfo> {
+        self.buffer
+            .iter()
+            .filter(|ctx| ctx.reparenting_id.is_some() || ctx.invocation_needs_trace_id)
+            .map(|ctx| ReparentingInfo {
+                invocation_span_id: ctx.invocation_span.span_id,
+                parent_id_to_reparent: ctx.reparenting_id,
+                guessed_trace_id: 0,
+                request_id: ctx.request_id.clone(),
+                needs_trace_id: ctx.invocation_needs_trace_id,
+            })
+            .collect()
     }
 
     /// Returns the size of the buffer.
