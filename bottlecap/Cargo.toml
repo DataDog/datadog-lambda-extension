@@ -9,12 +9,12 @@ async-trait = { version = "0.1", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "9b6500ca977561f17f5b3b2024805ec3484f2cd8" }
-datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "9b6500ca977561f17f5b3b2024805ec3484f2cd8" }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "9b6500ca977561f17f5b3b2024805ec3484f2cd8", features = ["compression"] }
-datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "9b6500ca977561f17f5b3b2024805ec3484f2cd8" }
-datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "9b6500ca977561f17f5b3b2024805ec3484f2cd8" }
-datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "9b6500ca977561f17f5b3b2024805ec3484f2cd8" }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "a0b92b643dff8bc28d87c974eddf7189c238eaa5" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "a0b92b643dff8bc28d87c974eddf7189c238eaa5" }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "a0b92b643dff8bc28d87c974eddf7189c238eaa5", features = ["compression"] }
+datadog-trace-mini-agent = { git = "https://github.com/DataDog/libdatadog", rev = "a0b92b643dff8bc28d87c974eddf7189c238eaa5" }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog", rev = "a0b92b643dff8bc28d87c974eddf7189c238eaa5" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "a0b92b643dff8bc28d87c974eddf7189c238eaa5" }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "4dfe72ab1850680f41dd79d30a937eb68e7ba6da" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "1.6", default-features = false, features = ["server"] }
