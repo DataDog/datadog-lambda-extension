@@ -78,6 +78,42 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+#[cfg(all(feature = "default", feature = "fips"))]
+compile_error!("When building in fips mode, the default feature must be disabled");
+
+#[cfg(feature = "fips")]
+fn log_fips_status() {
+    debug!("FIPS mode is enabled");
+}
+
+#[cfg(not(feature = "fips"))]
+fn log_fips_status() {
+    debug!("FIPS mode is disabled");
+}
+
+/// Sets up the client provider for TLS operations.
+/// In FIPS mode, this installs the AWS-LC crypto provider.
+/// In non-FIPS mode, this is a no-op.
+#[cfg(feature = "fips")]
+fn prepare_client_provider() -> Result<()> {
+    rustls::crypto::default_fips_provider()
+        .install_default()
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to set up fips provider: {e:?}"),
+            )
+        })
+}
+
+#[cfg(not(feature = "fips"))]
+// this is not unnecessary since the fips version can return an error
+#[allow(clippy::unnecessary_wraps)]
+fn prepare_client_provider() -> Result<()> {
+    // No-op in non-FIPS mode
+    Ok(())
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
@@ -189,14 +225,20 @@ async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
+    log_fips_status();
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
-    let client = Client::builder().no_proxy().build().map_err(|e| {
-        Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to create client: {e:?}"),
-        )
-    })?;
+    prepare_client_provider()?;
+    let client = Client::builder()
+        .use_rustls_tls()
+        .no_proxy()
+        .build()
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to create client: {e:?}"),
+            )
+        })?;
 
     let r = register(&client)
         .await
@@ -235,7 +277,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     let aws_config = AwsConfig::from_env(start_time);
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
+    let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
             let err = Command::new("/opt/datadog-agent-go").exec();
