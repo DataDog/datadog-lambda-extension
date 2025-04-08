@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 arch=$(uname -a)
 cd ../bottlecap
 # build bottlecap in debug mode
