@@ -140,18 +140,19 @@ impl Trigger for APIGatewayWebSocketEvent {
         todo!()
     }
 
-    fn get_carrier(&self) -> HashMap<String, String> {
-        todo!()
+    fn is_async(&self) -> bool {
+        // WebSocket events are always async
+        true
     }
 
-    fn is_async(&self) -> bool {
-        todo!()
+    fn get_carrier(&self) -> HashMap<String, String> {
+        self.headers.clone()
     }
 }
 
 impl ServiceNameResolver for APIGatewayWebSocketEvent {
     fn get_specific_identifier(&self) -> String {
-        todo!()
+        self.request_context.api_id.clone()
     }
 
     fn get_generic_identifier(&self) -> &'static str {
