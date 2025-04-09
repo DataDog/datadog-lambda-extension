@@ -1,6 +1,9 @@
-use crate::lifecycle::invocation::{
-    processor::MS_TO_NS,
-    triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+use crate::{
+    config::get_aws_partition_by_region,
+    lifecycle::invocation::{
+        processor::MS_TO_NS,
+        triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    },
 };
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
@@ -137,7 +140,14 @@ impl Trigger for APIGatewayWebSocketEvent {
     }
 
     fn get_arn(&self, region: &str) -> String {
-        todo!()
+        let partition = get_aws_partition_by_region(region);
+        format!(
+            "arn:{partition}:apigateway:{region}::/apis/{api_id}/stages/{stage}",
+            partition = partition,
+            region = region,
+            api_id = self.request_context.api_id,
+            stage = self.request_context.stage
+        )
     }
 
     fn is_async(&self) -> bool {
