@@ -26,6 +26,17 @@ pub struct RequestContext {
     pub domain_name: String,
     #[serde(rename = "requestTimeEpoch")]
     pub time_epoch: i64,
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+    #[serde(rename = "apiId")]
+    pub api_id: String,
+    pub stage: String,
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "eventType")]
+    pub event_type: String,
+    #[serde(rename = "messageDirection")]
+    pub message_direction: String,
 }
 
 impl Trigger for APIGatewayWebSocketEvent {
@@ -65,7 +76,37 @@ impl Trigger for APIGatewayWebSocketEvent {
         span.resource.clone_from(&resource);
         span.r#type = "web".to_string();
         span.start = start_time;
-        // TODO meta
+        span.meta.extend(HashMap::from([
+            (
+                "endpoint".to_string(),
+                self.request_context.route_key.clone(),
+            ),
+            (
+                "resource_names".to_string(),
+                self.request_context.route_key.clone(),
+            ),
+            ("http.url".to_string(), http_url),
+            ("operation_name".to_string(), "aws.apigateway".to_string()),
+            (
+                "request_id".to_string(),
+                self.request_context.request_id.clone(),
+            ),
+            ("apiid".to_string(), self.request_context.api_id.clone()),
+            ("apiname".to_string(), self.request_context.api_id.clone()),
+            ("stage".to_string(), self.request_context.stage.clone()),
+            (
+                "connection_id".to_string(),
+                self.request_context.connection_id.clone(),
+            ),
+            (
+                "event_type".to_string(),
+                self.request_context.event_type.clone(),
+            ),
+            (
+                "message_direction".to_string(),
+                self.request_context.message_direction.clone(),
+            ),
+        ]));
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
