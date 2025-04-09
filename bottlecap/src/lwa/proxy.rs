@@ -72,7 +72,7 @@ pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<Jo
 }
 
 fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
-    let aws_lwa_proxy_lambda_runtime_api = std::env::var("AWS_LWA_PROXY_LAMBDA_RUNTIME_API")
+    let aws_lwa_proxy_lambda_runtime_api = std::env::var("AWS_LWA_LAMBDA_RUNTIME_API_PROXY")
     .ok()
     .and_then(|uri| match uri.parse::<Uri>() {
             Ok(parsed_uri) => {
@@ -80,7 +80,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
                 let port = parsed_uri.port_u16();
                 if let (Some(host), Some(port)) = (host, port) {
                     if host == "localhost" {
-                        error!("LWA: Cannot use localhost as host in AWS_LWA_PROXY_LAMBDA_RUNTIME_API, use 127.0.0.1 instead");
+                        error!("LWA: Cannot use localhost as host in AWS_LWA_LAMBDA_RUNTIME_API_PROXY, use 127.0.0.1 instead");
                         return None;
                     }
                     format!("{host}:{port}")
@@ -99,7 +99,7 @@ fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
             }
             Err(e) => {
                 error!(
-                    "LWA: Error parsing uri from AWS_LWA_PROXY_LAMBDA_RUNTIME_API: {}",
+                    "LWA: Error parsing uri from AWS_LWA_LAMBDA_RUNTIME_API_PROXY: {}",
                     e
                 );
                 None
@@ -394,7 +394,7 @@ mod tests {
         let proxy_uri = "127.0.0.1:12345";
         let final_uri = "127.0.0.1:12344";
 
-        env::set_var("AWS_LWA_PROXY_LAMBDA_RUNTIME_API", proxy_uri);
+        env::set_var("AWS_LWA_LAMBDA_RUNTIME_API_PROXY", proxy_uri);
         env::set_var("AWS_LAMBDA_RUNTIME_API", final_uri);
 
         let final_destination = tokio::spawn(async move {
@@ -481,7 +481,7 @@ mod tests {
         proxy_task_handle.abort();
         final_destination.abort();
 
-        env::remove_var("AWS_LWA_PROXY_LAMBDA_RUNTIME_API");
+        env::remove_var("AWS_LWA_LAMBDA_RUNTIME_API_PROXY");
         env::remove_var("AWS_LAMBDA_RUNTIME_API");
     }
 }
