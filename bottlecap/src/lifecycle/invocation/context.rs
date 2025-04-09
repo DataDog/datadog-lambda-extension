@@ -25,6 +25,8 @@ pub struct Context {
     /// In the tracer, this is created in order to have all children spans parented
     /// to a single span. This is useful when we reparent the tracer span children to
     /// the invocation span.
+    pub invocation_span_ready_to_send: bool,
+    pub telemetry_event_received: bool,
     ///
     /// This span is filtered out during chunk processing.
     pub tracer_span: Option<Span>,
@@ -46,6 +48,7 @@ pub struct ReparentingInfo {
 
     pub guessed_trace_id: u64,
     pub needs_trace_id: bool,
+    pub skip_first_trace_id: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -74,6 +77,8 @@ impl Default for Context {
             runtime_duration_ms: 0f64,
             enhanced_metric_data: None,
             invocation_span: Span::default(),
+            invocation_span_ready_to_send: true,
+            telemetry_event_received: false,
             cold_start_span: None,
             tracer_span: None,
             extracted_span_context: None,

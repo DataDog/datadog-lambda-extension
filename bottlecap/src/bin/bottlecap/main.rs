@@ -531,61 +531,64 @@ async fn handle_event_bus_event(
             p.on_out_of_memory_error(event_timestamp);
             drop(p);
         }
-        Event::Telemetry(event) => match event.record {
-            TelemetryRecord::PlatformInitStart { .. } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_init_start(event.time);
-                drop(p);
-            }
-            TelemetryRecord::PlatformInitReport {
-                initialization_type,
-                phase,
-                metrics,
-            } => {
-                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
-                drop(p);
-            }
-            TelemetryRecord::PlatformStart { request_id, .. } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_start(request_id, event.time);
-                drop(p);
-            }
-            TelemetryRecord::PlatformRuntimeDone {
-                ref request_id,
-                metrics: Some(metrics),
-                status,
-                ..
-            } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_runtime_done(
-                    request_id,
+        Event::Telemetry(event) => {
+            debug!("Telemetry event received: {:?}", event);
+            match event.record {
+                TelemetryRecord::PlatformInitStart { .. } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_init_start(event.time);
+                    drop(p);
+                }
+                TelemetryRecord::PlatformInitReport {
+                    initialization_type,
+                    phase,
                     metrics,
+                } => {
+                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
+                    drop(p);
+                }
+                TelemetryRecord::PlatformStart { request_id, .. } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_start(request_id, event.time);
+                    drop(p);
+                }
+                TelemetryRecord::PlatformRuntimeDone {
+                    ref request_id,
+                    metrics: Some(metrics),
                     status,
-                    tags_provider.clone(),
-                    trace_processor.clone(),
-                    trace_agent_channel.clone(),
-                    event.time.timestamp(),
-                )
-                .await;
-                drop(p);
-                return Some(event);
+                    ..
+                } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_runtime_done(
+                        request_id,
+                        metrics,
+                        status,
+                        tags_provider.clone(),
+                        trace_processor.clone(),
+                        trace_agent_channel.clone(),
+                        event.time.timestamp(),
+                    )
+                    .await;
+                    drop(p);
+                    return Some(event);
+                }
+                TelemetryRecord::PlatformReport {
+                    ref request_id,
+                    metrics,
+                    ..
+                } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_report(request_id, metrics, event.time.timestamp());
+                    drop(p);
+                    return Some(event);
+                }
+                _ => {
+                    debug!("Unforwarded Telemetry event: {:?}", event);
+                }
             }
-            TelemetryRecord::PlatformReport {
-                ref request_id,
-                metrics,
-                ..
-            } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_report(request_id, metrics, event.time.timestamp());
-                drop(p);
-                return Some(event);
-            }
-            _ => {
-                debug!("Unforwarded Telemetry event: {:?}", event);
-            }
-        },
+        }
     }
     None
 }

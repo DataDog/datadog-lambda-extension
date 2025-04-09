@@ -398,34 +398,27 @@ impl TraceAgent {
                     let mut invocation_processor = invocation_processor.lock().await;
                     invocation_processor.add_tracer_span(span);
                 }
-
-                'reparent_first_match: for rep_info in &mut reparenting_info {
-                    if rep_info.needs_trace_id {
-                        rep_info.guessed_trace_id = span.trace_id;
-                        rep_info.needs_trace_id = false;
-                        debug!(
-                            "Guessed trace ID: {} for reparenting {rep_info:?}",
-                            span.trace_id
-                        );
-                    }
-                    if span.trace_id == rep_info.guessed_trace_id {
-                        if span.parent_id == rep_info.parent_id_to_reparent {
-                            debug!(
-                                "Reparenting span {} to {}",
-                                span.parent_id, rep_info.invocation_span_id
-                            );
-                            span.parent_id = rep_info.invocation_span_id;
-                        }
-                        break 'reparent_first_match;
-                    }
-                }
+                handle_reparenting(&mut reparenting_info, span);
             }
         }
 
         debug!("Reparenting info after processing: {reparenting_info:?}");
+
         {
             let mut invocation_processor = invocation_processor.lock().await;
-            invocation_processor.apply_guessed_trace_id(reparenting_info);
+            if let Some(ctx_to_send) = invocation_processor.update_reparenting(reparenting_info) {
+                debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
+                if ctx_to_send.telemetry_event_received {
+                    invocation_processor
+                        .send_extension_spans(
+                            &tags_provider,
+                            &trace_processor,
+                            &trace_tx,
+                            ctx_to_send,
+                        )
+                        .await;
+                }
+            }
         }
 
         let send_data = trace_processor.process_traces(
@@ -657,5 +650,43 @@ impl TraceAgent {
     #[must_use]
     pub fn get_sender_copy(&self) -> Sender<SendData> {
         self.tx.clone()
+    }
+}
+
+fn handle_reparenting(
+    reparenting_info: &mut std::collections::VecDeque<
+        crate::lifecycle::invocation::context::ReparentingInfo,
+    >,
+    span: &mut pb::Span,
+) {
+    for rep_info in reparenting_info {
+        if rep_info.skip_first_trace_id {
+            if !rep_info.needs_trace_id && rep_info.guessed_trace_id != span.trace_id {
+                rep_info.skip_first_trace_id = false;
+                rep_info.needs_trace_id = true;
+            } else {
+                rep_info.guessed_trace_id = span.trace_id;
+                rep_info.needs_trace_id = false;
+            }
+        }
+        if !rep_info.skip_first_trace_id {
+            if rep_info.needs_trace_id {
+                rep_info.guessed_trace_id = span.trace_id;
+                rep_info.needs_trace_id = false;
+                debug!(
+                    "Guessed trace ID: {} for reparenting {rep_info:?}",
+                    span.trace_id
+                );
+            }
+            if span.trace_id == rep_info.guessed_trace_id
+                && span.parent_id == rep_info.parent_id_to_reparent
+            {
+                debug!(
+                    "Reparenting span {} with parent id {}",
+                    span.span_id, rep_info.invocation_span_id
+                );
+                span.parent_id = rep_info.invocation_span_id;
+            }
+        }
     }
 }
