@@ -1,6 +1,6 @@
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{lowercase_key, Trigger},
+    triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
 };
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
@@ -110,7 +110,30 @@ impl Trigger for APIGatewayWebSocketEvent {
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
-        todo!()
+        let mut tags = HashMap::from([
+            (
+                "http.url".to_string(),
+                format!(
+                    "{domain_name}{route_key}",
+                    domain_name = self.request_context.domain_name,
+                    route_key = self.request_context.route_key
+                ),
+            ),
+            (
+                "http.url_details.path".to_string(),
+                self.request_context.route_key.clone(),
+            ),
+            (
+                FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
+                "api-gateway".to_string(),
+            ),
+        ]);
+
+        if let Some(referer) = self.headers.get("referer") {
+            tags.insert("http.referer".to_string(), referer.to_string());
+        }
+
+        tags
     }
 
     fn get_arn(&self, region: &str) -> String {
