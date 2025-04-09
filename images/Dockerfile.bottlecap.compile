@@ -1,11 +1,12 @@
 FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
 
-# FIPS is not used for now.
 ARG FIPS
 
 # Install dependencies
-RUN yum install -y curl gcc gcc-c++ make unzip cmake3 perl go
+RUN yum install -y curl clang make unzip cmake3 perl go
+# We need to use clang to make sure the FIPS build goes well.
+ENV CC=clang
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
@@ -33,7 +34,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     else \
         export FEATURES=default; \
     fi; \
-    echo FEATURES=$FEATURES; \
     cargo +stable build --no-default-features --features $FEATURES --release --target $PLATFORM-unknown-linux-gnu;
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
