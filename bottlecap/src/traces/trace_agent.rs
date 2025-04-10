@@ -389,8 +389,6 @@ impl TraceAgent {
             invocation_processor.get_reparenting_info()
         };
 
-        debug!("Applying reparenting: {reparenting_info:?}");
-
         for chunk in &mut traces {
             for span in chunk.iter_mut() {
                 debug!("Processing span: {span:?}");
@@ -401,8 +399,6 @@ impl TraceAgent {
                 handle_reparenting(&mut reparenting_info, span);
             }
         }
-
-        debug!("Reparenting info after processing: {reparenting_info:?}");
 
         {
             let mut invocation_processor = invocation_processor.lock().await;

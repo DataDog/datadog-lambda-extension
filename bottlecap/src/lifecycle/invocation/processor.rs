@@ -15,8 +15,8 @@ use tracing::{debug, warn};
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{
-        base64_to_string, context::ContextBuffer, create_empty_span, generate_span_id,
-        get_metadata_from_value, span_inferrer::SpanInferrer,
+        base64_to_string, context::Context, context::ContextBuffer, context::ReparentingInfo,
+        create_empty_span, generate_span_id, get_metadata_from_value, span_inferrer::SpanInferrer,
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
@@ -38,8 +38,6 @@ use crate::{
         trace_processor::{self, TraceProcessor},
     },
 };
-
-use super::context::{Context, ReparentingInfo};
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
@@ -330,7 +328,6 @@ impl Processor {
 
         if self.tracer_detected {
             if let Some(ctx) = context {
-                debug!("Sending invocation span for context {:?}", ctx);
                 if ctx.invocation_span_ready_to_send {
                     self.send_extension_spans(
                         &tags_provider,

@@ -544,7 +544,6 @@ async fn handle_event_bus_event(
                     phase,
                     metrics,
                 } => {
-                    debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
                     let mut p = invocation_processor.lock().await;
                     p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
                     drop(p);

@@ -22,6 +22,7 @@ pub struct Context {
     /// Known as the `aws.lambda` span.
     pub invocation_span: Span,
     /// The span used as placeholder for the invocation span by the tracer.
+    ///
     /// In the tracer, this is created in order to have all children spans parented
     /// to a single span. This is useful when we reparent the tracer span children to
     /// the invocation span.
@@ -394,6 +395,7 @@ impl ContextBuffer {
             debug!("Could not add tracer span - context not found");
         }
     }
+
     /// Returns the size of the buffer.
     ///
     #[must_use]
