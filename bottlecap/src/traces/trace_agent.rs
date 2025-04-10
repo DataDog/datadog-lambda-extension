@@ -402,18 +402,11 @@ impl TraceAgent {
 
         {
             let mut invocation_processor = invocation_processor.lock().await;
-            if let Some(ctx_to_send) = invocation_processor.update_reparenting(reparenting_info) {
+            for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
                 debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
-                if ctx_to_send.telemetry_event_received {
-                    invocation_processor
-                        .send_extension_spans(
-                            &tags_provider,
-                            &trace_processor,
-                            &trace_tx,
-                            ctx_to_send,
-                        )
-                        .await;
-                }
+                invocation_processor
+                    .send_extension_spans(&tags_provider, &trace_processor, &trace_tx, ctx_to_send)
+                    .await;
             }
         }
 
@@ -656,33 +649,22 @@ fn handle_reparenting(
     span: &mut pb::Span,
 ) {
     for rep_info in reparenting_info {
-        if rep_info.skip_first_trace_id {
-            if !rep_info.needs_trace_id && rep_info.guessed_trace_id != span.trace_id {
-                rep_info.skip_first_trace_id = false;
-                rep_info.needs_trace_id = true;
-            } else {
-                rep_info.guessed_trace_id = span.trace_id;
-                rep_info.needs_trace_id = false;
-            }
+        if rep_info.needs_trace_id {
+            rep_info.guessed_trace_id = span.trace_id;
+            rep_info.needs_trace_id = false;
+            debug!(
+                "Guessed trace ID: {} for reparenting {rep_info:?}",
+                span.trace_id
+            );
         }
-        if !rep_info.skip_first_trace_id {
-            if rep_info.needs_trace_id {
-                rep_info.guessed_trace_id = span.trace_id;
-                rep_info.needs_trace_id = false;
-                debug!(
-                    "Guessed trace ID: {} for reparenting {rep_info:?}",
-                    span.trace_id
-                );
-            }
-            if span.trace_id == rep_info.guessed_trace_id
-                && span.parent_id == rep_info.parent_id_to_reparent
-            {
-                debug!(
-                    "Reparenting span {} with parent id {}",
-                    span.span_id, rep_info.invocation_span_id
-                );
-                span.parent_id = rep_info.invocation_span_id;
-            }
+        if span.trace_id == rep_info.guessed_trace_id
+            && span.parent_id == rep_info.parent_id_to_reparent
+        {
+            debug!(
+                "Reparenting span {} with parent id {}",
+                span.span_id, rep_info.invocation_span_id
+            );
+            span.parent_id = rep_info.invocation_span_id;
         }
     }
 }

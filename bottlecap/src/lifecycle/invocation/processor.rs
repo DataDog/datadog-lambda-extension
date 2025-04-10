@@ -328,7 +328,7 @@ impl Processor {
 
         if self.tracer_detected {
             if let Some(ctx) = context {
-                if ctx.invocation_span_ready_to_send {
+                if ctx.invocation_span.trace_id != 0 && ctx.invocation_span.span_id != 0 {
                     self.send_extension_spans(
                         &tags_provider,
                         &trace_processor,
@@ -350,7 +350,7 @@ impl Processor {
             debug!("Cannot process on platform runtime done, no invocation context found for request_id: {request_id}");
             return None;
         };
-        context.telemetry_event_received = true;
+        context.runtime_done_received = true;
 
         // Handle timeout error case
         if status == Status::Timeout {
@@ -585,10 +585,6 @@ impl Processor {
             self.context_buffer.sorted_reparenting_info.pop_front();
         }
 
-        let first_reparenting = false;
-        // we might want to keep this flag behind an env variable
-        // let first_reparenting = self.context_buffer.sorted_reparenting_info.is_empty();
-
         self.context_buffer
             .sorted_reparenting_info
             .push_back(ReparentingInfo {
@@ -597,7 +593,6 @@ impl Processor {
                 parent_id_to_reparent: parent_id,
                 guessed_trace_id: 0,
                 needs_trace_id: true,
-                skip_first_trace_id: first_reparenting,
             });
     }
 
@@ -609,17 +604,34 @@ impl Processor {
     pub fn update_reparenting(
         &mut self,
         reparenting_info: VecDeque<ReparentingInfo>,
-    ) -> Option<Context> {
-        let mut ctx_to_send = "None".to_string();
+    ) -> Vec<Context> {
+        let mut ctx_to_send = Vec::new();
         for rep_info in reparenting_info {
             if let Some(ctx) = self.context_buffer.get_mut(&rep_info.request_id) {
-                ctx.invocation_span.span_id = rep_info.invocation_span_id;
-                ctx.invocation_span.trace_id = rep_info.guessed_trace_id;
-                ctx.invocation_span_ready_to_send = !rep_info.skip_first_trace_id;
-                debug!(
-                    "Set trace id to {} for request_id: {}",
-                    rep_info.guessed_trace_id, rep_info.request_id
-                );
+                let mut span_updated = false;
+                if ctx.invocation_span.span_id == 0 {
+                    ctx.invocation_span.span_id = rep_info.invocation_span_id;
+                    debug!(
+                        "Set invocation span id to {} for request_id: {}",
+                        rep_info.guessed_trace_id, rep_info.request_id
+                    );
+                    span_updated = true;
+                }
+                if ctx.invocation_span.trace_id == 0 {
+                    ctx.invocation_span.trace_id = rep_info.guessed_trace_id;
+                    debug!(
+                        "Set trace id to {} for request_id: {}",
+                        rep_info.guessed_trace_id, rep_info.request_id
+                    );
+                    span_updated = true;
+                }
+                if span_updated
+                    && ctx.invocation_span.span_id != 0
+                    && ctx.invocation_span.trace_id != 0
+                    && ctx.runtime_done_received
+                {
+                    ctx_to_send.push(ctx.clone());
+                }
             } else {
                 warn!(
                     "Mismatched request info. Context not found for request_id: {}",
@@ -633,23 +645,11 @@ impl Processor {
                 .iter_mut()
                 .find(|info| info.request_id == rep_info.request_id)
             {
-                if existing_info.skip_first_trace_id && !rep_info.skip_first_trace_id {
-                    if ctx_to_send != "None" {
-                        warn!(
-                            "Skipping more than one invocatino span for request_id: {}",
-                            ctx_to_send
-                        );
-                    }
-                    ctx_to_send.clone_from(&existing_info.request_id);
-                }
                 existing_info.needs_trace_id = rep_info.needs_trace_id;
                 existing_info.guessed_trace_id = rep_info.guessed_trace_id;
-                existing_info.skip_first_trace_id = rep_info.skip_first_trace_id;
             }
         }
-        self.context_buffer
-            .get(&ctx_to_send)
-            .map(|ctx| ctx.to_owned().clone())
+        ctx_to_send
     }
 
     fn extract_span_context(

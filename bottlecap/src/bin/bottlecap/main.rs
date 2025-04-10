@@ -539,11 +539,7 @@ async fn handle_event_bus_event(
                     p.on_platform_init_start(event.time);
                     drop(p);
                 }
-                TelemetryRecord::PlatformInitReport {
-                    initialization_type,
-                    phase,
-                    metrics,
-                } => {
+                TelemetryRecord::PlatformInitReport { metrics, .. } => {
                     let mut p = invocation_processor.lock().await;
                     p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
                     drop(p);
