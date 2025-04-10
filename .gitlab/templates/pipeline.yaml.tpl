@@ -38,6 +38,7 @@ cargo clippy:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
+    - apt-get update && apt-get install -y --fix-missing --no-install-recommends golang-go
     - cd bottlecap && cargo clippy --all-features
 
 {{ range $flavor := (ds "flavors").flavors }}
