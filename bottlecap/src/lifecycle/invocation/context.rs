@@ -8,7 +8,7 @@ use std::{
 };
 
 use datadog_trace_protobuf::pb::Span;
-use tracing::{debug, warn};
+use tracing::debug;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Context {
