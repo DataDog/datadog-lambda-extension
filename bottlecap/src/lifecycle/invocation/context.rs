@@ -151,10 +151,6 @@ impl ContextBuffer {
             self.buffer.push_back(context);
         } else {
             if self.get(&context.request_id).is_some() {
-                warn!(
-                    "Context with request_id: {:?} already exists in the buffer",
-                    context.request_id
-                );
                 self.remove(&context.request_id);
             }
 
