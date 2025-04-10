@@ -74,6 +74,16 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+#[cfg(feature = "fips")]
+fn log_fips_status() {
+    debug!("FIPS mode is enabled");
+}
+
+#[cfg(not(feature = "fips"))]
+fn log_fips_status() {
+    debug!("FIPS mode is disabled");
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
@@ -190,6 +200,7 @@ async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
+    log_fips_status();
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
     let client = Client::builder().no_proxy().build().map_err(|e| {

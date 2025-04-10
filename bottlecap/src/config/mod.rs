@@ -97,12 +97,6 @@ fn fallback(config: &EnvConfig, yaml_config: &YamlConfig, region: &str) -> Resul
         return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
 
-    // Govcloud Regions
-    if region.starts_with("us-gov-") {
-        log_fallback_reason("gov_region");
-        return Err(ConfigError::UnsupportedField("gov_region".to_string()));
-    }
-
     Ok(())
 }
 
@@ -319,16 +313,6 @@ pub mod tests {
             );
             Ok(())
         });
-    }
-    #[test]
-    fn test_reject_on_gov_region() {
-        let mock_gov_region = "us-gov-east-1";
-        let config =
-            get_config(Path::new(""), mock_gov_region).expect_err("should reject unknown fields");
-        assert_eq!(
-            config,
-            ConfigError::UnsupportedField("gov_region".to_string())
-        );
     }
 
     #[test]
