@@ -1,11 +1,10 @@
 FROM registry.ddbuild.io/images/mirror/alpine:3.16 AS compiler
 ARG PLATFORM
 
-# FIPS is not used for now.
 ARG FIPS
 
 # Install dependencies
-RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++
+RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++ go cmake linux-headers clang
 
 SHELL ["/bin/bash", "-c"]
 
@@ -21,6 +20,7 @@ RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-mus
 # Copy source code
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap/src /tmp/dd/bottlecap/src
+COPY ./bottlecap/build.rs /tmp/dd/bottlecap/build.rs
 COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
 COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 
@@ -28,8 +28,18 @@ COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 #
 # Added `-C link-arg=-lgcc` for alpine.
 ENV RUSTFLAGS="-C panic=abort -C link-arg=-lgcc"
+ENV AWS_LC_FIPS_SYS_CC=clang
+ENV AWS_LC_FIPS_SYS_CXX=clang++
+
 WORKDIR /tmp/dd/bottlecap
-RUN --mount=type=cache,target=/root/.cargo/registry cargo +stable build --release --target $PLATFORM-unknown-linux-musl
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    if [ "$FIPS" = "1" ]; then \
+        export FEATURES=fips; \
+    else \
+        export FEATURES=default; \
+    fi; \
+    env; \
+    cargo +stable build --no-default-features --features $FEATURES --release --target $PLATFORM-unknown-linux-musl;
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-musl/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
 # Use the smallest image possible
