@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use ddcommon::hyper_migration;
+use ddcommon::hyper_migration::Body;
 use http_body_util::BodyExt;
 use hyper::service::service_fn;
-use hyper::{http, Method, Response, StatusCode};
+use hyper::{http, HeaderMap, Method, Response, StatusCode};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io;
@@ -95,10 +96,20 @@ impl Listener {
     ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
             (&Method::POST, START_INVOCATION_PATH) => {
-                Self::start_invocation_handler(req, invocation_processor).await
+                let (parts, body) = req.into_parts();
+                Self::universal_instrumentation_start(&parts.headers, body, invocation_processor)
+                    .await
+                    .1
             }
             (&Method::POST, END_INVOCATION_PATH) => {
-                match Self::end_invocation_handler(req, invocation_processor).await {
+                let (parts, body) = req.into_parts();
+                match Self::universal_instrumentation_end(
+                    &parts.headers,
+                    body,
+                    invocation_processor,
+                )
+                .await
+                {
                     Ok(response) => Ok(response),
                     Err(e) => {
                         error!("Failed to end invocation {e}");
@@ -118,27 +129,29 @@ impl Listener {
         }
     }
 
-    async fn start_invocation_handler(
-        req: hyper_migration::HttpRequest,
+    pub async fn universal_instrumentation_start(
+        headers: &HeaderMap,
+        body: Body,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> http::Result<hyper_migration::HttpResponse> {
+    ) -> (u64, http::Result<hyper_migration::HttpResponse>) {
         debug!("Received start invocation request");
-        let (parts, body) = req.into_parts();
         match body.collect().await {
             Ok(b) => {
                 let body = b.to_bytes().to_vec();
-                let mut processor = invocation_processor.lock().await;
 
-                let headers = Self::headers_to_map(parts.headers);
+                let headers = Self::headers_to_map(headers);
 
-                let span_context = processor.on_universal_instrumentation_start(headers, body);
-
+                let extracted_span_context = {
+                    let mut processor = invocation_processor.lock().await;
+                    processor.on_universal_instrumentation_start(headers, body)
+                };
                 let mut response = Response::builder().status(200);
 
+                let found_parent_span_id;
                 // If a `SpanContext` exists, then tell the tracer to use it.
                 // todo: update this whole code with DatadogHeaderPropagator::inject
                 // since this logic looks messy
-                if let Some(sp) = &span_context {
+                if let Some(sp) = extracted_span_context {
                     response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
                     if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
                         response =
@@ -150,40 +163,47 @@ impl Listener {
                         sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
                     {
                         response = response.header(
-                            DATADOG_TAGS_KEY,
-                            format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
-                        );
+                        DATADOG_TAGS_KEY,
+                        format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
+                    );
                     }
+                    found_parent_span_id = sp.span_id;
+                } else {
+                    found_parent_span_id = 0;
                 }
 
-                drop(processor);
-
-                response.body(hyper_migration::Body::from(json!({}).to_string()))
+                (
+                    found_parent_span_id,
+                    response.body(hyper_migration::Body::from(json!({}).to_string())),
+                )
             }
             Err(e) => {
                 error!("Could not read start invocation request body {e}");
 
-                Response::builder()
-                    .status(400)
-                    .body(hyper_migration::Body::from(
-                        "Could not read start invocation request body",
-                    ))
+                (
+                    0,
+                    Response::builder()
+                        .status(400)
+                        .body(hyper_migration::Body::from(
+                            "Could not read start invocation request body",
+                        )),
+                )
             }
         }
     }
 
-    async fn end_invocation_handler(
-        req: hyper_migration::HttpRequest,
+    pub async fn universal_instrumentation_end(
+        headers: &HeaderMap,
+        body: Body,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
     ) -> http::Result<hyper_migration::HttpResponse> {
         debug!("Received end invocation request");
-        let (parts, body) = req.into_parts();
         match body.collect().await {
             Ok(b) => {
                 let body = b.to_bytes().to_vec();
                 let mut processor = invocation_processor.lock().await;
 
-                let headers = Self::headers_to_map(parts.headers);
+                let headers = Self::headers_to_map(headers);
                 processor.on_universal_instrumentation_end(headers, body);
                 drop(processor);
 
@@ -210,7 +230,7 @@ impl Listener {
             .body(hyper_migration::Body::from(json!({}).to_string()))
     }
 
-    fn headers_to_map(headers: http::HeaderMap) -> HashMap<String, String> {
+    fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
         headers
             .iter()
             .map(|(k, v)| {
