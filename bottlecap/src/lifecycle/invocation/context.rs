@@ -21,12 +21,12 @@ pub struct Context {
     ///
     /// Known as the `aws.lambda` span.
     pub invocation_span: Span,
+    pub runtime_done_received: bool,
     /// The span used as placeholder for the invocation span by the tracer.
     ///
     /// In the tracer, this is created in order to have all children spans parented
     /// to a single span. This is useful when we reparent the tracer span children to
     /// the invocation span.
-    pub runtime_done_received: bool,
     ///
     /// This span is filtered out during chunk processing.
     pub tracer_span: Option<Span>,
@@ -40,6 +40,14 @@ pub struct Context {
     pub extracted_span_context: Option<SpanContext>,
 }
 
+/// Struct containing the information needed to reparent a span.
+/// The struct contains initially the span ID of an invocation span, the lambda request ID
+/// causing the invocation, and the parent found (0 if no inferred spans or existing parent were
+/// found).
+///
+/// When receiving spans, the trace id for this request will be guessed based on the order of
+/// incoming spans. So it holds true when at least one span related to invocation N is received
+/// by the extension before the spans of request N+1
 #[derive(Clone, Debug)]
 pub struct ReparentingInfo {
     pub request_id: String,

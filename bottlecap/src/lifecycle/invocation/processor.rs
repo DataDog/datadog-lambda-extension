@@ -324,24 +324,19 @@ impl Processor {
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
     ) {
-        let context = self.enrich_spans_at_paltform_done(request_id, status);
+        let context = self.enrich_ctx_at_paltform_done(request_id, status);
 
         if self.tracer_detected {
             if let Some(ctx) = context {
                 if ctx.invocation_span.trace_id != 0 && ctx.invocation_span.span_id != 0 {
-                    self.send_extension_spans(
-                        &tags_provider,
-                        &trace_processor,
-                        &trace_agent_tx,
-                        ctx,
-                    )
-                    .await;
+                    self.send_ctx_spans(&tags_provider, &trace_processor, &trace_agent_tx, ctx)
+                        .await;
                 }
             }
         }
     }
 
-    fn enrich_spans_at_paltform_done(
+    fn enrich_ctx_at_paltform_done(
         &mut self,
         request_id: &String,
         status: Status,
@@ -405,12 +400,12 @@ impl Processor {
         Some(context.clone())
     }
 
-    pub async fn send_extension_spans(
+    pub async fn send_ctx_spans(
         &mut self,
         tags_provider: &Arc<provider::Provider>,
         trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
         trace_agent_tx: &Sender<SendData>,
-        context: super::context::Context,
+        context: Context,
     ) {
         let mut body_size = std::mem::size_of_val(&context.invocation_span);
         let mut traces = vec![context.invocation_span.clone()];

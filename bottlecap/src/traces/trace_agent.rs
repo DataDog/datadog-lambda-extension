@@ -7,6 +7,7 @@ use hyper::service::service_fn;
 use hyper::{http, Method, Response, StatusCode};
 use reqwest;
 use serde_json::json;
+use std::collections::VecDeque;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -17,6 +18,7 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::http_client;
+use crate::lifecycle::invocation::context::ReparentingInfo;
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 use crate::tags::provider;
 use crate::traces::{
@@ -405,7 +407,7 @@ impl TraceAgent {
             for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
                 debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
                 invocation_processor
-                    .send_extension_spans(&tags_provider, &trace_processor, &trace_tx, ctx_to_send)
+                    .send_ctx_spans(&tags_provider, &trace_processor, &trace_tx, ctx_to_send)
                     .await;
             }
         }
@@ -642,12 +644,7 @@ impl TraceAgent {
     }
 }
 
-fn handle_reparenting(
-    reparenting_info: &mut std::collections::VecDeque<
-        crate::lifecycle::invocation::context::ReparentingInfo,
-    >,
-    span: &mut pb::Span,
-) {
+fn handle_reparenting(reparenting_info: &mut VecDeque<ReparentingInfo>, span: &mut pb::Span) {
     for rep_info in reparenting_info {
         if rep_info.needs_trace_id {
             rep_info.guessed_trace_id = span.trace_id;
