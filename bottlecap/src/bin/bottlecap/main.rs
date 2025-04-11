@@ -74,6 +74,9 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+#[cfg(all(feature = "default", feature = "fips"))]
+compile_error!("When building in fips mode, the default feature must be disabled");
+
 #[cfg(feature = "fips")]
 fn log_fips_status() {
     debug!("FIPS mode is enabled");
