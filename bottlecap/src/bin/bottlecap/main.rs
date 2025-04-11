@@ -73,6 +73,16 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+#[cfg(feature = "fips")]
+fn log_fips_status() {
+    debug!("FIPS mode is enabled");
+}
+
+#[cfg(not(feature = "fips"))]
+fn log_fips_status() {
+    debug!("FIPS mode is disabled");
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
@@ -197,6 +207,7 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let (mut aws_config, config) = load_configs(start_time);
     enable_logging_subsystem(&config);
+    log_fips_status();
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
@@ -242,7 +253,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
         sandbox_init_time: start_time,
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
+    let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
             let err = Command::new("/opt/datadog-agent-go").exec();

@@ -1,11 +1,10 @@
 FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
 
-# FIPS is not used for now.
 ARG FIPS
 
 # Install dependencies
-RUN yum install -y curl gcc gcc-c++ make unzip
+RUN yum install -y curl clang make unzip cmake3 perl go
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
@@ -20,13 +19,23 @@ RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-gnu
 # Copy source code
 RUN mkdir -p /tmp/dd
 COPY ./bottlecap/src /tmp/dd/bottlecap/src
+COPY ./bottlecap/build.rs /tmp/dd/bottlecap/build.rs
 COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
 COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 
 # Build the binary
 ENV RUSTFLAGS="-C panic=abort"
+ENV AWS_LC_FIPS_SYS_CC=clang
+ENV AWS_LC_FIPS_SYS_CXX=clang++
+
 WORKDIR /tmp/dd/bottlecap
-RUN --mount=type=cache,target=/usr/local/cargo/registry cargo +stable build --release --target $PLATFORM-unknown-linux-gnu
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    if [ "$FIPS" = "1" ]; then \
+        export FEATURES=fips; \
+    else \
+        export FEATURES=default; \
+    fi; \
+    cargo +stable build --no-default-features --features $FEATURES --release --target $PLATFORM-unknown-linux-gnu;
 RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
 
 # Use smallest image possible

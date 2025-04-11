@@ -22,7 +22,7 @@ cargo fmt:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
-    - cd bottlecap && cargo fmt
+    - cd bottlecap && cargo fmt --all -- --check
 
 cargo check:
   stage: test
@@ -30,7 +30,7 @@ cargo check:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
-    - cd bottlecap && cargo check
+    - cd bottlecap && cargo check --workspace
 
 cargo clippy:
   stage: test
@@ -38,7 +38,8 @@ cargo clippy:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   needs: []
   script:
-    - cd bottlecap && cargo clippy --all-features
+    - apt-get update && apt-get install -y --fix-missing --no-install-recommends golang-go
+    - cd bottlecap && cargo clippy --workspace --all-features
 
 {{ range $flavor := (ds "flavors").flavors }}
 

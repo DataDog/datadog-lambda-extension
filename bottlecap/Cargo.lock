@@ -267,11 +267,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ace50bade8e6234aa140d9a2f552bbee1db4d353f69b8217bc503490fc1a9f26"
 
 [[package]]
+name = "aws-lc-fips-sys"
+version = "0.13.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d9c2e952a1f57e8cbc78b058a968639e70c4ce8b9c0a5e6363d4e5670eed795"
+dependencies = [
+ "bindgen",
+ "cc",
+ "cmake",
+ "dunce",
+ "fs_extra",
+ "regex",
+]
+
+[[package]]
 name = "aws-lc-rs"
 version = "1.12.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dabb68eb3a7aa08b46fddfd59a3d55c978243557a90ab804769f7e20e67d2b01"
 dependencies = [
+ "aws-lc-fips-sys",
  "aws-lc-sys",
  "zeroize",
 ]
@@ -336,7 +351,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "lazy_static",
  "lazycell",
  "log",
@@ -673,7 +688,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-mini-agent"
 version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=a0b92b643dff8bc28d87c974eddf7189c238eaa5#a0b92b643dff8bc28d87c974eddf7189c238eaa5"
+source = "git+https://github.com/DataDog/libdatadog?branch=aleksandr.pasechnik/svls-6242-fips-features-for-bottlecap#80de337359e76df8459717e9a0007f11178f9a48"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -695,7 +710,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=a0b92b643dff8bc28d87c974eddf7189c238eaa5#a0b92b643dff8bc28d87c974eddf7189c238eaa5"
+source = "git+https://github.com/DataDog/libdatadog?branch=aleksandr.pasechnik/svls-6242-fips-features-for-bottlecap#80de337359e76df8459717e9a0007f11178f9a48"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -704,7 +719,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=a0b92b643dff8bc28d87c974eddf7189c238eaa5#a0b92b643dff8bc28d87c974eddf7189c238eaa5"
+source = "git+https://github.com/DataDog/libdatadog?branch=aleksandr.pasechnik/svls-6242-fips-features-for-bottlecap#80de337359e76df8459717e9a0007f11178f9a48"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -721,7 +736,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=a0b92b643dff8bc28d87c974eddf7189c238eaa5#a0b92b643dff8bc28d87c974eddf7189c238eaa5"
+source = "git+https://github.com/DataDog/libdatadog?branch=aleksandr.pasechnik/svls-6242-fips-features-for-bottlecap#80de337359e76df8459717e9a0007f11178f9a48"
 dependencies = [
  "prost 0.11.9",
  "serde",
@@ -731,7 +746,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=a0b92b643dff8bc28d87c974eddf7189c238eaa5#a0b92b643dff8bc28d87c974eddf7189c238eaa5"
+source = "git+https://github.com/DataDog/libdatadog?branch=aleksandr.pasechnik/svls-6242-fips-features-for-bottlecap#80de337359e76df8459717e9a0007f11178f9a48"
 dependencies = [
  "anyhow",
  "bytes 1.10.1",
@@ -759,7 +774,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=a0b92b643dff8bc28d87c974eddf7189c238eaa5#a0b92b643dff8bc28d87c974eddf7189c238eaa5"
+source = "git+https://github.com/DataDog/libdatadog?branch=aleksandr.pasechnik/svls-6242-fips-features-for-bottlecap#80de337359e76df8459717e9a0007f11178f9a48"
 dependencies = [
  "anyhow",
  "cc",
@@ -881,7 +896,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=4dfe72ab1850680f41dd79d30a937eb68e7ba6da#4dfe72ab1850680f41dd79d30a937eb68e7ba6da"
+source = "git+https://github.com/DataDog/serverless-components?branch=aleksandr.pasechnik/svls-6242-fips-builds#e349315c8c2733060c5f4a3f36593ae916a4ea98"
 dependencies = [
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
@@ -1702,15 +1717,6 @@ name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -2667,9 +2673,9 @@ dependencies = [
 
 [[package]]
 name = "rustls"
-version = "0.23.23"
+version = "0.23.25"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47796c98c480fce5406ef69d1c76378375492c3b0a0de587be0c1d9feb12f395"
+checksum = "822ee9188ac4ec04a2f0531e55d035fb2de73f18b41a63c70c2712503b6fb13c"
 dependencies = [
  "aws-lc-rs",
  "once_cell",
@@ -2712,9 +2718,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.102.8"
+version = "0.103.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64ca1bc8749bd4cf37b5ce386cc146580777b4e8572c7b97baf22c83f444bee9"
+checksum = "fef8b8769aaccf73098557a87cd1816b4f9c7c16811c9c77142aa695c16f2c03"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -3151,7 +3157,7 @@ dependencies = [
 [[package]]
 name = "tinybytes"
 version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=a0b92b643dff8bc28d87c974eddf7189c238eaa5#a0b92b643dff8bc28d87c974eddf7189c238eaa5"
+source = "git+https://github.com/DataDog/libdatadog?branch=aleksandr.pasechnik/svls-6242-fips-features-for-bottlecap#80de337359e76df8459717e9a0007f11178f9a48"
 dependencies = [
  "serde",
 ]
