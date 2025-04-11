@@ -209,6 +209,13 @@ fn log_fallback_reason(reason: &str) {
     println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
+#[cfg(feature = "force_fallback")]
+fn fallback(_figment: &Figment, _yaml_figment: &Figment) -> Result<(), ConfigError> {
+    log_fallback_reason("force_fallback");
+    Err(ConfigError::UnsupportedField("force_fallback".to_string()))
+}
+
+#[cfg(not(feature = "force_fallback"))]
 fn fallback(figment: &Figment, yaml_figment: &Figment) -> Result<(), ConfigError> {
     let (config, yaml_config): (FallbackConfig, FallbackYamlConfig) =
         match (figment.extract(), yaml_figment.extract()) {

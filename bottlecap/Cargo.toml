@@ -77,3 +77,4 @@ fips = [
     "reqwest/rustls-tls-no-provider",
     "rustls/fips",
 ]
+force_fallback = []
