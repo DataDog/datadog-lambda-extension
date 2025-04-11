@@ -32,9 +32,11 @@ ENV AWS_LC_FIPS_SYS_CC=clang
 ENV AWS_LC_FIPS_SYS_CXX=clang++
 
 WORKDIR /tmp/dd/bottlecap
+# we can't currently compile successfully in alpine for fips mode, so we force
+# fallback in alpine fips to the go agent.
 RUN --mount=type=cache,target=/root/.cargo/registry \
     if [ "$FIPS" = "1" ]; then \
-        export FEATURES=fips; \
+        export FEATURES="default,force_fallback"; \
     else \
         export FEATURES=default; \
     fi; \
