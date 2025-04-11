@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tokio::{sync::Mutex, task::JoinHandle};
 use tracing::{debug, error};
@@ -21,54 +22,71 @@ use tracing::{debug, error};
 use crate::lifecycle;
 use crate::lifecycle::listener::Listener;
 
+/// The sender can be used to trigger a graceful shutdown of the proxy server.
+pub type ShutdownSender = mpsc::Sender<()>;
+
 #[must_use]
 #[allow(clippy::module_name_repetitions)]
-pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<JoinHandle<()>> {
+pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<ShutdownSender> {
     let (proxy_socket, aws_runtime_uri) = parse_env_addresses()?;
     debug!(
         "LWA: proxy enabled with proxy URI: {} and AWS runtime: {}",
         proxy_socket, aws_runtime_uri
     );
 
-    let proxy_task_handle = tokio::spawn({
+    let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+
+    tokio::spawn({
         async move {
             let proxy_server = TcpListener::bind(&proxy_socket)
                 .await
                 .expect("LWA: Failed to bind LWA proxy socket");
 
             loop {
-                let (tcp_stream, _) = proxy_server
-                    .accept()
-                    .await
-                    .expect("LWA: Failed to accept LWA connection");
-                let io = TokioIo::new(tcp_stream);
-                let async_invocation_processor_cp = Arc::clone(&invocation_processor);
-                let async_aws_runtime_uri_cp = aws_runtime_uri.clone();
+                tokio::select! {
+                    accept_result = proxy_server.accept() => {
+                        match accept_result {
+                            Ok((tcp_stream, _)) => {
+                                let io = TokioIo::new(tcp_stream);
+                                let async_invocation_processor_cp = Arc::clone(&invocation_processor);
+                                let async_aws_runtime_uri_cp = aws_runtime_uri.clone();
 
-                tokio::task::spawn(async move {
-                    if let Err(err) = http1::Builder::new()
-                        .preserve_header_case(true)
-                        .title_case_headers(true)
-                        .serve_connection(
-                            io,
-                            service_fn(move |req| {
-                                intercept_payload(
-                                    req,
-                                    Arc::clone(&async_invocation_processor_cp),
-                                    async_aws_runtime_uri_cp.clone(),
-                                )
-                            }),
-                        )
-                        // .with_upgrades()
-                        .await
-                    {
-                        println!("LWA: Failed to serve connection: {err:?}");
+                                tokio::task::spawn(async move {
+                                    if let Err(err) = http1::Builder::new()
+                                        .preserve_header_case(true)
+                                        .title_case_headers(true)
+                                        .serve_connection(
+                                            io,
+                                            service_fn(move |req| {
+                                                intercept_payload(
+                                                    req,
+                                                    Arc::clone(&async_invocation_processor_cp),
+                                                    async_aws_runtime_uri_cp.clone(),
+                                                )
+                                            }),
+                                        )
+                                        // .with_upgrades()
+                                        .await
+                                    {
+                                        println!("LWA: Failed to serve connection: {err:?}");
+                                    }
+                                });
+                            }
+                            Err(e) => {
+                                error!("LWA: Failed to accept LWA connection: {e}");
+                                break;
+                            }
+                        }
                     }
-                });
+                    _ = shutdown_rx.recv() => {
+                        debug!("LWA: Received shutdown signal, terminating proxy server loop.");
+                        break;
+                    }
+                }
             }
         }
     });
-    Some(proxy_task_handle)
+    Some(shutdown_tx)
 }
 
 fn parse_env_addresses() -> Option<(SocketAddr, Uri)> {
@@ -478,7 +496,8 @@ mod tests {
         let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
         assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
 
-        proxy_task_handle.abort();
+        // Send shutdown signal to the proxy server
+        let _ = proxy_task_handle.send(()).await;
         final_destination.abort();
 
         env::remove_var("AWS_LWA_LAMBDA_RUNTIME_API_PROXY");

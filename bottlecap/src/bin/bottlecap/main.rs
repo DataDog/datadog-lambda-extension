@@ -344,7 +344,7 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
     );
 
-    let lwa_proxy_handle = start_lwa_proxy(Arc::clone(&invocation_processor));
+    let lwa_proxy_stopper = start_lwa_proxy(Arc::clone(&invocation_processor));
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -480,9 +480,11 @@ async fn extension_loop_active(
                     }
                 }
             }
-            if let Some(lwa_proxy_task) = lwa_proxy_handle {
+            if let Some(lwa_proxy_task) = lwa_proxy_stopper {
                 // use with graceful shutdown after rebase with hyper 1
-                lwa_proxy_task.abort();
+                if let Err(exit_err) = lwa_proxy_task.send(()).await {
+                    error!("Error stopping LWA proxy: {exit_err:?}");
+                }
             }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
