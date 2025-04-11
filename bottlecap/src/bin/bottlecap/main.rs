@@ -257,7 +257,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
         sandbox_init_time: start_time,
     };
     let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
+    let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
             let err = Command::new("/opt/datadog-agent-go").exec();

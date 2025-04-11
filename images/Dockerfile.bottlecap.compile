@@ -5,8 +5,6 @@ ARG FIPS
 
 # Install dependencies
 RUN yum install -y curl clang make unzip cmake3 perl go
-# We need to use clang to make sure the FIPS build goes well.
-ENV CC=clang
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
@@ -27,6 +25,9 @@ COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 
 # Build the binary
 ENV RUSTFLAGS="-C panic=abort"
+ENV AWS_LC_FIPS_SYS_CC=clang
+ENV AWS_LC_FIPS_SYS_CXX=clang++
+
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     if [ "$FIPS" = "1" ]; then \
