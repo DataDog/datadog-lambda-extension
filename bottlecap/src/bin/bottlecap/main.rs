@@ -186,19 +186,22 @@ fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> St
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
+    let (mut aws_config, config) = load_configs(start_time);
+
+    enable_logging_subsystem(&config);
+    let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
+    debug!("Starting Datadog Extension {version_without_next}");
     let client = Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Failed to create client: {e:?}"),
         )
     })?;
+
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    let (mut aws_config, config) = load_configs(start_time);
-    enable_logging_subsystem(&config);
-    let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
-    debug!("Starting Datadog Extension {version_without_next}");
+
     if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
         match extension_loop_active(
             &aws_config,
