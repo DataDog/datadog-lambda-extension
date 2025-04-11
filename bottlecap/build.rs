@@ -9,7 +9,7 @@ fn main() {
 
         // First run cargo tree to get dependency on ring with detailed info
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "tree",
                 "-i",
                 "ring",
@@ -23,7 +23,7 @@ fn main() {
 
         // Also get the complete dependency path to help debugging
         let path_output = Command::new("cargo")
-            .args(&[
+            .args([
                 "tree",
                 "-i",
                 "ring",
