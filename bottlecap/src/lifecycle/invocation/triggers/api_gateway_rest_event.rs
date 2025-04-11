@@ -45,6 +45,55 @@ pub struct Identity {
     pub user_agent: String,
 }
 
+impl APIGatewayRestEvent {
+    fn parameterize_resource(resource: String) -> String {
+        // If the resource already contains parameters in {curly_braces}, return it as is
+        if resource.contains('{') && resource.contains('}') {
+            return resource;
+        }
+        
+        let parts: Vec<&str> = resource.split('/').collect();
+        let mut result = Vec::new();
+        
+        // First element is empty string due to leading slash
+        result.push(String::from(""));
+        
+        // Process each path segment
+        for (i, part) in parts.iter().enumerate().skip(1) {
+            if part.is_empty() {
+                continue;
+            }
+            
+            // Skip parameterization for common version patterns like v1, v2, etc.
+            if part.starts_with('v') && part.len() <= 3 && part[1..].chars().all(|c| c.is_digit(10)) {
+                result.push((*part).to_string());
+                continue;
+            }
+            
+            // Check if this part looks like an ID (numeric or alphanumeric with special chars)
+            if part.chars().all(|c| c.is_digit(10)) || 
+               (part.chars().any(|c| c.is_digit(10) || c == '_' || c == '-') && 
+                part.chars().any(|c| c.is_alphabetic())) {
+                
+                // Determine the parameter name based on the previous segment
+                let param_name = if i > 1 && !parts[i-1].is_empty() {
+                    let singular = parts[i-1].trim_end_matches('s');
+                    format!("{}_id", singular)
+                } else {
+                    "id".to_string()
+                };
+                
+                // Format the parameter with braces and store it in the result
+                result.push(format!("{{{}}}", param_name));
+            } else {
+                result.push((*part).to_string());
+            }
+        }
+        
+        result.join("/")
+    }
+}
+
 impl Trigger for APIGatewayRestEvent {
     fn new(payload: Value) -> Option<Self> {
         match serde_json::from_value(payload) {
@@ -83,7 +132,7 @@ impl Trigger for APIGatewayRestEvent {
 
         span.name = "aws.apigateway".to_string();
         span.service = service_name;
-        span.resource.clone_from(&resource);
+        span.resource = APIGatewayRestEvent::parameterize_resource(resource);
         span.r#type = "http".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
@@ -192,6 +241,39 @@ impl ServiceNameResolver for APIGatewayRestEvent {
 mod tests {
     use super::*;
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+
+    #[test]
+    fn test_parameterize_resource() {
+        // Test case with numeric IDs
+        assert_eq!(
+            APIGatewayRestEvent::parameterize_resource("/users/12345/friends/67890".to_string()),
+            "/users/{user_id}/friends/{friend_id}"
+        );
+        
+        // Test case with alphanumeric IDs
+        assert_eq!(
+            APIGatewayRestEvent::parameterize_resource("/users/abc123/posts/def_456/comments/789".to_string()),
+            "/users/{user_id}/posts/{post_id}/comments/{comment_id}"
+        );
+        
+        // Test case with already parameterized path
+        assert_eq!(
+            APIGatewayRestEvent::parameterize_resource("/users/{user_id}/profile".to_string()),
+            "/users/{user_id}/profile"
+        );
+        
+        // Test case with mixed segments
+        assert_eq!(
+            APIGatewayRestEvent::parameterize_resource("/api/v1/users/12345/settings".to_string()),
+            "/api/v1/users/{user_id}/settings"
+        );
+        
+        // Test case with UUIDs
+        assert_eq!(
+            APIGatewayRestEvent::parameterize_resource("/orders/123e4567-e89b-12d3-a456-426614174000/items".to_string()),
+            "/orders/{order_id}/items"
+        );
+    }
 
     #[test]
     fn test_new() {
