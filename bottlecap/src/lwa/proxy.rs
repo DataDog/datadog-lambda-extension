@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use http_body_util::combinators::BoxBody;
 use http_body_util::{BodyExt, Full};
 use hyper::header::{HeaderMap, HeaderName, HeaderValue};
 use hyper::server::conn::http1;
@@ -11,7 +10,6 @@ use hyper_util::rt::TokioIo;
 use lifecycle::invocation::{generate_span_id, processor::Processor};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::{net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -42,6 +40,14 @@ pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<Sh
                 .await
                 .expect("LWA: Failed to bind LWA proxy socket");
 
+            let mut https = HttpConnector::new();
+            https.set_connect_timeout(Some(std::time::Duration::from_secs(5)));
+            let client = Arc::new(
+                Client::builder(hyper_util::rt::TokioExecutor::new())
+                    .pool_idle_timeout(std::time::Duration::from_secs(30))
+                    .pool_max_idle_per_host(32)
+                    .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https),
+            );
             loop {
                 tokio::select! {
                     accept_result = proxy_server.accept() => {
@@ -50,6 +56,8 @@ pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<Sh
                                 let io = TokioIo::new(tcp_stream);
                                 let async_invocation_processor_cp = Arc::clone(&invocation_processor);
                                 let async_aws_runtime_uri_cp = aws_runtime_uri.clone();
+
+                                let client_copy = Arc::clone(&client);
 
                                 tokio::task::spawn(async move {
                                     if let Err(err) = http1::Builder::new()
@@ -62,6 +70,7 @@ pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<Sh
                                                     req,
                                                     Arc::clone(&async_invocation_processor_cp),
                                                     async_aws_runtime_uri_cp.clone(),
+                                                    Arc::clone(&client_copy),
                                                 )
                                             }),
                                         )
@@ -162,7 +171,8 @@ async fn intercept_payload(
     intercepted: Request<hyper::body::Incoming>,
     processor: Arc<Mutex<Processor>>,
     aws_runtime_addr: Uri,
-) -> Result<Response<BoxBody<Bytes, Infallible>>, hyper::Error> {
+    client: Arc<Client<HttpConnector, http_body_util::Full<prost::bytes::Bytes>>>,
+) -> Result<Response<Full<Bytes>>, hyper::Error> {
     // request received from lambda handler directed to AWS runtime API
     // it can be either invocation/next, or a lambda handler response to it
     let (intercepted_parts, intercepted_body) = intercepted.into_parts();
@@ -190,17 +200,17 @@ async fn intercept_payload(
         waited_intercepted_body.clone(),
     );
 
-    // Create HTTP client
-    let https = HttpConnector::new();
-    let client = Client::builder(hyper_util::rt::TokioExecutor::new())
-        .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https);
-
     // response after forwarding to AWS runtime API
     let response_to_intercepted = match client.request(forward_intercepted).await {
         Ok(response) => response,
         Err(e) => {
             error!("LWA: Error forwarding request to AWS runtime: {}", e);
-            return Ok(Response::new(BoxBody::new(Full::new(Bytes::new()))));
+            return Ok(Response::builder()
+                .status(502) // Bad Gateway
+                .body(Full::new(Bytes::from(format!(
+                    "Failed to forward request: {e}"
+                ))))
+                .unwrap_or_else(|_| Response::new(Full::new(Bytes::new()))));
         }
     };
 
@@ -231,10 +241,10 @@ async fn intercept_payload(
     let mut forward_response = Response::builder()
         .status(resp_part.status)
         .version(resp_part.version)
-        .body(BoxBody::new(Full::new(resp_payload)))
+        .body(Full::new(resp_payload))
         .unwrap_or_else(|e| {
             error!("LWA: Error building forwarded response: {}", e);
-            Response::new(BoxBody::new(Full::new(Bytes::new())))
+            Response::new(Full::new(Bytes::new()))
         });
 
     *forward_response.headers_mut() = resp_part.headers.clone();
@@ -272,7 +282,16 @@ async fn on_get_next_response(
     // intercepted invocation/next. The *response body* contains the payload of
     // the request that the lambda handler will see
 
-    let inner_payload = serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|_| json!({}));
+    let inner_payload = serde_json::from_slice::<Value>(resp_payload).unwrap_or_else(|e| {
+        error!("LWA: Error parsing response payload as JSON: {}", e);
+        if resp_payload.len() < 1024 {
+            debug!(
+                "LWA: Invalid JSON payload: {:?}",
+                String::from_utf8_lossy(resp_payload)
+            );
+        }
+        json!({})
+    });
 
     // Response is not cloneable, so it must be built again
     let body = serde_json::to_vec(&inner_payload).unwrap_or_else(|e| {
@@ -393,6 +412,7 @@ mod tests {
     use hyper_util::client::legacy::Client;
     use hyper_util::rt::TokioIo;
     use tokio::net::TcpListener;
+    use tracing::error;
 
     use crate::LAMBDA_RUNTIME_SLUG;
 
