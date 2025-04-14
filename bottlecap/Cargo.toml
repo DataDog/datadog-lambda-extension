@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 async-trait = { version = "0.1", default-features = false }
-bytes = "1.2"
+bytes = { version = "1.2", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
