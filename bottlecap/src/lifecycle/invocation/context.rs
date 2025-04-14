@@ -21,6 +21,7 @@ pub struct Context {
     ///
     /// Known as the `aws.lambda` span.
     pub invocation_span: Span,
+    pub runtime_done_received: bool,
     /// The span used as placeholder for the invocation span by the tracer.
     ///
     /// In the tracer, this is created in order to have all children spans parented
@@ -37,6 +38,24 @@ pub struct Context {
     /// tracing.
     ///
     pub extracted_span_context: Option<SpanContext>,
+}
+
+/// Struct containing the information needed to reparent a span.
+/// The struct contains initially the span ID of an invocation span, the lambda request ID
+/// causing the invocation, and the parent found (0 if no inferred spans or existing parent were
+/// found).
+///
+/// When receiving spans, the trace id for this request will be guessed based on the order of
+/// incoming spans. So it holds true when at least one span related to invocation N is received
+/// by the extension before the spans of request N+1
+#[derive(Clone, Debug)]
+pub struct ReparentingInfo {
+    pub request_id: String,
+    pub invocation_span_id: u64,
+    pub parent_id_to_reparent: u64,
+
+    pub guessed_trace_id: u64,
+    pub needs_trace_id: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -65,6 +84,7 @@ impl Default for Context {
             runtime_duration_ms: 0f64,
             enhanced_metric_data: None,
             invocation_span: Span::default(),
+            runtime_done_received: false,
             cold_start_span: None,
             tracer_span: None,
             extracted_span_context: None,
@@ -85,9 +105,9 @@ pub struct ContextBuffer {
     /// For correct processing, events are paired based on a common pattern.
     ///
     /// The expected order of events is:
-    /// ```
-    /// Invoke -> UniversalInstrumentationStart -> UniversalInstrumentationEnd -> PlatformRuntimeDone
-    /// ```
+    ///
+    /// Invoke -> `UniversalInstrumentationStart` -> `UniversalInstrumentationEnd` -> `PlatformRuntimeDone`
+    ///
     ///
     /// 1. The `Invoke` event is used to pair the `UniversalInstrumentationStart` event.
     ///
@@ -102,6 +122,7 @@ pub struct ContextBuffer {
     platform_runtime_done_events_request_ids: VecDeque<String>,
     universal_instrumentation_start_events: VecDeque<UniversalInstrumentationData>,
     universal_instrumentation_end_events: VecDeque<UniversalInstrumentationData>,
+    pub sorted_reparenting_info: VecDeque<ReparentingInfo>,
 }
 
 struct UniversalInstrumentationData {
@@ -113,14 +134,7 @@ impl Default for ContextBuffer {
     /// Creates a new `ContextBuffer` with a default capacity of 5.
     ///
     fn default() -> Self {
-        let capacity = 5;
-        ContextBuffer {
-            buffer: VecDeque::<Context>::with_capacity(capacity),
-            invoke_events_request_ids: VecDeque::with_capacity(capacity),
-            platform_runtime_done_events_request_ids: VecDeque::with_capacity(capacity),
-            universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
-            universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
-        }
+        ContextBuffer::with_capacity(5)
     }
 }
 
@@ -133,6 +147,7 @@ impl ContextBuffer {
             platform_runtime_done_events_request_ids: VecDeque::with_capacity(capacity),
             universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
             universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
+            sorted_reparenting_info: VecDeque::with_capacity(capacity),
         }
     }
 

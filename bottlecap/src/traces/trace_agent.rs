@@ -7,6 +7,7 @@ use hyper::service::service_fn;
 use hyper::{http, Method, Response, StatusCode};
 use reqwest;
 use serde_json::json;
+use std::collections::VecDeque;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -17,6 +18,7 @@ use tracing::{debug, error};
 
 use crate::config;
 use crate::http_client;
+use crate::lifecycle::invocation::context::ReparentingInfo;
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 use crate::tags::provider;
 use crate::traces::{
@@ -364,7 +366,7 @@ impl TraceAgent {
 
         let tracer_header_tags = (&parts.headers).into();
 
-        let (body_size, traces) = match version {
+        let (body_size, mut traces) = match version {
             ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
                 Ok(result) => result,
                 Err(err) => {
@@ -384,14 +386,28 @@ impl TraceAgent {
                 }
             },
         };
+        let mut reparenting_info = {
+            let invocation_processor = invocation_processor.lock().await;
+            invocation_processor.get_reparenting_info()
+        };
 
-        // Search for trace invocation span and send it to the invocation processor
-        for chunk in &traces {
-            for span in chunk {
+        for chunk in &mut traces {
+            for span in chunk.iter_mut() {
                 if span.resource == INVOCATION_SPAN_RESOURCE {
                     let mut invocation_processor = invocation_processor.lock().await;
                     invocation_processor.add_tracer_span(span);
                 }
+                handle_reparenting(&mut reparenting_info, span);
+            }
+        }
+
+        {
+            let mut invocation_processor = invocation_processor.lock().await;
+            for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
+                debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
+                invocation_processor
+                    .send_ctx_spans(&tags_provider, &trace_processor, &trace_tx, ctx_to_send)
+                    .await;
             }
         }
 
@@ -624,5 +640,27 @@ impl TraceAgent {
     #[must_use]
     pub fn get_sender_copy(&self) -> Sender<SendData> {
         self.tx.clone()
+    }
+}
+
+fn handle_reparenting(reparenting_info: &mut VecDeque<ReparentingInfo>, span: &mut pb::Span) {
+    for rep_info in reparenting_info {
+        if rep_info.needs_trace_id {
+            rep_info.guessed_trace_id = span.trace_id;
+            rep_info.needs_trace_id = false;
+            debug!(
+                "Guessed trace ID: {} for reparenting {rep_info:?}",
+                span.trace_id
+            );
+        }
+        if span.trace_id == rep_info.guessed_trace_id
+            && span.parent_id == rep_info.parent_id_to_reparent
+        {
+            debug!(
+                "Reparenting span {} with parent id {}",
+                span.span_id, rep_info.invocation_span_id
+            );
+            span.parent_id = rep_info.invocation_span_id;
+        }
     }
 }
