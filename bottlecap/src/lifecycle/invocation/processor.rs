@@ -324,7 +324,7 @@ impl Processor {
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
     ) {
-        let context = self.enrich_ctx_at_paltform_done(request_id, status);
+        let context = self.enrich_ctx_at_platform_done(request_id, status);
 
         if self.tracer_detected {
             if let Some(ctx) = context {
