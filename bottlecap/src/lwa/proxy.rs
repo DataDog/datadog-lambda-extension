@@ -68,7 +68,7 @@ pub fn start_lwa_proxy(invocation_processor: Arc<Mutex<Processor>>) -> Option<Sh
                                         // .with_upgrades()
                                         .await
                                     {
-                                        println!("LWA: Failed to serve connection: {err:?}");
+                                        error!("LWA: Failed to serve connection: {err:?}");
                                     }
                                 });
                             }
