@@ -336,7 +336,7 @@ impl Processor {
         }
     }
 
-    fn enrich_ctx_at_paltform_done(
+    fn enrich_ctx_at_platform_done(
         &mut self,
         request_id: &String,
         status: Status,
