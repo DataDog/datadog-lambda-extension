@@ -87,6 +87,26 @@ fn log_fips_status() {
     debug!("FIPS mode is disabled");
 }
 
+/// Sets up the client provider for TLS operations.
+/// In FIPS mode, this installs the AWS-LC crypto provider.
+/// In non-FIPS mode, this is a no-op.
+#[cfg(feature = "fips")]
+fn prepare_client_provider() -> Result<()> {
+    rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to set up crypto provider: {e:?}"),
+            )
+        })
+}
+
+#[cfg(not(feature = "fips"))]
+fn prepare_client_provider() -> Result<()> {
+    // No-op in non-FIPS mode
+    Ok(())
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RegisterResponse {
@@ -206,6 +226,7 @@ async fn main() -> Result<()> {
     log_fips_status();
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
+    prepare_client_provider()?;
     let client = Client::builder().no_proxy().build().map_err(|e| {
         Error::new(
             std::io::ErrorKind::InvalidData,

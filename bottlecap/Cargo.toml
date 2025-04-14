@@ -75,7 +75,7 @@ fips = [
     "ddcommon/fips",
     "datadog-trace-utils/fips",
     "dogstatsd/fips",
-    "reqwest/rustls-tls-no-provider",
+    "reqwest/rustls-tls-native-roots-no-provider",
     "rustls/fips",
 ]
 force_fallback = []
