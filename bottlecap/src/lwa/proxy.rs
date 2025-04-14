@@ -475,7 +475,7 @@ mod tests {
             .await;
 
         while ask_proxy.is_err() {
-            println!(
+            error!(
                 "Retrying request to proxy, err: {}",
                 ask_proxy.err().unwrap()
             );
