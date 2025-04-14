@@ -393,7 +393,6 @@ impl TraceAgent {
 
         for chunk in &mut traces {
             for span in chunk.iter_mut() {
-                debug!("Processing span: {span:?}");
                 if span.resource == INVOCATION_SPAN_RESOURCE {
                     let mut invocation_processor = invocation_processor.lock().await;
                     invocation_processor.add_tracer_span(span);
