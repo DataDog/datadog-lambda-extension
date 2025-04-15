@@ -267,4 +267,34 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         assert!(!APIGatewayWebSocketEvent::is_match(&payload));
     }
+
+    #[test]
+    fn test_enrich_span() {
+        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize APIGatewayWebSocketEvent");
+
+        let mut span = Span::default();
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
+
+        assert_eq!(span.name, "aws.apigateway");
+        assert_eq!(span.service, "85fj5nw29d.execute-api.eu-west-1.amazonaws.com");
+        assert_eq!(span.resource, "hello");
+        assert_eq!(span.r#type, "web");
+        assert_eq!(span.meta, HashMap::from([
+            ("endpoint".to_string(), "hello".to_string()),
+            ("resource_names".to_string(), "hello".to_string()),
+            ("http.url".to_string(), "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()),
+            ("operation_name".to_string(), "aws.apigateway".to_string()),
+            ("request_id".to_string(), "ahVmYGOMmjQFhyg=".to_string()),
+            ("apiid".to_string(), "85fj5nw29d".to_string()),
+            ("apiname".to_string(), "85fj5nw29d".to_string()),
+            ("stage".to_string(), "dev".to_string()),
+            ("connection_id".to_string(), "ahVWscZqmjQCI1w=".to_string()),
+            ("event_type".to_string(), "MESSAGE".to_string()),
+            ("message_direction".to_string(), "IN".to_string()),
+        ]));
+    }
 }
