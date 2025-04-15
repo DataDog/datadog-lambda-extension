@@ -15,7 +15,7 @@ use super::ServiceNameResolver;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct APIGatewayWebSocketEvent {
-    #[serde(deserialize_with = "lowercase_key")]
+    #[serde(deserialize_with = "lowercase_key", default)]
     pub headers: HashMap<String, String>,
     #[serde(rename = "requestContext")]
     pub request_context: RequestContext,
