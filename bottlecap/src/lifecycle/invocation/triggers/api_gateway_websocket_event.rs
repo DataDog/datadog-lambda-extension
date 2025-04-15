@@ -76,7 +76,7 @@ impl Trigger for APIGatewayWebSocketEvent {
 
         span.name = "aws.apigateway".to_string();
         span.service = service_name;
-        span.resource.clone_from(&resource);
+        span.resource.clone_from(resource);
         span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
@@ -280,22 +280,31 @@ mod tests {
         event.enrich_span(&mut span, &service_mapping);
 
         assert_eq!(span.name, "aws.apigateway");
-        assert_eq!(span.service, "85fj5nw29d.execute-api.eu-west-1.amazonaws.com");
+        assert_eq!(
+            span.service,
+            "85fj5nw29d.execute-api.eu-west-1.amazonaws.com"
+        );
         assert_eq!(span.resource, "hello");
         assert_eq!(span.r#type, "web");
-        assert_eq!(span.meta, HashMap::from([
-            ("endpoint".to_string(), "hello".to_string()),
-            ("resource_names".to_string(), "hello".to_string()),
-            ("http.url".to_string(), "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()),
-            ("operation_name".to_string(), "aws.apigateway".to_string()),
-            ("request_id".to_string(), "ahVmYGOMmjQFhyg=".to_string()),
-            ("apiid".to_string(), "85fj5nw29d".to_string()),
-            ("apiname".to_string(), "85fj5nw29d".to_string()),
-            ("stage".to_string(), "dev".to_string()),
-            ("connection_id".to_string(), "ahVWscZqmjQCI1w=".to_string()),
-            ("event_type".to_string(), "MESSAGE".to_string()),
-            ("message_direction".to_string(), "IN".to_string()),
-        ]));
+        assert_eq!(
+            span.meta,
+            HashMap::from([
+                ("endpoint".to_string(), "hello".to_string()),
+                ("resource_names".to_string(), "hello".to_string()),
+                (
+                    "http.url".to_string(),
+                    "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()
+                ),
+                ("operation_name".to_string(), "aws.apigateway".to_string()),
+                ("request_id".to_string(), "ahVmYGOMmjQFhyg=".to_string()),
+                ("apiid".to_string(), "85fj5nw29d".to_string()),
+                ("apiname".to_string(), "85fj5nw29d".to_string()),
+                ("stage".to_string(), "dev".to_string()),
+                ("connection_id".to_string(), "ahVWscZqmjQCI1w=".to_string()),
+                ("event_type".to_string(), "MESSAGE".to_string()),
+                ("message_direction".to_string(), "IN".to_string()),
+            ])
+        );
     }
 
     #[test]
@@ -307,9 +316,15 @@ mod tests {
 
         let tags = event.get_tags();
         let expected = HashMap::from([
-            ("http.url".to_string(), "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()),
+            (
+                "http.url".to_string(),
+                "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string(),
+            ),
             ("http.url_details.path".to_string(), "hello".to_string()),
-            ("function_trigger.event_source".to_string(), "api-gateway".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "api-gateway".to_string(),
+            ),
         ]);
 
         assert_eq!(tags, expected);
@@ -338,7 +353,10 @@ mod tests {
         // Priority is given to the specific key
         let specific_service_mapping = HashMap::from([
             ("85fj5nw29d".to_string(), "specific-service".to_string()),
-            ("lambda_api_gateway".to_string(), "generic-service".to_string()),
+            (
+                "lambda_api_gateway".to_string(),
+                "generic-service".to_string(),
+            ),
         ]);
 
         assert_eq!(
@@ -349,15 +367,14 @@ mod tests {
             "specific-service"
         );
 
-        let generic_service_mapping = HashMap::from([
-            ("lambda_api_gateway".to_string(), "generic-service".to_string()),
-        ]);
+        let generic_service_mapping = HashMap::from([(
+            "lambda_api_gateway".to_string(),
+            "generic-service".to_string(),
+        )]);
 
         assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.request_context.domain_name
-            ),
+            event
+                .resolve_service_name(&generic_service_mapping, &event.request_context.domain_name),
             "generic-service"
         );
     }
