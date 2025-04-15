@@ -11,6 +11,7 @@ use crate::lifecycle::invocation::{
     triggers::{
         api_gateway_http_event::APIGatewayHttpEvent,
         api_gateway_rest_event::APIGatewayRestEvent,
+        api_gateway_websocket_event::APIGatewayWebSocketEvent,
         dynamodb_event::DynamoDbRecord,
         event_bridge_event::EventBridgeEvent,
         kinesis_event::KinesisRecord,
@@ -88,6 +89,12 @@ impl SpanInferrer {
             }
         } else if APIGatewayRestEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayRestEvent::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if APIGatewayWebSocketEvent::is_match(payload_value) {
+            if let Some(t) = APIGatewayWebSocketEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
