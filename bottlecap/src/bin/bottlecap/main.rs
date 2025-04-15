@@ -102,6 +102,8 @@ fn prepare_client_provider() -> Result<()> {
 }
 
 #[cfg(not(feature = "fips"))]
+// this is not unnecessary since the fips version can return an error
+#[allow(clippy::unnecessary_wraps)]
 fn prepare_client_provider() -> Result<()> {
     // No-op in non-FIPS mode
     Ok(())
