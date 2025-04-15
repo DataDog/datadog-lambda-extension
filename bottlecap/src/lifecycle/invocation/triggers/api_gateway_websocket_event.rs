@@ -297,4 +297,68 @@ mod tests {
             ("message_direction".to_string(), "IN".to_string()),
         ]));
     }
+
+    #[test]
+    fn test_get_tags() {
+        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize APIGatewayWebSocketEvent");
+
+        let tags = event.get_tags();
+        let expected = HashMap::from([
+            ("http.url".to_string(), "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()),
+            ("http.url_details.path".to_string(), "hello".to_string()),
+            ("function_trigger.event_source".to_string(), "api-gateway".to_string()),
+        ]);
+
+        assert_eq!(tags, expected);
+    }
+
+    #[test]
+    fn test_get_arn() {
+        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize APIGatewayWebSocketEvent");
+
+        assert_eq!(
+            event.get_arn("us-east-1"),
+            "arn:aws:apigateway:us-east-1::/apis/85fj5nw29d/stages/dev"
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize APIGatewayWebSocketEvent");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("85fj5nw29d".to_string(), "specific-service".to_string()),
+            ("lambda_api_gateway".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.request_context.domain_name
+            ),
+            "specific-service"
+        );
+
+        let generic_service_mapping = HashMap::from([
+            ("lambda_api_gateway".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.request_context.domain_name
+            ),
+            "generic-service"
+        );
+    }
 }
