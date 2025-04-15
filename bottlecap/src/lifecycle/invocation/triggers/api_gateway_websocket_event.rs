@@ -169,3 +169,84 @@ impl ServiceNameResolver for APIGatewayWebSocketEvent {
         "lambda_api_gateway"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+
+    #[test]
+    fn test_new_connect_event() {
+        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize into APIGatewayWebSocketEvent");
+
+        let expected = APIGatewayWebSocketEvent {
+            headers: HashMap::new(),
+            request_context: RequestContext {
+                route_key: "hello".to_string(),
+                domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
+                time_epoch: 1666633666203,
+                request_id: "ahVmYGOMmjQFhyg=".to_string(),
+                api_id: "85fj5nw29d".to_string(),
+                stage: "dev".to_string(),
+                connection_id: "ahVWscZqmjQCI1w=".to_string(),
+                event_type: "MESSAGE".to_string(),
+                message_direction: "IN".to_string(),
+            },
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_new_message_event() {
+        let json = read_json_file("api_gateway_websocket_message_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize into APIGatewayWebSocketEvent");
+
+        let expected = APIGatewayWebSocketEvent {
+            headers: HashMap::new(),
+            request_context: RequestContext {
+                route_key: "hello".to_string(),
+                domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
+                time_epoch: 1666633666203,
+                request_id: "ahVmYGOMmjQFhyg=".to_string(),
+                api_id: "85fj5nw29d".to_string(),
+                stage: "dev".to_string(),
+                connection_id: "ahVWscZqmjQCI1w=".to_string(),
+                event_type: "MESSAGE".to_string(),
+                message_direction: "IN".to_string(),
+            },
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_new_disconnect_event() {
+        let json = read_json_file("api_gateway_websocket_disconnect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize into APIGatewayWebSocketEvent");
+
+        let expected = APIGatewayWebSocketEvent {
+            headers: HashMap::new(),
+            request_context: RequestContext {
+                route_key: "hello".to_string(),
+                domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
+                time_epoch: 1666633666203,
+                request_id: "ahVmYGOMmjQFhyg=".to_string(),
+                api_id: "85fj5nw29d".to_string(),
+                stage: "production".to_string(),
+                connection_id: "ahVWscZqmjQCI1w=".to_string(),
+                event_type: "DISCONNECT".to_string(), // Note: The example payload shows MESSAGE event type, not DISCONNECT
+                message_direction: "IN".to_string(),
+            },
+        };
+
+        assert_eq!(result, expected);
+    }
+}
