@@ -249,4 +249,22 @@ mod tests {
 
         assert_eq!(result, expected);
     }
+
+    #[test]
+    fn test_is_match() {
+        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        assert!(APIGatewayWebSocketEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_is_not_match() {
+        let json = read_json_file("api_gateway_http_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        assert!(!APIGatewayWebSocketEvent::is_match(&payload));
+
+        let json = read_json_file("api_gateway_proxy_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        assert!(!APIGatewayWebSocketEvent::is_match(&payload));
+    }
 }
