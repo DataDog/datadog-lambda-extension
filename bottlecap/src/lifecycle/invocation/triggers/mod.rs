@@ -6,6 +6,7 @@ use serde_json::Value;
 
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
+pub mod api_gateway_websocket_event;
 pub mod dynamodb_event;
 pub mod event_bridge_event;
 pub mod kinesis_event;

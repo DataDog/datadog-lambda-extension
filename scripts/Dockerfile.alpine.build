@@ -7,7 +7,7 @@ ARG CMD_PATH
 ARG BUILD_TAGS
 
 RUN apk add --no-cache git make musl-dev gcc
-COPY --from=golang:1.23.6-alpine /usr/local/go/ /usr/lib/go
+COPY --from=golang:1.23.8-alpine /usr/local/go/ /usr/lib/go
 
 ENV GOROOT /usr/lib/go
 ENV GOPATH /go

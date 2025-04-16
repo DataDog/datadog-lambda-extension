@@ -1,6 +1,7 @@
 use base64::{engine::general_purpose, DecodeError, Engine};
 use datadog_trace_protobuf::pb::Span;
 use rand::{rngs::OsRng, Rng, RngCore};
+use std::collections::HashMap;
 
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
 use serde_json::Value;
@@ -30,91 +31,24 @@ pub fn base64_to_string(base64_string: &str) -> Result<String, DecodeError> {
     }
 }
 
-fn create_empty_span(name: String, resource: String, service: String) -> Span {
+fn create_empty_span(name: String, resource: &str, service: &str) -> Span {
     Span {
         name,
-        resource,
-        service,
+        resource: resource.to_string(),
+        service: service.to_string(),
         r#type: String::from("serverless"),
         ..Default::default()
     }
 }
 
-fn generate_span_id() -> u64 {
+#[must_use]
+pub fn generate_span_id() -> u64 {
     if std::env::var(INIT_TYPE).map_or(false, |it| it == SNAP_START_VALUE) {
         return OsRng.next_u64();
     }
 
     let mut rng = rand::thread_rng();
     rng.gen()
-}
-
-pub fn tag_span_from_value(span: &mut Span, key: &str, value: &Value, depth: u32, max_depth: u32) {
-    // Null scenario
-    if value.is_null() {
-        span.meta.insert(key.to_string(), value.to_string());
-        return;
-    }
-
-    // Check max depth
-    if depth >= max_depth {
-        match serde_json::to_string(value) {
-            Ok(s) => {
-                let truncated = s.chars().take(MAX_TAG_CHARS).collect::<String>();
-                span.meta.insert(key.to_string(), truncated);
-                return;
-            }
-            Err(e) => {
-                debug!("Unable to serialize value for tagging {e}");
-                return;
-            }
-        }
-    }
-
-    let new_depth = depth + 1;
-    match value {
-        // Handle string case
-        Value::String(s) => {
-            if let Ok(p) = serde_json::from_str::<Value>(s) {
-                tag_span_from_value(span, key, &p, new_depth, max_depth);
-            } else {
-                let truncated = s.chars().take(MAX_TAG_CHARS).collect::<String>();
-                span.meta
-                    .insert(key.to_string(), redact_value(key, truncated));
-            }
-        }
-
-        // Handle number case
-        Value::Number(n) => {
-            span.meta.insert(key.to_string(), n.to_string());
-        }
-
-        // Handle boolean case
-        Value::Bool(b) => {
-            span.meta.insert(key.to_string(), b.to_string());
-        }
-
-        // Handle object case
-        Value::Object(map) => {
-            for (k, v) in map {
-                let new_key = format!("{key}.{k}");
-                tag_span_from_value(span, &new_key, v, new_depth, max_depth);
-            }
-        }
-
-        Value::Array(a) => {
-            if a.is_empty() {
-                span.meta.insert(key.to_string(), "[]".to_string());
-                return;
-            }
-
-            for (i, v) in a.iter().enumerate() {
-                let new_key = format!("{key}.{i}");
-                tag_span_from_value(span, &new_key, v, new_depth, max_depth);
-            }
-        }
-        Value::Null => {}
-    }
 }
 
 fn redact_value(key: &str, value: String) -> String {
@@ -126,6 +60,82 @@ fn redact_value(key: &str, value: String) -> String {
     }
 }
 
+pub fn get_metadata_from_value(
+    key: &str,
+    value: &Value,
+    depth: u32,
+    max_depth: u32,
+) -> HashMap<String, String> {
+    let mut metadata = HashMap::new();
+
+    // Null scenario
+    if value.is_null() {
+        metadata.insert(key.to_string(), value.to_string());
+        return metadata;
+    }
+
+    // Check max depth
+    if depth >= max_depth {
+        match serde_json::to_string(value) {
+            Ok(s) => {
+                let truncated = s.chars().take(MAX_TAG_CHARS).collect::<String>();
+                metadata.insert(key.to_string(), truncated);
+                return metadata;
+            }
+            Err(e) => {
+                debug!("Unable to serialize value for tagging {e}");
+                return metadata;
+            }
+        }
+    }
+
+    let new_depth = depth + 1;
+    match value {
+        // Handle string case
+        Value::String(s) => {
+            if let Ok(p) = serde_json::from_str::<Value>(s) {
+                metadata.extend(get_metadata_from_value(key, &p, new_depth, max_depth));
+            } else {
+                let truncated = s.chars().take(MAX_TAG_CHARS).collect::<String>();
+                metadata.insert(key.to_string(), redact_value(key, truncated));
+            }
+        }
+
+        // Handle number case
+        Value::Number(n) => {
+            metadata.insert(key.to_string(), n.to_string());
+        }
+
+        // Handle boolean case
+        Value::Bool(b) => {
+            metadata.insert(key.to_string(), b.to_string());
+        }
+
+        // Handle object case
+        Value::Object(map) => {
+            for (k, v) in map {
+                let new_key = format!("{key}.{k}");
+                metadata.extend(get_metadata_from_value(&new_key, v, new_depth, max_depth));
+            }
+        }
+
+        Value::Array(a) => {
+            if a.is_empty() {
+                metadata.insert(key.to_string(), "[]".to_string());
+                return metadata;
+            }
+
+            for (i, v) in a.iter().enumerate() {
+                let new_key = format!("{key}.{i}");
+                metadata.extend(get_metadata_from_value(&new_key, v, new_depth, max_depth));
+            }
+        }
+        Value::Null => {}
+    }
+
+    metadata
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
@@ -135,20 +145,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_simple_tagging() {
-        let mut span = Span::default();
+    fn test_get_metadata_from_value_simple_tagging() {
         let value = json!({ "request": { "simple": "value" } });
 
-        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+        let metadata = get_metadata_from_value("payload", &value, 0, 10);
 
         let expected = HashMap::from([("payload.request.simple".to_string(), "value".to_string())]);
 
-        assert_eq!(span.meta, expected);
+        assert_eq!(metadata, expected);
     }
 
     #[test]
-    fn test_complex_object() {
-        let mut span = Span::default();
+    fn test_get_metadata_from_value_complex_object() {
         let value = json!({
             "request": {
                 "simple": "value",
@@ -165,7 +173,7 @@ mod tests {
             }
         });
 
-        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+        let metadata = get_metadata_from_value("payload", &value, 0, 10);
 
         let expected = HashMap::from([
             ("payload.request.simple".to_string(), "value".to_string()),
@@ -185,12 +193,11 @@ mod tests {
             ("payload.request.boolean".to_string(), "true".to_string()),
         ]);
 
-        assert_eq!(span.meta, expected);
+        assert_eq!(metadata, expected);
     }
 
     #[test]
-    fn test_array_of_objects() {
-        let mut span = Span::default();
+    fn test_get_metadata_from_value_array_of_objects() {
         let value = json!({
             "request": [
                 { "simple": "value" },
@@ -199,7 +206,7 @@ mod tests {
             ]
         });
 
-        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+        let metadata = get_metadata_from_value("payload", &value, 0, 10);
 
         let expected = HashMap::from([
             ("payload.request.0.simple".to_string(), "value".to_string()),
@@ -207,12 +214,11 @@ mod tests {
             ("payload.request.2.simple".to_string(), "value".to_string()),
         ]);
 
-        assert_eq!(span.meta, expected);
+        assert_eq!(metadata, expected);
     }
 
     #[test]
-    fn test_reach_max_depth() {
-        let mut span = Span::default();
+    fn test_get_metadata_from_value_reach_max_depth() {
         let value = json!({
             "hello": "world",
             "empty": null,
@@ -230,7 +236,7 @@ mod tests {
             "arr": [{ "a": "b" }, { "c": "d" }]
         });
 
-        tag_span_from_value(&mut span, "payload", &value, 0, 2);
+        let metadata = get_metadata_from_value("payload", &value, 0, 2);
 
         let expected = HashMap::from([
             ("payload.hello".to_string(), "world".to_string()),
@@ -252,12 +258,11 @@ mod tests {
             ("payload.arr.1".to_string(), "{\"c\":\"d\"}".to_string()),
         ]);
 
-        assert_eq!(span.meta, expected);
+        assert_eq!(metadata, expected);
     }
 
     #[test]
-    fn test_tag_redacts_key() {
-        let mut span = Span::default();
+    fn test_get_metadata_from_value_tag_redacts_key() {
         let value = json!({
             "request": {
                 "headers": {
@@ -266,13 +271,13 @@ mod tests {
             }
         });
 
-        tag_span_from_value(&mut span, "payload", &value, 0, 10);
+        let metadata = get_metadata_from_value("payload", &value, 0, 10);
 
         let expected = HashMap::from([(
             "payload.request.headers.authorization".to_string(),
             "redacted".to_string(),
         )]);
 
-        assert_eq!(span.meta, expected);
+        assert_eq!(metadata, expected);
     }
 }

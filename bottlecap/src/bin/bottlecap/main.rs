@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::lwa::proxy::start_lwa_proxy;
 use bottlecap::{
     base_url,
     config::{self, get_aws_partition_by_region, AwsConfig, Config},
@@ -347,6 +348,8 @@ async fn extension_loop_active(
         Arc::clone(&trace_aggregator),
     );
 
+    let lwa_proxy_stopper = start_lwa_proxy(Arc::clone(&invocation_processor));
+
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
     };
@@ -395,7 +398,7 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                 break 'flush_end;
                             }
@@ -460,7 +463,7 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
                         flush_all(
@@ -479,13 +482,19 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), config.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
                                 // Wait for the report event before shutting down
                                 break 'shutdown;
                             }
                         }
                     }
+                }
+            }
+            if let Some(lwa_proxy_task) = lwa_proxy_stopper {
+                // use with graceful shutdown after rebase with hyper 1
+                if let Err(exit_err) = lwa_proxy_task.send(()).await {
+                    error!("Error stopping LWA proxy: {exit_err:?}");
                 }
             }
             dogstatsd_cancel_token.cancel();
@@ -507,8 +516,8 @@ async fn extension_loop_active(
 async fn flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flusher: &mut MetricsFlusher,
-    trace_flusher: &dyn TraceFlusher,
-    stats_flusher: &dyn StatsFlusher,
+    trace_flusher: &impl TraceFlusher,
+    stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
@@ -523,7 +532,6 @@ async fn flush_all(
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
-    config: Arc<Config>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
@@ -537,62 +545,59 @@ async fn handle_event_bus_event(
             p.on_out_of_memory_error(event_timestamp);
             drop(p);
         }
-        Event::Telemetry(event) => match event.record {
-            TelemetryRecord::PlatformInitStart { .. } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_init_start(event.time);
-                drop(p);
-            }
-            TelemetryRecord::PlatformInitReport {
-                initialization_type,
-                phase,
-                metrics,
-            } => {
-                debug!("Platform init report for initialization_type: {:?} with phase: {:?} and metrics: {:?}", initialization_type, phase, metrics);
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
-                drop(p);
-            }
-            TelemetryRecord::PlatformStart { request_id, .. } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_start(request_id, event.time);
-                drop(p);
-            }
-            TelemetryRecord::PlatformRuntimeDone {
-                ref request_id,
-                metrics: Some(metrics),
-                status,
-                ..
-            } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_runtime_done(
-                    request_id,
-                    metrics,
+        Event::Telemetry(event) => {
+            debug!("Telemetry event received: {:?}", event);
+            match event.record {
+                TelemetryRecord::PlatformInitStart { .. } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_init_start(event.time);
+                    drop(p);
+                }
+                TelemetryRecord::PlatformInitReport { metrics, .. } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
+                    drop(p);
+                }
+                TelemetryRecord::PlatformStart { request_id, .. } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_start(request_id, event.time);
+                    drop(p);
+                }
+                TelemetryRecord::PlatformRuntimeDone {
+                    ref request_id,
+                    metrics: Some(metrics),
                     status,
-                    config.clone(),
-                    tags_provider.clone(),
-                    trace_processor.clone(),
-                    trace_agent_channel.clone(),
-                    event.time.timestamp(),
-                )
-                .await;
-                drop(p);
-                return Some(event);
+                    ..
+                } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_runtime_done(
+                        request_id,
+                        metrics,
+                        status,
+                        tags_provider.clone(),
+                        trace_processor.clone(),
+                        trace_agent_channel.clone(),
+                        event.time.timestamp(),
+                    )
+                    .await;
+                    drop(p);
+                    return Some(event);
+                }
+                TelemetryRecord::PlatformReport {
+                    ref request_id,
+                    metrics,
+                    ..
+                } => {
+                    let mut p = invocation_processor.lock().await;
+                    p.on_platform_report(request_id, metrics, event.time.timestamp());
+                    drop(p);
+                    return Some(event);
+                }
+                _ => {
+                    debug!("Unforwarded Telemetry event: {:?}", event);
+                }
             }
-            TelemetryRecord::PlatformReport {
-                ref request_id,
-                metrics,
-                ..
-            } => {
-                let mut p = invocation_processor.lock().await;
-                p.on_platform_report(request_id, metrics, event.time.timestamp());
-                drop(p);
-                return Some(event);
-            }
-            _ => {
-                debug!("Unforwarded Telemetry event: {:?}", event);
-            }
-        },
+        }
     }
     None
 }
