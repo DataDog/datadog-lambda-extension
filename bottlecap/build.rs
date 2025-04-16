@@ -19,10 +19,12 @@ fn check_forbidden_dependency(dependency_name: &str) -> Result<(), String> {
             "--no-default-features",
         ])
         .output()
-        .expect(&format!(
-            "Failed to execute cargo tree command for {}",
-            dependency_name
-        ));
+        .map_err(|e| {
+            format!(
+                "Failed to execute cargo tree command for {}: {}",
+                dependency_name, e
+            )
+        })?;
 
     // Also get the complete dependency path to help debugging
     let path_output = Command::new("cargo")
@@ -34,10 +36,12 @@ fn check_forbidden_dependency(dependency_name: &str) -> Result<(), String> {
             "--no-default-features",
         ])
         .output()
-        .expect(&format!(
-            "Failed to execute detailed cargo tree command for {}",
-            dependency_name
-        ));
+        .map_err(|e| {
+            format!(
+                "Failed to execute detailed cargo tree command for {}: {}",
+                dependency_name, e
+            )
+        })?;
 
     let output_str = String::from_utf8_lossy(&output.stdout);
     let dependency_pattern = format!("{} v", dependency_name);
