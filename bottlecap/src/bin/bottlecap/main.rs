@@ -230,12 +230,16 @@ async fn main() -> Result<()> {
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
     prepare_client_provider()?;
-    let client = Client::builder().no_proxy().build().map_err(|e| {
-        Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to create client: {e:?}"),
-        )
-    })?;
+    let client = Client::builder()
+        .use_rustls_tls()
+        .no_proxy()
+        .build()
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to create client: {e:?}"),
+            )
+        })?;
 
     let r = register(&client)
         .await

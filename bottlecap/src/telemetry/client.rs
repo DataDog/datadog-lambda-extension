@@ -20,6 +20,7 @@ impl TelemetryApiClient {
     pub async fn subscribe(&self) -> Result<Response, Box<dyn Error>> {
         let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE)?;
         let resp = reqwest::Client::builder()
+            .use_rustls_tls()
             .no_proxy()
             .build()
             .map_err(|e| {
