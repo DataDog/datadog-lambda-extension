@@ -252,7 +252,7 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
         config.otlp_config_traces_span_name_as_resource_name = true;
     }
 
-    if !config.otlp_config_traces_span_name_remappings.is_empty()
+    if config.otlp_config_traces_span_name_remappings.is_empty()
         && !yaml_config
             .otlp_config
             .traces
