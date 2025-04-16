@@ -92,11 +92,12 @@ fn log_fips_status() {
 /// In non-FIPS mode, this is a no-op.
 #[cfg(feature = "fips")]
 fn prepare_client_provider() -> Result<()> {
-    rustls::crypto::CryptoProvider::install_default(rustls::crypto::aws_lc_rs::default_provider())
+    rustls::crypto::default_fips_provider()
+        .install_default()
         .map_err(|e| {
             Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!("Failed to set up crypto provider: {e:?}"),
+                format!("Failed to set up fips provider: {e:?}"),
             )
         })
 }
