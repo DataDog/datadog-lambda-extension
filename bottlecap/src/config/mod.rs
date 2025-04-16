@@ -1,202 +1,27 @@
 pub mod apm_replace_rule;
+pub mod env;
 pub mod flush_strategy;
 pub mod log_level;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
+pub mod yaml;
 
-use datadog_trace_obfuscation::replacer::ReplaceRule;
 use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
-use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
-use std::vec;
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
-use serde::{Deserialize, Deserializer};
-use serde_json::Value;
-use trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle};
 
 use crate::config::{
     apm_replace_rule::deserialize_apm_replace_rules,
-    flush_strategy::FlushStrategy,
-    log_level::{deserialize_log_level, LogLevel},
+    env::Config as EnvConfig,
     processing_rule::{deserialize_processing_rules, ProcessingRule},
-    service_mapping::deserialize_service_mapping,
+    yaml::Config as YamlConfig,
 };
 
-/// `FallbackConfig` is a struct that represents fields that are not supported in the extension yet.
-///
-/// If `extension_version` is set to `compatibility`, the Go extension will be launched.
-#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct FallbackConfig {
-    extension_version: Option<String>,
-    serverless_appsec_enabled: bool,
-    appsec_enabled: bool,
-    // otel
-    trace_otel_enabled: bool,
-    otlp_config_receiver_protocols_http_endpoint: Option<String>,
-    otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
-}
-
-/// `FallbackYamlConfig` is a struct that represents fields in `datadog.yaml` not yet supported in the extension yet.
-///
-#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-pub struct FallbackYamlConfig {
-    otlp_config: Option<Value>,
-}
-#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-pub struct YamlLogsConfig {
-    #[serde(deserialize_with = "deserialize_processing_rules")]
-    processing_rules: Option<Vec<ProcessingRule>>,
-}
-
-#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-pub struct YamlApmConfig {
-    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
-    replace_tags: Option<Vec<ReplaceRule>>,
-    obfuscation: Option<ApmObfuscation>,
-}
-
-#[derive(Debug, PartialEq, Deserialize, Clone, Copy, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-pub struct ApmObfuscation {
-    http: ApmHttpObfuscation,
-}
-
-#[derive(Debug, PartialEq, Deserialize, Clone, Copy, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-pub struct ApmHttpObfuscation {
-    remove_query_string: bool,
-    remove_paths_with_digits: bool,
-}
-
-/// `YamlConfig` is a struct that represents some of the fields in the datadog.yaml file.
-///
-/// It is used to deserialize the datadog.yaml file into a struct that can be merged with the Config struct.
-#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-pub struct YamlConfig {
-    pub logs_config: YamlLogsConfig,
-    pub apm_config: YamlApmConfig,
-    pub proxy: YamlProxyConfig,
-}
-
-#[derive(Debug, PartialEq, Deserialize, Clone, Default)]
-#[serde(default)]
-#[allow(clippy::module_name_repetitions)]
-pub struct YamlProxyConfig {
-    pub https: Option<String>,
-    pub no_proxy: Option<Vec<String>>,
-}
-
-#[derive(Debug, PartialEq, Deserialize, Clone)]
-#[serde(default)]
-#[allow(clippy::struct_excessive_bools)]
-pub struct Config {
-    pub site: String,
-    pub api_key: String,
-    pub api_key_secret_arn: String,
-    pub kms_api_key: String,
-    #[serde(deserialize_with = "deserialize_string_or_int")]
-    pub env: Option<String>,
-    #[serde(deserialize_with = "deserialize_string_or_int")]
-    pub service: Option<String>,
-    #[serde(deserialize_with = "deserialize_string_or_int")]
-    pub version: Option<String>,
-    pub tags: Option<String>,
-    #[serde(deserialize_with = "deserialize_log_level")]
-    pub log_level: LogLevel,
-    #[serde(deserialize_with = "deserialize_processing_rules")]
-    pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
-    pub logs_config_use_compression: bool,
-    pub logs_config_compression_level: i32,
-    pub logs_config_logs_dd_url: String,
-    pub serverless_flush_strategy: FlushStrategy,
-    pub enhanced_metrics: bool,
-    //flush timeout in seconds
-    pub flush_timeout: u64, //TODO go agent adds jitter too
-    pub https_proxy: Option<String>,
-    pub capture_lambda_payload: bool,
-    pub capture_lambda_payload_max_depth: u32,
-    #[serde(deserialize_with = "deserialize_service_mapping")]
-    pub service_mapping: HashMap<String, String>,
-    pub serverless_logs_enabled: bool,
-    // Trace Propagation
-    #[serde(deserialize_with = "deserialize_trace_propagation_style")]
-    pub trace_propagation_style: Vec<TracePropagationStyle>,
-    #[serde(deserialize_with = "deserialize_trace_propagation_style")]
-    pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
-    pub trace_propagation_extract_first: bool,
-    pub trace_propagation_http_baggage_enabled: bool,
-    pub apm_config_apm_dd_url: String,
-    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
-    pub apm_config_replace_tags: Option<Vec<ReplaceRule>>,
-    pub apm_config_obfuscation_http_remove_query_string: bool,
-    pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
-    // Metrics overrides
-    pub dd_url: String,
-    pub url: String,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            // General
-            site: String::default(),
-            api_key: String::default(),
-            api_key_secret_arn: String::default(),
-            kms_api_key: String::default(),
-            serverless_flush_strategy: FlushStrategy::Default,
-            flush_timeout: 5,
-            // Unified Tagging
-            env: None,
-            service: None,
-            version: None,
-            tags: None,
-            // Logs
-            log_level: LogLevel::default(),
-            logs_config_processing_rules: None,
-            logs_config_use_compression: true,
-            logs_config_compression_level: 6,
-            logs_config_logs_dd_url: String::default(),
-            // Metrics
-            enhanced_metrics: true,
-            https_proxy: None,
-            capture_lambda_payload: false,
-            capture_lambda_payload_max_depth: 10,
-            service_mapping: HashMap::new(),
-            serverless_logs_enabled: true,
-            // Trace Propagation
-            trace_propagation_style: vec![
-                TracePropagationStyle::Datadog,
-                TracePropagationStyle::TraceContext,
-            ],
-            trace_propagation_style_extract: vec![],
-            trace_propagation_extract_first: false,
-            trace_propagation_http_baggage_enabled: false,
-            apm_config_apm_dd_url: String::default(),
-            apm_config_replace_tags: None,
-            apm_config_obfuscation_http_remove_query_string: false,
-            apm_config_obfuscation_http_remove_paths_with_digits: false,
-            dd_url: String::default(),
-            url: String::default(),
-        }
-    }
-}
+pub type Config = EnvConfig;
 
 #[derive(Debug, PartialEq)]
 #[allow(clippy::module_name_repetitions)]
@@ -209,16 +34,7 @@ fn log_fallback_reason(reason: &str) {
     println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
-fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(), ConfigError> {
-    let (config, yaml_config): (FallbackConfig, FallbackYamlConfig) =
-        match (figment.extract(), yaml_figment.extract()) {
-            (Ok(env_config), Ok(yaml_config)) => (env_config, yaml_config),
-            (_, Err(err)) | (Err(err), _) => {
-                println!("Failed to parse Datadog config: {err}");
-                return Err(ConfigError::ParseError(err.to_string()));
-            }
-        };
-
+fn fallback(config: &EnvConfig, yaml_config: &YamlConfig, region: &str) -> Result<(), ConfigError> {
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match config.extension_version.as_deref() {
         Some("compatibility") => true,
@@ -238,16 +54,45 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
         return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
 
-    // OTEL env
-    if config.trace_otel_enabled
+    // OTLP
+    let has_otlp_env_config = config
+        .otlp_config_receiver_protocols_grpc_endpoint
+        .is_some()
         || config
-            .otlp_config_receiver_protocols_http_endpoint
+            .otlp_config_receiver_protocols_grpc_transport
             .is_some()
         || config
-            .otlp_config_receiver_protocols_grpc_endpoint
+            .otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib
             .is_some()
-        || yaml_config.otlp_config.is_some()
-    {
+        || config.otlp_config_metrics_enabled
+        || config.otlp_config_metrics_resource_attributes_as_tags
+        || config.otlp_config_metrics_instrumentation_scope_metadata_as_tags
+        || config.otlp_config_metrics_tag_cardinality.is_some()
+        || config.otlp_config_metrics_delta_ttl.is_some()
+        || config.otlp_config_metrics_histograms_mode.is_some()
+        || config.otlp_config_metrics_histograms_send_count_sum_metrics
+        || config.otlp_config_metrics_histograms_send_aggregation_metrics
+        || config
+            .otlp_config_metrics_sums_cumulative_monotonic_mode
+            .is_some()
+        || config
+            .otlp_config_metrics_sums_initial_cumulativ_monotonic_value
+            .is_some()
+        || config.otlp_config_metrics_summaries_mode.is_some()
+        || config
+            .otlp_config_traces_probabilistic_sampler_sampling_percentage
+            .is_some()
+        || config.otlp_config_logs_enabled;
+
+    let has_otlp_yaml_config = yaml_config.otlp_config.receiver.protocols.grpc.is_some()
+        || yaml_config
+            .otlp_config
+            .traces
+            .probabilistic_sampler
+            .is_some()
+        || yaml_config.otlp_config.logs.is_some();
+
+    if has_otlp_env_config || has_otlp_yaml_config {
         log_fallback_reason("otel");
         return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
@@ -262,7 +107,7 @@ fn fallback(figment: &Figment, yaml_figment: &Figment, region: &str) -> Result<(
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, ConfigError> {
+pub fn get_config(config_directory: &Path, region: &str) -> Result<EnvConfig, ConfigError> {
     let path = config_directory.join("datadog.yaml");
 
     // Get default config fields (and ENV specific ones)
@@ -275,9 +120,7 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
     // Get YAML nested fields
     let yaml_figment = Figment::from(Yaml::file(&path));
 
-    fallback(&figment, &yaml_figment, region)?;
-
-    let (mut config, yaml_config): (Config, YamlConfig) =
+    let (mut config, yaml_config): (EnvConfig, YamlConfig) =
         match (figment.extract(), yaml_figment.extract()) {
             (Ok(env_config), Ok(yaml_config)) => (env_config, yaml_config),
             (_, Err(err)) | (Err(err), _) => {
@@ -285,6 +128,9 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
                 return Err(ConfigError::ParseError(err.to_string()));
             }
         };
+
+    fallback(&config, &yaml_config, region)?;
+
     // Set site if empty
     if config.site.is_empty() {
         config.site = "datadoghq.com".to_string();
@@ -300,11 +146,9 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
             .clone()
             .ok_or(std::env::VarError::NotPresent)
     }) {
+        let no_proxy = yaml_config.proxy.no_proxy.clone();
         if std::env::var("NO_PROXY").map_or(false, |no_proxy| no_proxy.contains(&config.site))
-            || yaml_config
-                .proxy
-                .no_proxy
-                .map_or(false, |no_proxy| no_proxy.contains(&config.site))
+            || no_proxy.map_or(false, |no_proxy| no_proxy.contains(&config.site))
         {
             config.https_proxy = None;
         } else {
@@ -312,12 +156,19 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
         }
     }
 
-    // Merge YAML nested fields
-    //
+    merge_config(&mut config, &yaml_config);
+
+    // Metrics are handled by dogstatsd in Main
+    Ok(config)
+}
+
+/// Merge YAML nested fields into `EnvConfig`
+///
+fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
     // Set logs_config_processing_rules if not defined in env
     if config.logs_config_processing_rules.is_none() {
-        if let Some(processing_rules) = yaml_config.logs_config.processing_rules {
-            config.logs_config_processing_rules = Some(processing_rules);
+        if let Some(processing_rules) = yaml_config.logs_config.processing_rules.as_ref() {
+            config.logs_config_processing_rules = Some(processing_rules.clone());
         }
     }
 
@@ -341,8 +192,8 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
     }
 
     if config.apm_config_replace_tags.is_none() {
-        if let Some(rules) = yaml_config.apm_config.replace_tags {
-            config.apm_config_replace_tags = Some(rules);
+        if let Some(rules) = yaml_config.apm_config.replace_tags.as_ref() {
+            config.apm_config_replace_tags = Some(rules.clone());
         }
     }
 
@@ -360,32 +211,62 @@ pub fn get_config(config_directory: &Path, region: &str) -> Result<Config, Confi
         }
     }
 
-    // Metrics are handled by dogstatsd in Main
-    Ok(config)
+    // OTLP
+    //
+    // - Receiver / HTTP
+    if config
+        .otlp_config_receiver_protocols_http_endpoint
+        .is_none()
+        && !yaml_config
+            .otlp_config
+            .receiver
+            .protocols
+            .http
+            .endpoint
+            .is_empty()
+    {
+        config.otlp_config_receiver_protocols_http_endpoint = Some(
+            yaml_config
+                .otlp_config
+                .receiver
+                .protocols
+                .http
+                .endpoint
+                .clone(),
+        );
+    }
+
+    if !config.otlp_config_traces_enabled && yaml_config.otlp_config.traces.enabled {
+        config.otlp_config_traces_enabled = true;
+    }
+
+    if !config.otlp_config_ignore_missing_datadog_fields
+        && yaml_config.otlp_config.traces.ignore_missing_datadog_fields
+    {
+        config.otlp_config_ignore_missing_datadog_fields = true;
+    }
+
+    if !config.otlp_config_traces_span_name_as_resource_name
+        && yaml_config.otlp_config.traces.span_name_as_resource_name
+    {
+        config.otlp_config_traces_span_name_as_resource_name = true;
+    }
+
+    if !config.otlp_config_traces_span_name_remappings.is_empty()
+        && !yaml_config
+            .otlp_config
+            .traces
+            .span_name_remappings
+            .is_empty()
+    {
+        config.otlp_config_traces_span_name_remappings.clone_from(&yaml_config.otlp_config.traces.span_name_remappings);
+    }
 }
 
 #[inline]
 #[must_use]
 fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
-}
-
-fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let value = Value::deserialize(deserializer)?;
-    match value {
-        Value::String(s) => {
-            if s.trim().is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(s))
-            }
-        }
-        Value::Number(n) => Ok(Some(n.to_string())),
-        _ => Err(serde::de::Error::custom("expected a string or an integer")),
-    }
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -416,8 +297,10 @@ pub mod tests {
 
     use super::*;
 
-    use crate::config::flush_strategy::PeriodicStrategy;
+    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
+    use crate::config::log_level::LogLevel;
     use crate::config::processing_rule;
+    use crate::config::trace_propagation_style::TracePropagationStyle;
 
     const MOCK_REGION: &str = "us-east-1";
 
@@ -667,7 +550,7 @@ pub mod tests {
             let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
             assert_eq!(
                 config,
-                Config {
+                EnvConfig {
                     site: "datadoghq.com".to_string(),
                     trace_propagation_style_extract: vec![
                         TracePropagationStyle::Datadog,
@@ -676,7 +559,7 @@ pub mod tests {
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
                     apm_config_apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
                     dd_url: String::new(), // We add the prefix in main.rs
-                    ..Config::default()
+                    ..EnvConfig::default()
                 }
             );
             Ok(())
