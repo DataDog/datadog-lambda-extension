@@ -259,7 +259,9 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
             .span_name_remappings
             .is_empty()
     {
-        config.otlp_config_traces_span_name_remappings.clone_from(&yaml_config.otlp_config.traces.span_name_remappings);
+        config
+            .otlp_config_traces_span_name_remappings
+            .clone_from(&yaml_config.otlp_config.traces.span_name_remappings);
     }
 }
 
