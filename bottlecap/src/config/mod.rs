@@ -336,7 +336,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env(
-                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT",
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
                 "localhost:4138",
             );
 
@@ -357,29 +357,8 @@ pub mod tests {
                 otlp_config:
                   receiver:
                     protocols:
-                      http:
+                      grpc:
                         endpoint: localhost:4138
-            ",
-            )?;
-
-            let config =
-                get_config(Path::new(""), MOCK_REGION).expect_err("should reject unknown fields");
-            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_fallback_on_otel_yaml_empty_section() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                otlp_config:
-                  receiver:
-                    protocols:
-                      http:
             ",
             )?;
 
