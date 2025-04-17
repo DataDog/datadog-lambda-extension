@@ -217,6 +217,16 @@ async fn request(
     Ok(v)
 }
 
+#[cfg(not(feature = "fips"))]
+fn compute_host(service: &String, region: &String, domain: &str) -> String {
+    format!("{service}.{region}.{domain}")
+}
+
+#[cfg(feature = "fips")]
+fn compute_host(service: &String, region: &String, domain: &str) -> String {
+    format!("{service}-fips.{region}.{domain}")
+}
+
 fn build_get_secret_signed_headers(
     aws_config: &AwsConfig,
     region: String,
@@ -231,7 +241,7 @@ fn build_get_secret_signed_headers(
         "amazonaws.com"
     };
 
-    let host = format!("{}.{}.{}", header_values.service, region, domain);
+    let host = compute_host(&header_values.service, &region, domain);
 
     let canonical_uri = "/";
     let canonical_querystring = "";
