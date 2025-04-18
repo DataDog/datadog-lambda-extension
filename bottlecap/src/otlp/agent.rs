@@ -66,6 +66,7 @@ impl Agent {
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         let server = hyper::server::conn::http1::Builder::new();
         let mut joinset = tokio::task::JoinSet::new();
+        debug!("OTLP started on {}", addr);
         loop {
             let conn = tokio::select! {
                 con_res = listener.accept() => match con_res {
@@ -105,7 +106,6 @@ impl Agent {
                     error!("OTLP Receiver connection error: {e}");
                 }
             });
-            debug!("OTLP started on {}", addr);
         }
     }
 
