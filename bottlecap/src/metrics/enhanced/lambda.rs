@@ -665,6 +665,49 @@ impl Lambda {
         });
     }
 
+    pub fn generate_context_switches_enhanced_metrics(
+        context_switches: f64,
+        aggr: &mut std::sync::MutexGuard<Aggregator>,
+        tags: Option<SortedTags>,
+    ) {
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let metric = Metric::new(
+            constants::CONTEXT_SWITCHES_METRIC.into(),
+            MetricValue::distribution(context_switches),
+            tags,
+            Some(now),
+        );
+        if let Err(e) = aggr.insert(metric) {
+            error!("Failed to insert context switches metric: {}", e);
+        }
+    }
+
+    pub fn set_context_switches_enhanced_metric(&self, context_switches_offset: Option<f64>) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let mut aggr: std::sync::MutexGuard<Aggregator> =
+            self.aggregator.lock().expect("lock poisoned");
+
+        if let Some(context_switches_offset) = context_switches_offset {
+            if let Ok(context_switches_data) = proc::get_context_switches() {
+                let context_switches = context_switches_data - context_switches_offset;
+                Self::generate_context_switches_enhanced_metrics(
+                    context_switches,
+                    &mut aggr,
+                    self.get_dynamic_value_tags(),
+                );
+            }
+        }
+    }
+
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
         let gb_seconds = (billed_duration_ms as f64 * constants::MS_TO_SEC)
             * (memory_size_mb as f64 / constants::MB_TO_GB);
@@ -743,6 +786,7 @@ pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
+    pub context_switches_offset: Option<f64>,
     pub tmp_chan_tx: Sender<()>,
     pub process_chan_tx: Sender<()>,
 }
@@ -752,6 +796,7 @@ impl PartialEq for EnhancedMetricData {
         self.network_offset == other.network_offset
             && self.cpu_offset == other.cpu_offset
             && self.uptime_offset == other.uptime_offset
+            && self.context_switches_offset == other.context_switches_offset
     }
 }
 
@@ -973,6 +1018,9 @@ mod tests {
             .is_none());
         assert!(aggr
             .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
+            .is_none());
+        assert!(aggr
+            .get_entry_by_id(constants::CONTEXT_SWITCHES_METRIC.into(), &None, now)
             .is_none());
     }
 
@@ -1264,5 +1312,26 @@ mod tests {
         assert!(aggr
             .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
             .is_none());
+    }
+
+    #[test]
+    fn test_set_context_switches_enhanced_metric() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        let context_switches = 92.0;
+
+        Lambda::generate_context_switches_enhanced_metrics(
+            context_switches,
+            &mut lambda.aggregator.lock().expect("lock poisoned"),
+            None,
+        );
+
+        assert_sketch(&metrics_aggr, constants::CONTEXT_SWITCHES_METRIC, 92.0, now);
     }
 }

@@ -4,7 +4,7 @@ pub mod constants;
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{self, BufRead, Read},
+    io::{self, BufRead},
 };
 
 use constants::{
@@ -64,8 +64,7 @@ pub fn get_runtime_pid_from_path(path: &str) -> Result<u32, String> {
                     fs::read(pid_folder.path().join("environ"))
                         .ok()
                         .and_then(|bytes| String::from_utf8(bytes).ok())
-                        .map(|s| s.contains(RUNTIME_VAR))
-                        .unwrap_or(false)
+                        .map_or(false, |s| s.contains(RUNTIME_VAR))
                 })
                 .and_then(|pid_folder| pid_folder.file_name().into_string().ok())
                 .and_then(|pid_str| pid_str.parse::<u32>().ok());
@@ -77,9 +76,7 @@ pub fn get_runtime_pid_from_path(path: &str) -> Result<u32, String> {
                 Err("No runtime process found".to_string())
             }
         }
-        Err(e) => {
-            Err(format!("Could not read proc directory: {}", e))
-        }
+        Err(_) => Err("Could not read proc directory".to_string()),
     }
 }
 
@@ -258,12 +255,12 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
 pub fn get_context_switches() -> Result<f64, io::Error> {
     if let Ok(pid) = get_runtime_pid() {
         return get_context_switches_from_path(PROC_PATH, pid);
-    } else {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Could not find Lambda function process ID",
-        ));
-    };
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "Could not find Lambda function process ID",
+    ))
 }
 
 pub fn get_context_switches_from_path(path: &str, pid: u32) -> Result<f64, io::Error> {
@@ -421,13 +418,28 @@ mod tests {
         let path = "./tests/proc";
         let mut pids = get_pid_list_from_path(path_from_root(path).as_str());
         pids.sort_unstable();
-        assert_eq!(pids.len(), 2);
-        assert_eq!(pids[0], 13);
-        assert_eq!(pids[1], 142);
+        assert_eq!(pids.len(), 4);
+        assert_eq!(pids[0], 5);
+        assert_eq!(pids[1], 6);
+        assert_eq!(pids[2], 13);
+        assert_eq!(pids[3], 142);
 
         let path = "./tests/incorrect_folder";
         let pids = get_pid_list_from_path(path);
         assert_eq!(pids.len(), 0);
+    }
+
+    #[test]
+    fn test_get_runtime_pid() {
+        // only test process with pid 5 has environ file with RUNTIME_VAR
+        let path = "./tests/proc";
+        let pid = get_runtime_pid_from_path(path_from_root(path).as_str());
+        assert!(pid.is_ok());
+        assert_eq!(pid.unwrap(), 5);
+
+        let path = "./tests/incorrect_folder";
+        let pid = get_runtime_pid_from_path(path);
+        assert!(pid.is_err());
     }
 
     #[test]
@@ -601,15 +613,13 @@ mod tests {
     fn test_get_context_switches_data() {
         // process with pid 5 has valid proc/<pid>/status file
         let path = "./tests/proc";
-        let ctx_switches_result =
-            get_context_switches_from_path(path_from_root(path).as_str(), 5);
+        let ctx_switches_result = get_context_switches_from_path(path_from_root(path).as_str(), 5);
         assert!(ctx_switches_result.is_ok());
         let ctx_switches = ctx_switches_result.unwrap();
         assert!((ctx_switches - 818.0).abs() < f64::EPSILON);
 
         // process with pid 6 has invalid proc/<pid>/status file (missing voluntary_ctxt_switches)
-        let ctx_switches_result =
-            get_context_switches_from_path(path_from_root(path).as_str(), 6);
+        let ctx_switches_result = get_context_switches_from_path(path_from_root(path).as_str(), 6);
         assert!(ctx_switches_result.is_err());
     }
 }

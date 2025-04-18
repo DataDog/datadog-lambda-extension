@@ -131,6 +131,7 @@ impl Processor {
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
+            let context_switches_offset: Option<f64> = proc::get_context_switches().ok();
 
             // Start a channel for monitoring tmp enhanced data
             let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
@@ -145,6 +146,7 @@ impl Processor {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
+                context_switches_offset,
                 tmp_chan_tx,
                 process_chan_tx,
             });
@@ -484,6 +486,8 @@ impl Processor {
                     .set_network_enhanced_metrics(offsets.network_offset);
                 self.enhanced_metrics
                     .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
+                self.enhanced_metrics
+                    .set_context_switches_enhanced_metric(offsets.context_switches_offset);
             }
         }
     }
