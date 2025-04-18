@@ -319,6 +319,7 @@ impl SpanInferrer {
 
         // Step Functions `SpanContext` is deterministically generated
         if self.generated_span_context.is_some() {
+            debug!("Returning generated span context");
             return self.generated_span_context.clone();
         }
 
