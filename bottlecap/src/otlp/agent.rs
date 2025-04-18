@@ -5,8 +5,7 @@ use datadog_trace_utils::send_data::SendData;
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use ddcommon::hyper_migration;
 use http_body_util::BodyExt;
-use hyper::service::service_fn;
-use hyper::{http, Method, Response, StatusCode};
+use hyper::{http, service::service_fn, Method, Response, StatusCode};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -18,7 +17,7 @@ use crate::{
     traces::trace_processor::TraceProcessor,
 };
 
-const OTLP_PORT: usize = 4318;
+const OTLP_TRACE_AGENT_PORT: usize = 4318;
 
 pub struct Agent {
     pub config: Arc<Config>,
@@ -61,7 +60,7 @@ impl Agent {
             )
         });
 
-        let port = u16::try_from(OTLP_PORT).expect("OTLP_PORT is too large");
+        let port = u16::try_from(OTLP_TRACE_AGENT_PORT).expect("OTLP_PORT is too large");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         let server = hyper::server::conn::http1::Builder::new();

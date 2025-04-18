@@ -812,6 +812,11 @@ fn start_otlp_agent(
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendData>,
 ) {
+    if !config.otlp_config_traces_enabled {
+        debug!("OTLP traces agent is disabled, not starting it.");
+        return;
+    }
+
     let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
 
     tokio::spawn(async move {
