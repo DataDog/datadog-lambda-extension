@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 async-trait = { version = "0.1", default-features = false }
+bytes = { version = "1.2", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
@@ -33,7 +34,7 @@ regex = { version = "1.10", default-features = false }
 reqwest = { version = "0.12.11", features = ["json", "http2", "rustls-tls"], default-features = false }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-thiserror = { version = "1.0", default-features = false}
+thiserror = { version = "1.0", default-features = false }
 tokio = { version = "1.37", default-features = false, features = ["macros", "rt-multi-thread"] }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
@@ -48,7 +49,7 @@ rustls = { version = "0.23.18", default-features = false, features = ["aws-lc-rs
 rand = { version = "0.8", default-features = false }
 prost = { version = "0.11.6", default-features = false }
 zstd = { version = "0.13.3", default-features = false }
-futures = { version = "0.3.31", default-features = false}
+futures = { version = "0.3.31", default-features = false }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }

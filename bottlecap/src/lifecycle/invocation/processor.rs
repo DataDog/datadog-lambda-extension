@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     sync::{Arc, Mutex},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -10,13 +10,13 @@ use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{json, Value};
 use tokio::sync::{mpsc::Sender, watch};
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     config::{self, AwsConfig},
     lifecycle::invocation::{
-        base64_to_string, context::ContextBuffer, create_empty_span, generate_span_id,
-        get_metadata_from_value, span_inferrer::SpanInferrer,
+        base64_to_string, context::Context, context::ContextBuffer, context::ReparentingInfo,
+        create_empty_span, generate_span_id, get_metadata_from_value, span_inferrer::SpanInferrer,
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
@@ -35,7 +35,7 @@ use crate::{
             },
             DatadogCompositePropagator, Propagator,
         },
-        trace_processor,
+        trace_processor::{self, TraceProcessor},
     },
 };
 
@@ -324,10 +324,28 @@ impl Processor {
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendData>,
     ) {
+        let context = self.enrich_ctx_at_platform_done(request_id, status);
+
+        if self.tracer_detected {
+            if let Some(ctx) = context {
+                if ctx.invocation_span.trace_id != 0 && ctx.invocation_span.span_id != 0 {
+                    self.send_ctx_spans(&tags_provider, &trace_processor, &trace_agent_tx, ctx)
+                        .await;
+                }
+            }
+        }
+    }
+
+    fn enrich_ctx_at_platform_done(
+        &mut self,
+        request_id: &String,
+        status: Status,
+    ) -> Option<Context> {
         let Some(context) = self.context_buffer.get_mut(request_id) else {
             debug!("Cannot process on platform runtime done, no invocation context found for request_id: {request_id}");
-            return;
+            return None;
         };
+        context.runtime_done_received = true;
 
         // Handle timeout error case
         if status == Status::Timeout {
@@ -379,52 +397,59 @@ impl Processor {
             cold_start_span.trace_id = context.invocation_span.trace_id;
             cold_start_span.parent_id = context.invocation_span.parent_id;
         }
+        Some(context.clone())
+    }
 
-        if self.tracer_detected {
-            let mut body_size = std::mem::size_of_val(&context.invocation_span);
-            let mut traces = vec![context.invocation_span.clone()];
+    pub async fn send_ctx_spans(
+        &mut self,
+        tags_provider: &Arc<provider::Provider>,
+        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
+        trace_agent_tx: &Sender<SendData>,
+        context: Context,
+    ) {
+        let mut body_size = std::mem::size_of_val(&context.invocation_span);
+        let mut traces = vec![context.invocation_span.clone()];
 
-            if let Some(inferred_span) = &self.inferrer.inferred_span {
-                body_size += std::mem::size_of_val(inferred_span);
-                traces.push(inferred_span.clone());
-            }
+        if let Some(inferred_span) = &self.inferrer.inferred_span {
+            body_size += std::mem::size_of_val(inferred_span);
+            traces.push(inferred_span.clone());
+        }
 
-            if let Some(ws) = &self.inferrer.wrapped_inferred_span {
-                body_size += std::mem::size_of_val(ws);
-                traces.push(ws.clone());
-            }
+        if let Some(ws) = &self.inferrer.wrapped_inferred_span {
+            body_size += std::mem::size_of_val(ws);
+            traces.push(ws.clone());
+        }
 
-            if let Some(cold_start_span) = &context.cold_start_span {
-                body_size += std::mem::size_of_val(cold_start_span);
-                traces.push(cold_start_span.clone());
-            }
+        if let Some(cold_start_span) = &context.cold_start_span {
+            body_size += std::mem::size_of_val(cold_start_span);
+            traces.push(cold_start_span.clone());
+        }
 
-            // todo: figure out what to do here
-            let header_tags = tracer_header_tags::TracerHeaderTags {
-                lang: "",
-                lang_version: "",
-                lang_interpreter: "",
-                lang_vendor: "",
-                tracer_version: "",
-                container_id: "",
-                client_computed_top_level: false,
-                client_computed_stats: false,
-                dropped_p0_traces: 0,
-                dropped_p0_spans: 0,
-            };
+        // todo: figure out what to do here
+        let header_tags = tracer_header_tags::TracerHeaderTags {
+            lang: "",
+            lang_version: "",
+            lang_interpreter: "",
+            lang_vendor: "",
+            tracer_version: "",
+            container_id: "",
+            client_computed_top_level: false,
+            client_computed_stats: false,
+            dropped_p0_traces: 0,
+            dropped_p0_spans: 0,
+        };
 
-            let send_data: SendData = trace_processor.process_traces(
-                self.config.clone(),
-                tags_provider.clone(),
-                header_tags,
-                vec![traces],
-                body_size,
-                self.inferrer.span_pointers.clone(),
-            );
+        let send_data: SendData = trace_processor.process_traces(
+            self.config.clone(),
+            tags_provider.clone(),
+            header_tags,
+            vec![traces],
+            body_size,
+            self.inferrer.span_pointers.clone(),
+        );
 
-            if let Err(e) = trace_agent_tx.send(send_data).await {
-                debug!("Failed to send invocation span to agent: {e}");
-            }
+        if let Err(e) = trace_agent_tx.send(send_data).await {
+            debug!("Failed to send invocation span to agent: {e}");
         }
     }
 
@@ -540,6 +565,86 @@ impl Processor {
         if let Some(inferred_span) = &self.inferrer.inferred_span {
             context.invocation_span.parent_id = inferred_span.span_id;
         }
+    }
+
+    pub fn add_reparenting(&mut self, request_id: String, span_id: u64, parent_id: u64) {
+        for rep_info in &self.context_buffer.sorted_reparenting_info {
+            if rep_info.request_id == request_id {
+                warn!("Reparenting already exists for request_id: {request_id}, ignoring new one");
+                return;
+            }
+        }
+        if self.context_buffer.sorted_reparenting_info.len()
+            == self.context_buffer.sorted_reparenting_info.capacity()
+        {
+            self.context_buffer.sorted_reparenting_info.pop_front();
+        }
+
+        self.context_buffer
+            .sorted_reparenting_info
+            .push_back(ReparentingInfo {
+                request_id: request_id.clone(),
+                invocation_span_id: span_id,
+                parent_id_to_reparent: parent_id,
+                guessed_trace_id: 0,
+                needs_trace_id: true,
+            });
+    }
+
+    #[must_use]
+    pub fn get_reparenting_info(&self) -> VecDeque<ReparentingInfo> {
+        self.context_buffer.sorted_reparenting_info.clone()
+    }
+
+    pub fn update_reparenting(
+        &mut self,
+        reparenting_info: VecDeque<ReparentingInfo>,
+    ) -> Vec<Context> {
+        let mut ctx_to_send = Vec::new();
+        for rep_info in reparenting_info {
+            if let Some(ctx) = self.context_buffer.get_mut(&rep_info.request_id) {
+                let mut span_updated = false;
+                if ctx.invocation_span.span_id == 0 {
+                    ctx.invocation_span.span_id = rep_info.invocation_span_id;
+                    debug!(
+                        "Set invocation span id to {} for request_id: {}",
+                        rep_info.guessed_trace_id, rep_info.request_id
+                    );
+                    span_updated = true;
+                }
+                if ctx.invocation_span.trace_id == 0 {
+                    ctx.invocation_span.trace_id = rep_info.guessed_trace_id;
+                    debug!(
+                        "Set trace id to {} for request_id: {}",
+                        rep_info.guessed_trace_id, rep_info.request_id
+                    );
+                    span_updated = true;
+                }
+                if span_updated
+                    && ctx.invocation_span.span_id != 0
+                    && ctx.invocation_span.trace_id != 0
+                    && ctx.runtime_done_received
+                {
+                    ctx_to_send.push(ctx.clone());
+                }
+            } else {
+                warn!(
+                    "Mismatched request info. Context not found for request_id: {}",
+                    rep_info.request_id
+                );
+            }
+
+            if let Some(existing_info) = self
+                .context_buffer
+                .sorted_reparenting_info
+                .iter_mut()
+                .find(|info| info.request_id == rep_info.request_id)
+            {
+                existing_info.needs_trace_id = rep_info.needs_trace_id;
+                existing_info.guessed_trace_id = rep_info.guessed_trace_id;
+            }
+        }
+        ctx_to_send
     }
 
     fn extract_span_context(
@@ -664,6 +769,9 @@ impl Processor {
             context.invocation_span.span_id = header.parse::<u64>().unwrap_or(0);
         }
 
+        if trace_id == 0 {
+            trace_id = context.invocation_span.trace_id;
+        }
         context.invocation_span.trace_id = trace_id;
 
         if self.inferrer.inferred_span.is_some() {
@@ -761,6 +869,7 @@ impl Processor {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
