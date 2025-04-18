@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_get_batch_full_entries() {
-        let mut aggregator = StatsAggregator::new(230);
+        let mut aggregator = StatsAggregator::new(640);
         // Payload below is 115 bytes
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
