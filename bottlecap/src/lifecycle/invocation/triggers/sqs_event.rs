@@ -445,6 +445,40 @@ mod tests {
     }
 
     #[test]
+    fn test_get_carrier_from_sns_binary() {
+        let json = read_json_file("sns_sqs_binary_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::from([
+            (
+                "x-datadog-trace-id".to_string(),
+                "5863834085596065348".to_string(),
+            ),
+            (
+                "x-datadog-parent-id".to_string(),
+                "2752725546543693249".to_string(),
+            ),
+            (
+                "tracestate".to_string(),
+                "dd=s:1;p:2633a54ccde13dc1;t.tid:6801584a00000000;t.dm:-1".to_string(),
+            ),
+            (
+                "traceparent".to_string(),
+                "00-6801584a00000000516086086dc7ee44-2633a54ccde13dc1-01".to_string(),
+            ),
+            (
+                "x-datadog-tags".to_string(),
+                "_dd.p.dm=-1,_dd.p.tid=6801584a00000000".to_string(),
+            ),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
     fn test_get_carrier_from_eventbridge() {
         let json = read_json_file("eventbridge_sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
