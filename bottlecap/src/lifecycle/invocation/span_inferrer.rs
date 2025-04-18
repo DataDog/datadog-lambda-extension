@@ -312,14 +312,14 @@ impl SpanInferrer {
     /// otherwise it will return `None`.
     ///
     pub fn get_span_context(&self, propagator: &impl Propagator) -> Option<SpanContext> {
-        // Step Functions `SpanContext` is deterministically generated
-        if self.generated_span_context.is_some() {
-            return self.generated_span_context.clone();
-        }
-
         if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
             debug!("Extracted trace context from inferred span");
             return Some(sc);
+        }
+
+        // Step Functions `SpanContext` is deterministically generated
+        if self.generated_span_context.is_some() {
+            return self.generated_span_context.clone();
         }
 
         None
