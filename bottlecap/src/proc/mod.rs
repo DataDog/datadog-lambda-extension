@@ -4,12 +4,12 @@ pub mod constants;
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{self, BufRead},
+    io::{self, BufRead, Read},
 };
 
 use constants::{
     LAMBDA_NETWORK_INTERFACE, LAMBDA_RUNTIME_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH,
-    PROC_STAT_PATH, PROC_UPTIME_PATH,
+    PROC_STAT_PATH, PROC_UPTIME_PATH, RUNTIME_VAR,
 };
 use regex::Regex;
 use tracing::{debug, trace};
@@ -40,6 +40,47 @@ pub fn get_pid_list_from_path(path: &str) -> Vec<i64> {
     }));
 
     pids
+}
+
+pub fn get_runtime_pid() -> Result<u32, String> {
+    get_runtime_pid_from_path(PROC_PATH)
+}
+
+pub fn get_runtime_pid_from_path(path: &str) -> Result<u32, String> {
+    match fs::read_dir(path) {
+        Ok(proc_dir) => {
+            let runtime_pid = proc_dir
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.path().is_dir()
+                        && entry
+                            .file_name()
+                            .into_string()
+                            .ok()
+                            .is_some_and(|pid_folder| pid_folder.chars().all(char::is_numeric))
+                })
+                .filter(|pid_folder| pid_folder.file_name().ne("1"))
+                .find(|pid_folder| {
+                    fs::read(pid_folder.path().join("environ"))
+                        .ok()
+                        .and_then(|bytes| String::from_utf8(bytes).ok())
+                        .map(|s| s.contains(RUNTIME_VAR))
+                        .unwrap_or(false)
+                })
+                .and_then(|pid_folder| pid_folder.file_name().into_string().ok())
+                .and_then(|pid_str| pid_str.parse::<u32>().ok());
+
+            if let Some(pid) = runtime_pid {
+                debug!("Found runtime process with PID: {pid}");
+                Ok(pid)
+            } else {
+                Err("No runtime process found".to_string())
+            }
+        }
+        Err(e) => {
+            Err(format!("Could not read proc directory: {}", e))
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -211,6 +252,40 @@ fn get_uptime_from_path(path: &str) -> Result<f64, io::Error> {
     Err(io::Error::new(
         io::ErrorKind::NotFound,
         "Uptime data not found",
+    ))
+}
+
+pub fn get_context_switches() -> Result<f64, io::Error> {
+    if let Ok(pid) = get_runtime_pid() {
+        return get_context_switches_from_path(PROC_PATH, pid);
+    } else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Could not find Lambda function process ID",
+        ));
+    };
+}
+
+pub fn get_context_switches_from_path(path: &str, pid: u32) -> Result<f64, io::Error> {
+    // Read the process's status file
+    let status_path = format!("{path}/{pid}/status");
+    let file = File::open(status_path)?;
+    let reader = io::BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with("voluntary_ctxt_switches:") {
+            if let Some(switches_str) = line.split_whitespace().nth(1) {
+                if let Ok(switches) = switches_str.parse::<f64>() {
+                    return Ok(switches);
+                }
+            }
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "Could not find voluntary context switches",
     ))
 }
 
@@ -520,5 +595,21 @@ mod tests {
         let threads_use_result =
             get_threads_use_data_from_path(path_from_root(path).as_str(), &pids);
         assert!(threads_use_result.is_err());
+    }
+
+    #[test]
+    fn test_get_context_switches_data() {
+        // process with pid 5 has valid proc/<pid>/status file
+        let path = "./tests/proc";
+        let ctx_switches_result =
+            get_context_switches_from_path(path_from_root(path).as_str(), 5);
+        assert!(ctx_switches_result.is_ok());
+        let ctx_switches = ctx_switches_result.unwrap();
+        assert!((ctx_switches - 818.0).abs() < f64::EPSILON);
+
+        // process with pid 6 has invalid proc/<pid>/status file (missing voluntary_ctxt_switches)
+        let ctx_switches_result =
+            get_context_switches_from_path(path_from_root(path).as_str(), 6);
+        assert!(ctx_switches_result.is_err());
     }
 }
