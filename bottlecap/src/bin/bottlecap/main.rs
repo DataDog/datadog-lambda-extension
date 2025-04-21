@@ -722,7 +722,7 @@ fn start_trace_agent(
     });
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules: config.apm_config_replace_tags.clone(),
+        tag_replace_rules: config.apm_replace_tags.clone(),
         http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
         http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
         obfuscate_memcached: false,
