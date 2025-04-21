@@ -191,9 +191,9 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
             trace_intake_url_prefixed(config.apm_config_apm_dd_url.as_str());
     }
 
-    if config.apm_config_replace_tags.is_none() {
+    if config.apm_replace_tags.is_none() {
         if let Some(rules) = yaml_config.apm_config.replace_tags.as_ref() {
-            config.apm_config_replace_tags = Some(rules.clone());
+            config.apm_replace_tags = Some(rules.clone());
         }
     }
 
@@ -769,7 +769,7 @@ pub mod tests {
                     ]"#,
             )
             .expect("can't parse rules");
-            assert_eq!(config.apm_config_replace_tags, Some(rule),);
+            assert_eq!(config.apm_replace_tags, Some(rule),);
             Ok(())
         });
     }
