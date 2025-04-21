@@ -17,7 +17,7 @@ use crate::{
     traces::trace_processor::TraceProcessor,
 };
 
-const OTLP_TRACE_AGENT_PORT: u16 = 4318;
+const OTLP_AGENT_PORT: u16 = 4318;
 
 pub struct Agent {
     pub config: Arc<Config>,
@@ -52,15 +52,15 @@ impl Agent {
             let port = endpoint.split(':').nth(1);
             if let Some(port) = port {
                 return port.parse::<u16>().unwrap_or_else(|_| {
-                    error!("Invalid OTLP port, using default port {OTLP_TRACE_AGENT_PORT}");
-                    OTLP_TRACE_AGENT_PORT
+                    error!("Invalid OTLP port, using default port {OTLP_AGENT_PORT}");
+                    OTLP_AGENT_PORT
                 });
             }
 
-            debug!("Invalid OTLP endpoint format, using default port {OTLP_TRACE_AGENT_PORT}");
+            debug!("Invalid OTLP endpoint format, using default port {OTLP_AGENT_PORT}");
         }
 
-        OTLP_TRACE_AGENT_PORT
+        OTLP_AGENT_PORT
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -137,7 +137,7 @@ impl Agent {
         trace_tx: Sender<SendData>,
     ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
-            (&Method::POST, "/") => {
+            (&Method::POST, "/v1/traces") => {
                 debug!("Received OTLP request");
                 let headers = req.headers().clone();
                 let body = match req.collect().await {
@@ -218,27 +218,27 @@ mod tests {
     fn test_parse_port_with_invalid_port_format() {
         // Test with an endpoint containing an invalid port format
         let endpoint = Some("localhost:invalid".to_string());
-        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_AGENT_PORT);
     }
 
     #[test]
     fn test_parse_port_with_missing_port() {
         // Test with an endpoint missing a port
         let endpoint = Some("localhost".to_string());
-        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_AGENT_PORT);
     }
 
     #[test]
     fn test_parse_port_with_none_endpoint() {
         // Test with None endpoint
         let endpoint: Option<String> = None;
-        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_AGENT_PORT);
     }
 
     #[test]
     fn test_parse_port_with_empty_endpoint() {
         // Test with an empty endpoint
         let endpoint = Some("".to_string());
-        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_AGENT_PORT);
     }
 }
