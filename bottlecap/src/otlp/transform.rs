@@ -78,14 +78,6 @@ lazy_static! {
     ]);
 }
 
-// fn get_db_system_type(db_system: &str) -> String {
-//     if let Some(span_type) = DB_SYSTEM_MAP.get(db_system) {
-//         return span_type.to_string();
-//     }
-
-//     SPAN_TYPE_GENERIC_DB.to_string()
-// }
-
 fn get_otel_attribute_value(attributes: &Vec<KeyValue>, key: &str) -> Option<AnyValue> {
     for attribute in attributes {
         if attribute.key == key {
@@ -433,37 +425,6 @@ pub fn get_otel_resource(otel_span: &OtelSpan, otel_res: &OtelResource) -> Strin
     // If nothing matches, return Span name
     otel_span.name.clone()
 }
-
-// fn get_otel_span_type(otel_span: &OtelSpan, otel_res: &OtelResource) -> String {
-//     let span_type = get_otel_attribute_value_as_string_from_resource_or_span(
-//         otel_res,
-//         otel_span,
-//         "span.type",
-//         false,
-//     );
-
-//     if !span_type.is_empty() {
-//         return span_type;
-//     }
-
-//     match otel_span.kind() {
-//         SpanKind::Server => "web".to_string(),
-//         SpanKind::Client => {
-//             let db_system = get_otel_attribute_value_as_string_from_resource_or_span(
-//                 otel_res,
-//                 otel_span,
-//                 DB_SYSTEM_NAME,
-//                 true,
-//             );
-//             if db_system.is_empty() {
-//                 return "http".to_string();
-//             }
-
-//             get_db_system_type(&db_system)
-//         }
-//         _ => "custom".to_string(),
-//     }
-// }
 
 fn get_dd_span_type_from_otel_kind(otel_span: &OtelSpan, otel_res: &OtelResource) -> String {
     match otel_span.kind() {

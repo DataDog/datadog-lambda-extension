@@ -17,7 +17,7 @@ use crate::{
     traces::trace_processor::TraceProcessor,
 };
 
-const OTLP_TRACE_AGENT_PORT: usize = 4318;
+const OTLP_TRACE_AGENT_PORT: u16 = 4318;
 
 pub struct Agent {
     pub config: Arc<Config>,
@@ -25,6 +25,7 @@ pub struct Agent {
     pub processor: OtlpProcessor,
     pub trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
     pub trace_tx: Sender<SendData>,
+    port: u16,
 }
 
 impl Agent {
@@ -34,13 +35,32 @@ impl Agent {
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendData>,
     ) -> Self {
+        let port = Self::parse_port(&config.otlp_config_receiver_protocols_http_endpoint);
+
         Self {
             config: config.clone(),
             tags_provider: tags_provider.clone(),
             processor: OtlpProcessor::new(config.clone()),
             trace_processor,
             trace_tx,
+            port,
         }
+    }
+
+    fn parse_port(endpoint: &Option<String>) -> u16 {
+        if let Some(endpoint) = endpoint {
+            let port = endpoint.split(':').nth(1);
+            if let Some(port) = port {
+                return port.parse::<u16>().unwrap_or_else(|_| {
+                    error!("Invalid OTLP port, using default port {OTLP_TRACE_AGENT_PORT}");
+                    OTLP_TRACE_AGENT_PORT
+                });
+            }
+
+            debug!("Invalid OTLP endpoint format, using default port {OTLP_TRACE_AGENT_PORT}");
+        }
+
+        OTLP_TRACE_AGENT_PORT
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -60,8 +80,7 @@ impl Agent {
             )
         });
 
-        let port = u16::try_from(OTLP_TRACE_AGENT_PORT).expect("OTLP_PORT is too large");
-        let addr = SocketAddr::from(([127, 0, 0, 1], port));
+        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
         let listener = tokio::net::TcpListener::bind(&addr).await?;
         let server = hyper::server::conn::http1::Builder::new();
         let mut joinset = tokio::task::JoinSet::new();
@@ -157,7 +176,12 @@ impl Agent {
                     None,
                 );
 
-                // TODO(duncanista): do not send if empty
+                if send_data.is_empty() {
+                    return log_and_create_http_response(
+                        "Not sending traces, processor returned empty data",
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    );
+                }
 
                 match trace_tx.send(send_data).await {
                     Ok(()) => log_and_create_traces_success_http_response(
@@ -176,5 +200,45 @@ impl Agent {
                 Ok(not_found)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_port_with_valid_endpoint() {
+        // Test with a valid endpoint containing a port
+        let endpoint = Some("localhost:8080".to_string());
+        assert_eq!(Agent::parse_port(&endpoint), 8080);
+    }
+
+    #[test]
+    fn test_parse_port_with_invalid_port_format() {
+        // Test with an endpoint containing an invalid port format
+        let endpoint = Some("localhost:invalid".to_string());
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
+    }
+
+    #[test]
+    fn test_parse_port_with_missing_port() {
+        // Test with an endpoint missing a port
+        let endpoint = Some("localhost".to_string());
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
+    }
+
+    #[test]
+    fn test_parse_port_with_none_endpoint() {
+        // Test with None endpoint
+        let endpoint: Option<String> = None;
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
+    }
+
+    #[test]
+    fn test_parse_port_with_empty_endpoint() {
+        // Test with an empty endpoint
+        let endpoint = Some("".to_string());
+        assert_eq!(Agent::parse_port(&endpoint), OTLP_TRACE_AGENT_PORT);
     }
 }
