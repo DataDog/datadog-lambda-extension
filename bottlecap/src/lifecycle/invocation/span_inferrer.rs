@@ -312,6 +312,9 @@ impl SpanInferrer {
     /// otherwise it will return `None`.
     ///
     pub fn get_span_context(&self, propagator: &impl Propagator) -> Option<SpanContext> {
+        // Order matters here: check inferred span for trace context first, then fallback to generated span context.
+        // If the order is flipped, trace propagation will be broken when AWS Xray is enabled.
+        // https://github.com/DataDog/datadog-lambda-extension/pull/655
         if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
             debug!("Extracted trace context from inferred span");
             return Some(sc);
