@@ -716,7 +716,6 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         aggregator: trace_aggregator.clone(),
         config: Arc::clone(config),
@@ -813,7 +812,6 @@ fn start_otlp_agent(
     trace_tx: Sender<SendData>,
 ) {
     if !config.otlp_config_traces_enabled {
-        debug!("OTLP traces agent is disabled, not starting it.");
         return;
     }
 
