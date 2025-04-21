@@ -56,6 +56,8 @@ pub struct Config {
     // APM
     pub apm_config_apm_dd_url: String,
     #[serde(deserialize_with = "deserialize_apm_replace_rules")]
+    pub apm_replace_tags: Option<Vec<ReplaceRule>>,
+    #[serde(deserialize_with = "deserialize_apm_replace_rules")]
     pub apm_config_replace_tags: Option<Vec<ReplaceRule>>,
     pub apm_config_obfuscation_http_remove_query_string: bool,
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
@@ -142,6 +144,7 @@ impl Default for Config {
             trace_propagation_http_baggage_enabled: false,
             // APM
             apm_config_apm_dd_url: String::default(),
+            apm_replace_tags: None,
             apm_config_replace_tags: None,
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
