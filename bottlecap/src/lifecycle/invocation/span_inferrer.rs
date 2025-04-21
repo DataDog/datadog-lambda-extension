@@ -312,14 +312,18 @@ impl SpanInferrer {
     /// otherwise it will return `None`.
     ///
     pub fn get_span_context(&self, propagator: &impl Propagator) -> Option<SpanContext> {
-        // Step Functions `SpanContext` is deterministically generated
-        if self.generated_span_context.is_some() {
-            return self.generated_span_context.clone();
-        }
-
+        // Order matters here: check inferred span for trace context first, then fallback to generated span context.
+        // If the order is flipped, trace propagation will be broken when AWS Xray is enabled.
+        // https://github.com/DataDog/datadog-lambda-extension/pull/655
         if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
             debug!("Extracted trace context from inferred span");
             return Some(sc);
+        }
+
+        // Step Functions `SpanContext` is deterministically generated
+        if self.generated_span_context.is_some() {
+            debug!("Returning generated span context");
+            return self.generated_span_context.clone();
         }
 
         None
@@ -330,5 +334,169 @@ impl SpanInferrer {
     #[must_use]
     pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
         self.trigger_tags.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::traces::context::{Sampling, SpanContext};
+    use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
+    use serde_json::json;
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    use super::*;
+
+    fn test_context_source(
+        carrier: Option<HashMap<String, String>>,
+        generated_context: Option<SpanContext>,
+        expected_source: &str,
+    ) {
+        let mut inferrer = SpanInferrer::default();
+        inferrer.carrier = carrier;
+        inferrer.generated_span_context = generated_context;
+
+        let propagator = DatadogHeaderPropagator;
+        let context = inferrer.get_span_context(&propagator);
+
+        assert!(context.is_some(), "Should return a span context");
+        let context = context.unwrap();
+        match expected_source {
+            "inferred" => {
+                assert_eq!(
+                    context.trace_id, 123456789,
+                    "Should have trace_id from inferred span"
+                );
+                assert_eq!(
+                    context.span_id, 987654321,
+                    "Should have span_id from inferred span"
+                );
+            }
+            "generated" => {
+                assert_eq!(
+                    context.trace_id, 111111111,
+                    "Should have trace_id from generated context"
+                );
+                assert_eq!(
+                    context.span_id, 222222222,
+                    "Should have span_id from generated context"
+                );
+            }
+            "aws_trace_header" => {
+                assert_eq!(
+                    context.trace_id, 0x35578e774943fd9d,
+                    "Should have trace_id from AWSTraceHeader"
+                );
+                assert_eq!(
+                    context.span_id, 0x76c040bdc454a7ac,
+                    "Should have span_id from AWSTraceHeader"
+                );
+            }
+            _ => panic!("Unknown expected source: {}", expected_source),
+        }
+    }
+
+    #[test]
+    fn test_get_span_context_from_inferred_span() {
+        let carrier = HashMap::from([
+            ("x-datadog-trace-id".to_string(), "123456789".to_string()),
+            ("x-datadog-parent-id".to_string(), "987654321".to_string()),
+            ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+        ]);
+
+        let generated_context = SpanContext {
+            trace_id: 111111111,
+            span_id: 222222222,
+            sampling: Some(Sampling {
+                priority: Some(1),
+                mechanism: None,
+            }),
+            origin: None,
+            tags: HashMap::new(),
+            links: Vec::new(),
+        };
+
+        // Should prefer inferred span context from carrier over generated context
+        test_context_source(Some(carrier), Some(generated_context), "inferred");
+    }
+
+    #[test]
+    fn test_get_span_context_fallback_to_generated() {
+        let generated_context = SpanContext {
+            trace_id: 111111111,
+            span_id: 222222222,
+            sampling: Some(Sampling {
+                priority: Some(1),
+                mechanism: None,
+            }),
+            origin: None,
+            tags: HashMap::new(),
+            links: Vec::new(),
+        };
+
+        // Should fallback to generated context when no carrier exists
+        test_context_source(None, Some(generated_context), "generated");
+    }
+
+    #[test]
+    fn test_java_sqs_aws_trace_header() {
+        let mut inferrer = SpanInferrer::default();
+
+        // Create a payload with AWSTraceHeader from Java->SQS->Java
+        let payload = json!({
+            "Records": [{
+                "messageId": "fde33907-bdf2-4e37-bb5b-f19c4f0e5ec2",
+                "receiptHandle": "test-receipt-handle",
+                "body": "Hello World",
+                "attributes": {
+                    "ApproximateReceiveCount": "1",
+                    "AWSTraceHeader": "Root=1-68029e8a-0000000035578e774943fd9d;Parent=76c040bdc454a7ac;Sampled=1",
+                    "SentTimestamp": "1745002122577",
+                    "SenderId": "AROAWGCM4HXUTNAMSZ533:nhulston-java-test-dev-main",
+                    "ApproximateFirstReceiveTimestamp": "1745002122578"
+                },
+                "messageAttributes": {},
+                "md5OfBody": "b10a8db164e0754105b7a99be72e3fe5",
+                "eventSource": "aws:sqs",
+                "eventSourceARN": "arn:aws:sqs:us-east-1:425362996713:nhulston-java",
+                "awsRegion": "us-east-1"
+            }]
+        });
+
+        let aws_config = AwsConfig {
+            region: "us-east-1".to_string(),
+            aws_access_key_id: "".to_string(),
+            aws_secret_access_key: "".to_string(),
+            aws_session_token: "".to_string(),
+            function_name: "".to_string(),
+            sandbox_init_time: Instant::now(),
+            aws_container_credentials_full_uri: "".to_string(),
+            aws_container_authorization_token: "".to_string(),
+        };
+        inferrer.infer_span(&payload, &aws_config);
+
+        assert!(
+            inferrer.generated_span_context.is_some(),
+            "Should generate span context from AWSTraceHeader"
+        );
+        assert!(
+            inferrer.carrier.is_some(),
+            "Should have carrier from SQS event"
+        );
+        let propagator = DatadogHeaderPropagator;
+        let inferred_context = inferrer
+            .carrier
+            .as_ref()
+            .and_then(|c| propagator.extract(c));
+        assert!(
+            inferred_context.is_none(),
+            "Carrier should not have trace context for Java->SQS->Java case"
+        );
+
+        test_context_source(
+            inferrer.carrier,
+            inferrer.generated_span_context,
+            "aws_trace_header",
+        );
     }
 }
