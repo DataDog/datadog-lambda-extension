@@ -645,7 +645,11 @@ fn marshal_events(events: &[Event]) -> String {
             let mut attrs = json!({});
             for kv in &event.attributes {
                 let key = kv.key.to_string();
-                attrs[key] = json!(kv.value);
+                if let Some(v) = &kv.value {
+                    if let Some(value) = &v.value {
+                        attrs[key] = json!(otel_value_to_string(value));
+                    }
+                }
             }
             event_obj["attributes"] = attrs;
         }
@@ -677,8 +681,11 @@ fn marshal_links(links: &[Link]) -> String {
             let mut attrs = json!({});
             for kv in &link.attributes {
                 let key = kv.key.to_string();
-
-                attrs[key] = json!(kv.value);
+                if let Some(v) = &kv.value {
+                    if let Some(value) = &v.value {
+                        attrs[key] = json!(otel_value_to_string(value));
+                    }
+                }
             }
             link_obj["attributes"] = attrs;
         }
