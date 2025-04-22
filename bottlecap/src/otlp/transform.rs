@@ -95,8 +95,31 @@ fn otel_value_to_string(value: &any_value::Value) -> String {
         any_value::Value::IntValue(i) => i.to_string(),
         any_value::Value::DoubleValue(d) => d.to_string(),
         any_value::Value::BytesValue(b) => hex::encode(b),
-        any_value::Value::ArrayValue(a) => serde_json::to_string(a).unwrap_or_default(),
-        any_value::Value::KvlistValue(kvl) => serde_json::to_string(kvl).unwrap_or_default(),
+        any_value::Value::ArrayValue(a) => {
+            let array: Vec<String> = a
+                .values
+                .iter()
+                .filter_map(|v| v.value.as_ref().map(otel_value_to_string))
+                .collect();
+            serde_json::to_string(&array).unwrap_or_default()
+        }
+        any_value::Value::KvlistValue(kvl) => {
+            let hashmap: HashMap<String, String> = kvl
+                .values
+                .iter()
+                .filter_map(|kv| {
+                    let key = kv.key.clone();
+                    let value = kv
+                        .value
+                        .as_ref()
+                        .and_then(|v| v.value.as_ref())
+                        .map(otel_value_to_string);
+
+                    value.map(|v| (key, v))
+                })
+                .collect();
+            serde_json::to_string(&hashmap).unwrap_or_default()
+        }
     }
 }
 
@@ -1102,4 +1125,120 @@ pub fn otel_resource_spans_to_dd_spans(
     }
 
     dd_spans
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opentelemetry_proto::tonic::common::v1::any_value::Value;
+    use opentelemetry_proto::tonic::common::v1::{AnyValue, ArrayValue, KeyValue, KeyValueList};
+
+    #[test]
+    fn test_otel_value_to_string_string_value() {
+        let value = Value::StringValue("test_string".to_string());
+        assert_eq!(otel_value_to_string(&value), "test_string");
+    }
+
+    #[test]
+    fn test_otel_value_to_string_bool_value() {
+        let value = Value::BoolValue(true);
+        assert_eq!(otel_value_to_string(&value), "true");
+
+        let value = Value::BoolValue(false);
+        assert_eq!(otel_value_to_string(&value), "false");
+    }
+
+    #[test]
+    fn test_otel_value_to_string_int_value() {
+        let value = Value::IntValue(42);
+        assert_eq!(otel_value_to_string(&value), "42");
+
+        let value = Value::IntValue(-123);
+        assert_eq!(otel_value_to_string(&value), "-123");
+
+        let value = Value::IntValue(0);
+        assert_eq!(otel_value_to_string(&value), "0");
+    }
+
+    #[test]
+    fn test_otel_value_to_string_double_value() {
+        let value = Value::DoubleValue(3.14);
+        assert_eq!(otel_value_to_string(&value), "3.14");
+
+        let value = Value::DoubleValue(-2.5);
+        assert_eq!(otel_value_to_string(&value), "-2.5");
+
+        let value = Value::DoubleValue(0.0);
+        assert_eq!(otel_value_to_string(&value), "0");
+    }
+
+    #[test]
+    fn test_otel_value_to_string_bytes_value() {
+        let value = Value::BytesValue(vec![0x01, 0x02, 0x03, 0x04]);
+        assert_eq!(otel_value_to_string(&value), "01020304");
+
+        let value = Value::BytesValue(vec![]);
+        assert_eq!(otel_value_to_string(&value), "");
+    }
+
+    #[test]
+    fn test_otel_value_to_string_array_value() {
+        let array = vec![
+            AnyValue {
+                value: Some(Value::StringValue("one".to_string())),
+            },
+            AnyValue {
+                value: Some(Value::IntValue(2)),
+            },
+            AnyValue {
+                value: Some(Value::BoolValue(true)),
+            },
+        ];
+
+        let value = Value::ArrayValue(ArrayValue { values: array });
+        let result = otel_value_to_string(&value);
+
+        let expected = r#"["one","2","true"]"#;
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_otel_value_to_string_kvlist_value() {
+        let kvlist = vec![
+            KeyValue {
+                key: "key1".to_string(),
+                value: Some(AnyValue {
+                    value: Some(Value::StringValue("value1".to_string())),
+                }),
+            },
+            KeyValue {
+                key: "key2".to_string(),
+                value: Some(AnyValue {
+                    value: Some(Value::IntValue(42)),
+                }),
+            },
+        ];
+
+        let value = Value::KvlistValue(KeyValueList { values: kvlist });
+        let result = otel_value_to_string(&value);
+
+        // The result should be a JSON object with key-value pairs
+        // Note: The order of keys in a JSON object is not guaranteed
+        assert!(result.contains("\"key1\":\"value1\""));
+        assert!(result.contains("\"key2\":\"42\""));
+        assert!(result.starts_with("{"));
+        assert!(result.ends_with("}"));
+    }
+
+    #[test]
+    fn test_otel_value_to_string_empty_array() {
+        let value = Value::ArrayValue(ArrayValue { values: vec![] });
+        assert_eq!(otel_value_to_string(&value), "[]");
+    }
+
+    #[test]
+    fn test_otel_value_to_string_empty_kvlist() {
+        let value = Value::KvlistValue(KeyValueList { values: vec![] });
+        assert_eq!(otel_value_to_string(&value), "{}");
+    }
 }
