@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::vec;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
+use serde_aux::field_attributes::deserialize_bool_from_anything;
 use serde_json::Value;
 
 use crate::config::{
@@ -33,25 +34,31 @@ pub struct Config {
     pub log_level: LogLevel,
     #[serde(deserialize_with = "deserialize_processing_rules")]
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
     pub logs_config_logs_dd_url: String,
     pub serverless_flush_strategy: FlushStrategy,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub enhanced_metrics: bool,
     /// Flush timeout in seconds
     pub flush_timeout: u64, //TODO go agent adds jitter too
     pub https_proxy: Option<String>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
     #[serde(deserialize_with = "deserialize_service_mapping")]
     pub service_mapping: HashMap<String, String>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub serverless_logs_enabled: bool,
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub trace_propagation_extract_first: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub trace_propagation_http_baggage_enabled: bool,
     // APM
     pub apm_config_apm_dd_url: String,
@@ -59,7 +66,9 @@ pub struct Config {
     pub apm_replace_tags: Option<Vec<ReplaceRule>>,
     #[serde(deserialize_with = "deserialize_apm_replace_rules")]
     pub apm_config_replace_tags: Option<Vec<ReplaceRule>>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub apm_config_obfuscation_http_remove_query_string: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
     pub apm_features: Vec<String>,
     pub apm_ignore_resources: Vec<String>,
@@ -69,9 +78,12 @@ pub struct Config {
     // OTLP
     //
     // - Traces
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_traces_enabled: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_traces_span_name_as_resource_name: bool,
     pub otlp_config_traces_span_name_remappings: HashMap<String, String>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_ignore_missing_datadog_fields: bool,
     // - Receiver / HTTP
     pub otlp_config_receiver_protocols_http_endpoint: Option<String>,
@@ -80,7 +92,9 @@ pub struct Config {
     // Fallback Config
     pub extension_version: Option<String>,
     // AppSec
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub serverless_appsec_enabled: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub appsec_enabled: bool,
     // OTLP
     //
@@ -89,13 +103,18 @@ pub struct Config {
     pub otlp_config_receiver_protocols_grpc_transport: Option<String>,
     pub otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib: Option<i32>,
     // - Metrics
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_metrics_enabled: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_metrics_resource_attributes_as_tags: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_metrics_instrumentation_scope_metadata_as_tags: bool,
     pub otlp_config_metrics_tag_cardinality: Option<String>,
     pub otlp_config_metrics_delta_ttl: Option<i32>,
     pub otlp_config_metrics_histograms_mode: Option<String>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_metrics_histograms_send_count_sum_metrics: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_metrics_histograms_send_aggregation_metrics: bool,
     pub otlp_config_metrics_sums_cumulative_monotonic_mode: Option<String>,
     pub otlp_config_metrics_sums_initial_cumulativ_monotonic_value: Option<String>,
@@ -103,6 +122,7 @@ pub struct Config {
     // - Traces
     pub otlp_config_traces_probabilistic_sampler_sampling_percentage: Option<i32>,
     // - Logs
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub otlp_config_logs_enabled: bool,
 }
 

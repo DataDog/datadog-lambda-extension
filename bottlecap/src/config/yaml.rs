@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::config::{deserialize_apm_replace_rules, deserialize_processing_rules, ProcessingRule};
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use serde::Deserialize;
+use serde_aux::field_attributes::deserialize_bool_from_anything;
 use serde_json::Value;
 
 /// `Config` is a struct that represents some of the fields in the `datadog.yaml` file.
@@ -52,7 +53,9 @@ pub struct ApmObfuscation {
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ApmHttpObfuscation {
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub remove_query_string: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub remove_paths_with_digits: bool,
 }
 
@@ -110,9 +113,12 @@ pub struct OtlpReceiverHttpConfig {
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
 pub struct OtlpTracesConfig {
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub enabled: bool,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub span_name_as_resource_name: bool,
     pub span_name_remappings: HashMap<String, String>,
+    #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub ignore_missing_datadog_fields: bool,
 
     // NOT SUPORTED
