@@ -465,6 +465,11 @@ impl Processor {
     ) {
         if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
             if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
+                if cold_start_span.trace_id == 0 {
+                    debug!("Not sending cold start span because trace ID is unset.");
+                    return;
+                }
+
                 let traces = vec![cold_start_span.clone()];
                 let body_size = size_of_val(cold_start_span);
 
