@@ -12,7 +12,11 @@
 use bottlecap::lwa::proxy::start_lwa_proxy;
 use bottlecap::{
     base_url,
-    config::{self, get_aws_partition_by_region, AwsConfig, Config},
+    config::{
+        self,
+        aws::{build_lambda_function_arn, AwsConfig},
+        Config,
+    },
     event_bus::bus::EventBus,
     events::Event,
     lifecycle::{
@@ -179,14 +183,9 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
     Ok(register_response)
 }
 
-fn build_function_arn(account_id: &str, region: &str, function_name: &str) -> String {
-    let aws_partition = get_aws_partition_by_region(region);
-    format!("arn:{aws_partition}:lambda:{region}:{account_id}:function:{function_name}")
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let start_time = Instant::now();
+    let start_time: Instant = Instant::now();
     let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
@@ -232,20 +231,10 @@ async fn main() -> Result<()> {
 }
 
 fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
-    // First load the configuration
-    let aws_config = AwsConfig {
-        region: env::var("AWS_DEFAULT_REGION").unwrap_or("us-east-1".to_string()),
-        aws_access_key_id: env::var("AWS_ACCESS_KEY_ID").unwrap_or_default(),
-        aws_secret_access_key: env::var("AWS_SECRET_ACCESS_KEY").unwrap_or_default(),
-        aws_session_token: env::var("AWS_SESSION_TOKEN").unwrap_or_default(),
-        aws_container_credentials_full_uri: env::var("AWS_CONTAINER_CREDENTIALS_FULL_URI")
-            .unwrap_or_default(),
-        aws_container_authorization_token: env::var("AWS_CONTAINER_AUTHORIZATION_TOKEN")
-            .unwrap_or_default(),
-        function_name: env::var("AWS_LAMBDA_FUNCTION_NAME").unwrap_or_default(),
-        sandbox_init_time: start_time,
-    };
-    let lambda_directory = env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    // First load the AWS configuration
+    let aws_config = AwsConfig::from_env(start_time);
+    let lambda_directory: String =
+        env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
@@ -630,7 +619,7 @@ fn setup_tag_provider(
     account_id: &str,
 ) -> Arc<TagProvider> {
     let function_arn =
-        build_function_arn(account_id, &aws_config.region, &aws_config.function_name);
+        build_lambda_function_arn(account_id, &aws_config.region, &aws_config.function_name);
     let metadata_hash = hash_map::HashMap::from([(
         lambda::tags::FUNCTION_ARN_KEY.to_string(),
         function_arn.clone(),
