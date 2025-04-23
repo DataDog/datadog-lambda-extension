@@ -141,7 +141,6 @@ impl Agent {
     ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
             (&Method::POST, "/v1/traces") => {
-                debug!("Received OTLP request");
                 let headers = req.headers().clone();
                 let body = match req.collect().await {
                     Ok(body_bytes_collected) => body_bytes_collected.to_bytes().to_vec(),
