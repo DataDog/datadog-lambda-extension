@@ -584,6 +584,33 @@ mod tests {
     }
 
     #[test]
+    fn test_get_cold_start_span() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+
+        // Create a context with no cold start span
+        let request_id = String::from("1");
+        let context = Context::from_request_id(&request_id);
+        buffer.insert(context.clone());
+
+        // Should return None when no cold start span exists
+        assert!(buffer.get_cold_start_span().is_none());
+
+        // Create a context with a cold start span
+        let request_id_2 = String::from("2");
+        let mut context_2 = Context::from_request_id(&request_id_2);
+        let mut cold_start_span = Span::default();
+        cold_start_span.name = "aws.lambda.cold_start".to_string();
+        cold_start_span.span_id = 12345;
+        context_2.cold_start_span = Some(cold_start_span);
+        buffer.insert(context_2);
+
+        // Should return the cold start span
+        let retrieved_span = buffer.get_cold_start_span();
+        assert!(retrieved_span.is_some());
+        assert_eq!(retrieved_span.unwrap().name, "aws.lambda.cold_start");
+    }
+
+    #[test]
     fn test_pair_invoke_event() {
         let mut buffer = ContextBuffer::with_capacity(2);
         let request_id = "test-request-1".to_string();
