@@ -398,13 +398,13 @@ impl ContextBuffer {
     }
 
     #[must_use]
-    pub fn get_cold_start_span(&mut self) -> Option<&mut Span> {
+    pub fn get_context_with_cold_start(&mut self) -> Option<&mut Context> {
         if let Some(context) = self
             .buffer
             .iter_mut()
             .find(|context| context.cold_start_span.is_some())
         {
-            return context.cold_start_span.as_mut();
+            return Some(context);
         }
 
         None
@@ -584,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_cold_start_span() {
+    fn test_get_context_with_cold_start() {
         let mut buffer = ContextBuffer::with_capacity(2);
 
         // Create a context with no cold start span
@@ -593,7 +593,7 @@ mod tests {
         buffer.insert(context.clone());
 
         // Should return None when no cold start span exists
-        assert!(buffer.get_cold_start_span().is_none());
+        assert!(buffer.get_context_with_cold_start().is_none());
 
         // Create a context with a cold start span
         let request_id_2 = String::from("2");
@@ -605,9 +605,11 @@ mod tests {
         buffer.insert(context_2);
 
         // Should return the cold start span
-        let retrieved_span = buffer.get_cold_start_span();
-        assert!(retrieved_span.is_some());
-        assert_eq!(retrieved_span.unwrap().name, "aws.lambda.cold_start");
+        let context = buffer.get_context_with_cold_start();
+        assert!(context.is_some());
+        let cold_start_span = &context.as_ref().unwrap().cold_start_span;
+        assert!(cold_start_span.is_some());
+        assert_eq!(cold_start_span.as_ref().unwrap().name, "aws.lambda.cold_start");
     }
 
     #[test]
