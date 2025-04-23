@@ -443,7 +443,7 @@ impl Processor {
         trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
         trace_agent_tx: &Sender<SendData>,
         trace_id: u64,
-    ) {
+    ) -> Option<u64> {
         if let Some(cold_start_span) = self.context_buffer.get_cold_start_span() {
             if cold_start_span.trace_id == 0 {
                 cold_start_span.trace_id = trace_id;
@@ -451,6 +451,7 @@ impl Processor {
 
             let body_size = size_of_val(cold_start_span);
             let traces = vec![cold_start_span.clone()];
+            let span_id = cold_start_span.span_id;
 
             self.send_spans(
                 traces,
@@ -460,7 +461,11 @@ impl Processor {
                 trace_agent_tx,
             )
             .await;
+
+            return Some(span_id);
         }
+
+        None
     }
 
     // Used by universally instrumented runtimes to send context spans:
