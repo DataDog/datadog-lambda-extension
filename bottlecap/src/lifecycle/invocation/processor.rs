@@ -333,6 +333,9 @@ impl Processor {
                         .await;
                 }
             }
+        } else {
+            self.send_cold_start_span(&tags_provider, &trace_processor, &trace_agent_tx)
+                .await;
         }
     }
 
@@ -394,8 +397,10 @@ impl Processor {
 
         // Handle cold start span if present
         if let Some(cold_start_span) = &mut context.cold_start_span {
-            cold_start_span.trace_id = context.invocation_span.trace_id;
-            cold_start_span.parent_id = context.invocation_span.parent_id;
+            if cold_start_span.trace_id == 0 {
+                cold_start_span.trace_id = context.invocation_span.trace_id;
+                cold_start_span.parent_id = context.invocation_span.parent_id;
+            }
         }
         Some(context.clone())
     }
@@ -435,24 +440,33 @@ impl Processor {
         .await;
     }
 
-    /// For Node/Python: Updates the cold start span with the given trace ID and sends to the trace agent.
-    /// Returns the Span ID of the cold start span so we can reparent the lambda.load span.
-    pub async fn send_cold_start_span(
-        &mut self,
-        tags_provider: &Arc<provider::Provider>,
-        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendData>,
-        trace_id: u64,
-    ) -> Option<u64> {
+    /// For Node/Python: Updates the cold start span with the given trace ID.
+    /// Returns the Span ID of the cold start span so we can reparent the `aws.lambda.load` span.
+    pub fn set_cold_start_span_trace_id(&mut self, trace_id: u64) -> Option<u64> {
         if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
             if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
                 if cold_start_span.trace_id == 0 {
                     cold_start_span.trace_id = trace_id;
                 }
 
-                let body_size = size_of_val(cold_start_span);
+                return Some(cold_start_span.span_id);
+            }
+        }
+
+        None
+    }
+
+    /// For Node/Python: Sends the cold start span to the trace agent.
+    async fn send_cold_start_span(
+        &mut self,
+        tags_provider: &Arc<provider::Provider>,
+        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
+        trace_agent_tx: &Sender<SendData>,
+    ) {
+        if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
+            if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
                 let traces = vec![cold_start_span.clone()];
-                let span_id = cold_start_span.span_id;
+                let body_size = size_of_val(cold_start_span);
 
                 self.send_spans(
                     traces,
@@ -461,13 +475,9 @@ impl Processor {
                     trace_processor,
                     trace_agent_tx,
                 )
-                    .await;
-
-                return Some(span_id);
+                .await;
             }
         }
-
-        None
     }
 
     /// Used by universally instrumented runtimes to send context spans:

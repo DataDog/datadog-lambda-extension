@@ -398,14 +398,8 @@ impl TraceAgent {
                 // and reparent the aws.lambda.load span to the cold start span.
                 if span.name == "aws.lambda.load" {
                     let mut invocation_processor = invocation_processor.lock().await;
-                    let cold_start_span_id = invocation_processor
-                        .send_cold_start_span(
-                            &tags_provider,
-                            &trace_processor,
-                            &trace_tx,
-                            span.trace_id,
-                        )
-                        .await;
+                    let cold_start_span_id =
+                        invocation_processor.set_cold_start_span_trace_id(span.trace_id);
                     if let Some(cold_start_span_id) = cold_start_span_id {
                         span.parent_id = cold_start_span_id;
                     }
