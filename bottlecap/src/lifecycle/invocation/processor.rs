@@ -397,7 +397,7 @@ impl Processor {
 
         // Handle cold start span if present
         if let Some(cold_start_span) = &mut context.cold_start_span {
-            if cold_start_span.trace_id == 0 {
+            if context.invocation_span.trace_id != 0 {
                 cold_start_span.trace_id = context.invocation_span.trace_id;
                 cold_start_span.parent_id = context.invocation_span.parent_id;
             }
