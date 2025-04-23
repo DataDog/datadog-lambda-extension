@@ -435,8 +435,8 @@ impl Processor {
         .await;
     }
 
-    // For Node/Python: Updates the cold start span with the given trace ID and sends to the trace agent.
-    // Returns the Span ID of the cold start span so we can reparent the lambda.load span.
+    /// For Node/Python: Updates the cold start span with the given trace ID and sends to the trace agent.
+    /// Returns the Span ID of the cold start span so we can reparent the lambda.load span.
     pub async fn send_cold_start_span(
         &mut self,
         tags_provider: &Arc<provider::Provider>,
@@ -470,9 +470,9 @@ impl Processor {
         None
     }
 
-    // Used by universally instrumented runtimes to send context spans:
-    // invocation span, inferred span(s), & cold start span.
-    // Used by Node+Python to send cold start span.
+    /// Used by universally instrumented runtimes to send context spans:
+    /// invocation span, inferred span(s), & cold start span.
+    /// Used by Node+Python to send cold start span.
     async fn send_spans(
         &mut self,
         traces: Vec<Span>,
