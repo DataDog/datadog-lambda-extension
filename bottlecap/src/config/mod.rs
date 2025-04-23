@@ -1,4 +1,5 @@
 pub mod apm_replace_rule;
+pub mod aws;
 pub mod env;
 pub mod flush_strategy;
 pub mod log_level;
@@ -9,7 +10,6 @@ pub mod yaml;
 
 use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 use std::path::Path;
-use std::time::Instant;
 
 use figment::providers::{Format, Yaml};
 use figment::{providers::Env, Figment};
@@ -269,28 +269,6 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
 #[must_use]
 fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
-}
-
-#[allow(clippy::module_name_repetitions)]
-#[derive(Debug, Clone)]
-pub struct AwsConfig {
-    pub region: String,
-    pub aws_access_key_id: String,
-    pub aws_secret_access_key: String,
-    pub aws_session_token: String,
-    pub function_name: String,
-    pub sandbox_init_time: Instant,
-    pub aws_container_credentials_full_uri: String,
-    pub aws_container_authorization_token: String,
-}
-
-#[must_use]
-pub fn get_aws_partition_by_region(region: &str) -> String {
-    match region {
-        r if r.starts_with("us-gov-") => "aws-us-gov".to_string(),
-        r if r.starts_with("cn-") => "aws-cn".to_string(),
-        _ => "aws".to_string(),
-    }
 }
 
 #[cfg(test)]
