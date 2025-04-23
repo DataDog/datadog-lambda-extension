@@ -394,8 +394,8 @@ impl TraceAgent {
         for chunk in &mut traces {
             for span in chunk.iter_mut() {
                 // If the aws.lambda.load span is found, we're in Python or Node.
-                // We need to update the trace ID of the cold start span, send the cold start span,
-                // and reparent the aws.lambda.load span to the cold start span.
+                // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
+                // span to the cold start span, and eventually send the cold start span.
                 if span.name == "aws.lambda.load" {
                     let mut invocation_processor = invocation_processor.lock().await;
                     let cold_start_span_id =
