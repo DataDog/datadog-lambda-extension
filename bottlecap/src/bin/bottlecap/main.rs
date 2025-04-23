@@ -9,7 +9,6 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use bottlecap::lwa::proxy::start_lwa_proxy;
 use bottlecap::{
     base_url,
     config::{
@@ -25,6 +24,7 @@ use bottlecap::{
     },
     logger,
     logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
+    lwa::proxy::start_lwa_proxy,
     otlp::agent::Agent as OtlpAgent,
     secrets::decrypt,
     tags::{
@@ -32,10 +32,9 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     telemetry::{
-        self,
         client::TelemetryApiClient,
         events::{TelemetryEvent, TelemetryRecord},
-        listener::TelemetryListener,
+        listener::{TelemetryListener, TelemetryListenerConfig},
     },
     traces::{
         stats_aggregator::StatsAggregator,
@@ -74,7 +73,6 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use telemetry::listener::TelemetryListenerConfig;
 use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
