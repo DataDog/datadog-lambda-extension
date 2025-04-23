@@ -399,15 +399,9 @@ impl ContextBuffer {
 
     #[must_use]
     pub fn get_context_with_cold_start(&mut self) -> Option<&mut Context> {
-        if let Some(context) = self
-            .buffer
+        self.buffer
             .iter_mut()
             .find(|context| context.cold_start_span.is_some())
-        {
-            return Some(context);
-        }
-
-        None
     }
 
     /// Returns the size of the buffer.
