@@ -17450,7 +17450,7 @@ third_party_libraries:
 
       END OF TERMS AND CONDITIONS
 - package_name: serde-aux
-  package_version: 4.6.0
+  package_version: 4.7.0
   repository: https://github.com/iddm/serde-aux
   license: MIT
   licenses:
