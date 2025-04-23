@@ -19,7 +19,7 @@ use opentelemetry_semantic_conventions::attribute::{
     MESSAGING_SYSTEM, OTEL_LIBRARY_NAME, OTEL_LIBRARY_VERSION, OTEL_STATUS_CODE,
     OTEL_STATUS_DESCRIPTION, RPC_METHOD, RPC_SERVICE, RPC_SYSTEM,
 };
-use opentelemetry_semantic_conventions::resource::SERVICE_VERSION; // CONTAINER_ID, SERVICE_VERSION, TELEMETRY_SDK_LANGUAGE, TELEMETRY_SDK_VERSION,
+use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION}; // CONTAINER_ID, SERVICE_VERSION, TELEMETRY_SDK_LANGUAGE, TELEMETRY_SDK_VERSION,
 use opentelemetry_semantic_conventions::trace::{
     EXCEPTION_MESSAGE, EXCEPTION_STACKTRACE, EXCEPTION_TYPE,
 };
@@ -188,7 +188,7 @@ pub fn otel_span_id_to_u64(span_id: &[u8]) -> u64 {
 
 fn get_otel_service(otel_res: &OtelResource, normalize: bool) -> String {
     let mut service =
-        get_otel_attribute_value_as_string(&otel_res.attributes, KEY_DATADOG_SERVICE, normalize);
+        get_otel_attribute_value_as_string(&otel_res.attributes, SERVICE_NAME, normalize);
 
     if service.is_empty() {
         service = String::from("otlpresourcenoservicename");
