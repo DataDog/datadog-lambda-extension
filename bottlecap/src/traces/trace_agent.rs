@@ -50,6 +50,7 @@ const INFO_ENDPOINT_PATH: &str = "/info";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
+const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
@@ -393,6 +394,18 @@ impl TraceAgent {
 
         for chunk in &mut traces {
             for span in chunk.iter_mut() {
+                // If the aws.lambda.load span is found, we're in Python or Node.
+                // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
+                // span to the cold start span, and eventually send the cold start span.
+                if span.name == LAMBDA_LOAD_SPAN {
+                    let mut invocation_processor = invocation_processor.lock().await;
+                    if let Some(cold_start_span_id) =
+                        invocation_processor.set_cold_start_span_trace_id(span.trace_id)
+                    {
+                        span.parent_id = cold_start_span_id;
+                    }
+                }
+
                 if span.resource == INVOCATION_SPAN_RESOURCE {
                     let mut invocation_processor = invocation_processor.lock().await;
                     invocation_processor.add_tracer_span(span);

@@ -397,6 +397,13 @@ impl ContextBuffer {
         }
     }
 
+    #[must_use]
+    pub fn get_context_with_cold_start(&mut self) -> Option<&mut Context> {
+        self.buffer
+            .iter_mut()
+            .find(|context| context.cold_start_span.is_some())
+    }
+
     /// Returns the size of the buffer.
     ///
     #[must_use]
@@ -567,6 +574,38 @@ mod tests {
         assert_eq!(
             buffer.get(&request_id).unwrap().enhanced_metric_data,
             enhanced_metric_data,
+        );
+    }
+
+    #[test]
+    fn test_get_context_with_cold_start() {
+        let mut buffer = ContextBuffer::with_capacity(2);
+
+        // Create a context with no cold start span
+        let request_id = String::from("1");
+        let context = Context::from_request_id(&request_id);
+        buffer.insert(context.clone());
+
+        // Should return None when no cold start span exists
+        assert!(buffer.get_context_with_cold_start().is_none());
+
+        // Create a context with a cold start span
+        let request_id_2 = String::from("2");
+        let mut context_2 = Context::from_request_id(&request_id_2);
+        let mut cold_start_span = Span::default();
+        cold_start_span.name = "aws.lambda.cold_start".to_string();
+        cold_start_span.span_id = 12345;
+        context_2.cold_start_span = Some(cold_start_span);
+        buffer.insert(context_2);
+
+        // Should return the cold start span
+        let context = buffer.get_context_with_cold_start();
+        assert!(context.is_some());
+        let cold_start_span = &context.as_ref().unwrap().cold_start_span;
+        assert!(cold_start_span.is_some());
+        assert_eq!(
+            cold_start_span.as_ref().unwrap().name,
+            "aws.lambda.cold_start"
         );
     }
 
