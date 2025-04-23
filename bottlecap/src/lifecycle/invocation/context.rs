@@ -609,7 +609,10 @@ mod tests {
         assert!(context.is_some());
         let cold_start_span = &context.as_ref().unwrap().cold_start_span;
         assert!(cold_start_span.is_some());
-        assert_eq!(cold_start_span.as_ref().unwrap().name, "aws.lambda.cold_start");
+        assert_eq!(
+            cold_start_span.as_ref().unwrap().name,
+            "aws.lambda.cold_start"
+        );
     }
 
     #[test]
