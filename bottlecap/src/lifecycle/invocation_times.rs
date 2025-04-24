@@ -21,20 +21,20 @@ impl InvocationTimes {
     }
 
     pub(crate) fn should_adapt_to_periodic(&self, now: u64) -> bool {
-        let mut count = 0;
-        let mut last = 0;
-        for time in &self.times {
-            if *time != 0 {
-                count += 1;
-                last = *time;
+        // If the buffer isn't full, then we haven't seen enough invocations, so we should flush.
+        for idx in self.head..LOOKBACK_COUNT {
+            if self.times[idx] == 0 {
+                return false;
             }
         }
-        // If we haven't seen enough invocations, we should flush
-        if count < LOOKBACK_COUNT {
-            return false;
-        }
-        let elapsed = now - last;
-        (elapsed as f64 / (count - 1) as f64) < ONE_TWENTY_SECONDS
+
+        // Now we've seen at least 20 invocations. Switch to periodic if we're invoked at least once every 2 minutes.
+        // We get the average time between each invocation by taking the difference between newest (`now`) and the
+        // oldest invocation in the buffer, then dividing by `LOOKBACK_COUNT - 1`.
+        let oldest = self.times[self.head];
+
+        let elapsed = now - oldest;
+        (elapsed as f64 / (LOOKBACK_COUNT - 1) as f64) < ONE_TWENTY_SECONDS
     }
 }
 
