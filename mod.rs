@@ -884,4 +884,21 @@ pub mod tests {
             Ok(())
         });
     }
+
+    #[test]
+    fn test_parse_bool_from_anything() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "true");
+            jail.set_env("DD_ENHANCED_METRICS", "1");
+            jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "TRUE");
+            jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "0");
+            let config = get_config(Path::new(""), MOCK_REGION).expect("should parse config");
+            assert_eq!(config.serverless_logs_enabled, true);
+            assert_eq!(config.enhanced_metrics, true);
+            assert_eq!(config.logs_config_use_compression, true);
+            assert_eq!(config.capture_lambda_payload, false);
+            Ok(())
+        });
+    }
 }
