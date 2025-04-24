@@ -126,7 +126,7 @@ impl Processor {
             .unwrap_or_default();
         self.set_init_tags();
 
-        if self.config.enhanced_metrics {
+        if self.config.proc_enhanced_metrics {
             // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();

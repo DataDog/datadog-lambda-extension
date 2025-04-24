@@ -38,6 +38,7 @@ pub struct Config {
     pub logs_config_logs_dd_url: String,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
+    pub proc_enhanced_metrics: bool,
     /// Flush timeout in seconds
     pub flush_timeout: u64, //TODO go agent adds jitter too
     pub https_proxy: Option<String>,
@@ -129,6 +130,7 @@ impl Default for Config {
             logs_config_logs_dd_url: String::default(),
             // Metrics
             enhanced_metrics: true,
+            proc_enhanced_metrics: true,
             https_proxy: None,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
