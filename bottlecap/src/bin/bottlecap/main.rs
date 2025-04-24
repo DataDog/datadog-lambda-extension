@@ -9,7 +9,6 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use bottlecap::lwa::proxy::start_lwa_proxy;
 use bottlecap::{
     base_url,
     config::{
@@ -25,16 +24,17 @@ use bottlecap::{
     },
     logger,
     logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
+    lwa::proxy::start_lwa_proxy,
+    otlp::agent::Agent as OtlpAgent,
     secrets::decrypt,
     tags::{
         lambda::{self, tags::EXTENSION_VERSION},
         provider::Provider as TagProvider,
     },
     telemetry::{
-        self,
         client::TelemetryApiClient,
         events::{TelemetryEvent, TelemetryRecord},
-        listener::TelemetryListener,
+        listener::{TelemetryListener, TelemetryListenerConfig},
     },
     traces::{
         stats_aggregator::StatsAggregator,
@@ -48,6 +48,7 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_trace_obfuscation::obfuscation_config;
+use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
@@ -72,7 +73,6 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use telemetry::listener::TelemetryListenerConfig;
 use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
@@ -326,11 +326,13 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
     )));
 
+    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) = start_trace_agent(
         config,
         resolved_api_key.clone(),
         &tags_provider,
         Arc::clone(&invocation_processor),
+        Arc::clone(&trace_aggregator),
     );
 
     let lwa_proxy_stopper = start_lwa_proxy(Arc::clone(&invocation_processor));
@@ -350,6 +352,13 @@ async fn extension_loop_active(
 
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
+
+    start_otlp_agent(
+        config,
+        tags_provider.clone(),
+        trace_processor.clone(),
+        trace_agent_channel.clone(),
+    );
 
     let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
 
@@ -687,6 +696,7 @@ fn start_trace_agent(
     resolved_api_key: String,
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
 ) -> (
     Sender<datadog_trace_utils::send_data::SendData>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
@@ -704,7 +714,6 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         aggregator: trace_aggregator.clone(),
         config: Arc::clone(config),
@@ -792,4 +801,23 @@ async fn setup_telemetry_client(
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     Ok(telemetry_listener_cancel_token)
+}
+
+fn start_otlp_agent(
+    config: &Arc<Config>,
+    tags_provider: Arc<TagProvider>,
+    trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+    trace_tx: Sender<SendData>,
+) {
+    if !config.otlp_config_traces_enabled {
+        return;
+    }
+
+    let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
+
+    tokio::spawn(async move {
+        if let Err(e) = agent.start().await {
+            error!("Error starting OTLP agent: {e:?}");
+        }
+    });
 }

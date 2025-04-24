@@ -1,5 +1,4 @@
 use datadog_trace_protobuf::pb::ClientStatsPayload;
-use prost::Message;
 use std::collections::VecDeque;
 
 /// Maximum number of entries in a stat payload.
@@ -55,7 +54,7 @@ impl StatsAggregator {
         // Fill the batch
         while batch_size < self.max_content_size_bytes {
             if let Some(payload) = self.queue.pop_front() {
-                let payload_size = payload.encoded_len();
+                let payload_size = size_of_val(&payload);
 
                 // Put stats back in the queue
                 if batch_size + payload_size > self.max_content_size_bytes {
@@ -130,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_get_batch_full_entries() {
-        let mut aggregator = StatsAggregator::new(230);
+        let mut aggregator = StatsAggregator::new(640);
         // Payload below is 115 bytes
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
