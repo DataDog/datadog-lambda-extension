@@ -203,9 +203,7 @@ mod tests {
         );
 
         assert_eq!(
-            parameterize_api_resource(
-                "/dev/proxy_route/users/12345/friends/67890".to_string()
-            ),
+            parameterize_api_resource("/dev/proxy_route/users/12345/friends/67890".to_string()),
             "/dev/proxy_route/users/{user_id}/friends/{friend_id}"
         );
 
@@ -290,7 +288,7 @@ mod tests {
         event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
-        assert_eq!(span.resource, "GET /path");
+        assert_eq!(span.resource, "GET /my/path");
         assert_eq!(span.r#type, "http");
 
         assert_eq!(
@@ -352,7 +350,7 @@ mod tests {
             span.service,
             "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com"
         );
-        assert_eq!(span.resource, "GET /user/{id}");
+        assert_eq!(span.resource, "GET /dev/user/{user_id}");
         assert_eq!(span.r#type, "http");
         let expected = HashMap::from([
             ("endpoint".to_string(), "/dev/user/42".to_string()),

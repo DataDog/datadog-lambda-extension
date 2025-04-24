@@ -187,7 +187,7 @@ mod tests {
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
-                time_epoch: 1666633666203,
+                time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
                 api_id: "85fj5nw29d".to_string(),
                 stage: "dev".to_string(),
@@ -212,7 +212,7 @@ mod tests {
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
-                time_epoch: 1666633666203,
+                time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
                 api_id: "85fj5nw29d".to_string(),
                 stage: "dev".to_string(),
@@ -237,7 +237,7 @@ mod tests {
             request_context: RequestContext {
                 route_key: "hello".to_string(),
                 domain_name: "85fj5nw29d.execute-api.eu-west-1.amazonaws.com".to_string(),
-                time_epoch: 1666633666203,
+                time_epoch: 1_666_633_666_203,
                 request_id: "ahVmYGOMmjQFhyg=".to_string(),
                 api_id: "85fj5nw29d".to_string(),
                 stage: "production".to_string(),

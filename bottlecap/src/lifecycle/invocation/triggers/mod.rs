@@ -50,7 +50,7 @@ pub trait ServiceNameResolver {
     fn get_generic_identifier(&self) -> &'static str;
 }
 
-pub fn parameterize_api_resource(resource: String) -> String {
+#[must_use] pub fn parameterize_api_resource(resource: String) -> String {
     // curly braces are used for APIGW parameters feature
     if resource.contains('{') && resource.contains('}') {
         return resource;
@@ -60,7 +60,7 @@ pub fn parameterize_api_resource(resource: String) -> String {
     let mut result = Vec::new();
 
     // First element is empty string due to leading slash
-    result.push(String::from(""));
+    result.push(String::new());
 
     // Process each path segment
     for (i, part) in parts.iter().enumerate().skip(1) {
@@ -70,17 +70,17 @@ pub fn parameterize_api_resource(resource: String) -> String {
 
         // Check if this part looks like an identifier
         // Number, ULID, GUID, or UUID
-        if part.chars().all(|c| c.is_digit(10)) || ULID_UUID_GUID.is_match(part) {
+        if part.chars().all(|c| c.is_ascii_digit()) || ULID_UUID_GUID.is_match(part) {
             // Determine the parameter name based on the previous segment
             let param_name = if i > 1 && !parts[i - 1].is_empty() {
                 let singular = parts[i - 1].trim_end_matches('s');
-                format!("{}_id", singular)
+                format!("{singular}_id")
             } else {
                 "id".to_string()
             };
 
             // Format the parameter with braces and store it in the result
-            result.push(format!("{{{}}}", param_name));
+            result.push(format!("{{{param_name}}}"));
         } else {
             result.push((*part).to_string());
         }

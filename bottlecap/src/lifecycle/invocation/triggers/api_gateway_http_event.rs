@@ -343,7 +343,7 @@ mod tests {
             span.service,
             "9vj54we5ih.execute-api.sa-east-1.amazonaws.com"
         );
-        assert_eq!(span.resource, "GET /user/{id}");
+        assert_eq!(span.resource, "GET /user/{user_id}");
         assert_eq!(span.r#type, "http");
         assert_eq!(
             span.meta,
