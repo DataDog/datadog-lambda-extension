@@ -86,4 +86,38 @@ mod tests {
         assert_eq!(invocation_times.head, 1);
         assert!(!invocation_times.should_adapt_to_periodic(10000));
     }
+
+    #[test]
+    fn should_adapt_to_periodic_when_fast_invokes() {
+        let mut invocation_times = invocation_times::InvocationTimes::new();
+        for i in 0..=(invocation_times::LOOKBACK_COUNT + 5) {
+            invocation_times.add((i * 100 + 1) as u64);
+        }
+
+        assert_eq!(invocation_times.times[0], 2001);
+        assert_eq!(invocation_times.times[5], 2501);
+        assert_eq!(invocation_times.times[6], 601);
+        assert_eq!(
+            invocation_times.times[invocation_times::LOOKBACK_COUNT - 1],
+            1901
+        );
+        assert!(invocation_times.should_adapt_to_periodic(2501));
+    }
+
+    #[test]
+    fn should_not_adapt_to_periodic_when_slow_invokes() {
+        let mut invocation_times = invocation_times::InvocationTimes::new();
+        for i in 0..=(invocation_times::LOOKBACK_COUNT + 5) {
+            invocation_times.add((i * 130 + 1) as u64);
+        }
+
+        assert_eq!(invocation_times.times[0], 2601);
+        assert_eq!(invocation_times.times[5], 3251);
+        assert_eq!(invocation_times.times[6], 781);
+        assert_eq!(
+            invocation_times.times[invocation_times::LOOKBACK_COUNT - 1],
+            2471
+        );
+        assert!(!invocation_times.should_adapt_to_periodic(3251));
+    }
 }
