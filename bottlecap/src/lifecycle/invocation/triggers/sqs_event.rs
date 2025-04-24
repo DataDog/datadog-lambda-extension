@@ -1,4 +1,4 @@
-use crate::config::get_aws_partition_by_region;
+use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{

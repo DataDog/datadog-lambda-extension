@@ -1,4 +1,4 @@
-use crate::config::{AwsConfig, Config};
+use crate::config::{aws::AwsConfig, Config};
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};

@@ -4,27 +4,28 @@ use datadog_trace_protobuf::pb::Span;
 use serde_json::Value;
 use tracing::debug;
 
-use crate::config::AwsConfig;
-
-use crate::lifecycle::invocation::{
-    generate_span_id,
-    triggers::{
-        api_gateway_http_event::APIGatewayHttpEvent,
-        api_gateway_rest_event::APIGatewayRestEvent,
-        api_gateway_websocket_event::APIGatewayWebSocketEvent,
-        dynamodb_event::DynamoDbRecord,
-        event_bridge_event::EventBridgeEvent,
-        kinesis_event::KinesisRecord,
-        lambda_function_url_event::LambdaFunctionUrlEvent,
-        s3_event::S3Record,
-        sns_event::{SnsEntity, SnsRecord},
-        sqs_event::{extract_trace_context_from_aws_trace_header, SqsRecord},
-        step_function_event::StepFunctionEvent,
-        Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
-    },
-};
 use crate::traces::span_pointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
+use crate::{
+    config::aws::AwsConfig,
+    lifecycle::invocation::{
+        generate_span_id,
+        triggers::{
+            api_gateway_http_event::APIGatewayHttpEvent,
+            api_gateway_rest_event::APIGatewayRestEvent,
+            api_gateway_websocket_event::APIGatewayWebSocketEvent,
+            dynamodb_event::DynamoDbRecord,
+            event_bridge_event::EventBridgeEvent,
+            kinesis_event::KinesisRecord,
+            lambda_function_url_event::LambdaFunctionUrlEvent,
+            s3_event::S3Record,
+            sns_event::{SnsEntity, SnsRecord},
+            sqs_event::{extract_trace_context_from_aws_trace_header, SqsRecord},
+            step_function_event::StepFunctionEvent,
+            Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
+        },
+    },
+};
 
 #[derive(Default)]
 pub struct SpanInferrer {

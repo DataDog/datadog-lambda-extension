@@ -397,7 +397,7 @@ fn build_forward_request(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
-    use crate::config::{AwsConfig, Config};
+    use crate::config::{aws::AwsConfig, Config};
     use crate::lifecycle::invocation::processor::Processor;
     use crate::lwa::proxy::start_lwa_proxy;
     use crate::tags::provider::Provider;

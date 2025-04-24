@@ -13,7 +13,7 @@ use tokio::sync::{mpsc::Sender, watch};
 use tracing::{debug, warn};
 
 use crate::{
-    config::{self, AwsConfig},
+    config::{self, aws::AwsConfig},
     lifecycle::invocation::{
         base64_to_string, context::Context, context::ContextBuffer, context::ReparentingInfo,
         create_empty_span, generate_span_id, get_metadata_from_value, span_inferrer::SpanInferrer,

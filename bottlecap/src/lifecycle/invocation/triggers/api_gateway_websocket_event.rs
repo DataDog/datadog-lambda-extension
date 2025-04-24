@@ -1,5 +1,5 @@
 use crate::{
-    config::get_aws_partition_by_region,
+    config::aws::get_aws_partition_by_region,
     lifecycle::invocation::{
         processor::MS_TO_NS,
         triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
