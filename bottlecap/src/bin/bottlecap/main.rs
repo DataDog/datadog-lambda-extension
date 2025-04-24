@@ -185,7 +185,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let start_time: Instant = Instant::now();
+    let start_time = Instant::now();
     let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
