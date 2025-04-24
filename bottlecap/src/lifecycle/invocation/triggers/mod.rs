@@ -50,7 +50,8 @@ pub trait ServiceNameResolver {
     fn get_generic_identifier(&self) -> &'static str;
 }
 
-#[must_use] pub fn parameterize_api_resource(resource: String) -> String {
+#[must_use]
+pub fn parameterize_api_resource(resource: String) -> String {
     // curly braces are used for APIGW parameters feature
     if resource.contains('{') && resource.contains('}') {
         return resource;
