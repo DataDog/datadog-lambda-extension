@@ -70,6 +70,7 @@ use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
+    result::Result as StdResult,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -231,6 +232,15 @@ async fn main() -> Result<()> {
     prepare_client_provider()?;
     let client = Client::builder()
         .use_rustls_tls()
+        .inspect_rustls_config(|config| -> StdResult<(), String> {
+            if config.fips() {
+                debug!("FIPS mode confirmed for main client");
+            } else {
+                #[cfg(feature = "fips")]
+                return Err("FIPS mode is required but not enabled for main client".to_string());
+            }
+            Ok(())
+        })
         .no_proxy()
         .build()
         .map_err(|e| {

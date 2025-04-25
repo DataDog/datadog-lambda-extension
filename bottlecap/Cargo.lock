@@ -464,7 +464,7 @@ dependencies = [
  "protobuf",
  "rand 0.8.5",
  "regex",
- "reqwest",
+ "reqwest 0.12.15 (git+https://github.com/apiarian-datadog/reqwest?rev=d723dbb4481ba414f73adc5dcffbc13f7fa89b22)",
  "rmp-serde",
  "rustls",
  "serde",
@@ -888,7 +888,7 @@ dependencies = [
  "hashbrown 0.15.2",
  "protobuf",
  "regex",
- "reqwest",
+ "reqwest 0.12.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -2640,6 +2640,49 @@ name = "reqwest"
 version = "0.12.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d19c46a6fdd48bc4dab94b6103fccc55d34c67cc0ad04653aad4ea2a07cd7bbb"
+dependencies = [
+ "base64 0.22.1",
+ "bytes 1.10.1",
+ "futures-core",
+ "futures-util",
+ "h2",
+ "http 1.3.1",
+ "http-body 1.0.1",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-rustls",
+ "hyper-util",
+ "ipnet",
+ "js-sys",
+ "log",
+ "mime",
+ "once_cell",
+ "percent-encoding",
+ "pin-project-lite",
+ "quinn",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "sync_wrapper",
+ "tokio",
+ "tokio-rustls",
+ "tower 0.5.2",
+ "tower-service",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "webpki-roots",
+ "windows-registry",
+]
+
+[[package]]
+name = "reqwest"
+version = "0.12.15"
+source = "git+https://github.com/apiarian-datadog/reqwest?rev=d723dbb4481ba414f73adc5dcffbc13f7fa89b22#d723dbb4481ba414f73adc5dcffbc13f7fa89b22"
 dependencies = [
  "base64 0.22.1",
  "bytes 1.10.1",

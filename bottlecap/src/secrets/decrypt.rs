@@ -17,7 +17,21 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
 
-            let client = match Client::builder().use_rustls_tls().build() {
+            let client = match Client::builder()
+                .use_rustls_tls()
+                .inspect_rustls_config(|config| -> Result<(), String> {
+                    if config.fips() {
+                        debug!("FIPS mode confirmed for decrypt client");
+                    } else {
+                        #[cfg(feature = "fips")]
+                        return Err(
+                            "FIPS mode is required but not enabled for decrypt client".to_string()
+                        );
+                    }
+                    Ok(())
+                })
+                .build()
+            {
                 Ok(client) => client,
                 Err(err) => {
                     error!("Error creating reqwest client: {}", err);

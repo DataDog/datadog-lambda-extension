@@ -21,6 +21,17 @@ impl TelemetryApiClient {
         let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE)?;
         let resp = reqwest::Client::builder()
             .use_rustls_tls()
+            .inspect_rustls_config(|config| -> Result<(), String> {
+                if config.fips() {
+                    debug!("FIPS mode confirmed for telemetry client");
+                } else {
+                    #[cfg(feature = "fips")]
+                    return Err(
+                        "FIPS mode is required but not enabled for telemetry client".to_string()
+                    );
+                }
+                Ok(())
+            })
             .no_proxy()
             .build()
             .map_err(|e| {

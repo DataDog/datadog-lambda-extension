@@ -1,7 +1,7 @@
 use crate::config;
 use core::time::Duration;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{debug, error};
 
 #[must_use]
 pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
@@ -18,6 +18,15 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
 fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest::Error> {
     let client = reqwest::Client::builder()
         .use_rustls_tls()
+        .inspect_rustls_config(|config| -> Result<(), String> {
+            if config.fips() {
+                debug!("FIPS mode confirmed for http client");
+            } else {
+                #[cfg(feature = "fips")]
+                return Err("FIPS mode is required but not enabled for http client".to_string());
+            }
+            Ok(())
+        })
         .timeout(Duration::from_secs(config.flush_timeout))
         // Temporarily not force http2
         // Enable HTTP/2 for better multiplexing
