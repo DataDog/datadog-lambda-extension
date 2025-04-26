@@ -23,9 +23,9 @@ impl Provider {
     ) -> Self {
         match runtime.as_str() {
             LAMBDA_RUNTIME_SLUG => {
-                let lambda_tabs = Lambda::new_from_config(config, metadata);
+                let lambda_tags = Lambda::new_from_config(config, metadata);
                 Provider {
-                    tag_provider: Arc::new(TagProvider::Lambda(lambda_tabs)),
+                    tag_provider: Arc::new(TagProvider::Lambda(lambda_tags)),
                 }
             }
             _ => panic!("Unsupported runtime: {runtime}"),
