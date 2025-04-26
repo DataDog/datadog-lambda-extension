@@ -69,11 +69,11 @@ impl Flusher {
         };
 
         let mut set = JoinSet::new();
-        for batch in &logs_batches {
+        for batch in logs_batches {
             if batch.is_empty() {
                 continue;
             }
-            let req = self.create_request(batch.clone());
+            let req = self.create_request(batch);
             set.spawn(async move { Self::send(req).await });
         }
 
