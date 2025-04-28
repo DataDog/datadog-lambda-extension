@@ -42,7 +42,6 @@ impl Trigger for MSKEvent {
         match serde_json::from_value::<Self>(payload) {
             Ok(event) => Some(event),
             Err(e) => {
-                println!("[bottlecap] Failed to deserialize modified MSKEvent: {e}");
                 debug!("Failed to deserialize modified MSKEvent: {e}");
                 None
             }
