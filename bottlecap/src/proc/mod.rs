@@ -286,6 +286,40 @@ pub fn get_context_switches_from_path(path: &str, pid: u32) -> Result<f64, io::E
     ))
 }
 
+pub fn get_fs_write() -> Result<f64, io::Error> {
+    if let Ok(pid) = get_runtime_pid() {
+        return get_fs_write_from_path(PROC_PATH, pid);
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "Could not find Lambda function process ID",
+    ))
+}
+
+pub fn get_fs_write_from_path(path: &str, pid: u32) -> Result<f64, io::Error> {
+    let io_path = format!("{path}/{pid}/io");
+    let file = File::open(io_path)?;
+    let reader = io::BufReader::new(file);
+
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with("write_bytes:") {
+            if let Some(bytes_str) = line.split_whitespace().nth(1) {
+                if let Ok(bytes) = bytes_str.parse::<f64>() {
+                    return Ok(bytes);
+                }
+            }
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "Could not find file system write data",
+    ))
+}
+
+
 #[must_use]
 pub fn get_fd_max_data(pids: &[i64]) -> f64 {
     get_fd_max_data_from_path(PROC_PATH, pids)
@@ -621,5 +655,18 @@ mod tests {
         // process with pid 6 has invalid proc/<pid>/status file (missing voluntary_ctxt_switches)
         let ctx_switches_result = get_context_switches_from_path(path_from_root(path).as_str(), 6);
         assert!(ctx_switches_result.is_err());
+    }
+
+    #[test]
+    fn test_get_fs_write_data() {
+        let path = "./tests/proc";
+        let fs_write_result = get_fs_write_from_path(path_from_root(path).as_str(), 5);
+        assert!(fs_write_result.is_ok());
+        let fs_write = fs_write_result.unwrap();
+        assert!((fs_write - 61440.0).abs() < f64::EPSILON);
+
+        // process with pid 6 has invalid proc/<pid>/status file (missing write_bytes)
+        let fs_write_result = get_fs_write_from_path(path_from_root(path).as_str(), 6);
+        assert!(fs_write_result.is_err());
     }
 }

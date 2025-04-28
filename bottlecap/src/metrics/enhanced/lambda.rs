@@ -708,6 +708,26 @@ impl Lambda {
         }
     }
 
+    // pub fn set_fs_write_enhanced_metric(&self, fs_write_offset: Option<f64>) {
+    //     if !self.config.enhanced_metrics {
+    //         return;
+    //     }
+
+    //     let mut aggr: std::sync::MutexGuard<Aggregator> =
+    //         self.aggregator.lock().expect("lock poisoned");
+
+    //     if let Some(fs_write_offset) = fs_write_offset {
+    //         if let Ok(fs_write_data) = proc::get_fs_write() {
+    //             let context_switches = context_switches_data - context_switches_offset;
+    //             Self::generate_context_switches_enhanced_metrics(
+    //                 context_switches,
+    //                 &mut aggr,
+    //                 self.get_dynamic_value_tags(),
+    //             );
+    //         }
+    //     }
+    // }
+
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
         let gb_seconds = (billed_duration_ms as f64 * constants::MS_TO_SEC)
             * (memory_size_mb as f64 / constants::MB_TO_GB);
@@ -787,6 +807,7 @@ pub struct EnhancedMetricData {
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
     pub context_switches_offset: Option<f64>,
+    pub fs_write_offset: Option<f64>,
     pub tmp_chan_tx: Sender<()>,
     pub process_chan_tx: Sender<()>,
 }
@@ -797,6 +818,7 @@ impl PartialEq for EnhancedMetricData {
             && self.cpu_offset == other.cpu_offset
             && self.uptime_offset == other.uptime_offset
             && self.context_switches_offset == other.context_switches_offset
+            && self.fs_write_offset == other.fs_write_offset
     }
 }
 

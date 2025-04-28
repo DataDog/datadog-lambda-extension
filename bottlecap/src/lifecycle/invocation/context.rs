@@ -553,6 +553,7 @@ mod tests {
 
         let uptime_offset = Some(50f64);
         let context_switches_offset = Some(800f64);
+        let fs_write_offset = Some(50f64);
         let (tmp_chan_tx, _) = watch::channel(());
         let (process_chan_tx, _) = watch::channel(());
 
@@ -561,6 +562,7 @@ mod tests {
             cpu_offset,
             uptime_offset,
             context_switches_offset,
+            fs_write_offset,
             tmp_chan_tx,
             process_chan_tx,
         });

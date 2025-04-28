@@ -132,6 +132,7 @@ impl Processor {
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
             let context_switches_offset: Option<f64> = proc::get_context_switches().ok();
+            let fs_write_offset: Option<f64> = proc::get_fs_write().ok();
 
             // Start a channel for monitoring tmp enhanced data
             let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
@@ -147,6 +148,7 @@ impl Processor {
                 cpu_offset,
                 uptime_offset,
                 context_switches_offset,
+                fs_write_offset,
                 tmp_chan_tx,
                 process_chan_tx,
             });
