@@ -1,3 +1,4 @@
+use crate::lifecycle::invocation::processor::MS_TO_NS;
 use crate::lifecycle::invocation::triggers::{
     ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
 };
@@ -65,7 +66,27 @@ impl Trigger for MSKEvent {
 
     #[allow(clippy::cast_possible_truncation)]
     fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
-        // TODO
+        debug!("Enriching an Inferred Span for an MSK event");
+
+        span.name = String::from("aws.msk");
+        span.service = self.resolve_service_name(service_mapping, "msk");
+        span.r#type = String::from("web");
+
+        let first_value = self.records.values().find_map(|arr| arr.first());
+        if let Some(first_value) = first_value {
+            span.resource.clone_from(&first_value.topic);
+            span.start = (first_value.timestamp * MS_TO_NS) as i64;
+            span.meta.extend([
+                ("operation_name".to_string(), String::from("aws.msk")),
+                ("topic".to_string(), first_value.topic.to_string()),
+                ("partition".to_string(), first_value.partition.to_string()),
+                ("event_source".to_string(), self.event_source.clone()),
+                (
+                    "event_source_arn".to_string(),
+                    self.event_source_arn.clone(),
+                ),
+            ]);
+        }
     }
 
     fn get_tags(&self) -> HashMap<String, String> {
