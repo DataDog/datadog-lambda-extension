@@ -122,3 +122,140 @@ impl ServiceNameResolver for MSKEvent {
         "lambda_msk"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+
+    #[test]
+    fn test_new() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = MSKEvent::new(payload).expect("Failed to deserialize into MSKEvent");
+
+        let record = MSKRecord {
+            topic: String::from("topic1"),
+            partition: 0,
+            timestamp: 1745846213022.0,
+        };
+        let mut expected_records = HashMap::new();
+        expected_records.insert(String::from("topic1"), vec![record]);
+
+        let expected = MSKEvent {
+            event_source: String::from("aws:kafka"),
+            event_source_arn: String::from("arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2"),
+            records: expected_records,
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_is_match() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize MSKEvent");
+
+        assert!(MSKEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_is_not_match() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize SqsRecord");
+        assert!(!MSKEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_enrich_span() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+        let mut span = Span::default();
+        let service_mapping = HashMap::new();
+        event.enrich_span(&mut span, &service_mapping);
+
+        assert_eq!(span.name, "aws.msk");
+        assert_eq!(span.service, "msk");
+        assert_eq!(span.r#type, "web");
+        assert_eq!(span.resource, "topic1");
+        assert_eq!(span.start, 1745846213022000128);
+
+        assert_eq!(
+            span.meta,
+            HashMap::from([
+                ("operation_name".to_string(), "aws.msk".to_string()),
+                ("topic".to_string(), "topic1".to_string()),
+                ("partition".to_string(), "0".to_string()),
+                ("event_source".to_string(), "aws:kafka".to_string()),
+                (
+                    "event_source_arn".to_string(),
+                    "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2".to_string()
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn test_get_tags() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+        let tags = event.get_tags();
+
+        let expected = HashMap::from([(
+            "function_trigger.event_source".to_string(),
+            "msk".to_string(),
+        )]);
+
+        assert_eq!(tags, expected);
+    }
+
+    #[test]
+    fn test_get_arn() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+        assert_eq!(
+            event.get_arn("us-east-1"),
+            "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2"
+        );
+    }
+
+    #[test]
+    fn test_get_carrier() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+        let carrier = event.get_carrier();
+
+        let expected = HashMap::new();
+
+        assert_eq!(carrier, expected);
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("demo-cluster".to_string(), "specific-service".to_string()),
+            ("lambda_msk".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(&specific_service_mapping, "msk"),
+            "specific-service"
+        );
+
+        let generic_service_mapping =
+            HashMap::from([("lambda_msk".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(&generic_service_mapping, "msk"),
+            "generic-service"
+        );
+    }
+}
