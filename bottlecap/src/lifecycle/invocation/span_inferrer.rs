@@ -18,6 +18,7 @@ use crate::{
             event_bridge_event::EventBridgeEvent,
             kinesis_event::KinesisRecord,
             lambda_function_url_event::LambdaFunctionUrlEvent,
+            msk_event::MSKEvent,
             s3_event::S3Record,
             sns_event::{SnsEntity, SnsRecord},
             sqs_event::{extract_trace_context_from_aws_trace_header, SqsRecord},
@@ -102,6 +103,12 @@ impl SpanInferrer {
             }
         } else if LambdaFunctionUrlEvent::is_match(payload_value) {
             if let Some(t) = LambdaFunctionUrlEvent::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if MSKEvent::is_match(payload_value) {
+            if let Some(t) = MSKEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
