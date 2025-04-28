@@ -24,11 +24,11 @@ use crate::tags::provider;
 use crate::traces::{
     stats_aggregator, stats_processor, trace_aggregator, trace_processor, INVOCATION_SPAN_RESOURCE,
 };
-use datadog_trace_protobuf::pb;
-use datadog_trace_utils::trace_utils::{self, SendData};
-use trace_agent::http_utils::{
+use datadog_trace_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
+use datadog_trace_protobuf::pb;
+use datadog_trace_utils::trace_utils::{self, SendData};
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";

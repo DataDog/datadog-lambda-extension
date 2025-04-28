@@ -18,6 +18,7 @@ use bottlecap::{
     },
     event_bus::bus::EventBus,
     events::Event,
+    fips::create_reqwest_client_builder,
     lifecycle::{
         flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
@@ -229,8 +230,13 @@ async fn main() -> Result<()> {
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
     prepare_client_provider()?;
-    let client = Client::builder()
-        .use_rustls_tls()
+    let client = create_reqwest_client_builder()
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to create client builder: {e:?}"),
+            )
+        })?
         .no_proxy()
         .build()
         .map_err(|e| {

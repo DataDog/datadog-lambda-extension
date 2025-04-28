@@ -1,4 +1,5 @@
 use crate::config::{aws::AwsConfig, Config};
+use crate::fips::create_reqwest_client_builder;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use hmac::{Hmac, Mac};
@@ -17,7 +18,15 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
 
-            let client = match Client::builder().use_rustls_tls().build() {
+            let builder = match create_reqwest_client_builder() {
+                Ok(builder) => builder,
+                Err(err) => {
+                    error!("Error creating reqwest client builder: {}", err);
+                    return None;
+                }
+            };
+
+            let client = match builder.build() {
                 Ok(client) => client,
                 Err(err) => {
                     error!("Error creating reqwest client: {}", err);

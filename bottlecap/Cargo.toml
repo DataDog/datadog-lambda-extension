@@ -15,8 +15,8 @@ datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = 
 datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" , features = ["compression"] }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"  }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "0aac11e23a31cdae22ebe42406028964a2b36cea", default-features = false }
-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "0aac11e23a31cdae22ebe42406028964a2b36cea" }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", branch = "aleksandr.pasechnik/svls-6242-reqwest-fips-tls-injection", default-features = false }
+datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", branch = "aleksandr.pasechnik/svls-6242-reqwest-fips-tls-injection" }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "1.6", default-features = false, features = ["server"] }
 hyper-util = { version = "0.1.10", features = [
@@ -53,6 +53,7 @@ futures = { version = "0.3.31", default-features = false }
 serde-aux = { version = "4.7", default-features = false }
 opentelemetry-proto = { version = "0.29", features = ["trace", "with-serde", "gen-tonic"] }
 opentelemetry-semantic-conventions = { version = "0.29", features = ["semconv_experimental"] }
+rustls-native-certs = { version = "0.8.1", optional = true }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
@@ -86,5 +87,6 @@ fips = [
     "dogstatsd/fips",
     "reqwest/rustls-tls-native-roots-no-provider",
     "rustls/fips",
+    "rustls-native-certs",
 ]
 force_fallback = []

@@ -1,3 +1,6 @@
+use datadog_trace_agent::http_utils::{
+    log_and_create_http_response, log_and_create_traces_success_http_response,
+};
 use datadog_trace_utils::send_data::SendData;
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use ddcommon::hyper_migration;
@@ -7,9 +10,6 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
-use trace_agent::http_utils::{
-    log_and_create_http_response, log_and_create_traces_success_http_response,
-};
 use tracing::{debug, error};
 
 use crate::{

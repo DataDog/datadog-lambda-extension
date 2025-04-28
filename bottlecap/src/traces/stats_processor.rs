@@ -13,7 +13,7 @@ use datadog_trace_protobuf::pb;
 use datadog_trace_utils::stats_utils;
 
 use super::trace_agent::MAX_CONTENT_LENGTH;
-use trace_agent::http_utils::{self, log_and_create_http_response};
+use datadog_trace_agent::http_utils::{self, log_and_create_http_response};
 
 #[async_trait]
 pub trait StatsProcessor {
