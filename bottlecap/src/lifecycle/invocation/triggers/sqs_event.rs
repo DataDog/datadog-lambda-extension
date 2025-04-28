@@ -220,34 +220,21 @@ pub(crate) fn extract_trace_context_from_aws_trace_header(
         return None;
     }
 
-    let mut start_part = 0;
     let mut trace_id = String::new();
     let mut parent_id = String::new();
     let mut sampled = String::new();
 
-    let length = value.len();
-    while start_part < length {
-        let end_part = value[start_part..]
-            .find(';')
-            .map_or(length, |i| i + start_part);
-        let part = &value[start_part..end_part];
-
+    for part in value.split(';') {
         if part.starts_with("Root=") {
-            if trace_id.is_empty() {
-                trace_id = part[24..].to_string();
-            }
+            trace_id = part[24..].to_string();
         } else if let Some(parent_part) = part.strip_prefix("Parent=") {
-            if parent_id.is_empty() {
-                parent_id = parent_part.to_string();
-            }
+            parent_id = parent_part.to_string();
         } else if part.starts_with("Sampled=") && sampled.is_empty() {
             sampled = part[8..].to_string();
         }
-
         if !trace_id.is_empty() && !parent_id.is_empty() && !sampled.is_empty() {
             break;
         }
-        start_part = end_part + 1;
     }
 
     let trace_id = u64::from_str_radix(&trace_id, 16).ok()?;

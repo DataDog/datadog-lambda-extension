@@ -83,7 +83,7 @@ impl Trigger for APIGatewayRestEvent {
 
         span.name = "aws.apigateway".to_string();
         span.service = service_name;
-        span.resource.clone_from(&resource);
+        span.resource = resource;
         span.r#type = "http".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
