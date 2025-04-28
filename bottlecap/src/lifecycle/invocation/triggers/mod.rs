@@ -11,6 +11,7 @@ pub mod dynamodb_event;
 pub mod event_bridge_event;
 pub mod kinesis_event;
 pub mod lambda_function_url_event;
+pub mod msk_event;
 pub mod s3_event;
 pub mod sns_event;
 pub mod sqs_event;
