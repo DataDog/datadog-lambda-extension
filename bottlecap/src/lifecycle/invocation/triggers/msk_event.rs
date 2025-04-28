@@ -26,21 +26,16 @@ pub struct MSKRecord {
 impl Trigger for MSKEvent {
     fn new(mut payload: Value) -> Option<Self> {
         // We only care about the first item in the first record, so drop the others before deserializing.
-        let mut key_to_keep: Option<String> = None;
-
         if let Some(records_map) = payload.get_mut("records").and_then(Value::as_object_mut) {
-            if let Some((first_key, first_value_ref)) = records_map.iter_mut().next() {
-                let key_copy = first_key.clone();
-                if let Some(arr) = first_value_ref.as_array_mut() {
+            match records_map.iter_mut().next() {
+                Some((first_key, Value::Array(arr))) => {
                     arr.truncate(1);
-                    key_to_keep = Some(key_copy);
+                    let key = first_key.clone();
+                    records_map.retain(|k, _| k == &key);
                 }
-            }
-
-            if let Some(ref key) = key_to_keep {
-                records_map.retain(|k, _| k == key);
-            } else {
-                records_map.clear();
+                _ => {
+                    records_map.clear();
+                }
             }
         }
 
