@@ -68,6 +68,7 @@ impl Flusher {
             batches
         };
 
+        println!("AJ: batch size for logs is {:?}", logs_batches.len());
         let mut set = JoinSet::new();
         for batch in &logs_batches {
             if batch.is_empty() {

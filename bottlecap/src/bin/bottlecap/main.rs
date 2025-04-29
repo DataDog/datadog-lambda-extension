@@ -393,9 +393,9 @@ async fn extension_loop_active(
                     }
                     _ = race_flush_interval.tick() => {
                         flush_all(
-                            &logs_flusher,
+                            //&logs_flusher,
                             &mut metrics_flusher,
-                            &*trace_flusher,
+                            //&*trace_flusher,
                             &*stats_flusher,
                             &mut race_flush_interval,
                         ).await;
@@ -404,9 +404,9 @@ async fn extension_loop_active(
             }
             // flush
             flush_all(
-                &logs_flusher,
+                //&logs_flusher,
                 &mut metrics_flusher,
-                &*trace_flusher,
+                //&*trace_flusher,
                 &*stats_flusher,
                 &mut race_flush_interval,
             )
@@ -417,14 +417,24 @@ async fn extension_loop_active(
             //Periodic flush scenario, flush at top of invocation
             if flush_control.should_periodic_flush() {
                 // Should flush at the top of the invocation, which is now
+                let val = logs_flusher.clone();
+                tokio::spawn(async move {
+                    val.flush().await;
+                });
+                let traces_val = trace_flusher.clone();
+                tokio::spawn(async move {
+                    traces_val.flush().await;
+                });
+                let duration = Instant::now();
                 flush_all(
-                    &logs_flusher,
+                    //&logs_flusher,
                     &mut metrics_flusher,
-                    &*trace_flusher,
+                    //&*trace_flusher,
                     &*stats_flusher,
                     &mut race_flush_interval,
                 )
                 .await;
+                println!("ASTUYVE flush duration: {:?}", duration.elapsed());
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
@@ -454,9 +464,9 @@ async fn extension_loop_active(
                     }
                     _ = race_flush_interval.tick() => {
                         flush_all(
-                            &logs_flusher,
+                            //&logs_flusher,
                             &mut metrics_flusher,
-                            &*trace_flusher,
+                            //&*trace_flusher,
                             &*stats_flusher,
                             &mut race_flush_interval,
                         ).await;
@@ -487,9 +497,9 @@ async fn extension_loop_active(
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             flush_all(
-                &logs_flusher,
+                //&logs_flusher,
                 &mut metrics_flusher,
-                &*trace_flusher,
+                //&*trace_flusher,
                 &*stats_flusher,
                 &mut race_flush_interval,
             )
@@ -500,17 +510,17 @@ async fn extension_loop_active(
 }
 
 async fn flush_all(
-    logs_flusher: &LogsFlusher,
+    //logs_flusher: &LogsFlusher,
     metrics_flusher: &mut MetricsFlusher,
-    trace_flusher: &impl TraceFlusher,
+    //trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
-        logs_flusher.flush(),
+        //logs_flusher.flush(),
         metrics_flusher.flush(),
-        trace_flusher.flush(),
-        stats_flusher.flush()
+        //trace_flusher.flush(),
+        //stats_flusher.flush()
     );
     race_flush_interval.reset();
 }
