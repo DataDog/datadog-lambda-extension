@@ -34,13 +34,6 @@ fn log_fallback_reason(reason: &str) {
     println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
-#[cfg(feature = "force_fallback")]
-fn fallback(_: &EnvConfig, _: &YamlConfig) -> Result<(), ConfigError> {
-    log_fallback_reason("force_fallback");
-    Err(ConfigError::UnsupportedField("force_fallback".to_string()))
-}
-
-#[cfg(not(feature = "force_fallback"))]
 fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigError> {
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match config.extension_version.as_deref() {

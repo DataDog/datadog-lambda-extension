@@ -91,4 +91,3 @@ fips = [
     "rustls/fips",
     "rustls-native-certs",
 ]
-force_fallback = []
