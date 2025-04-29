@@ -20,7 +20,6 @@
 pub mod config;
 pub mod event_bus;
 pub mod events;
-pub mod fips;
 pub mod http_client;
 pub mod lifecycle;
 pub mod logger;

@@ -1,4 +1,4 @@
-use crate::fips::create_reqwest_client_builder;
+use datadog_serverless_fips::reqwest_adapter::create_reqwest_client_builder;
 use reqwest::Response;
 use serde_json;
 use std::error::Error;

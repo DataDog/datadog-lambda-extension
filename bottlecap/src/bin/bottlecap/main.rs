@@ -18,7 +18,6 @@ use bottlecap::{
     },
     event_bus::bus::EventBus,
     events::Event,
-    fips::create_reqwest_client_builder,
     lifecycle::{
         flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
@@ -48,6 +47,7 @@ use bottlecap::{
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
+use datadog_serverless_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
