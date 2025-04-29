@@ -1,5 +1,5 @@
 // This module contains all of the things we do a little bit differently when we compile for FIPS
-// mode. This is used in conjunction with the datadog-serverless-fips crate to ensure that when we
+// mode. This is used in conjunction with the datadog-fips crate to ensure that when we
 // compile the extension in FIPS mode, everything is built and configured correctly.
 
 #[cfg(feature = "fips")]

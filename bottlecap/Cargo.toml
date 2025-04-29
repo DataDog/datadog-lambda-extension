@@ -17,7 +17,7 @@ datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"  }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", branch = "aleksandr.pasechnik/svls-6242-reqwest-fips-tls-injection", default-features = false }
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", branch = "aleksandr.pasechnik/svls-6242-reqwest-fips-tls-injection" }
-datadog-serverless-fips = { git = "https://github.com/DataDog/serverless-components", branch = "aleksandr.pasechnik/svls-6242-reqwest-fips-tls-injection", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", branch = "aleksandr.pasechnik/svls-6242-reqwest-fips-tls-injection", default-features = false }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 hyper = { version = "1.6", default-features = false, features = ["server"] }
 hyper-util = { version = "0.1.10", features = [
@@ -81,12 +81,12 @@ inherits = "release"
 opt-level = 3
 
 [features]
-default = ["reqwest/rustls-tls", "dogstatsd/default", "datadog-serverless-fips/default" ]
+default = ["reqwest/rustls-tls", "dogstatsd/default", "datadog-fips/default" ]
 fips = [
     "ddcommon/fips",
     "datadog-trace-utils/fips",
     "dogstatsd/fips",
-    "datadog-serverless-fips/fips",
+    "datadog-fips/fips",
     "reqwest/rustls-tls-native-roots-no-provider",
     "rustls/fips",
     "rustls-native-certs",

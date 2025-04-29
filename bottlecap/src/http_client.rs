@@ -1,6 +1,6 @@
 use crate::config;
 use core::time::Duration;
-use datadog_serverless_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use std::error::Error;
 use std::sync::Arc;
 use tracing::error;

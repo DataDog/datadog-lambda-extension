@@ -2,7 +2,7 @@ use crate::config::{aws::AwsConfig, Config};
 use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
-use datadog_serverless_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use hmac::{Hmac, Mac};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
