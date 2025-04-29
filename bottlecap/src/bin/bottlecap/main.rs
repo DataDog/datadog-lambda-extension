@@ -18,6 +18,7 @@ use bottlecap::{
     },
     event_bus::bus::EventBus,
     events::Event,
+    fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
         flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
@@ -78,42 +79,6 @@ use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
-
-#[cfg(all(feature = "default", feature = "fips"))]
-compile_error!("When building in fips mode, the default feature must be disabled");
-
-#[cfg(feature = "fips")]
-fn log_fips_status() {
-    debug!("FIPS mode is enabled");
-}
-
-#[cfg(not(feature = "fips"))]
-fn log_fips_status() {
-    debug!("FIPS mode is disabled");
-}
-
-/// Sets up the client provider for TLS operations.
-/// In FIPS mode, this installs the AWS-LC crypto provider.
-/// In non-FIPS mode, this is a no-op.
-#[cfg(feature = "fips")]
-fn prepare_client_provider() -> Result<()> {
-    rustls::crypto::default_fips_provider()
-        .install_default()
-        .map_err(|e| {
-            Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to set up fips provider: {e:?}"),
-            )
-        })
-}
-
-#[cfg(not(feature = "fips"))]
-// this is not unnecessary since the fips version can return an error
-#[allow(clippy::unnecessary_wraps)]
-fn prepare_client_provider() -> Result<()> {
-    // No-op in non-FIPS mode
-    Ok(())
-}
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

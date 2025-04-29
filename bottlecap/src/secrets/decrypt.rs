@@ -1,4 +1,5 @@
 use crate::config::{aws::AwsConfig, Config};
+use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use datadog_serverless_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -226,16 +227,6 @@ async fn request(
     Ok(v)
 }
 
-#[cfg(not(feature = "fips"))]
-fn compute_host(service: &String, region: &String, domain: &str) -> String {
-    format!("{service}.{region}.{domain}")
-}
-
-#[cfg(feature = "fips")]
-fn compute_host(service: &String, region: &String, domain: &str) -> String {
-    format!("{service}-fips.{region}.{domain}")
-}
-
 fn build_get_secret_signed_headers(
     aws_config: &AwsConfig,
     region: String,
@@ -250,7 +241,7 @@ fn build_get_secret_signed_headers(
         "amazonaws.com"
     };
 
-    let host = compute_host(&header_values.service, &region, domain);
+    let host = compute_aws_api_host(&header_values.service, &region, domain);
 
     let canonical_uri = "/";
     let canonical_querystring = "";
