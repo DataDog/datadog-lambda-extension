@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::{debug, warn};
 
+use crate::traces::propagation::flatten_multi_value_headers;
 use crate::{
     config::{self, aws::AwsConfig},
     lifecycle::invocation::{
@@ -731,6 +732,15 @@ impl Processor {
             if let Some(sc) = self.propagator.extract(payload_headers) {
                 debug!("Extracted trace context from event headers");
                 return Some(sc);
+            }
+        }
+
+        if let Some(multi_value_headers) = payload_value.get("multiValueHeaders") {
+            if let Some(flattened_headers) = flatten_multi_value_headers(multi_value_headers) {
+                if let Some(sc) = self.propagator.extract(&flattened_headers) {
+                    debug!("Extracted trace context from event multiValueHeaders");
+                    return Some(sc);
+                }
             }
         }
 
