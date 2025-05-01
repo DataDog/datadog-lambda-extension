@@ -29,6 +29,7 @@ pub mod lwa;
 pub mod metrics;
 pub mod otlp;
 pub mod proc;
+pub mod proxy;
 pub mod secrets;
 pub mod tags;
 pub mod telemetry;
