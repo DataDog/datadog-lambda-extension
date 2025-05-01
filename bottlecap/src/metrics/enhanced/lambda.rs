@@ -654,9 +654,10 @@ impl Lambda {
                     // Otherwise keep monitoring file descriptor and thread usage periodically
                     _ = interval.tick() => {
                         pids = proc::get_pid_list();
-                        let fd_use_curr = proc::get_fd_use_data(&pids);
+                        // Use the combined metrics function to reduce filesystem operations
+                        let (fd_use_curr, threads_use_result) = proc::get_combined_process_metrics(&pids);
                         fd_use = fd_use.max(fd_use_curr);
-                        if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
+                        if let Ok(threads_use_curr) = threads_use_result {
                             threads_use = threads_use.max(threads_use_curr);
                         }
                     }

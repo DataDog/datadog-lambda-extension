@@ -2,6 +2,7 @@ pub mod clock;
 pub mod constants;
 
 use std::{
+    sync::OnceLock,
     collections::HashMap,
     fs::{self, File},
     io::{self, BufRead},
@@ -13,6 +14,17 @@ use constants::{
 };
 use regex::Regex;
 use tracing::{debug, trace};
+
+// Static regex patterns to avoid recompilation
+fn fd_max_regex() -> &'static Regex {
+    static INSTANCE: OnceLock<Regex> = OnceLock::new();
+    INSTANCE.get_or_init(|| Regex::new(r"^Max open files\s+(\d+)").expect("Failed to create regex"))
+}
+
+fn threads_max_regex() -> &'static Regex {
+    static INSTANCE: OnceLock<Regex> = OnceLock::new();
+    INSTANCE.get_or_init(|| Regex::new(r"^Max processes\s+(\d+)").expect("Failed to create regex"))
+}
 
 #[must_use]
 pub fn get_pid_list() -> Vec<i64> {
@@ -221,8 +233,6 @@ pub fn get_fd_max_data(pids: &[i64]) -> f64 {
 
 fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut fd_max = constants::LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT;
-    // regex to capture the soft limit value (first numeric value after the title)
-    let re = Regex::new(r"^Max open files\s+(\d+)").expect("Failed to create regex");
 
     for &pid in pids {
         let limits_path = format!("{path}/{pid}/limits");
@@ -232,7 +242,7 @@ fn get_fd_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
 
         let reader = io::BufReader::new(file);
         for line in reader.lines().map_while(Result::ok) {
-            if let Some(line_items) = re.captures(&line) {
+            if let Some(line_items) = fd_max_regex().captures(&line) {
                 if let Ok(fd_max_pid) = line_items[1].parse() {
                     fd_max = fd_max.min(fd_max_pid);
                 } else {
@@ -271,6 +281,52 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
     fd_use as f64
 }
 
+/// Combined function to get process metrics in a single pass, reducing filesystem operations
+/// Returns (fd_use, threads_use)
+pub fn get_combined_process_metrics(pids: &[i64]) -> (f64, Result<f64, io::Error>) {
+    get_combined_process_metrics_from_path(PROC_PATH, pids)
+}
+
+fn get_combined_process_metrics_from_path(path: &str, pids: &[i64]) -> (f64, Result<f64, io::Error>) {
+    let mut fd_use = 0;
+    let mut threads_use = 0;
+    let mut threads_error = false;
+
+    for &pid in pids {
+        // Get file descriptor count
+        let fd_path = format!("{path}/{pid}/fd");
+        if let Ok(files) = fs::read_dir(&fd_path) {
+            fd_use += files.count();
+        } else {
+            trace!("File descriptor use data not found in path {} with pid {}", fd_path, pid);
+        }
+
+        // Get thread count
+        let task_path = format!("{path}/{pid}/task");
+        if let Ok(files) = fs::read_dir(task_path) {
+            threads_use += files
+                .flatten()
+                .filter_map(|dir_entry| dir_entry.file_type().ok())
+                .filter(fs::FileType::is_dir)
+                .count();
+        } else {
+            threads_error = true;
+        }
+    }
+
+    if threads_error && threads_use == 0 {
+        (
+            fd_use as f64,
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Threads use data not found",
+            )),
+        )
+    } else {
+        (fd_use as f64, Ok(threads_use as f64))
+    }
+}
+
 #[must_use]
 pub fn get_threads_max_data(pids: &[i64]) -> f64 {
     get_threads_max_data_from_path(PROC_PATH, pids)
@@ -278,8 +334,6 @@ pub fn get_threads_max_data(pids: &[i64]) -> f64 {
 
 fn get_threads_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
     let mut threads_max = constants::LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT;
-    // regex to capture the soft limit value (first numeric value after the title)
-    let re = Regex::new(r"^Max processes\s+(\d+)").expect("Failed to create regex");
 
     for &pid in pids {
         let limits_path = format!("{path}/{pid}/limits");
@@ -289,7 +343,7 @@ fn get_threads_max_data_from_path(path: &str, pids: &[i64]) -> f64 {
 
         let reader = io::BufReader::new(file);
         for line in reader.lines().map_while(Result::ok) {
-            if let Some(line_items) = re.captures(&line) {
+            if let Some(line_items) = threads_max_regex().captures(&line) {
                 if let Ok(threads_max_pid) = line_items[1].parse() {
                     threads_max = threads_max.min(threads_max_pid);
                 } else {
