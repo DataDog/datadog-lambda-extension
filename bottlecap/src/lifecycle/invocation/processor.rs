@@ -953,10 +953,13 @@ impl Processor {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::config::trace_propagation_style::TracePropagationStyle;
+    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
     use crate::LAMBDA_RUNTIME_SLUG;
     use base64::{engine::general_purpose::STANDARD, Engine};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
+    use serde_json::from_str;
 
     fn setup() -> Processor {
         let aws_config = AwsConfig {
@@ -973,6 +976,7 @@ mod tests {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: Some("test:tags".to_string()),
+            trace_propagation_style_extract: vec![TracePropagationStyle::Datadog],
             ..config::Config::default()
         });
 
@@ -1164,5 +1168,22 @@ mod tests {
                 .expect("Status code not parsed!"),
             "200"
         );
+    }
+
+    #[test]
+    fn test_extract_trace_context_from_multi_value_headers() {
+        let p = setup();
+
+        let json = read_json_file("application-load-balancer-multivalue-headers.json");
+        let payload_value: Value = from_str(&json).expect("Failed to parse ALB test payload");
+
+        let span_context = p.extract_span_context(&HashMap::new(), &payload_value);
+
+        assert!(span_context.is_some());
+        let context = span_context.unwrap();
+
+        assert_eq!(context.trace_id, 987654321);
+        assert_eq!(context.span_id, 1234567890);
+        assert_eq!(context.sampling.as_ref().unwrap().priority.unwrap(), 1,);
     }
 }
