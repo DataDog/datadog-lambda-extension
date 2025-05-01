@@ -331,17 +331,13 @@ impl SpanInferrer {
         // Order matters here: check inferred span for trace context first, then fallback to generated span context.
         // If the order is flipped, trace propagation will be broken when AWS Xray is enabled.
         // https://github.com/DataDog/datadog-lambda-extension/pull/655
-        println!("[bottlecap] trying to extract trace context from inferred span");
         if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
-            println!("[bottlecap] extracted trace context from inferred span");
             debug!("Extracted trace context from inferred span");
             return Some(sc);
         }
 
         // Step Functions `SpanContext` is deterministically generated
-        println!("[bottlecap] trying to get generated span context");
         if self.generated_span_context.is_some() {
-            println!("[bottlecap] returning generated span context");
             debug!("Returning generated span context");
             return self.generated_span_context.clone();
         }
