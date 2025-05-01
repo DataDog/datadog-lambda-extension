@@ -6,7 +6,6 @@ use crate::{
 };
 use carrier::{Extractor, Injector};
 use datadog_trace_protobuf::pb::SpanLink;
-use serde_json::{Map, Value};
 use text_map_propagator::{
     BAGGAGE_PREFIX, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY,
     TRACESTATE_KEY,
@@ -15,19 +14,6 @@ use text_map_propagator::{
 pub mod carrier;
 pub mod error;
 pub mod text_map_propagator;
-
-pub fn flatten_multi_value_headers(multi_value_headers: &Value) -> Option<Value> {
-    let obj = multi_value_headers.as_object()?;
-
-    let mut flat_map = Map::new();
-    for (key, val_array) in obj {
-        if let Some(str_val) = val_array.get(0).and_then(Value::as_str) {
-            flat_map.insert(key.to_lowercase(), Value::from(str_val));
-        }
-    }
-
-    Some(Value::Object(flat_map))
-}
 
 pub trait Propagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
@@ -892,48 +878,5 @@ pub mod tests {
 
         assert_eq!(context.tags.len(), 1);
         assert_eq!(context.tags.get("key1").expect("Missing tag"), "value1");
-    }
-
-    #[test]
-    fn test_flatten_multi_value_headers() {
-        let multi_value_headers = serde_json::json!({
-            "X-Forwarded-For": ["192.168.1.1", "10.0.0.1"],
-            "X-Datadog-Trace-ID": ["123456789"],
-            "X-Datadog-Parent-ID": ["987654321"],
-            "Content-Type": ["application/json", "text/html"],
-            "Empty-Array": []
-        });
-
-        let flattened = flatten_multi_value_headers(&multi_value_headers).unwrap();
-        let obj = flattened.as_object().unwrap();
-
-        assert_eq!(
-            obj.get("x-forwarded-for").unwrap().as_str().unwrap(),
-            "192.168.1.1"
-        );
-        assert_eq!(
-            obj.get("x-datadog-trace-id").unwrap().as_str().unwrap(),
-            "123456789"
-        );
-        assert_eq!(
-            obj.get("x-datadog-parent-id").unwrap().as_str().unwrap(),
-            "987654321"
-        );
-        assert_eq!(
-            obj.get("content-type").unwrap().as_str().unwrap(),
-            "application/json"
-        );
-
-        assert!(!obj.contains_key("empty-array"));
-    }
-
-    #[test]
-    fn test_flatten_multi_value_headers_invalid_input() {
-        let invalid_input = serde_json::json!("not an object");
-        assert!(flatten_multi_value_headers(&invalid_input).is_none());
-
-        let empty_object = serde_json::json!({});
-        let flattened = flatten_multi_value_headers(&empty_object).unwrap();
-        assert!(flattened.as_object().unwrap().is_empty());
     }
 }

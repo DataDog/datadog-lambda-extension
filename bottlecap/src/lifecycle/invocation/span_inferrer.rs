@@ -4,6 +4,7 @@ use datadog_trace_protobuf::pb::Span;
 use serde_json::Value;
 use tracing::debug;
 
+use crate::lifecycle::invocation::triggers::alb_event::ALBEvent;
 use crate::traces::span_pointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
 use crate::{
@@ -82,8 +83,15 @@ impl SpanInferrer {
         };
 
         let mut is_step_function = false;
+        let mut is_alb_event = false;
 
-        if APIGatewayHttpEvent::is_match(payload_value) {
+        if ALBEvent::is_match(payload_value) {
+            if let Some(t) = ALBEvent::new(payload_value.clone()) {
+                // self.generated_span_context = Some(t.get_span_context());
+                trigger = Some(Box::new(t));
+                is_alb_event = true;
+            }
+        } else if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
 
@@ -236,8 +244,8 @@ impl SpanInferrer {
             self.carrier = Some(t.get_carrier());
             self.is_async_span = t.is_async();
 
-            // For Step Functions, there is no inferred span
-            if is_step_function && self.generated_span_context.is_some() {
+            // For Step Functions & ALB, there is no inferred span
+            if is_alb_event || (is_step_function && self.generated_span_context.is_some()) {
                 self.inferred_span = None;
             } else {
                 self.inferred_span = Some(inferred_span);
@@ -323,13 +331,17 @@ impl SpanInferrer {
         // Order matters here: check inferred span for trace context first, then fallback to generated span context.
         // If the order is flipped, trace propagation will be broken when AWS Xray is enabled.
         // https://github.com/DataDog/datadog-lambda-extension/pull/655
+        println!("[bottlecap] trying to extract trace context from inferred span");
         if let Some(sc) = self.carrier.as_ref().and_then(|c| propagator.extract(c)) {
+            println!("[bottlecap] extracted trace context from inferred span");
             debug!("Extracted trace context from inferred span");
             return Some(sc);
         }
 
         // Step Functions `SpanContext` is deterministically generated
+        println!("[bottlecap] trying to get generated span context");
         if self.generated_span_context.is_some() {
+            println!("[bottlecap] returning generated span context");
             debug!("Returning generated span context");
             return self.generated_span_context.clone();
         }

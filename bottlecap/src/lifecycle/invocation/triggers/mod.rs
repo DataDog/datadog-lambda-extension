@@ -4,6 +4,7 @@ use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
+pub mod alb_event;
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
 pub mod api_gateway_websocket_event;
