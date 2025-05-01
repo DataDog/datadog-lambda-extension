@@ -142,10 +142,24 @@ mod tests {
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let result = ALBEvent::new(payload).expect("Failed to deserialize into ALBEvent");
 
-        assert_eq!(result.multi_value_headers.get("accept"), Some(&vec!["*/*".to_string()]));
-        assert_eq!(result.multi_value_headers.get("x-datadog-trace-id"), Some(&vec!["0987654321".to_string()]));
-        assert_eq!(result.multi_value_headers.get("x-datadog-parent-id"), Some(&vec!["1234567890".to_string()]));
-        assert_eq!(result.multi_value_headers.get("x-datadog-sampling-priority"), Some(&vec!["1".to_string()]));
+        assert_eq!(
+            result.multi_value_headers.get("accept"),
+            Some(&vec!["*/*".to_string()])
+        );
+        assert_eq!(
+            result.multi_value_headers.get("x-datadog-trace-id"),
+            Some(&vec!["0987654321".to_string()])
+        );
+        assert_eq!(
+            result.multi_value_headers.get("x-datadog-parent-id"),
+            Some(&vec!["1234567890".to_string()])
+        );
+        assert_eq!(
+            result
+                .multi_value_headers
+                .get("x-datadog-sampling-priority"),
+            Some(&vec!["1".to_string()])
+        );
     }
 
     #[test]
@@ -168,8 +182,7 @@ mod tests {
     fn test_get_tags() {
         let json = read_json_file("application_load_balancer.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
         let tags = event.get_tags();
         let expected = HashMap::from([
             ("http.method".to_string(), "GET".to_string()),
@@ -186,8 +199,7 @@ mod tests {
     fn test_get_arn() {
         let json = read_json_file("application_load_balancer.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
         assert_eq!(
             event.get_arn("sa-east-1"),
             "arn:aws:elasticloadbalancing:us-east-1:1234567890:targetgroup/nhulston-alb-test/dcabb42f66a496e0"
@@ -198,8 +210,7 @@ mod tests {
     fn test_resolve_service_name() {
         let json = read_json_file("application_load_balancer.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
 
         // Priority is given to the specific key
         let specific_service_mapping = HashMap::from([
@@ -223,8 +234,10 @@ mod tests {
             "generic-service".to_string(),
         )]);
         assert_eq!(
-            event
-                .resolve_service_name(&generic_service_mapping, &event.request_context.elb.target_group_arn),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.request_context.elb.target_group_arn
+            ),
             "generic-service"
         );
     }
@@ -233,25 +246,41 @@ mod tests {
     fn test_get_carrier() {
         let json = read_json_file("application_load_balancer.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
         let carrier = event.get_carrier();
 
-        assert_eq!(carrier.get("x-datadog-trace-id"), Some(&"0987654321".to_string()));
-        assert_eq!(carrier.get("x-datadog-parent-id"), Some(&"1234567890".to_string()));
-        assert_eq!(carrier.get("x-datadog-sampling-priority"), Some(&"1".to_string()));
+        assert_eq!(
+            carrier.get("x-datadog-trace-id"),
+            Some(&"0987654321".to_string())
+        );
+        assert_eq!(
+            carrier.get("x-datadog-parent-id"),
+            Some(&"1234567890".to_string())
+        );
+        assert_eq!(
+            carrier.get("x-datadog-sampling-priority"),
+            Some(&"1".to_string())
+        );
     }
 
     #[test]
     fn test_get_carrier_multivalue_headers() {
         let json = read_json_file("application_load_balancer_multivalue_headers.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
-        let event =
-            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let event = ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
         let carrier = event.get_carrier();
 
-        assert_eq!(carrier.get("x-datadog-trace-id"), Some(&"0987654321".to_string()));
-        assert_eq!(carrier.get("x-datadog-parent-id"), Some(&"1234567890".to_string()));
-        assert_eq!(carrier.get("x-datadog-sampling-priority"), Some(&"1".to_string()));
+        assert_eq!(
+            carrier.get("x-datadog-trace-id"),
+            Some(&"0987654321".to_string())
+        );
+        assert_eq!(
+            carrier.get("x-datadog-parent-id"),
+            Some(&"1234567890".to_string())
+        );
+        assert_eq!(
+            carrier.get("x-datadog-sampling-priority"),
+            Some(&"1".to_string())
+        );
     }
 }
