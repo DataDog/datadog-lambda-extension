@@ -6,6 +6,7 @@ use crate::{
 };
 use carrier::{Extractor, Injector};
 use datadog_trace_protobuf::pb::SpanLink;
+use serde_json::{Map, Value};
 use text_map_propagator::{
     BAGGAGE_PREFIX, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY,
     TRACESTATE_KEY,
@@ -14,6 +15,19 @@ use text_map_propagator::{
 pub mod carrier;
 pub mod error;
 pub mod text_map_propagator;
+
+pub fn flatten_multi_value_headers(multi_value_headers: &Value) -> Option<Value> {
+    let obj = multi_value_headers.as_object()?;
+
+    let mut flat_map = Map::new();
+    for (key, val_array) in obj {
+        if let Some(str_val) = val_array.get(0).and_then(Value::as_str) {
+            flat_map.insert(key.to_lowercase(), Value::from(str_val));
+        }
+    }
+
+    Some(Value::Object(flat_map))
+}
 
 pub trait Propagator {
     fn extract(&self, carrier: &dyn Extractor) -> Option<SpanContext>;
