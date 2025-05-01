@@ -893,4 +893,48 @@ pub mod tests {
         assert_eq!(context.tags.len(), 1);
         assert_eq!(context.tags.get("key1").expect("Missing tag"), "value1");
     }
+
+    #[test]
+    fn test_flatten_multi_value_headers() {
+        let multi_value_headers = serde_json::json!({
+            "X-Forwarded-For": ["192.168.1.1", "10.0.0.1"],
+            "X-Datadog-Trace-ID": ["123456789"],
+            "X-Datadog-Parent-ID": ["987654321"],
+            "Content-Type": ["application/json", "text/html"],
+            "Empty-Array": []
+        });
+
+        let flattened = flatten_multi_value_headers(&multi_value_headers).unwrap();
+        println!("{:?}", flattened);
+        let obj = flattened.as_object().unwrap();
+
+        assert_eq!(
+            obj.get("x-forwarded-for").unwrap().as_str().unwrap(),
+            "192.168.1.1"
+        );
+        assert_eq!(
+            obj.get("x-datadog-trace-id").unwrap().as_str().unwrap(),
+            "123456789"
+        );
+        assert_eq!(
+            obj.get("x-datadog-parent-id").unwrap().as_str().unwrap(),
+            "987654321"
+        );
+        assert_eq!(
+            obj.get("content-type").unwrap().as_str().unwrap(),
+            "application/json"
+        );
+
+        assert!(!obj.contains_key("empty-array"));
+    }
+
+    #[test]
+    fn test_flatten_multi_value_headers_invalid_input() {
+        let invalid_input = serde_json::json!("not an object");
+        assert!(flatten_multi_value_headers(&invalid_input).is_none());
+
+        let empty_object = serde_json::json!({});
+        let flattened = flatten_multi_value_headers(&empty_object).unwrap();
+        assert!(flattened.as_object().unwrap().is_empty());
+    }
 }
