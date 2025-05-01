@@ -91,3 +91,167 @@ impl ServiceNameResolver for ALBEvent {
         "lambda_application_load_balancer"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lifecycle::invocation::triggers::api_gateway_http_event::APIGatewayHttpEvent;
+    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
+
+    #[test]
+    fn test_new() {
+        let json = read_json_file("application_load_balancer.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = ALBEvent::new(payload).expect("Failed to deserialize into ALBEvent");
+
+        let expected = ALBEvent {
+            request_context: RequestContext {
+                elb: Elb {
+                    target_group_arn: "arn:aws:elasticloadbalancing:us-east-1:1234567890:targetgroup/nhulston-alb-test/dcabb42f66a496e0".to_string(),
+                }
+            },
+            http_method: "GET".to_string(),
+            headers: HashMap::from([
+                ("accept".to_string(), "*/*".to_string()),
+                ("accept-encoding".to_string(), "gzip, deflate".to_string()),
+                ("accept-language".to_string(), "*".to_string()),
+                ("connection".to_string(), "keep-alive".to_string()),
+                ("host".to_string(), "nhulston-test-0987654321.us-east-1.elb.amazonaws.com".to_string()),
+                ("sec-fetch-mode".to_string(), "cors".to_string()),
+                ("traceparent".to_string(), "00-68126c4300000000125a7f065cf9a530-1c6dcc8ab8a6e99d-01".to_string()),
+                ("tracestate".to_string(), "dd=t.dm:-0;t.tid:68126c4300000000;s:1;p:1c6dcc8ab8a6e99d".to_string()),
+                ("user-agent".to_string(), "node".to_string()),
+                ("x-amzn-trace-id".to_string(), "Root=1-68126c45-01b175997ab51c4c47a2d643".to_string()),
+                ("x-datadog-parent-id".to_string(), "1234567890".to_string()),
+                ("x-datadog-sampling-priority".to_string(), "1".to_string()),
+                ("x-datadog-tags".to_string(), "_dd.p.tid=68126c4300000000,_dd.p.dm=-0".to_string()),
+                ("x-datadog-trace-id".to_string(), "0987654321".to_string()),
+                ("x-forwarded-for".to_string(), "18.204.55.6".to_string()),
+                ("x-forwarded-port".to_string(), "80".to_string()),
+                ("x-forwarded-proto".to_string(), "http".to_string()),
+            ]),
+            multi_value_headers: Default::default(),
+        };
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_new_multivalue_headers() {
+        let json = read_json_file("application_load_balancer_multivalue_headers.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let result = ALBEvent::new(payload).expect("Failed to deserialize into ALBEvent");
+
+        assert_eq!(result.multi_value_headers.get("accept"), Some(&vec!["*/*".to_string()]));
+        assert_eq!(result.multi_value_headers.get("x-datadog-trace-id"), Some(&vec!["0987654321".to_string()]));
+        assert_eq!(result.multi_value_headers.get("x-datadog-parent-id"), Some(&vec!["1234567890".to_string()]));
+        assert_eq!(result.multi_value_headers.get("x-datadog-sampling-priority"), Some(&vec!["1".to_string()]));
+    }
+
+    #[test]
+    fn test_is_match() {
+        let json = read_json_file("application_load_balancer.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize ALBEvent");
+
+        assert!(ALBEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_is_not_match() {
+        let json = read_json_file("api_gateway_proxy_event.json");
+        let payload =
+            serde_json::from_str(&json).expect("Failed to deserialize APIGatewayHttpEvent");
+        assert!(!APIGatewayHttpEvent::is_match(&payload));
+    }
+
+    #[test]
+    fn test_get_tags() {
+        let json = read_json_file("application_load_balancer.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let tags = event.get_tags();
+        let expected = HashMap::from([
+            ("http.method".to_string(), "GET".to_string()),
+            (
+                "function_trigger.event_source".to_string(),
+                "application-load-balancer".to_string(),
+            ),
+        ]);
+
+        assert_eq!(tags, expected);
+    }
+
+    #[test]
+    fn test_get_arn() {
+        let json = read_json_file("application_load_balancer.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        assert_eq!(
+            event.get_arn("sa-east-1"),
+            "arn:aws:elasticloadbalancing:us-east-1:1234567890:targetgroup/nhulston-alb-test/dcabb42f66a496e0"
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name() {
+        let json = read_json_file("application_load_balancer.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+
+        // Priority is given to the specific key
+        let specific_service_mapping = HashMap::from([
+            ("arn:aws:elasticloadbalancing:us-east-1:1234567890:targetgroup/nhulston-alb-test/dcabb42f66a496e0".to_string(), "specific-service".to_string()),
+            (
+                "lambda_application_load_balancer".to_string(),
+                "generic-service".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.request_context.elb.target_group_arn
+            ),
+            "specific-service"
+        );
+
+        let generic_service_mapping = HashMap::from([(
+            "lambda_application_load_balancer".to_string(),
+            "generic-service".to_string(),
+        )]);
+        assert_eq!(
+            event
+                .resolve_service_name(&generic_service_mapping, &event.request_context.elb.target_group_arn),
+            "generic-service"
+        );
+    }
+
+    #[test]
+    fn test_get_carrier() {
+        let json = read_json_file("application_load_balancer.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let carrier = event.get_carrier();
+
+        assert_eq!(carrier.get("x-datadog-trace-id"), Some(&"0987654321".to_string()));
+        assert_eq!(carrier.get("x-datadog-parent-id"), Some(&"1234567890".to_string()));
+        assert_eq!(carrier.get("x-datadog-sampling-priority"), Some(&"1".to_string()));
+    }
+
+    #[test]
+    fn test_get_carrier_multivalue_headers() {
+        let json = read_json_file("application_load_balancer_multivalue_headers.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            ALBEvent::new(payload).expect("Failed to deserialize ALBEvent");
+        let carrier = event.get_carrier();
+
+        assert_eq!(carrier.get("x-datadog-trace-id"), Some(&"0987654321".to_string()));
+        assert_eq!(carrier.get("x-datadog-parent-id"), Some(&"1234567890".to_string()));
+        assert_eq!(carrier.get("x-datadog-sampling-priority"), Some(&"1".to_string()));
+    }
+}
