@@ -1184,6 +1184,6 @@ mod tests {
 
         assert_eq!(context.trace_id, 987654321);
         assert_eq!(context.span_id, 1234567890);
-        assert_eq!(context.sampling.as_ref().unwrap().priority.unwrap(), 1,);
+        assert_eq!(context.sampling.as_ref().unwrap().priority.unwrap(), 1);
     }
 }

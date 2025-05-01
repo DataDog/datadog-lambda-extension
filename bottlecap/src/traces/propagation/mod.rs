@@ -905,7 +905,6 @@ pub mod tests {
         });
 
         let flattened = flatten_multi_value_headers(&multi_value_headers).unwrap();
-        println!("{:?}", flattened);
         let obj = flattened.as_object().unwrap();
 
         assert_eq!(
