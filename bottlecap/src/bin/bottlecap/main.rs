@@ -1023,7 +1023,8 @@ fn start_api_runtime_proxy(
         return None;
     }
 
+    let config = Arc::clone(config);
     let aws_config = aws_config.clone();
     let invocation_processor = invocation_processor.clone();
-    interceptor::start(aws_config, invocation_processor).ok()
+    interceptor::start(config, aws_config, invocation_processor).ok()
 }
