@@ -25,8 +25,8 @@ use bottlecap::{
     },
     logger,
     logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
-    lwa::proxy::start_lwa_proxy,
     otlp::agent::Agent as OtlpAgent,
+    proxy::{interceptor::Interceptor, should_start_proxy},
     secrets::decrypt,
     tags::{
         lambda::{self, tags::EXTENSION_VERSION},
@@ -348,7 +348,7 @@ async fn extension_loop_active(
         Arc::clone(&trace_aggregator),
     );
 
-    let lwa_proxy_stopper = start_lwa_proxy(Arc::clone(&invocation_processor));
+    start_api_runtime_proxy(config, aws_config, &invocation_processor);
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -491,12 +491,14 @@ async fn extension_loop_active(
                     }
                 }
             }
-            if let Some(lwa_proxy_task) = lwa_proxy_stopper {
-                // use with graceful shutdown after rebase with hyper 1
-                if let Err(exit_err) = lwa_proxy_task.send(()).await {
-                    error!("Error stopping LWA proxy: {exit_err:?}");
-                }
-            }
+
+            // TODO(duncanista): graceful shutdown for runtime proxy
+            // if let Some(lwa_proxy_task) = lwa_proxy_stopper {
+            //     // use with graceful shutdown after rebase with hyper 1
+            //     if let Err(exit_err) = lwa_proxy_task.send(()).await {
+            //         error!("Error stopping LWA proxy: {exit_err:?}");
+            //     }
+            // }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             flush_all(
@@ -831,6 +833,25 @@ fn start_otlp_agent(
     tokio::spawn(async move {
         if let Err(e) = agent.start().await {
             error!("Error starting OTLP agent: {e:?}");
+        }
+    });
+}
+
+fn start_api_runtime_proxy(
+    config: &Arc<Config>,
+    aws_config: &AwsConfig,
+    invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
+) {
+    if !should_start_proxy(config, aws_config) {
+        debug!("Skipping API runtime proxy, no LWA proxy or datadog wrapper found");
+        return;
+    }
+
+    let interceptor = Interceptor::new(config.clone(), aws_config, invocation_processor.clone());
+
+    tokio::spawn(async move {
+        if let Err(e) = interceptor.start().await {
+            error!("Error starting API runtime proxy: {e:?}");
         }
     });
 }
