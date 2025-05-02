@@ -20,10 +20,10 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest:
         .timeout(Duration::from_secs(config.flush_timeout))
         // Temporarily not force http2
         // Enable HTTP/2 for better multiplexing
-        //.http2_prior_knowledge()
+        .http2_prior_knowledge()
         //.http2_keep_alive_interval(Some(Duration::from_secs(10)))
-        //.http2_keep_alive_while_idle(true)
-        //.http2_keep_alive_timeout(Duration::from_secs(10))
+        .http2_keep_alive_while_idle(true)
+        .http2_keep_alive_timeout(Duration::from_secs(10))
         //.http2_initial_stream_window_size(5_000_000) // magic number
         //.http2_initial_connection_window_size(5_000_000)
         // Set keep-alive timeout

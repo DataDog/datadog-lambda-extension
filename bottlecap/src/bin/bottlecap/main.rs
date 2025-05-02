@@ -416,6 +416,7 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if flush_control.should_periodic_flush() {
+                let duration = Instant::now();
                 // Should flush at the top of the invocation, which is now
                 flush_all(
                     &logs_flusher,
@@ -425,6 +426,7 @@ async fn extension_loop_active(
                     &mut race_flush_interval,
                 )
                 .await;
+                println!("AJ flushed in - {:?}", duration.elapsed());
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT

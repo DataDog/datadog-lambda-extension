@@ -73,10 +73,11 @@ fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
 
             match (rx_bytes, tx_bytes) {
                 (Some(rx_val), Some(tx_val)) => {
+                    println!("tx bytes found: {:?}", tx_val);
                     return Ok(NetworkData {
                         rx_bytes: rx_val,
                         tx_bytes: tx_val,
-                    })
+                    });
                 }
                 (_, _) => {
                     return Err(io::Error::new(

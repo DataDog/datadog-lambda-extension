@@ -551,6 +551,10 @@ impl Processor {
 
             // Set Network and CPU time metrics
             if let Some(offsets) = context.enhanced_metric_data.clone() {
+                println!(
+                    "platform report network offset is {:?}",
+                    offsets.network_offset
+                );
                 self.enhanced_metrics
                     .set_network_enhanced_metrics(offsets.network_offset);
                 self.enhanced_metrics

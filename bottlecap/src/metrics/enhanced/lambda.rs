@@ -170,6 +170,7 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
+        println!("setting post runtime duration: {:?}", duration_ms);
         let metric = metric::Metric::new(
             constants::POST_RUNTIME_DURATION_METRIC.into(),
             MetricValue::distribution(duration_ms),
@@ -212,7 +213,8 @@ impl Lambda {
         if let Err(e) = aggr.insert(metric) {
             error!("Failed to insert rx_bytes metric: {}", e);
         }
-
+        println!("network offset at start was {:?}", network_data_offset);
+        println!("inserting tx_byte metric, value: {:?}", tx_bytes);
         let metric = Metric::new(
             constants::TX_BYTES_METRIC.into(),
             MetricValue::distribution(tx_bytes),
