@@ -151,7 +151,7 @@ async fn invocation_next_proxy(
                 error!("PROXY | passthrough_proxy | error proxying request: {e}");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to proxy request: {e}"),
+                    format!("Failed to build forward response: {e}"),
                 )
                     .into_response();
             }
