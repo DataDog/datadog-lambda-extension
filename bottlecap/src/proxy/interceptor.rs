@@ -17,10 +17,8 @@ use hyper_util::{
     rt::TokioExecutor,
 };
 use std::{net::SocketAddr, sync::Arc};
-use tokio::{
-    net::TcpListener,
-    sync::{oneshot, Mutex},
-};
+use tokio::{net::TcpListener, sync::Mutex};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 /// The Lambda Function requires the `/opt/datadog_wrapper` to be executed.
@@ -35,20 +33,31 @@ type InterceptorState = (
     Arc<Mutex<InvocationProcessor>>,
 );
 
-pub async fn start(
+pub fn start(
     config: Arc<Config>,
     aws_config: AwsConfig,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
-) -> Result<oneshot::Sender<()>, Box<dyn std::error::Error>> {
+) -> Result<CancellationToken, Box<dyn std::error::Error>> {
     let socket = get_proxy_socket_address(&aws_config.aws_lwa_proxy_lambda_runtime_api);
-    let server = TcpListener::bind(&socket).await?;
-    let (shutdown_tx, _shutdown_rx) = oneshot::channel::<()>();
+    let shutdown_token = CancellationToken::new();
 
-    let router = make_router(config, aws_config, invocation_processor);
-    debug!("PROXY | Starting API runtime proxy on {socket}");
-    axum::serve(server, router).await?;
+    let shutdown_token_clone = shutdown_token.clone();
+    tokio::spawn(async move {
+        let server = TcpListener::bind(&socket)
+            .await
+            .expect("Failed to bind socket");
+        let router = make_router(config, aws_config, invocation_processor);
+        debug!("PROXY | Starting API runtime proxy on {socket}");
+        axum::serve(server, router)
+            .with_graceful_shutdown(async move {
+                shutdown_token_clone.cancelled().await;
+                debug!("PROXY | Shutdown signal received, shutting down");
+            })
+            .await
+            .expect("Failed to start API runtime proxy");
+    });
 
-    Ok(shutdown_tx)
+    Ok(shutdown_token)
 }
 
 fn make_router(
@@ -56,9 +65,13 @@ fn make_router(
     aws_config: AwsConfig,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
 ) -> Router {
-    let connector = HttpConnector::new();
-    // TODO(duncanista): find a good number of idle timeout and max idle per host.
-    let client = Client::builder(TokioExecutor::new()).build(connector);
+    let mut connector = HttpConnector::new();
+    connector.set_connect_timeout(Some(std::time::Duration::from_secs(5)));
+
+    let client = Client::builder(TokioExecutor::new())
+        .pool_idle_timeout(std::time::Duration::from_secs(30))
+        .pool_max_idle_per_host(8)
+        .build(connector);
 
     let state: InterceptorState = (
         config.clone(),
@@ -309,4 +322,119 @@ fn build_proxy_request(
     let request = request.body(Body::from(body_bytes))?;
 
     Ok(request)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        sync::Mutex,
+        time::{Duration, Instant},
+    };
+    use tokio::sync::Mutex as TokioMutex;
+
+    use dogstatsd::{aggregator::Aggregator as MetricsAggregator, metric::EMPTY_TAGS};
+    use http_body_util::Full;
+    use hyper::{server::conn::http1, service::service_fn};
+    use hyper_util::rt::TokioIo;
+
+    use crate::{tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_noop_proxy() {
+        let aws_lwa_lambda_runtime_api = "127.0.0.1:12345";
+        let aws_lambda_runtime_api = "127.0.0.1:12344";
+
+        let final_destination = tokio::spawn(async move {
+            let listener = TcpListener::bind(aws_lambda_runtime_api)
+                .await
+                .expect("Failed to bind final destination socket");
+            let (tcp_stream, _) = listener
+                .accept()
+                .await
+                .expect("LWA: Failed to accept LWA connection");
+            let io = TokioIo::new(tcp_stream);
+            http1::Builder::new()
+                .preserve_header_case(true)
+                .title_case_headers(true)
+                .serve_connection(
+                    io,
+                    service_fn(move |_req| async move {
+                        Ok::<_, std::convert::Infallible>(Response::new(Full::new(Bytes::from(
+                            "Response from AWS LAMBDA RUNTIME API",
+                        ))))
+                    }),
+                )
+                .await
+                .unwrap();
+        });
+
+        let config = Arc::new(Config::default());
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let aws_config = AwsConfig {
+            region: "us-east-1".to_string(),
+            aws_access_key_id: "AKIDEXAMPLE".to_string(),
+            aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
+            aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
+            function_name: "arn:some-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            aws_container_credentials_full_uri: String::new(),
+            aws_container_authorization_token: String::new(),
+            runtime_api: aws_lambda_runtime_api.to_string(),
+            aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
+            exec_wrapper: None,
+        };
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            &aws_config,
+            metrics_aggregator,
+        )));
+
+        let proxy_handle = start(config, aws_config, invocation_processor)
+            .expect("Failed to start API runtime proxy");
+        let https = HttpConnector::new();
+        let client = Client::builder(hyper_util::rt::TokioExecutor::new())
+            .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https);
+
+        let uri_with_schema = format!("http://{aws_lwa_lambda_runtime_api}");
+        let mut ask_proxy = client
+            .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+            .await;
+
+        while ask_proxy.is_err() {
+            error!(
+                "Retrying request to proxy, err: {}",
+                ask_proxy.err().unwrap()
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            ask_proxy = client
+                .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+                .await;
+        }
+
+        let body_bytes = ask_proxy
+            .unwrap()
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+
+        let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
+        assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
+        // Send shutdown signal to the proxy server
+        let _ = proxy_handle.cancel();
+        final_destination.abort();
+    }
 }

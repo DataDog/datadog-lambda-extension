@@ -1,5 +1,3 @@
-pub mod proxy;
-
 use axum::http::{self, HeaderName, HeaderValue};
 use bytes::Bytes;
 use hyper::{HeaderMap, Uri};
