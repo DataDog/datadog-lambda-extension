@@ -28,13 +28,6 @@ use tracing::{debug, error};
 /// This port is used to intercept requests coming from the AWS Lambda Runtime Interface Client (RIC).
 const INTERCEPTOR_DEFAULT_PORT: u16 = 9000;
 
-pub struct Interceptor {
-    pub config: Arc<Config>,
-    pub aws_config: AwsConfig,
-    /// Processors
-    pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
-}
-
 type InterceptorState = (
     Arc<Config>,
     AwsConfig,
