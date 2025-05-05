@@ -352,13 +352,14 @@ mod tests {
             span.service,
             "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com"
         );
-        assert_eq!(span.resource, "GET /dev/user/{user_id}");
+        assert_eq!(span.resource, "GET /dev/user/{user_id}/id/{id}");
         assert_eq!(span.r#type, "http");
         let expected = HashMap::from([
-            ("endpoint".to_string(), "/dev/user/42".to_string()),
+            ("endpoint".to_string(), "/dev/user/42/id/50".to_string()),
             (
                 "http.url".to_string(),
-                "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42".to_string(),
+                "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42/id/50"
+                    .to_string(),
             ),
             ("http.method".to_string(), "GET".to_string()),
             ("http.protocol".to_string(), "HTTP/1.1".to_string()),
@@ -387,12 +388,12 @@ mod tests {
             HashMap::from([
                 (
                     "http.url".to_string(),
-                    "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42"
+                    "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42/id/50"
                         .to_string(),
                 ),
                 (
                     "http.url_details.path".to_string(),
-                    "/dev/user/42".to_string(),
+                    "/dev/user/42/id/50".to_string(),
                 ),
                 ("http.method".to_string(), "GET".to_string()),
                 ("http.route".to_string(), "/user/{id}".to_string()),

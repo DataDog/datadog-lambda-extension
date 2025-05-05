@@ -75,7 +75,11 @@ pub fn parameterize_api_resource(resource: String) -> String {
             // Determine the parameter name based on the previous segment
             let param_name = if i > 1 && !parts[i - 1].is_empty() {
                 let singular = parts[i - 1].trim_end_matches('s');
-                format!("{singular}_id")
+                if singular == "id" {
+                    singular.into()
+                } else {
+                    format!("{singular}_id")
+                }
             } else {
                 "id".to_string()
             };
