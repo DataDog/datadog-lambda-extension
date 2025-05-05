@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use datadog_trace_protobuf::pb::Span;
+use lazy_static::lazy_static;
+use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
@@ -21,6 +23,24 @@ pub mod step_function_event;
 pub const DATADOG_CARRIER_KEY: &str = "_datadog";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_TAG: &str = "function_trigger.event_source";
 pub const FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG: &str = "function_trigger.event_source_arn";
+lazy_static! {
+    static ref ULID_UUID_GUID: Regex = Regex::new(
+        r"(?x)
+        (
+            [0-9a-fA-F]{8}-          # UUID/GUID segment 1
+            [0-9a-fA-F]{4}-          # segment 2
+            [0-9a-fA-F]{4}-          # segment 3
+            [0-9a-fA-F]{4}-          # segment 4
+            [0-9a-fA-F]{12}          # segment 5
+        )
+        |
+        (
+            [0123456789ABCDEFGHJKMNPQRSTVWXYZ]{26}  # ULID
+        )
+    "
+    )
+    .expect("failed to create regex");
+}
 
 /// Resolves the service name for a given trigger depending on
 /// service mapping configuration.
@@ -31,6 +51,49 @@ pub trait ServiceNameResolver {
 
     /// Get the generic service mapping key for the trigger
     fn get_generic_identifier(&self) -> &'static str;
+}
+
+#[must_use]
+pub fn parameterize_api_resource(resource: String) -> String {
+    // curly braces are used for APIGW parameters feature
+    if resource.contains('{') && resource.contains('}') {
+        return resource;
+    }
+
+    let parts: Vec<&str> = resource.split('/').collect();
+    let mut result = Vec::new();
+
+    // First element is empty string due to leading slash
+    result.push(String::new());
+
+    // Process each path segment
+    for (i, part) in parts.iter().enumerate().skip(1) {
+        if part.is_empty() {
+            continue;
+        }
+
+        // Check if this part looks like an identifier
+        // Number, ULID, GUID, or UUID
+        if part.chars().all(|c| c.is_ascii_digit()) || ULID_UUID_GUID.is_match(part) {
+            // Determine the parameter name based on the previous segment
+            let param_name = if i > 1 && !parts[i - 1].is_empty() {
+                let singular = parts[i - 1].trim_end_matches('s');
+                if singular == "id" {
+                    singular.into()
+                } else {
+                    format!("{singular}_id")
+                }
+            } else {
+                "id".to_string()
+            };
+
+            // Format the parameter with braces and store it in the result
+            result.push(format!("{{{param_name}}}"));
+        } else {
+            result.push((*part).to_string());
+        }
+    }
+    result.join("/")
 }
 
 pub trait Trigger: ServiceNameResolver {
