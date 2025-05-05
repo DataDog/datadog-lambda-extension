@@ -5,6 +5,8 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
+
+pub mod alb_event;
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
 pub mod api_gateway_websocket_event;
