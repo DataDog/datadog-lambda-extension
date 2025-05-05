@@ -87,7 +87,6 @@ impl SpanInferrer {
 
         if ALBEvent::is_match(payload_value) {
             if let Some(t) = ALBEvent::new(payload_value.clone()) {
-                // self.generated_span_context = Some(t.get_span_context());
                 trigger = Some(Box::new(t));
                 is_alb_event = true;
             }
