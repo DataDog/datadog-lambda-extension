@@ -1,7 +1,10 @@
 use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{
+        lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
@@ -63,16 +66,11 @@ impl Trigger for APIGatewayHttpEvent {
     #[allow(clippy::cast_possible_truncation)]
     fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
         debug!("Enriching an Inferred Span for an API Gateway HTTP Event");
-        let resource = if self.route_key.is_empty() {
-            format!(
-                "{http_method} {route_key}",
-                http_method = self.request_context.http.method,
-                route_key = self.route_key
-            )
-        } else {
-            self.route_key.clone()
-        };
-
+        let resource = format!(
+            "{http_method} {parameterized_route}",
+            http_method = self.request_context.http.method,
+            parameterized_route = parameterize_api_resource(self.request_context.http.path.clone())
+        );
         let http_url = format!(
             "https://{domain_name}{path}",
             domain_name = self.request_context.domain_name,
@@ -347,7 +345,7 @@ mod tests {
             span.service,
             "9vj54we5ih.execute-api.sa-east-1.amazonaws.com"
         );
-        assert_eq!(span.resource, "GET /user/{id}");
+        assert_eq!(span.resource, "GET /user/{user_id}");
         assert_eq!(span.r#type, "http");
         assert_eq!(
             span.meta,
