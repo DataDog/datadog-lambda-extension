@@ -56,7 +56,8 @@ impl Interceptor {
     }
 
     pub async fn start(&self) -> Result<oneshot::Sender<()>, Box<dyn std::error::Error>> {
-        let socket = Self::get_proxy_socket_address(&self.aws_config);
+        let socket =
+            Self::get_proxy_socket_address(&self.aws_config.aws_lwa_proxy_lambda_runtime_api);
         let server = TcpListener::bind(&socket).await?;
         let (shutdown_tx, _shutdown_rx) = oneshot::channel::<()>();
 
@@ -309,9 +310,8 @@ impl Interceptor {
         Ok((parts, bytes))
     }
 
-    fn get_proxy_socket_address(aws_config: &AwsConfig) -> SocketAddr {
-        if let Some(socket_addr) = aws_config
-            .aws_lwa_proxy_lambda_runtime_api
+    fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -> SocketAddr {
+        if let Some(socket_addr) = aws_lwa_proxy_lambda_runtime_api
             .as_ref()
             .and_then(|uri_str| lwa::get_lwa_proxy_socket_address(uri_str).ok())
         {
