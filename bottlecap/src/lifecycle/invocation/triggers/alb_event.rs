@@ -84,7 +84,10 @@ impl Trigger for ALBEvent {
 
 impl ServiceNameResolver for ALBEvent {
     fn get_specific_identifier(&self) -> String {
-        self.request_context.elb.target_group_arn.clone()
+        // arn is of format: arn:aws:elasticloadbalancing:<region>:<account-id>:targetgroup/<alb-name>/<some-uid>
+        let arn = &self.request_context.elb.target_group_arn;
+
+        arn.split('/').nth(1).unwrap_or_default().to_string()
     }
 
     fn get_generic_identifier(&self) -> &'static str {
@@ -214,7 +217,10 @@ mod tests {
 
         // Priority is given to the specific key
         let specific_service_mapping = HashMap::from([
-            ("arn:aws:elasticloadbalancing:us-east-1:1234567890:targetgroup/nhulston-alb-test/dcabb42f66a496e0".to_string(), "specific-service".to_string()),
+            (
+                "nhulston-alb-test".to_string(),
+                "specific-service".to_string(),
+            ),
             (
                 "lambda_application_load_balancer".to_string(),
                 "generic-service".to_string(),
