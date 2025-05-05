@@ -397,27 +397,28 @@ async fn extension_loop_active(
                         }
                     }
                     _ = race_flush_interval.tick() => {
-                        metrics_flusher.lock().await.flush().await;
-                        // flush_all(
-                        //     //&logs_flusher,
-                        //     &mut metrics_flusher,
-                        //     //&*trace_flusher,
-                        //     &*stats_flusher,
-                        //     &mut race_flush_interval,
-                        // ).await;
+                        let mut locked_metrics = metrics_flusher.lock().await;
+                        blocking_flush_all(
+                            &logs_flusher,
+                            &mut locked_metrics,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &mut race_flush_interval,
+                        )
+                        .await;
                     }
                 }
             }
             // flush
-            metrics_flusher.lock().await.flush().await;
-            // flush_all(
-            //     //&logs_flusher,
-            //     &mut metrics_flusher,
-            //     //&*trace_flusher,
-            //     &*stats_flusher,
-            //     &mut race_flush_interval,
-            // )
-            // .await;
+            let mut locked_metrics = metrics_flusher.lock().await;
+            blocking_flush_all(
+                &logs_flusher,
+                &mut locked_metrics,
+                &*trace_flusher,
+                &*stats_flusher,
+                &mut race_flush_interval,
+            )
+            .await;
             let next_response = next_event(client, &r.extension_id).await;
             shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
@@ -434,14 +435,7 @@ async fn extension_loop_active(
                 }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
                 tokio::spawn(async move { cloned_metrics_flusher.lock().await.flush().await });
-                // flush_all(
-                //     //&logs_flusher,
-                //     &mut metrics_flusher,
-                //     //&*trace_flusher,
-                //     &*stats_flusher,
-                //     &mut race_flush_interval,
-                // )
-                // .await;
+                race_flush_interval.reset();
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
@@ -470,14 +464,15 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        metrics_flusher.lock().await.flush().await;
-                        // flush_all(
-                        //     //&logs_flusher,
-                        //     &mut metrics_flusher,
-                        //     //&*trace_flusher,
-                        //     &*stats_flusher,
-                        //     &mut race_flush_interval,
-                        // ).await;
+                        let mut locked_metrics = metrics_flusher.lock().await;
+                        blocking_flush_all(
+                            &logs_flusher,
+                            &mut locked_metrics,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &mut race_flush_interval,
+                        )
+                        .await;
                     }
                 }
             }
@@ -509,38 +504,31 @@ async fn extension_loop_active(
             }
             // gotta lock here
             let mut locked_metrics = metrics_flusher.lock().await;
-            tokio::join!(
-                locked_metrics.flush(),
-                logs_flusher.flush(),
-                trace_flusher.flush(),
-                stats_flusher.flush()
-            );
-            race_flush_interval.reset();
-            // flush_all(
-            //     //&logs_flusher,
-            //     &mut metrics_flusher,
-            //     //&*trace_flusher,
-            //     &*stats_flusher,
-            //     &mut race_flush_interval,
-            // )
-            // .await;
+            blocking_flush_all(
+                &logs_flusher,
+                &mut locked_metrics,
+                &*trace_flusher,
+                &*stats_flusher,
+                &mut race_flush_interval,
+            )
+            .await;
             return Ok(());
         }
     }
 }
 
-async fn flush_all(
-    //logs_flusher: &LogsFlusher,
+async fn blocking_flush_all(
+    logs_flusher: &LogsFlusher,
     metrics_flusher: &mut MetricsFlusher,
-    //trace_flusher: &impl TraceFlusher,
+    trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
-        //logs_flusher.flush(),
+        logs_flusher.flush(),
         metrics_flusher.flush(),
-        //trace_flusher.flush(),
-        //stats_flusher.flush()
+        trace_flusher.flush(),
+        stats_flusher.flush()
     );
     race_flush_interval.reset();
 }
