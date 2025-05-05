@@ -434,7 +434,9 @@ async fn extension_loop_active(
                     traces_val.flush().await;
                 }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
-                tokio::spawn(async move { cloned_metrics_flusher.lock().await.flush().await });
+                shutdown_flush_handles.push_back(tokio::spawn(async move {
+                    cloned_metrics_flusher.lock().await.flush().await
+                }));
                 race_flush_interval.reset();
             }
             // NO FLUSH SCENARIO
@@ -500,6 +502,7 @@ async fn extension_loop_active(
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             while let Some(res) = shutdown_flush_handles.next().await {
+                println!("AJ: running shutdown result: {:?}", res);
                 debug!("Flushing in-progress tasks at shutdown: {:?}", res);
             }
             // gotta lock here
