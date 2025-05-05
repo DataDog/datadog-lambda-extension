@@ -85,12 +85,7 @@ impl SpanInferrer {
         let mut is_step_function = false;
         let mut is_alb_event = false;
 
-        if ALBEvent::is_match(payload_value) {
-            if let Some(t) = ALBEvent::new(payload_value.clone()) {
-                trigger = Some(Box::new(t));
-                is_alb_event = true;
-            }
-        } else if APIGatewayHttpEvent::is_match(payload_value) {
+        if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
 
@@ -107,6 +102,11 @@ impl SpanInferrer {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
+            }
+        } else if ALBEvent::is_match(payload_value) {
+            if let Some(t) = ALBEvent::new(payload_value.clone()) {
+                trigger = Some(Box::new(t));
+                is_alb_event = true;
             }
         } else if LambdaFunctionUrlEvent::is_match(payload_value) {
             if let Some(t) = LambdaFunctionUrlEvent::new(payload_value.clone()) {
