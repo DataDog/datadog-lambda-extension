@@ -26,7 +26,7 @@ use bottlecap::{
     logger,
     logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
     otlp::agent::Agent as OtlpAgent,
-    proxy::{interceptor::Interceptor, should_start_proxy},
+    proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
     tags::{
         lambda::{self, tags::EXTENSION_VERSION},
@@ -847,10 +847,11 @@ fn start_api_runtime_proxy(
         return;
     }
 
-    let interceptor = Interceptor::new(config.clone(), aws_config, invocation_processor.clone());
-
+    let config = config.clone();
+    let aws_config = aws_config.clone();
+    let invocation_processor = invocation_processor.clone();
     tokio::spawn(async move {
-        if let Err(e) = interceptor.start().await {
+        if let Err(e) = interceptor::start(config, aws_config, invocation_processor).await {
             error!("Error starting API runtime proxy: {e:?}");
         }
     });

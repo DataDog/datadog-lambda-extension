@@ -42,285 +42,278 @@ type InterceptorState = (
     Arc<Mutex<InvocationProcessor>>,
 );
 
-impl Interceptor {
-    pub fn new(
-        config: Arc<Config>,
-        aws_config: &AwsConfig,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> Self {
-        Self {
-            config,
-            aws_config: aws_config.clone(),
-            invocation_processor,
+pub async fn start(
+    config: Arc<Config>,
+    aws_config: AwsConfig,
+    invocation_processor: Arc<Mutex<InvocationProcessor>>,
+) -> Result<oneshot::Sender<()>, Box<dyn std::error::Error>> {
+    let socket = get_proxy_socket_address(&aws_config.aws_lwa_proxy_lambda_runtime_api);
+    let server = TcpListener::bind(&socket).await?;
+    let (shutdown_tx, _shutdown_rx) = oneshot::channel::<()>();
+
+    let router = make_router(config, aws_config, invocation_processor);
+    debug!("PROXY | Starting API runtime proxy on {socket}");
+    axum::serve(server, router).await?;
+
+    Ok(shutdown_tx)
+}
+
+fn make_router(
+    config: Arc<Config>,
+    aws_config: AwsConfig,
+    invocation_processor: Arc<Mutex<InvocationProcessor>>,
+) -> Router {
+    let connector = HttpConnector::new();
+    // TODO(duncanista): find a good number of idle timeout and max idle per host.
+    let client = Client::builder(TokioExecutor::new()).build(connector);
+
+    let state: InterceptorState = (
+        config.clone(),
+        aws_config.clone(),
+        Arc::new(client),
+        invocation_processor.clone(),
+    );
+
+    Router::new()
+        .route("/", get(passthrough_proxy))
+        .route(
+            "/{api_version}/runtime/invocation/next",
+            get(invocation_next_proxy),
+        )
+        .route(
+            "/{api_version}/runtime/invocation/{request_id}/response",
+            post(invocation_response_proxy),
+        )
+        .route(
+            "/{api_version}/runtime/invocation/{request_id}/error",
+            post(passthrough_proxy),
+        )
+        .fallback(passthrough_proxy)
+        .with_state(state)
+}
+
+fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -> SocketAddr {
+    if let Some(socket_addr) = aws_lwa_proxy_lambda_runtime_api
+        .as_ref()
+        .and_then(|uri_str| lwa::get_lwa_proxy_socket_address(uri_str).ok())
+    {
+        debug!("PROXY | get_proxy_socket_address | LWA proxy detected");
+        return socket_addr;
+    }
+
+    let uri = format!("{EXTENSION_HOST}:{INTERCEPTOR_DEFAULT_PORT}");
+    uri.parse::<SocketAddr>()
+        .expect("Failed to parse socket address")
+}
+
+async fn invocation_next_proxy(
+    Path(api_version): Path<String>,
+    State((_, aws_config, client, invocation_processor)): State<InterceptorState>,
+    request: Request,
+) -> Response {
+    debug!("PROXY | invocation_next_proxy | api_version: {api_version}");
+    let (parts, body_bytes) = match extract_request_body(request).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to extract request body: {e}"),
+            )
+                .into_response();
         }
-    }
+    };
 
-    pub async fn start(&self) -> Result<oneshot::Sender<()>, Box<dyn std::error::Error>> {
-        let socket =
-            Self::get_proxy_socket_address(&self.aws_config.aws_lwa_proxy_lambda_runtime_api);
-        let server = TcpListener::bind(&socket).await?;
-        let (shutdown_tx, _shutdown_rx) = oneshot::channel::<()>();
+    let (intercepted_parts, intercepted_bytes) =
+        match proxy_request(&client, &aws_config, parts, body_bytes).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("PROXY | passthrough_proxy | error proxying request: {e}");
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to proxy request: {e}"),
+                )
+                    .into_response();
+            }
+        };
 
-        let router = self.make_router();
-        debug!("PROXY | Starting API runtime proxy on {socket}");
-        axum::serve(server, router).await?;
-
-        Ok(shutdown_tx)
-    }
-
-    pub fn make_router(&self) -> Router {
-        let connector = HttpConnector::new();
-        // TODO(duncanista): find a good number of idle timeout and max idle per host.
-        let client = Client::builder(TokioExecutor::new()).build(connector);
-
-        let state: InterceptorState = (
-            self.config.clone(),
-            self.aws_config.clone(),
-            Arc::new(client),
-            self.invocation_processor.clone(),
+    if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
+        lwa::process_invocation_next(
+            &invocation_processor,
+            &intercepted_parts,
+            &intercepted_bytes,
         );
-
-        Router::new()
-            .route("/", get(Self::passthrough_proxy))
-            .route(
-                "/{api_version}/runtime/invocation/next",
-                get(Self::invocation_next_proxy),
-            )
-            .route(
-                "/{api_version}/runtime/invocation/{request_id}/response",
-                post(Self::invocation_response_proxy),
-            )
-            .route(
-                "/{api_version}/runtime/invocation/{request_id}/error",
-                post(Self::passthrough_proxy),
-            )
-            .fallback(Self::passthrough_proxy)
-            .with_state(state)
     }
 
-    async fn invocation_next_proxy(
-        Path(api_version): Path<String>,
-        State((_, aws_config, client, invocation_processor)): State<InterceptorState>,
-        request: Request,
-    ) -> Response {
-        debug!("PROXY | invocation_next_proxy | api_version: {api_version}");
-        let (parts, body_bytes) = match Self::extract_request_body(request).await {
+    match build_forward_response(intercepted_parts, intercepted_bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("PROXY | passthrough_proxy | error building forward response: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to build forward response: {e}"),
+            )
+                .into_response()
+        }
+    }
+}
+
+async fn invocation_response_proxy(
+    Path((api_version, request_id)): Path<(String, String)>,
+    State((_, aws_config, client, invocation_processor)): State<InterceptorState>,
+    request: Request,
+) -> Response {
+    debug!(
+        "PROXY | invocation_response_proxy | api_version: {api_version}, request_id: {request_id}"
+    );
+    let (parts, body_bytes) = match extract_request_body(request).await {
+        Ok(r) => r,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to extract request body: {e}"),
+            )
+                .into_response();
+        }
+    };
+
+    if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
+        lwa::process_invocation_response(&invocation_processor, &body_bytes);
+    }
+
+    let (intercepted_parts, intercepted_bytes) =
+        match proxy_request(&client, &aws_config, parts, body_bytes).await {
             Ok(r) => r,
             Err(e) => {
+                error!("PROXY | passthrough_proxy | error proxying request: {e}");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to extract request body: {e}"),
+                    format!("Failed to proxy request: {e}"),
                 )
                     .into_response();
             }
         };
 
-        let (intercepted_parts, intercepted_bytes) =
-            match Self::proxy_request(&client, &aws_config, parts, body_bytes).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("PROXY | passthrough_proxy | error proxying request: {e}");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to proxy request: {e}"),
-                    )
-                        .into_response();
-                }
-            };
-
-        if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
-            lwa::process_invocation_next(
-                &invocation_processor,
-                &intercepted_parts,
-                &intercepted_bytes,
-            );
-        }
-
-        match Self::build_forward_response(intercepted_parts, intercepted_bytes) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("PROXY | passthrough_proxy | error building forward response: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to build forward response: {e}"),
-                )
-                    .into_response()
-            }
+    match build_forward_response(intercepted_parts, intercepted_bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("PROXY | passthrough_proxy | error building forward response: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to build forward response: {e}"),
+            )
+                .into_response()
         }
     }
+}
 
-    async fn invocation_response_proxy(
-        Path((api_version, request_id)): Path<(String, String)>,
-        State((_, aws_config, client, invocation_processor)): State<InterceptorState>,
-        request: Request,
-    ) -> Response {
-        debug!(
-            "PROXY | invocation_response_proxy | api_version: {api_version}, request_id: {request_id}"
-        );
-        let (parts, body_bytes) = match Self::extract_request_body(request).await {
+async fn passthrough_proxy(
+    State((_, aws_config, client, _)): State<InterceptorState>,
+    request: Request,
+) -> Response {
+    let (parts, body_bytes) = match extract_request_body(request).await {
+        Ok(r) => r,
+        Err(e) => {
+            error!("PROXY | passthrough_proxy | error extracting request body: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to extract request body: {e}"),
+            )
+                .into_response();
+        }
+    };
+
+    let (intercepted_parts, intercepted_bytes) =
+        match proxy_request(&client, &aws_config, parts, body_bytes).await {
             Ok(r) => r,
             Err(e) => {
+                error!("PROXY | passthrough_proxy | error proxying request: {e}");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to extract request body: {e}"),
+                    format!("Failed to proxy request: {e}"),
                 )
                     .into_response();
             }
         };
 
-        if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
-            lwa::process_invocation_response(&invocation_processor, &body_bytes);
-        }
-
-        let (intercepted_parts, intercepted_bytes) =
-            match Self::proxy_request(&client, &aws_config, parts, body_bytes).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("PROXY | passthrough_proxy | error proxying request: {e}");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to proxy request: {e}"),
-                    )
-                        .into_response();
-                }
-            };
-
-        match Self::build_forward_response(intercepted_parts, intercepted_bytes) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("PROXY | passthrough_proxy | error building forward response: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to build forward response: {e}"),
-                )
-                    .into_response()
-            }
+    match build_forward_response(intercepted_parts, intercepted_bytes) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("PROXY | passthrough_proxy | error building forward response: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to build forward response: {e}"),
+            )
+                .into_response()
         }
     }
+}
 
-    async fn passthrough_proxy(
-        State((_, aws_config, client, _)): State<InterceptorState>,
-        request: Request,
-    ) -> Response {
-        let (parts, body_bytes) = match Self::extract_request_body(request).await {
-            Ok(r) => r,
-            Err(e) => {
-                error!("PROXY | passthrough_proxy | error extracting request body: {e}");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to extract request body: {e}"),
-                )
-                    .into_response();
-            }
-        };
+async fn proxy_request(
+    client: &Client<HttpConnector, Body>,
+    aws_config: &AwsConfig,
+    parts: http::request::Parts,
+    body_bytes: Bytes,
+) -> Result<(http::response::Parts, Bytes), Box<dyn std::error::Error>> {
+    let request = build_proxy_request(aws_config, parts, body_bytes)?;
+    debug!("PROXY | proxy_request | calling {}", request.uri());
+    let intercepted_response = client.request(request).await?;
+    let (parts, body) = intercepted_response.into_parts();
+    let bytes = body.collect().await?.to_bytes();
 
-        let (intercepted_parts, intercepted_bytes) =
-            match Self::proxy_request(&client, &aws_config, parts, body_bytes).await {
-                Ok(r) => r,
-                Err(e) => {
-                    error!("PROXY | passthrough_proxy | error proxying request: {e}");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to proxy request: {e}"),
-                    )
-                        .into_response();
-                }
-            };
+    Ok((parts, bytes))
+}
 
-        match Self::build_forward_response(intercepted_parts, intercepted_bytes) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("PROXY | passthrough_proxy | error building forward response: {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to build forward response: {e}"),
-                )
-                    .into_response()
-            }
-        }
+fn build_forward_response(
+    parts: http::response::Parts,
+    body_bytes: Bytes,
+) -> Result<Response<Body>, Box<dyn std::error::Error>> {
+    let mut forward_response = Response::builder()
+        .status(parts.status)
+        .version(parts.version);
+
+    if let Some(h) = forward_response.headers_mut() {
+        *h = parts.headers;
     }
 
-    async fn proxy_request(
-        client: &Client<HttpConnector, Body>,
-        aws_config: &AwsConfig,
-        parts: http::request::Parts,
-        body_bytes: Bytes,
-    ) -> Result<(http::response::Parts, Bytes), Box<dyn std::error::Error>> {
-        let request = Self::build_proxy_request(aws_config, parts, body_bytes)?;
-        debug!("PROXY | proxy_request | calling {}", request.uri());
-        let intercepted_response = client.request(request).await?;
-        let (parts, body) = intercepted_response.into_parts();
-        let bytes = body.collect().await?.to_bytes();
+    let forward_response = forward_response.body(Body::from(body_bytes))?;
 
-        Ok((parts, bytes))
+    Ok(forward_response)
+}
+
+async fn extract_request_body(
+    request: Request,
+) -> Result<(hyper::http::request::Parts, Bytes), Box<dyn std::error::Error>> {
+    let (parts, body) = request.into_parts();
+    let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
+
+    Ok((parts, bytes))
+}
+
+fn build_proxy_request(
+    aws_config: &AwsConfig,
+    parts: http::request::Parts,
+    body_bytes: Bytes,
+) -> Result<Request<Body>, Box<dyn std::error::Error>> {
+    let uri = parts.uri.clone();
+
+    let target_path = uri
+        .path_and_query()
+        .map(std::string::ToString::to_string)
+        .unwrap_or(uri.path().to_string());
+
+    let target_uri = format!("http://{}{}", aws_config.runtime_api, target_path);
+    let uri = target_uri.parse::<Uri>()?;
+
+    let mut request = HttpRequest::builder()
+        .method(&parts.method)
+        .uri(uri)
+        .version(parts.version);
+
+    if let Some(h) = request.headers_mut() {
+        *h = parts.headers.clone();
     }
 
-    fn build_proxy_request(
-        aws_config: &AwsConfig,
-        parts: http::request::Parts,
-        body_bytes: Bytes,
-    ) -> Result<Request<Body>, Box<dyn std::error::Error>> {
-        let uri = parts.uri.clone();
+    let request = request.body(Body::from(body_bytes))?;
 
-        let target_path = uri
-            .path_and_query()
-            .map(std::string::ToString::to_string)
-            .unwrap_or(uri.path().to_string());
-
-        let target_uri = format!("http://{}{}", aws_config.runtime_api, target_path);
-        let uri = target_uri.parse::<Uri>()?;
-
-        let mut request = HttpRequest::builder()
-            .method(&parts.method)
-            .uri(uri)
-            .version(parts.version);
-
-        if let Some(h) = request.headers_mut() {
-            *h = parts.headers.clone();
-        }
-
-        let request = request.body(Body::from(body_bytes))?;
-
-        Ok(request)
-    }
-
-    fn build_forward_response(
-        parts: http::response::Parts,
-        body_bytes: Bytes,
-    ) -> Result<Response<Body>, Box<dyn std::error::Error>> {
-        let mut forward_response = Response::builder()
-            .status(parts.status)
-            .version(parts.version);
-
-        if let Some(h) = forward_response.headers_mut() {
-            *h = parts.headers;
-        }
-
-        let forward_response = forward_response.body(Body::from(body_bytes))?;
-
-        Ok(forward_response)
-    }
-
-    async fn extract_request_body(
-        request: Request,
-    ) -> Result<(hyper::http::request::Parts, Bytes), Box<dyn std::error::Error>> {
-        let (parts, body) = request.into_parts();
-        let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
-
-        Ok((parts, bytes))
-    }
-
-    fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -> SocketAddr {
-        if let Some(socket_addr) = aws_lwa_proxy_lambda_runtime_api
-            .as_ref()
-            .and_then(|uri_str| lwa::get_lwa_proxy_socket_address(uri_str).ok())
-        {
-            debug!("PROXY | get_proxy_socket_address | LWA proxy detected");
-            return socket_addr;
-        }
-
-        let uri = format!("{EXTENSION_HOST}:{INTERCEPTOR_DEFAULT_PORT}");
-        uri.parse::<SocketAddr>()
-            .expect("Failed to parse socket address")
-    }
+    Ok(request)
 }
