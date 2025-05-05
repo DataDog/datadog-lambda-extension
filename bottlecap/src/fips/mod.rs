@@ -2,6 +2,7 @@
 // mode. This is used in conjunction with the datadog-fips crate to ensure that when we
 // compile the extension in FIPS mode, everything is built and configured correctly.
 
+use std::env;
 #[cfg(feature = "fips")]
 use std::io::Error;
 use std::io::Result;
@@ -10,14 +11,41 @@ use tracing::debug;
 #[cfg(all(feature = "default", feature = "fips"))]
 compile_error!("When building in fips mode, the default feature must be disabled");
 
+#[must_use]
+pub fn runtime_layer_would_enable_fips_mode(region: &str) -> bool {
+    let is_gov_region = region.starts_with("us-gov-");
+
+    env::var("DD_LAMBDA_FIPS_MODE")
+        .map(|val| val.to_lowercase() == "true")
+        .unwrap_or(is_gov_region)
+}
+
 #[cfg(feature = "fips")]
-pub fn log_fips_status() {
-    debug!("FIPS mode is enabled");
+pub fn check_fips_mode_mismatch(region: &str) {
+    let runtime_would_enable = runtime_layer_would_enable_fips_mode(region);
+    if !runtime_would_enable {
+        debug!("FIPS mode is enabled in this Extension layer but would be disabled in the runtime layer based on region and environment settings. Set DD_LAMBDA_FIPS_MODE=true or deploy the standard (non-FIPS) version of the Extension layer to ensure consistent FIPS behavior.");
+    }
 }
 
 #[cfg(not(feature = "fips"))]
-pub fn log_fips_status() {
+pub fn check_fips_mode_mismatch(region: &str) {
+    let runtime_would_enable = runtime_layer_would_enable_fips_mode(region);
+    if runtime_would_enable {
+        debug!("FIPS mode is disabled in this Extension layer but would be enabled in the runtime layer based on region and environment settings. Deploy the FIPS version of the Extension layer or set DD_LAMBDA_FIPS_MODE=false to ensure consistent FIPS behavior.");
+    }
+}
+
+#[cfg(feature = "fips")]
+pub fn log_fips_status(region: &str) {
+    debug!("FIPS mode is enabled");
+    check_fips_mode_mismatch(region);
+}
+
+#[cfg(not(feature = "fips"))]
+pub fn log_fips_status(region: &str) {
     debug!("FIPS mode is disabled");
+    check_fips_mode_mismatch(region);
 }
 
 /// Sets up the client provider for TLS operations.

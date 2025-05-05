@@ -191,7 +191,7 @@ async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
-    log_fips_status();
+    log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
     prepare_client_provider()?;
