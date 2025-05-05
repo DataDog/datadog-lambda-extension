@@ -1,3 +1,23 @@
+/// LWA (Lambda Web Adapter)
+///
+/// Example of flow
+//   Starting up proxy
+//     LWA: proxy enabled with proxy URI: 127.0.0.1:9002 and AWS runtime: http://127.0.0.1:9001/
+//   Extension is ready, blocking on GET /invocation/next. Intercepting it in theis LWA proxy
+//     LWA: Intercepted request: Parts { method: GET, uri: /2018-06-01/runtime/invocation/next, version: HTTP/1.1, headers: {"user-agent": "aws-lambda-rust/aws-lambda-adapter/0.9.0", "host": "127.0.0.1:9002"} }
+//     LWA: Intercepted request body: b""
+//  AWS lambda service returns from GET /invocation/next with the incoming invocation. LWA wraps it into the body. LWA proxy intercepts it
+//     LWA: Intercepted resp: Parts { status: 200, version: HTTP/1.1, headers: {"content-type": "application/json", "lambda-runtime-aws-request-id": "8442603f-da10-42d2-bf58-c33a31978aad", "lambda-runtime-deadline-ms": "1741965555094", "lambda-runtime-invoked-function-arn": "arn:aws:lambda:us-east-1:425362996713:function:ag-lwa-stack-lambda", "lambda-runtime-trace-id": "Root=1-67d448e8-3ae320be0e2cdf2f53ccdaba;Lineage=1:73f724a8:0", "date": "Fri, 14 Mar 2025 15:19:06 GMT", "content-length": "927"} }
+//     LWA: Intercepted resp body: b"{\"version\":\"2.0\",\"routeKey\":\"$default\",\"rawPath\":\"/\",\"rawQueryString\":\"\",\"headers\":{\"x-amzn-tls-cipher-suite\":\"TLS_AES_128_GCM_SHA256\",\"x-amzn-tls-version\":\"TLSv1.3\",\"x-amzn-trace-id\":\"Root=1-67d448e8-3ae320be0e2cdf2f53ccdaba\",\"x-forwarded-proto\":\"https\",\"host\":\"e366vgzulqwityxor4e6nfkdam0axzew.lambda-url.us-east-1.on.aws\",\"x-forwarded-port\":\"443\",\"x-forwarded-for\":\"70.107.97.101\",\"accept\":\"*/*\",\"user-agent\":\"curl/7.81.0\"},\"requestContext\":{\"accountId\":\"anonymous\",\"apiId\":\"e366vgzulqwityxor4e6nfkdam0axzew\",\"domainName\":\"e366vgzulqwityxor4e6nfkdam0axzew.lambda-url.us-east-1.on.aws\",\"domainPrefix\":\"e366vgzulqwityxor4e6nfkdam0axzew\",\"http\":{\"method\":\"GET\",\"path\":\"/\",\"protocol\":\"HTTP/1.1\",\"sourceIp\":\"70.107.97.101\",\"userAgent\":\"curl/7.81.0\"},\"requestId\":\"8442603f-da10-42d2-bf58-c33a31978aad\",\"routeKey\":\"$default\",\"stage\":\"$default\",\"time\":\"14/Mar/2025:15:19:04 +0000\",\"timeEpoch\":1741965544908},\"isBase64Encoded\":false}"
+//  Lambda Runtime processes the request and when it's done, LWA invokes POST to runtime/invocation/REQ_ID/response. The body has the response. LWA proxy intercepts it
+//     LWA: Intercepted request: Parts { method: POST, uri: /2018-06-01/runtime/invocation/8442603f-da10-42d2-bf58-c33a31978aad/response, version: HTTP/1.1, headers: {"user-agent": "aws-lambda-rust/aws-lambda-adapter/0.9.0", "host": "127.0.0.1:9002", "content-length": "238"} }
+//     LWA: Intercepted request body: b"{\"statusCode\":200,\"headers\":{\"date\":\"Fri, 14 Mar 2025 15:19:06 GMT\",\"content-length\":\"34\",\"content-type\":\"text/html; charset=utf-8\"},\"multiValueHeaders\":{},\"body\":\"<h1>Hello, Website with span!<h1>\\n\",\"isBase64Encoded\":false,\"cookies\":[]}
+//  AWS Lambda service responds to the POST with a 202. LWA proxy intercepts it
+//     LWA: Intercepted resp: Parts { status: 202, version: HTTP/1.1, headers: {"content-type": "application/json", "date": "Fri, 14 Mar 2025 15:19:06 GMT", "content-length": "16"} }
+//     LWA: Intercepted resp body: b"{\"status\":\"OK\"}\n"
+//  Extension is again ready, blocking on GET /invocation/next
+//     LWA: Intercepted request: Parts { method: GET, uri: /2018-06-01/runtime/invocation/next, version: HTTP/1.1, headers: {"user-agent": "aws-lambda-rust/aws-lambda-adapter/0.9.0", "host": "127.0.0.1:9002"} }
+//     LWA: Intercepted request body: b""
 use axum::http::{self, HeaderName, HeaderValue};
 use bytes::Bytes;
 use hyper::{HeaderMap, Uri};

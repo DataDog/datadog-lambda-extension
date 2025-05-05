@@ -844,8 +844,7 @@ fn start_api_runtime_proxy(
         return None;
     }
 
-    let config = config.clone();
     let aws_config = aws_config.clone();
     let invocation_processor = invocation_processor.clone();
-    interceptor::start(config, aws_config, invocation_processor).ok()
+    interceptor::start(aws_config, invocation_processor).ok()
 }
