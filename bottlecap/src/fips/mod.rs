@@ -15,24 +15,21 @@ compile_error!("When building in fips mode, the default feature must be disabled
 pub fn runtime_layer_would_enable_fips_mode(region: &str) -> bool {
     let is_gov_region = region.starts_with("us-gov-");
 
+    // Note that we are defaulting to `is_gov_region` for this rather than a specific default
+    // value. So if the `DD_LAMBDA_FIPS_MODE` environment is not set, we expect lambdas in govcloud
+    // to be running the runtime layers in FIPS mode.
     env::var("DD_LAMBDA_FIPS_MODE")
         .map(|val| val.to_lowercase() == "true")
         .unwrap_or(is_gov_region)
 }
 
-#[cfg(feature = "fips")]
 pub fn check_fips_mode_mismatch(region: &str) {
-    let runtime_would_enable = runtime_layer_would_enable_fips_mode(region);
-    if !runtime_would_enable {
-        debug!("FIPS mode is enabled in this Extension layer but would be disabled in the runtime layer based on region and environment settings. Set DD_LAMBDA_FIPS_MODE=true or deploy the standard (non-FIPS) version of the Extension layer to ensure consistent FIPS behavior.");
-    }
-}
-
-#[cfg(not(feature = "fips"))]
-pub fn check_fips_mode_mismatch(region: &str) {
-    let runtime_would_enable = runtime_layer_would_enable_fips_mode(region);
-    if runtime_would_enable {
+    if runtime_layer_would_enable_fips_mode(region) {
+        #[cfg(not(feature = "fips"))]
         debug!("FIPS mode is disabled in this Extension layer but would be enabled in the runtime layer based on region and environment settings. Deploy the FIPS version of the Extension layer or set DD_LAMBDA_FIPS_MODE=false to ensure consistent FIPS behavior.");
+    } else {
+        #[cfg(feature = "fips")]
+        debug!("FIPS mode is enabled in this Extension layer but would be disabled in the runtime layer based on region and environment settings. Set DD_LAMBDA_FIPS_MODE=true or deploy the standard (non-FIPS) version of the Extension layer to ensure consistent FIPS behavior.");
     }
 }
 
