@@ -61,6 +61,7 @@ use dogstatsd::{
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
 };
+use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
@@ -316,8 +317,11 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let mut metrics_flusher =
-        start_metrics_flusher(resolved_api_key.clone(), &metrics_aggr, config);
+    let metrics_flusher = Arc::new(TokioMutex::new(start_metrics_flusher(
+        resolved_api_key.clone(),
+        &metrics_aggr,
+        config,
+    )));
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -371,6 +375,7 @@ async fn extension_loop_active(
     );
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
+    let mut shutdown_flush_handles = FuturesOrdered::<tokio::task::JoinHandle<_>>::new();
 
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
@@ -392,25 +397,27 @@ async fn extension_loop_active(
                         }
                     }
                     _ = race_flush_interval.tick() => {
-                        flush_all(
-                            //&logs_flusher,
-                            &mut metrics_flusher,
-                            //&*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                        ).await;
+                        metrics_flusher.lock().await.flush().await;
+                        // flush_all(
+                        //     //&logs_flusher,
+                        //     &mut metrics_flusher,
+                        //     //&*trace_flusher,
+                        //     &*stats_flusher,
+                        //     &mut race_flush_interval,
+                        // ).await;
                     }
                 }
             }
             // flush
-            flush_all(
-                //&logs_flusher,
-                &mut metrics_flusher,
-                //&*trace_flusher,
-                &*stats_flusher,
-                &mut race_flush_interval,
-            )
-            .await;
+            metrics_flusher.lock().await.flush().await;
+            // flush_all(
+            //     //&logs_flusher,
+            //     &mut metrics_flusher,
+            //     //&*trace_flusher,
+            //     &*stats_flusher,
+            //     &mut race_flush_interval,
+            // )
+            // .await;
             let next_response = next_event(client, &r.extension_id).await;
             shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
@@ -418,23 +425,23 @@ async fn extension_loop_active(
             if flush_control.should_periodic_flush() {
                 // Should flush at the top of the invocation, which is now
                 let val = logs_flusher.clone();
-                tokio::spawn(async move {
+                shutdown_flush_handles.push_back(tokio::spawn(async move {
                     val.flush().await;
-                });
+                }));
                 let traces_val = trace_flusher.clone();
-                tokio::spawn(async move {
+                shutdown_flush_handles.push_back(tokio::spawn(async move {
                     traces_val.flush().await;
-                });
-                let duration = Instant::now();
-                flush_all(
-                    //&logs_flusher,
-                    &mut metrics_flusher,
-                    //&*trace_flusher,
-                    &*stats_flusher,
-                    &mut race_flush_interval,
-                )
-                .await;
-                println!("ASTUYVE flush duration: {:?}", duration.elapsed());
+                }));
+                let cloned_metrics_flusher = metrics_flusher.clone();
+                tokio::spawn(async move { cloned_metrics_flusher.lock().await.flush().await });
+                // flush_all(
+                //     //&logs_flusher,
+                //     &mut metrics_flusher,
+                //     //&*trace_flusher,
+                //     &*stats_flusher,
+                //     &mut race_flush_interval,
+                // )
+                // .await;
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
@@ -463,13 +470,14 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        flush_all(
-                            //&logs_flusher,
-                            &mut metrics_flusher,
-                            //&*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                        ).await;
+                        metrics_flusher.lock().await.flush().await;
+                        // flush_all(
+                        //     //&logs_flusher,
+                        //     &mut metrics_flusher,
+                        //     //&*trace_flusher,
+                        //     &*stats_flusher,
+                        //     &mut race_flush_interval,
+                        // ).await;
                     }
                 }
             }
@@ -496,14 +504,26 @@ async fn extension_loop_active(
             }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            flush_all(
-                //&logs_flusher,
-                &mut metrics_flusher,
-                //&*trace_flusher,
-                &*stats_flusher,
-                &mut race_flush_interval,
-            )
-            .await;
+            while let Some(res) = shutdown_flush_handles.next().await {
+                debug!("Flushing in-progress tasks at shutdown: {:?}", res);
+            }
+            // gotta lock here
+            let mut locked_metrics = metrics_flusher.lock().await;
+            tokio::join!(
+                locked_metrics.flush(),
+                logs_flusher.flush(),
+                trace_flusher.flush(),
+                stats_flusher.flush()
+            );
+            race_flush_interval.reset();
+            // flush_all(
+            //     //&logs_flusher,
+            //     &mut metrics_flusher,
+            //     //&*trace_flusher,
+            //     &*stats_flusher,
+            //     &mut race_flush_interval,
+            // )
+            // .await;
             return Ok(());
         }
     }
