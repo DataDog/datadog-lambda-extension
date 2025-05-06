@@ -1,6 +1,8 @@
 use crate::config::{aws::AwsConfig, Config};
+use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
+use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use hmac::{Hmac, Mac};
 use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
@@ -17,7 +19,15 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
 
-            let client = match Client::builder().use_rustls_tls().build() {
+            let builder = match create_reqwest_client_builder() {
+                Ok(builder) => builder,
+                Err(err) => {
+                    error!("Error creating reqwest client builder: {}", err);
+                    return None;
+                }
+            };
+
+            let client = match builder.build() {
                 Ok(client) => client,
                 Err(err) => {
                     error!("Error creating reqwest client: {}", err);
@@ -231,7 +241,7 @@ fn build_get_secret_signed_headers(
         "amazonaws.com"
     };
 
-    let host = format!("{}.{}.{}", header_values.service, region, domain);
+    let host = compute_aws_api_host(&header_values.service, &region, domain);
 
     let canonical_uri = "/";
     let canonical_querystring = "";

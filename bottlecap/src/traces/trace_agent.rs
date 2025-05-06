@@ -24,7 +24,7 @@ use crate::tags::provider;
 use crate::traces::{
     stats_aggregator, stats_processor, trace_aggregator, trace_processor, INVOCATION_SPAN_RESOURCE,
 };
-use datadog_trace_mini_agent::http_utils::{
+use datadog_trace_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
 use datadog_trace_protobuf::pb;

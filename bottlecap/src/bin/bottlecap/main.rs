@@ -18,6 +18,7 @@ use bottlecap::{
     },
     event_bus::bus::EventBus,
     events::Event,
+    fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
         flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
@@ -47,6 +48,7 @@ use bottlecap::{
     EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
+use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
@@ -189,14 +191,25 @@ async fn main() -> Result<()> {
     let (mut aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
+    log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
-    let client = Client::builder().no_proxy().build().map_err(|e| {
-        Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("Failed to create client: {e:?}"),
-        )
-    })?;
+    prepare_client_provider()?;
+    let client = create_reqwest_client_builder()
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to create client builder: {e:?}"),
+            )
+        })?
+        .no_proxy()
+        .build()
+        .map_err(|e| {
+            Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to create client: {e:?}"),
+            )
+        })?;
 
     let r = register(&client)
         .await
@@ -235,7 +248,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     let aws_config = AwsConfig::from_env(start_time);
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory), &aws_config.region) {
+    let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
             let err = Command::new("/opt/datadog-agent-go").exec();
