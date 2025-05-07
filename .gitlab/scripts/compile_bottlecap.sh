@@ -62,6 +62,7 @@ docker_build() {
     fi
 
     docker buildx build --platform linux/${arch} \
+        --progress plain \
         -t datadog/compile-bottlecap \
         -f ./images/${file} \
         --build-arg PLATFORM=$PLATFORM \

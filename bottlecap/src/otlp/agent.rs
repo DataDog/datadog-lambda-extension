@@ -1,4 +1,4 @@
-use datadog_trace_mini_agent::http_utils::{
+use datadog_trace_agent::http_utils::{
     log_and_create_http_response, log_and_create_traces_success_http_response,
 };
 use datadog_trace_utils::send_data::SendData;
@@ -124,7 +124,7 @@ impl Agent {
             let service = service.clone();
             joinset.spawn(async move {
                 if let Err(e) = server.serve_connection(conn, service).await {
-                    error!("OTLP Receiver connection error: {e}");
+                    debug!("OTLP Receiver connection error: {e}");
                 }
             });
         }

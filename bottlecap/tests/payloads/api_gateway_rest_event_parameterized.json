@@ -1,6 +1,6 @@
 {
   "resource": "/user/{id}",
-  "path": "/user/42",
+  "path": "/user/42/id/50",
   "httpMethod": "GET",
   "headers": {
     "Accept": "*/*",
@@ -82,7 +82,7 @@
     "httpMethod": "GET",
     "extendedRequestId": "Ur19IHYDmjQEU5A=",
     "requestTime": "15/Mar/2024:19:10:24 +0000",
-    "path": "/dev/user/42",
+    "path": "/dev/user/42/id/50",
     "accountId": "425362996713",
     "protocol": "HTTP/1.1",
     "stage": "dev",

@@ -1,7 +1,10 @@
 use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{
+        lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    },
 };
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
@@ -69,7 +72,7 @@ impl Trigger for APIGatewayRestEvent {
         let resource = format!(
             "{http_method} {path}",
             http_method = self.request_context.method,
-            path = self.request_context.resource_path
+            path = parameterize_api_resource(self.request_context.path.clone())
         );
         let http_url = format!(
             "https://{domain_name}{path}",
@@ -83,7 +86,7 @@ impl Trigger for APIGatewayRestEvent {
 
         span.name = "aws.apigateway".to_string();
         span.service = service_name;
-        span.resource.clone_from(&resource);
+        span.resource = resource;
         span.r#type = "http".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
@@ -194,6 +197,40 @@ mod tests {
     use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
 
     #[test]
+    fn test_parameterize_resource() {
+        // Test case with numeric IDs
+        assert_eq!(
+            parameterize_api_resource("/users/12345/friends/67890".to_string()),
+            "/users/{user_id}/friends/{friend_id}"
+        );
+
+        assert_eq!(
+            parameterize_api_resource("/dev/proxy_route/users/12345/friends/67890".to_string()),
+            "/dev/proxy_route/users/{user_id}/friends/{friend_id}"
+        );
+
+        // Test case with already parameterized path
+        assert_eq!(
+            parameterize_api_resource("/users/{user_id}/profile".to_string()),
+            "/users/{user_id}/profile"
+        );
+
+        // Test case with mixed segments
+        assert_eq!(
+            parameterize_api_resource("/api/v1/users/12345/settings".to_string()),
+            "/api/v1/users/{user_id}/settings"
+        );
+
+        // Test case with UUIDs
+        assert_eq!(
+            parameterize_api_resource(
+                "/orders/123e4567-e89b-12d3-a456-426614174000/items".to_string()
+            ),
+            "/orders/{order_id}/items"
+        );
+    }
+
+    #[test]
     fn test_new() {
         let json = read_json_file("api_gateway_rest_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
@@ -253,7 +290,7 @@ mod tests {
         event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
-        assert_eq!(span.resource, "GET /path");
+        assert_eq!(span.resource, "GET /my/path");
         assert_eq!(span.r#type, "http");
 
         assert_eq!(
@@ -315,13 +352,14 @@ mod tests {
             span.service,
             "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com"
         );
-        assert_eq!(span.resource, "GET /user/{id}");
+        assert_eq!(span.resource, "GET /dev/user/{user_id}/id/{id}");
         assert_eq!(span.r#type, "http");
         let expected = HashMap::from([
-            ("endpoint".to_string(), "/dev/user/42".to_string()),
+            ("endpoint".to_string(), "/dev/user/42/id/50".to_string()),
             (
                 "http.url".to_string(),
-                "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42".to_string(),
+                "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42/id/50"
+                    .to_string(),
             ),
             ("http.method".to_string(), "GET".to_string()),
             ("http.protocol".to_string(), "HTTP/1.1".to_string()),
@@ -350,12 +388,12 @@ mod tests {
             HashMap::from([
                 (
                     "http.url".to_string(),
-                    "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42"
+                    "https://mcwkra0ya4.execute-api.sa-east-1.amazonaws.com/dev/user/42/id/50"
                         .to_string(),
                 ),
                 (
                     "http.url_details.path".to_string(),
-                    "/dev/user/42".to_string(),
+                    "/dev/user/42/id/50".to_string(),
                 ),
                 ("http.method".to_string(), "GET".to_string()),
                 ("http.route".to_string(), "/user/{id}".to_string()),

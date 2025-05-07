@@ -1,5 +1,7 @@
 use crate::config;
 use core::time::Duration;
+use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use std::error::Error;
 use std::sync::Arc;
 use tracing::error;
 
@@ -15,8 +17,8 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
     })
 }
 
-fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest::Error> {
-    let client = reqwest::Client::builder()
+fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn Error>> {
+    let client = create_reqwest_client_builder()?
         .timeout(Duration::from_secs(config.flush_timeout))
         // Temporarily not force http2
         // Enable HTTP/2 for better multiplexing
@@ -35,8 +37,8 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, reqwest:
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
     if let Some(https_uri) = &config.https_proxy {
         let proxy = reqwest::Proxy::https(https_uri.clone())?;
-        client.proxy(proxy).build()
+        Ok(client.proxy(proxy).build()?)
     } else {
-        client.build()
+        Ok(client.build()?)
     }
 }

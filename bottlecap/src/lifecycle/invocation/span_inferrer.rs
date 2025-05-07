@@ -4,6 +4,7 @@ use datadog_trace_protobuf::pb::Span;
 use serde_json::Value;
 use tracing::debug;
 
+use crate::lifecycle::invocation::triggers::alb_event::ALBEvent;
 use crate::traces::span_pointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
 use crate::{
@@ -18,6 +19,7 @@ use crate::{
             event_bridge_event::EventBridgeEvent,
             kinesis_event::KinesisRecord,
             lambda_function_url_event::LambdaFunctionUrlEvent,
+            msk_event::MSKEvent,
             s3_event::S3Record,
             sns_event::{SnsEntity, SnsRecord},
             sqs_event::{extract_trace_context_from_aws_trace_header, SqsRecord},
@@ -81,6 +83,7 @@ impl SpanInferrer {
         };
 
         let mut is_step_function = false;
+        let mut is_alb_event = false;
 
         if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
@@ -100,8 +103,19 @@ impl SpanInferrer {
 
                 trigger = Some(Box::new(t));
             }
+        } else if ALBEvent::is_match(payload_value) {
+            if let Some(t) = ALBEvent::new(payload_value.clone()) {
+                trigger = Some(Box::new(t));
+                is_alb_event = true;
+            }
         } else if LambdaFunctionUrlEvent::is_match(payload_value) {
             if let Some(t) = LambdaFunctionUrlEvent::new(payload_value.clone()) {
+                t.enrich_span(&mut inferred_span, &self.service_mapping);
+
+                trigger = Some(Box::new(t));
+            }
+        } else if MSKEvent::is_match(payload_value) {
+            if let Some(t) = MSKEvent::new(payload_value.clone()) {
                 t.enrich_span(&mut inferred_span, &self.service_mapping);
 
                 trigger = Some(Box::new(t));
@@ -229,8 +243,8 @@ impl SpanInferrer {
             self.carrier = Some(t.get_carrier());
             self.is_async_span = t.is_async();
 
-            // For Step Functions, there is no inferred span
-            if is_step_function && self.generated_span_context.is_some() {
+            // For Step Functions & ALB, there is no inferred span
+            if is_alb_event || (is_step_function && self.generated_span_context.is_some()) {
                 self.inferred_span = None;
             } else {
                 self.inferred_span = Some(inferred_span);

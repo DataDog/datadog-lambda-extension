@@ -17,9 +17,7 @@ use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
 use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
-use datadog_trace_utils::tracer_payload::{
-    TraceChunkProcessor, TraceCollection::V07, TracerPayloadCollection,
-};
+use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -139,16 +137,15 @@ impl TraceProcessor for ServerlessTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData {
-        let mut payload = trace_utils::collect_trace_chunks(
-            V07(traces),
+        let mut payload = trace_utils::collect_pb_trace_chunks(
+            traces,
             &header_tags,
             &mut ChunkProcessor {
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
             },
-            true,
-            false,
+            true, // send agentless since we are the agent
         )
         .unwrap_or_else(|e| {
             error!("Error processing traces: {:?}", e);
