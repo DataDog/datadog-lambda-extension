@@ -424,6 +424,14 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if flush_control.should_periodic_flush() {
+                // FuturesOrdered concurrently awaits all flush handles
+                // We expec them to be mostly done in previous iterations, this is just cleanup
+                while let Some(_res) = shutdown_flush_handles.next().await {
+                    // Await the previous flush handles.
+                    // Unless there is a major issue, this should be 3 reqeusts and
+                    // take 40 microseconds
+                }
+
                 // Should flush at the top of the invocation, which is now
                 let val = logs_flusher.clone();
                 shutdown_flush_handles.push_back(tokio::spawn(async move {
@@ -493,6 +501,7 @@ async fn extension_loop_active(
                     }
                 }
             }
+            println!("ASTUYVE: shutdown in progres");
             if let Some(lwa_proxy_task) = lwa_proxy_stopper {
                 // use with graceful shutdown after rebase with hyper 1
                 if let Err(exit_err) = lwa_proxy_task.send(()).await {
@@ -505,6 +514,7 @@ async fn extension_loop_active(
                 println!("AJ: running shutdown result: {:?}", res);
                 debug!("Flushing in-progress tasks at shutdown: {:?}", res);
             }
+            let shutdown_flush = Instant::now();
             // gotta lock here
             let mut locked_metrics = metrics_flusher.lock().await;
             blocking_flush_all(
@@ -515,6 +525,10 @@ async fn extension_loop_active(
                 &mut race_flush_interval,
             )
             .await;
+            println!(
+                "ASTUYVE: blocking flush time was {:?}",
+                shutdown_flush.elapsed()
+            );
             return Ok(());
         }
     }
