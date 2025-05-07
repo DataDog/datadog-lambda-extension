@@ -94,34 +94,53 @@ impl Flusher {
     }
 
     async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
-        let time = Instant::now();
-        let resp = req.send().await;
-        let elapsed = time.elapsed();
+        let mut attempts = 0;
+        loop {
+            let time = Instant::now();
+            attempts += 1;
+            let cloned_req = match req.try_clone() {
+                Some(r) => r,
+                None => {
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "can't clone",
+                    )));
+                }
+            };
+            let resp = cloned_req.send().await;
+            let elapsed = time.elapsed();
 
-        match resp {
-            Ok(resp) => {
-                let status = resp.status();
-                _ = resp.text().await;
-                if status != 202 {
-                    debug!(
+            match resp {
+                Ok(resp) => {
+                    let status = resp.status();
+                    _ = resp.text().await;
+                    if status != 202 {
+                        println!(
+                            "AJ: failed to send logs after {}ms: {}",
+                            elapsed.as_millis(),
+                            status
+                        );
+                        debug!(
+                            "Failed to send logs to datadog after {}ms: {}",
+                            elapsed.as_millis(),
+                            status
+                        );
+                    } else {
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    error!(
                         "Failed to send logs to datadog after {}ms: {}",
                         elapsed.as_millis(),
-                        status
+                        e
                     );
+                    if attempts > 3 {
+                        return Err(Box::new(e));
+                    }
                 }
             }
-            Err(e) => {
-                error!(
-                    "Failed to send logs to datadog after {}ms: {}",
-                    elapsed.as_millis(),
-                    e
-                );
-
-                return Err(Box::new(e));
-            }
         }
-
-        Ok(())
     }
 
     fn compress(&self, data: Vec<u8>) -> Vec<u8> {
