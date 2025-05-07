@@ -124,7 +124,7 @@ impl Agent {
             let service = service.clone();
             joinset.spawn(async move {
                 if let Err(e) = server.serve_connection(conn, service).await {
-                    error!("OTLP Receiver connection error: {e}");
+                    debug!("OTLP Receiver connection error: {e}");
                 }
             });
         }
