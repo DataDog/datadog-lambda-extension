@@ -202,7 +202,7 @@ impl TraceAgent {
             let service = service.clone();
             joinset.spawn(async move {
                 if let Err(e) = server.serve_connection(conn, service).await {
-                    error!("Connection error: {e}");
+                    debug!("Trace agent connection error: {e}");
                 }
             });
         }
