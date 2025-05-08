@@ -153,9 +153,6 @@ sign layer ({{ $flavor.name }}):
     {{ end }}
   script:
     - .gitlab/scripts/sign_layers.sh prod
-{{ end }} # end needs_layer_publish
-
-{{ if $flavor.needs_layer_publish }}
 
 {{ range $environment_name, $environment := (ds "environments").environments }}
 
