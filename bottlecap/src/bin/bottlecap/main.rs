@@ -456,7 +456,7 @@ async fn extension_loop_active(
                 }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
                 shutdown_flush_handles.push_back(tokio::spawn(async move {
-                    cloned_metrics_flusher.lock().await.flush().await
+                    cloned_metrics_flusher.lock().await.flush().await;
                 }));
                 race_flush_interval.reset();
             }

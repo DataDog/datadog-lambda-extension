@@ -565,7 +565,7 @@ impl Processor {
             .expect("unable to poll clock, unrecoverable")
             .as_secs();
         self.enhanced_metrics
-            .set_shutdown_metric(i64::try_from(now).ok().expect("can't convert now to i64"));
+            .set_shutdown_metric(i64::try_from(now).expect("can't convert now to i64"));
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented
