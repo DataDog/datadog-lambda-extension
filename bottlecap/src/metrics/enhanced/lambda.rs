@@ -166,6 +166,27 @@ impl Lambda {
         }
     }
 
+    pub fn set_shutdown_metric(&self, timestamp: i64) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        let metric = metric::Metric::new(
+            "aws.lambda.enhanced.shutdowns".into(),
+            MetricValue::distribution(1.into()),
+            // Datadog expects this value as milliseconds, not seconds
+            self.get_dynamic_value_tags(),
+            Some(timestamp),
+        );
+        if let Err(e) = self
+            .aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(metric)
+        {
+            error!("failed to insert post runtime duration metric: {}", e);
+        }
+    }
+
     pub fn set_post_runtime_duration_metric(&self, duration_ms: f64, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;

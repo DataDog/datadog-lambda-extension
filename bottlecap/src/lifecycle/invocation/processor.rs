@@ -559,6 +559,14 @@ impl Processor {
         }
     }
 
+    pub fn on_shutdown_event(&mut self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs();
+        self.enhanced_metrics.set_shutdown_metric(now as i64);
+    }
+
     /// If this method is called, it means that we are operating in a Universally Instrumented
     /// runtime. Therefore, we need to set the `tracer_detected` flag to `true`.
     ///

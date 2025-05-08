@@ -505,7 +505,7 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
                                 // Wait for the report event before shutting down
                                 break 'shutdown;
@@ -514,7 +514,6 @@ async fn extension_loop_active(
                     }
                 }
             }
-            println!("ASTUYVE: shutdown in progres");
             if let Some(lwa_proxy_task) = lwa_proxy_stopper {
                 // use with graceful shutdown after rebase with hyper 1
                 if let Err(exit_err) = lwa_proxy_task.send(()).await {
@@ -524,10 +523,8 @@ async fn extension_loop_active(
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
             while let Some(res) = shutdown_flush_handles.next().await {
-                println!("AJ: running shutdown result: {:?}", res);
                 debug!("Flushing in-progress tasks at shutdown: {:?}", res);
             }
-            let shutdown_flush = Instant::now();
             // gotta lock here
             let mut locked_metrics = metrics_flusher.lock().await;
             blocking_flush_all(
@@ -538,10 +535,6 @@ async fn extension_loop_active(
                 &mut race_flush_interval,
             )
             .await;
-            println!(
-                "ASTUYVE: blocking flush time was {:?}",
-                shutdown_flush.elapsed()
-            );
             return Ok(());
         }
     }
@@ -659,6 +652,8 @@ async fn handle_next_invocation(
             shutdown_reason,
             deadline_ms,
         }) => {
+            let mut p = invocation_processor.lock().await;
+            p.on_shutdown_event();
             println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
             true
         }
