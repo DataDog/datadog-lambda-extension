@@ -98,14 +98,11 @@ impl Flusher {
         loop {
             let time = Instant::now();
             attempts += 1;
-            let cloned_req = match req.try_clone() {
-                Some(r) => r,
-                None => {
-                    return Err(Box::new(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "can't clone",
-                    )));
-                }
+            let Some(cloned_req) = req.try_clone() else {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "can't clone",
+                )));
             };
             let resp = cloned_req.send().await;
             let elapsed = time.elapsed();
@@ -114,7 +111,9 @@ impl Flusher {
                 Ok(resp) => {
                     let status = resp.status();
                     _ = resp.text().await;
-                    if status != 202 {
+                    if status == 202 {
+                        return Ok(());
+                    } else {
                         println!(
                             "AJ: failed to send logs after {}ms: {}",
                             elapsed.as_millis(),
@@ -125,8 +124,6 @@ impl Flusher {
                             elapsed.as_millis(),
                             status
                         );
-                    } else {
-                        return Ok(());
                     }
                 }
                 Err(e) => {
