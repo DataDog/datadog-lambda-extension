@@ -42,8 +42,9 @@ flavors:
     alpine: 0
     fips: 1
     needs_layer_sign: true
-    needs_layer_publish: false
+    needs_layer_publish: true
     suffix: amd64-fips
+    layer_name_base_suffix: "-FIPS"
     max_layer_compressed_size_mb: 25
     max_layer_uncompressed_size_mb: 56
 
@@ -52,8 +53,9 @@ flavors:
     alpine: 0
     fips: 1
     needs_layer_sign: true
-    needs_layer_publish: false
+    needs_layer_publish: true
     suffix: arm64-fips
+    layer_name_base_suffix: "-ARM-FIPS"
     max_layer_compressed_size_mb: 22
     max_layer_uncompressed_size_mb: 52
 
