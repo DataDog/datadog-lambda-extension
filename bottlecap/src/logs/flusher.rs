@@ -113,18 +113,17 @@ impl Flusher {
                     _ = resp.text().await;
                     if status == 202 {
                         return Ok(());
-                    } else {
-                        println!(
-                            "AJ: failed to send logs after {}ms: {}",
-                            elapsed.as_millis(),
-                            status
-                        );
-                        debug!(
-                            "Failed to send logs to datadog after {}ms: {}",
-                            elapsed.as_millis(),
-                            status
-                        );
                     }
+                    println!(
+                        "AJ: failed to send logs after {}ms: {}",
+                        elapsed.as_millis(),
+                        status
+                    );
+                    debug!(
+                        "Failed to send logs to datadog after {}ms: {}",
+                        elapsed.as_millis(),
+                        status
+                    );
                 }
                 Err(e) => {
                     error!(
