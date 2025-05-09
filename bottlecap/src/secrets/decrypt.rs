@@ -354,8 +354,11 @@ mod tests {
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
                 aws_container_authorization_token: String::new(),
                 aws_container_credentials_full_uri: String::new(),
+                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
+                runtime_api: String::new(),
+                exec_wrapper: None,
             },
             "us-east-1".to_string(),
             RequestArgs {
@@ -408,8 +411,11 @@ mod tests {
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
                 aws_container_authorization_token: String::new(),
                 aws_container_credentials_full_uri: String::new(),
+                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
+                runtime_api: String::new(),
+                exec_wrapper: None,
             },
             "us-west-2".to_string(),
             RequestArgs {
