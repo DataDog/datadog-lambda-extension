@@ -2,6 +2,7 @@ use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
 use reqwest::header::HeaderMap;
+use std::fmt;
 use std::time::Instant;
 use std::{
     error::Error,
@@ -11,6 +12,26 @@ use std::{
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
+
+// Custom error type to hold the failed request for later retry
+pub struct FailedRequestError {
+    pub request: reqwest::RequestBuilder,
+    pub message: String,
+}
+
+impl Error for FailedRequestError {}
+
+impl fmt::Debug for FailedRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "FailedRequestError: {}", self.message)
+    }
+}
+
+impl fmt::Display for FailedRequestError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Flusher {
@@ -55,33 +76,63 @@ impl Flusher {
             headers,
         }
     }
-    pub async fn flush(&self) {
-        let logs_batches = {
-            let mut guard = self.aggregator.lock().expect("lock poisoned");
-            let mut batches = Vec::new();
-            let mut current_batch = guard.get_batch();
-            while !current_batch.is_empty() {
-                batches.push(current_batch);
-                current_batch = guard.get_batch();
-            }
-
-            batches
-        };
-
+    pub async fn flush(
+        &self,
+        retry_request: Option<reqwest::RequestBuilder>,
+    ) -> Vec<reqwest::RequestBuilder> {
         let mut set = JoinSet::new();
-        for batch in logs_batches {
-            if batch.is_empty() {
-                continue;
-            }
-            let req = self.create_request(batch);
+
+        // If retry_request is provided, only process that request
+        if let Some(req) = retry_request {
             set.spawn(async move { Self::send(req).await });
+        } else {
+            // Process log batches only if no retry_request is provided
+            let logs_batches = {
+                let mut guard = self.aggregator.lock().expect("lock poisoned");
+                let mut batches = Vec::new();
+                let mut current_batch = guard.get_batch();
+                while !current_batch.is_empty() {
+                    batches.push(current_batch);
+                    current_batch = guard.get_batch();
+                }
+
+                batches
+            };
+
+            for batch in logs_batches {
+                if batch.is_empty() {
+                    continue;
+                }
+                let req = self.create_request(batch);
+                set.spawn(async move { Self::send(req).await });
+            }
         }
 
+        let mut failed_requests = Vec::new();
         for result in set.join_all().await {
             if let Err(e) = result {
-                debug!("Failed to send logs: {}", e);
+                debug!("Failed to join task: {}", e);
+                continue;
+            }
+
+            // At this point we know the task completed successfully,
+            // but the send operation itself may have failed
+            if let Err(e) = result {
+                if let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>() {
+                    // Clone the request from our custom error
+                    failed_requests.push(
+                        failed_req_err
+                            .request
+                            .try_clone()
+                            .expect("should be able to clone request"),
+                    );
+                    debug!("Failed to send logs after retries, will retry later");
+                } else {
+                    debug!("Failed to send logs: {}", e);
+                }
             }
         }
+        failed_requests
     }
 
     fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
@@ -95,6 +146,16 @@ impl Flusher {
 
     async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
         let mut attempts = 0;
+        let original_req = match req.try_clone() {
+            Some(r) => r,
+            None => {
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "can't clone original request",
+                )));
+            }
+        };
+
         loop {
             let time = Instant::now();
             attempts += 1;
@@ -132,7 +193,14 @@ impl Flusher {
                         e
                     );
                     if attempts > 3 {
-                        return Err(Box::new(e));
+                        // After 3 failed attempts, return the original request for later retry
+                        // Create a custom error that can be downcast to get the RequestBuilder
+                        return Err(Box::new(FailedRequestError {
+                            request: original_req
+                                .try_clone()
+                                .expect("should be able to clone request"),
+                            message: format!("Failed after {} attempts: {}", attempts, e),
+                        }));
                     }
                 }
             }

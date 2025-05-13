@@ -389,6 +389,8 @@ async fn extension_loop_active(
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
     let mut shutdown_flush_handles = FuturesOrdered::<tokio::task::JoinHandle<_>>::new();
+    let mut shutdown_log_flush_handles =
+        FuturesOrdered::<tokio::task::JoinHandle<Vec<reqwest::RequestBuilder>>>::new();
 
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
@@ -445,18 +447,30 @@ async fn extension_loop_active(
                     // take 40 microseconds
                 }
 
+                while let Some(retries) = shutdown_log_flush_handles.next().await {
+                    match retries {
+                        Ok(retry) => {
+                            for item in retry {
+                                println!("AJ redriving log request synchronously:");
+                                logs_flusher.flush(Some(item)).await;
+                            }
+                        }
+                        Err(e) => {
+                            println!("aj redrive log request error {:?}", e);
+                        }
+                    }
+                }
+
                 // Should flush at the top of the invocation, which is now
                 let val = logs_flusher.clone();
-                shutdown_flush_handles.push_back(tokio::spawn(async move {
-                    val.flush().await;
-                }));
+                shutdown_log_flush_handles
+                    .push_back(tokio::spawn(async move { val.flush(None).await }));
                 let traces_val = trace_flusher.clone();
-                shutdown_flush_handles.push_back(tokio::spawn(async move {
-                    traces_val.flush().await;
-                }));
+                shutdown_flush_handles
+                    .push_back(tokio::spawn(async move { traces_val.flush().await }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
                 shutdown_flush_handles.push_back(tokio::spawn(async move {
-                    cloned_metrics_flusher.lock().await.flush().await;
+                    cloned_metrics_flusher.lock().await.flush().await
                 }));
                 race_flush_interval.reset();
             }
@@ -548,7 +562,7 @@ async fn blocking_flush_all(
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
-        logs_flusher.flush(),
+        logs_flusher.flush(None),
         metrics_flusher.flush(),
         trace_flusher.flush(),
         stats_flusher.flush()
