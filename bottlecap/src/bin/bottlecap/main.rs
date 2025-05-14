@@ -49,6 +49,7 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_protos::metrics::SketchPayload;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
@@ -57,7 +58,7 @@ use dogstatsd::{
     constants::CONTEXTS,
     datadog::{
         DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
-        RetryStrategy as DsdRetryStrategy, Site as MetricsSite,
+        RetryStrategy as DsdRetryStrategy, Series, Site as MetricsSite,
     },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
@@ -388,10 +389,12 @@ async fn extension_loop_active(
     );
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
-    let mut shutdown_flush_handles = FuturesOrdered::<tokio::task::JoinHandle<_>>::new();
+    let mut shutdown_trace_flush_handles =
+        FuturesOrdered::<tokio::task::JoinHandle<Vec<SendData>>>::new();
     let mut shutdown_log_flush_handles =
         FuturesOrdered::<tokio::task::JoinHandle<Vec<reqwest::RequestBuilder>>>::new();
-
+    let mut shutdown_metric_flush_handles =
+        FuturesOrdered::<tokio::task::JoinHandle<(Vec<Series>, Vec<SketchPayload>)>>::new();
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let shutdown;
@@ -439,25 +442,68 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if flush_control.should_periodic_flush() {
-                // FuturesOrdered concurrently awaits all flush handles
-                // We expec them to be mostly done in previous iterations, this is just cleanup
-                while let Some(_res) = shutdown_flush_handles.next().await {
-                    // Await the previous flush handles.
-                    // Unless there is a major issue, this should be 3 reqeusts and
-                    // take 40 microseconds
+                // Use Tokio's JoinSet to parallelize the flush operations
+                let mut joinset = tokio::task::JoinSet::new();
+                while let Some(retries) = shutdown_trace_flush_handles.next().await {
+                    let tf = trace_flusher.clone();
+                    match retries {
+                        Ok(retry) => {
+                            println!("AJ redriving trace request in parallel:");
+                            joinset.spawn(async move {
+                                tf.flush(Some(retry)).await;
+                            });
+                        }
+                        Err(e) => {
+                            println!("aj redrive trace request error {e:?}");
+                        }
+                    }
                 }
-
                 while let Some(retries) = shutdown_log_flush_handles.next().await {
                     match retries {
                         Ok(retry) => {
                             for item in retry {
-                                println!("AJ redriving log request synchronously:");
-                                logs_flusher.flush(Some(item)).await;
+                                println!("AJ redriving log request in parallel:");
+                                let lf = logs_flusher.clone();
+                                match item.try_clone() {
+                                    Some(item_clone) => {
+                                        joinset.spawn(async move {
+                                            lf.flush(Some(item_clone)).await;
+                                        });
+                                    }
+                                    None => {
+                                        println!("can't clone");
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
-                            println!("aj redrive log request error {:?}", e);
+                            println!("aj redrive log request error {e:?}");
                         }
+                    }
+                }
+                while let Some(retries) = shutdown_metric_flush_handles.next().await {
+                    let mf = metrics_flusher.clone();
+                    match retries {
+                        Ok((series, sketches)) => {
+                            println!("AJ redriving metrics request in parallel:");
+                            let series_clone = series.clone();
+                            let sketches_clone = sketches.clone();
+                            joinset.spawn(async move {
+                                let mut locked_flusher = mf.lock().await;
+                                locked_flusher
+                                    .flush_with_retries(Some(series_clone), Some(sketches_clone))
+                                    .await;
+                            });
+                        }
+                        Err(e) => {
+                            println!("aj redrive metrics request error {e:?}");
+                        }
+                    }
+                }
+                // Wait for all parallel operations to complete
+                while let Some(result) = joinset.join_next().await {
+                    if let Err(e) = result {
+                        println!("Error in parallel flush: {e:?}");
                     }
                 }
 
@@ -466,11 +512,17 @@ async fn extension_loop_active(
                 shutdown_log_flush_handles
                     .push_back(tokio::spawn(async move { val.flush(None).await }));
                 let traces_val = trace_flusher.clone();
-                shutdown_flush_handles
-                    .push_back(tokio::spawn(async move { traces_val.flush().await }));
+                shutdown_trace_flush_handles.push_back(tokio::spawn(async move {
+                    traces_val.flush(None).await.unwrap_or_default()
+                }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
-                shutdown_flush_handles.push_back(tokio::spawn(async move {
-                    cloned_metrics_flusher.lock().await.flush().await
+                shutdown_metric_flush_handles.push_back(tokio::spawn(async move {
+                    cloned_metrics_flusher
+                        .lock()
+                        .await
+                        .flush()
+                        .await
+                        .unwrap_or_default()
                 }));
                 race_flush_interval.reset();
             }
@@ -536,9 +588,7 @@ async fn extension_loop_active(
             }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            while let Some(res) = shutdown_flush_handles.next().await {
-                debug!("Flushing in-progress tasks at shutdown: {:?}", res);
-            }
+
             // gotta lock here
             let mut locked_metrics = metrics_flusher.lock().await;
             blocking_flush_all(
@@ -564,7 +614,7 @@ async fn blocking_flush_all(
     tokio::join!(
         logs_flusher.flush(None),
         metrics_flusher.flush(),
-        trace_flusher.flush(),
+        trace_flusher.flush(None),
         stats_flusher.flush()
     );
     race_flush_interval.reset();
