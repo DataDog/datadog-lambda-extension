@@ -448,10 +448,12 @@ async fn extension_loop_active(
                     let tf = trace_flusher.clone();
                     match retries {
                         Ok(retry) => {
-                            println!("AJ redriving trace request in parallel:");
-                            joinset.spawn(async move {
-                                tf.flush(Some(retry)).await;
-                            });
+                            if !retry.is_empty() {
+                                println!("AJ redriving {:?} trace payloads", retry.len());
+                                joinset.spawn(async move {
+                                    tf.flush(Some(retry)).await;
+                                });
+                            }
                         }
                         Err(e) => {
                             println!("aj redrive trace request error {e:?}");
@@ -485,15 +487,20 @@ async fn extension_loop_active(
                     let mf = metrics_flusher.clone();
                     match retries {
                         Ok((series, sketches)) => {
-                            println!("AJ redriving metrics request in parallel:");
-                            let series_clone = series.clone();
-                            let sketches_clone = sketches.clone();
-                            joinset.spawn(async move {
-                                let mut locked_flusher = mf.lock().await;
-                                locked_flusher
-                                    .flush_with_retries(Some(series_clone), Some(sketches_clone))
-                                    .await;
-                            });
+                            if !series.is_empty() || !sketches.is_empty() {
+                                println!("AJ redriving metrics request in parallel:");
+                                let series_clone = series.clone();
+                                let sketches_clone = sketches.clone();
+                                joinset.spawn(async move {
+                                    let mut locked_flusher = mf.lock().await;
+                                    locked_flusher
+                                        .flush_with_retries(
+                                            Some(series_clone),
+                                            Some(sketches_clone),
+                                        )
+                                        .await;
+                                });
+                            }
                         }
                         Err(e) => {
                             println!("aj redrive metrics request error {e:?}");
