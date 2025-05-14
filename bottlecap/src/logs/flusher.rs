@@ -140,7 +140,7 @@ impl Flusher {
         let body = self.compress(data);
         self.client
             .post(&url)
-            .timeout(std::time::Duration::from_secs(1))
+            .timeout(std::time::Duration::from_secs(3))
             .headers(self.headers.clone())
             .body(body)
     }
