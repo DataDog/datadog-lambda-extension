@@ -1057,22 +1057,6 @@ pub fn otel_resource_spans_to_dd_spans(
         };
 
         for otel_span in otel_spans {
-            let mut resource_name = get_otel_attribute_value_as_string_from_resource_or_span(
-                otel_res,
-                otel_span,
-                KEY_DATADOG_RESOURCE,
-                true,
-            );
-
-            if resource_name.is_empty() && !config.otlp_config_ignore_missing_datadog_fields {
-                resource_name = get_otel_resource(otel_span, otel_res);
-            }
-
-            // TODO(duncanista): verify if type is correct for ignore resources
-            if config.apm_ignore_resources.contains(&resource_name) {
-                continue;
-            }
-
             let (trace_id_lower, _) = otel_trace_id_to_dd_id(&otel_span.trace_id);
             let dd_span = otel_span_to_dd_span(otel_span, otel_res, lib, config.clone());
             traces_by_id.entry(trace_id_lower).or_default();
