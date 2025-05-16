@@ -956,8 +956,11 @@ mod tests {
             aws_session_token: "***".into(),
             aws_container_credentials_full_uri: "***".into(),
             aws_container_authorization_token: "***".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
             function_name: "test-function".into(),
             sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
         };
 
         let config = Arc::new(config::Config {
