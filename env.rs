@@ -72,7 +72,6 @@ pub struct Config {
     #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
     pub apm_features: Vec<String>,
-    pub apm_ignore_resources: Vec<String>,
     // Metrics overrides
     pub dd_url: String,
     pub url: String,
@@ -171,7 +170,6 @@ impl Default for Config {
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
             apm_features: vec![],
-            apm_ignore_resources: vec![],
             dd_url: String::default(),
             url: String::default(),
             // OTLP
