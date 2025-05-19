@@ -57,21 +57,7 @@ pub fn get_lwa_proxy_socket_address(
     Ok(socket_addr)
 }
 
-pub fn process_invocation_next(
-    processor: &Arc<Mutex<InvocationProcessor>>,
-    intercepted_parts: &http::response::Parts,
-    intercepted_body: &Bytes,
-) {
-    let processor = Arc::clone(processor);
-    let intercepted_parts = intercepted_parts.clone();
-    let intercepted_body = intercepted_body.clone();
-
-    tokio::spawn(async move {
-        on_get_invocation_next(&processor, &intercepted_parts, &intercepted_body).await;
-    });
-}
-
-async fn on_get_invocation_next(
+pub async fn process_invocation_next(
     processor: &Arc<Mutex<InvocationProcessor>>,
     parts: &http::response::Parts,
     body_bytes: &Bytes,
@@ -117,18 +103,7 @@ async fn on_get_invocation_next(
     }
 }
 
-pub fn process_invocation_response(
-    processor: &Arc<Mutex<InvocationProcessor>>,
-    intercepted_body: &Bytes,
-) {
-    let processor = Arc::clone(processor);
-    let intercepted_body = intercepted_body.clone();
-    tokio::spawn(async move {
-        on_post_invocation_response(&processor, &intercepted_body).await;
-    });
-}
-
-async fn on_post_invocation_response(
+pub async fn process_invocation_response(
     processor: &Arc<Mutex<InvocationProcessor>>,
     waited_intercepted_body: &Bytes,
 ) {
