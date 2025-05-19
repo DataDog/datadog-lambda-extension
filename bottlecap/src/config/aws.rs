@@ -7,6 +7,9 @@ const AWS_SESSION_TOKEN: &str = "AWS_SESSION_TOKEN";
 const AWS_CONTAINER_CREDENTIALS_FULL_URI: &str = "AWS_CONTAINER_CREDENTIALS_FULL_URI";
 const AWS_CONTAINER_AUTHORIZATION_TOKEN: &str = "AWS_CONTAINER_AUTHORIZATION_TOKEN";
 const AWS_LAMBDA_FUNCTION_NAME: &str = "AWS_LAMBDA_FUNCTION_NAME";
+const AWS_LAMBDA_RUNTIME_API: &str = "AWS_LAMBDA_RUNTIME_API";
+const AWS_LWA_LAMBDA_RUNTIME_API_PROXY: &str = "AWS_LWA_LAMBDA_RUNTIME_API_PROXY";
+const AWS_LAMBDA_EXEC_WRAPPER: &str = "AWS_LAMBDA_EXEC_WRAPPER";
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone)]
@@ -15,10 +18,13 @@ pub struct AwsConfig {
     pub aws_access_key_id: String,
     pub aws_secret_access_key: String,
     pub aws_session_token: String,
-    pub function_name: String,
-    pub sandbox_init_time: Instant,
     pub aws_container_credentials_full_uri: String,
     pub aws_container_authorization_token: String,
+    pub aws_lwa_proxy_lambda_runtime_api: Option<String>,
+    pub function_name: String,
+    pub runtime_api: String,
+    pub sandbox_init_time: Instant,
+    pub exec_wrapper: Option<String>,
 }
 
 impl AwsConfig {
@@ -33,8 +39,11 @@ impl AwsConfig {
                 .unwrap_or_default(),
             aws_container_authorization_token: env::var(AWS_CONTAINER_AUTHORIZATION_TOKEN)
                 .unwrap_or_default(),
+            aws_lwa_proxy_lambda_runtime_api: env::var(AWS_LWA_LAMBDA_RUNTIME_API_PROXY).ok(),
             function_name: env::var(AWS_LAMBDA_FUNCTION_NAME).unwrap_or_default(),
+            runtime_api: env::var(AWS_LAMBDA_RUNTIME_API).unwrap_or_default(),
             sandbox_init_time: start_time,
+            exec_wrapper: env::var(AWS_LAMBDA_EXEC_WRAPPER).ok(),
         }
     }
 }
