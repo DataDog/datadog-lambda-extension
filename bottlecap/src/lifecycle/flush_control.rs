@@ -86,10 +86,6 @@ impl FlushControl {
             }
             FlushStrategy::Continuously(strategy) => {
                 if self.interval_passed(now, strategy.interval) {
-                    println!(
-                        "now is: {:?} continuous interval: {:?}",
-                        now, strategy.interval
-                    );
                     self.last_flush = now;
                     // TODO calculate periodic rate. if it's more frequent than the flush_timeout
                     // opt in to continuous
