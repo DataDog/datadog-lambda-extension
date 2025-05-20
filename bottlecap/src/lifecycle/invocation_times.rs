@@ -1,3 +1,6 @@
+use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
+
+const TWENTY_SECONDS: u64 = 20 * 1000;
 const LOOKBACK_COUNT: usize = 20;
 const ONE_TWENTY_SECONDS: f64 = 120.0;
 
@@ -20,11 +23,11 @@ impl InvocationTimes {
         self.head = (self.head + 1) % LOOKBACK_COUNT;
     }
 
-    pub(crate) fn should_adapt_to_periodic(&self, now: u64) -> bool {
+    pub(crate) fn should_adapt(&self, now: u64, flush_timeout: u64) -> FlushStrategy {
         // If the buffer isn't full, then we haven't seen enough invocations, so we should flush.
         for idx in self.head..LOOKBACK_COUNT {
             if self.times[idx] == 0 {
-                return false;
+                return FlushStrategy::End;
             }
         }
 
@@ -34,13 +37,26 @@ impl InvocationTimes {
         let oldest = self.times[self.head];
 
         let elapsed = now - oldest;
-        (elapsed as f64 / (LOOKBACK_COUNT - 1) as f64) < ONE_TWENTY_SECONDS
+        let should_adapt = (elapsed as f64 / (LOOKBACK_COUNT - 1) as f64) < ONE_TWENTY_SECONDS;
+        if should_adapt {
+            if elapsed < flush_timeout * 1000 {
+                return FlushStrategy::Continuously(PeriodicStrategy {
+                    interval: TWENTY_SECONDS,
+                });
+            } else {
+                return FlushStrategy::Periodically(PeriodicStrategy {
+                    interval: TWENTY_SECONDS,
+                });
+            }
+        }
+        FlushStrategy::End
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lifecycle::invocation_times;
+    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
+    use crate::lifecycle::invocation_times::{self, TWENTY_SECONDS};
 
     #[test]
     fn new() {
@@ -59,7 +75,7 @@ mod tests {
         invocation_times.add(timestamp);
         assert_eq!(invocation_times.times[0], timestamp);
         assert_eq!(invocation_times.head, 1);
-        assert!(!invocation_times.should_adapt_to_periodic(1));
+        assert_eq!(invocation_times.should_adapt(1, 60), FlushStrategy::End);
     }
 
     #[test]
@@ -71,7 +87,29 @@ mod tests {
         // should wrap around
         assert_eq!(invocation_times.times[0], 20);
         assert_eq!(invocation_times.head, 1);
-        assert!(invocation_times.should_adapt_to_periodic(21));
+        assert_eq!(
+            invocation_times.should_adapt(21, 60),
+            FlushStrategy::Continuously(PeriodicStrategy {
+                interval: TWENTY_SECONDS
+            })
+        );
+    }
+
+    #[test]
+    fn insertion_with_full_buffer_fast_invokes_low_timeout() {
+        let mut invocation_times = invocation_times::InvocationTimes::new();
+        for i in 0..=invocation_times::LOOKBACK_COUNT {
+            invocation_times.add(i as u64);
+        }
+        // should wrap around
+        assert_eq!(invocation_times.times[0], 20);
+        assert_eq!(invocation_times.head, 1);
+        assert_eq!(
+            invocation_times.should_adapt(21, 1),
+            FlushStrategy::Periodically(PeriodicStrategy {
+                interval: TWENTY_SECONDS
+            })
+        );
     }
 
     #[test]
@@ -84,7 +122,7 @@ mod tests {
         // should wrap around
         assert_eq!(invocation_times.times[0], 5019);
         assert_eq!(invocation_times.head, 1);
-        assert!(!invocation_times.should_adapt_to_periodic(10000));
+        assert_eq!(invocation_times.should_adapt(10000, 60), FlushStrategy::End);
     }
 
     #[test]
@@ -101,7 +139,12 @@ mod tests {
             invocation_times.times[invocation_times::LOOKBACK_COUNT - 1],
             1901
         );
-        assert!(invocation_times.should_adapt_to_periodic(2501));
+        assert_eq!(
+            invocation_times.should_adapt(2501, 60),
+            FlushStrategy::Periodically(PeriodicStrategy {
+                interval: TWENTY_SECONDS
+            })
+        );
     }
 
     #[test]
@@ -118,6 +161,6 @@ mod tests {
             invocation_times.times[invocation_times::LOOKBACK_COUNT - 1],
             2471
         );
-        assert!(!invocation_times.should_adapt_to_periodic(3251));
+        assert_eq!(invocation_times.should_adapt(3251, 60), FlushStrategy::End);
     }
 }

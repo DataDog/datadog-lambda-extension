@@ -140,7 +140,7 @@ impl Flusher {
         let body = self.compress(data);
         self.client
             .post(&url)
-            .timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
             .headers(self.headers.clone())
             .body(body)
     }
@@ -175,25 +175,26 @@ impl Flusher {
                         return Ok(());
                     }
                     println!(
-                        "AJ: failed to send logs after {}ms: {}",
-                        elapsed.as_millis(),
-                        status
-                    );
-                    debug!(
-                        "Failed to send logs to datadog after {}ms: {}",
+                        "AJ: success block but failed to send logs after {}ms: {}",
                         elapsed.as_millis(),
                         status
                     );
                 }
                 Err(e) => {
+                    if e.is_timeout() {
+                        println!("AJ timeout error!!! Log Data may be duplicated");
+                        //return Ok(());
+                    }
                     error!(
-                        "Failed to send logs to datadog after {}ms: {}",
+                        "Failed to send logs to datadog after {} ms and {} attempts: {}",
                         elapsed.as_millis(),
+                        attempts,
                         e
                     );
                     if attempts > 3 {
                         // After 3 failed attempts, return the original request for later retry
                         // Create a custom error that can be downcast to get the RequestBuilder
+                        println!("aj: returning log payload to redrive later after 3 attempts");
                         return Err(Box::new(FailedRequestError {
                             request: original_req
                                 .try_clone()
