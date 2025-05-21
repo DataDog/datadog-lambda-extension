@@ -43,11 +43,10 @@ impl InvocationTimes {
                 return FlushStrategy::Continuously(PeriodicStrategy {
                     interval: TWENTY_SECONDS,
                 });
-            } else {
-                return FlushStrategy::Periodically(PeriodicStrategy {
-                    interval: TWENTY_SECONDS,
-                });
             }
+            return FlushStrategy::Periodically(PeriodicStrategy {
+                interval: TWENTY_SECONDS,
+            });
         }
         FlushStrategy::End
     }

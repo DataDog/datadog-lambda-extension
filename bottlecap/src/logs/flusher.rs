@@ -174,11 +174,6 @@ impl Flusher {
                     if status == 202 {
                         return Ok(());
                     }
-                    println!(
-                        "AJ: success block but failed to send logs after {}ms: {}",
-                        elapsed.as_millis(),
-                        status
-                    );
                 }
                 Err(e) => {
                     if e.is_timeout() {
@@ -194,7 +189,6 @@ impl Flusher {
                     if attempts > 3 {
                         // After 3 failed attempts, return the original request for later retry
                         // Create a custom error that can be downcast to get the RequestBuilder
-                        println!("aj: returning log payload to redrive later after 3 attempts");
                         return Err(Box::new(FailedRequestError {
                             request: original_req
                                 .try_clone()
