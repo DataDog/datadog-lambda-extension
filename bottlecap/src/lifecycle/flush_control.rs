@@ -116,42 +116,48 @@ mod tests {
     use super::*;
     use crate::config::flush_strategy::PeriodicStrategy;
 
-    // #[test]
-    // fn should_flush_end() {
-    //     let mut flush_control = FlushControl::new(FlushStrategy::Default, 60);
-    //     assert!(flush_control.should_flush_end());
+    #[test]
+    fn should_flush_end() {
+        let mut flush_control = FlushControl::new(FlushStrategy::Default, 60);
+        assert_eq!(flush_control.evaluate_flush_decision(), FlushDecision::End);
 
-    //     let mut flush_control = FlushControl::new(
-    //         FlushStrategy::EndPeriodically(PeriodicStrategy { interval: 1 }),
-    //         60,
-    //     );
-    //     assert!(flush_control.should_flush_end());
+        let mut flush_control = FlushControl::new(
+            FlushStrategy::EndPeriodically(PeriodicStrategy { interval: 1 }),
+            60,
+        );
+        assert_eq!(flush_control.evaluate_flush_decision(), FlushDecision::End);
 
-    //     let mut flush_control = FlushControl::new(FlushStrategy::End, 60);
-    //     assert!(flush_control.should_flush_end());
+        let mut flush_control = FlushControl::new(FlushStrategy::End, 60);
+        assert_eq!(flush_control.evaluate_flush_decision(), FlushDecision::End);
 
-    //     let mut flush_control = FlushControl::new(
-    //         FlushStrategy::Periodically(PeriodicStrategy { interval: 1 }),
-    //         60,
-    //     );
-    //     assert!(!flush_control.should_flush_end());
-    // }
+        let mut flush_control = FlushControl::new(
+            FlushStrategy::Periodically(PeriodicStrategy { interval: 1 }),
+            60,
+        );
+        assert_eq!(
+            flush_control.evaluate_flush_decision(),
+            FlushDecision::Periodic
+        );
+    }
 
-    // #[test]
-    // fn should_flush_default_end() {
-    //     let mut flush_control = super::FlushControl::new(FlushStrategy::Default, 60);
-    //     assert!(flush_control.should_flush_end());
-    // }
+    #[test]
+    fn should_flush_default_end() {
+        let mut flush_control = super::FlushControl::new(FlushStrategy::Default, 60);
+        assert_eq!(flush_control.evaluate_flush_decision(), FlushDecision::End);
+    }
 
-    // #[test]
-    // fn should_flush_default_periodic() {
-    //     const LOOKBACK_COUNT: usize = 20;
-    //     let mut flush_control = super::FlushControl::new(FlushStrategy::Default, 60);
-    //     for _ in 0..LOOKBACK_COUNT - 1 {
-    //         assert!(flush_control.should_flush_end());
-    //     }
-    //     assert!(!flush_control.should_flush_end());
-    // }
+    #[test]
+    fn should_flush_default_continuous() {
+        const LOOKBACK_COUNT: usize = 20;
+        let mut flush_control = super::FlushControl::new(FlushStrategy::Default, 60);
+        for _ in 0..LOOKBACK_COUNT - 1 {
+            assert_eq!(flush_control.evaluate_flush_decision(), FlushDecision::End);
+        }
+        assert_eq!(
+            flush_control.evaluate_flush_decision(),
+            FlushDecision::Continuous
+        );
+    }
 
     #[test]
     fn should_flush_custom_periodic() {
