@@ -176,19 +176,15 @@ impl Flusher {
                     }
                 }
                 Err(e) => {
-                    if e.is_timeout() {
-                        println!("AJ timeout error!!! Log Data may be duplicated");
-                        //return Ok(());
-                    }
-                    error!(
-                        "Failed to send logs to datadog after {} ms and {} attempts: {}",
-                        elapsed.as_millis(),
-                        attempts,
-                        e
-                    );
                     if attempts > 3 {
                         // After 3 failed attempts, return the original request for later retry
                         // Create a custom error that can be downcast to get the RequestBuilder
+                        error!(
+                            "Failed to send logs to datadog after {} ms and {} attempts: {}",
+                            elapsed.as_millis(),
+                            attempts,
+                            e
+                        );
                         return Err(Box::new(FailedRequestError {
                             request: original_req
                                 .try_clone()
