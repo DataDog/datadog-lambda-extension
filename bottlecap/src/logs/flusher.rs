@@ -180,7 +180,7 @@ impl Flusher {
                         // After 3 failed attempts, return the original request for later retry
                         // Create a custom error that can be downcast to get the RequestBuilder
                         error!(
-                            "Failed to send logs to datadog after {} ms and {} attempts: {}",
+                            "Failed to send logs to datadog after {} ms and {} attempts: {:?}",
                             elapsed.as_millis(),
                             attempts,
                             e

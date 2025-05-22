@@ -39,7 +39,13 @@ impl InvocationTimes {
         let elapsed = now - oldest;
         let should_adapt = (elapsed as f64 / (LOOKBACK_COUNT - 1) as f64) < ONE_TWENTY_SECONDS;
         if should_adapt {
-            if elapsed < flush_timeout * 1000 {
+            // Both units here are in seconds
+            if elapsed < flush_timeout {
+                println!(
+                    "AJ: elapsed is {}, flush timeout is {}, adapting to continuous",
+                    elapsed,
+                    flush_timeout * 1000
+                );
                 return FlushStrategy::Continuously(PeriodicStrategy {
                     interval: TWENTY_SECONDS,
                 });
