@@ -821,7 +821,11 @@ fn start_otlp_agent(
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendData>,
 ) {
-    if !config.otlp_config_traces_enabled {
+    if !config.otlp_config_traces_enabled
+        && config
+            .otlp_config_receiver_protocols_http_endpoint
+            .is_none()
+    {
         return;
     }
 
