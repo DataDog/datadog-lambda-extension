@@ -83,6 +83,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
+#[allow(clippy::struct_field_names)]
 struct ShutdownHandles {
     trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
     log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
