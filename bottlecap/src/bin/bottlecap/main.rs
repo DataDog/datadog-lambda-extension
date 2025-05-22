@@ -42,7 +42,7 @@ use bottlecap::{
         stats_aggregator::StatsAggregator,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent, trace_aggregator,
-        trace_flusher::{self, TraceFlusher},
+        trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -78,10 +78,104 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex};
+use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+
+struct ShutdownHandles {
+    trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
+    log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
+    metric_flush_handles: FuturesOrdered<JoinHandle<(Vec<Series>, Vec<SketchPayload>)>>,
+}
+
+impl ShutdownHandles {
+    fn new() -> Self {
+        Self {
+            trace_flush_handles: FuturesOrdered::new(),
+            log_flush_handles: FuturesOrdered::new(),
+            metric_flush_handles: FuturesOrdered::new(),
+        }
+    }
+
+    async fn await_flush_handles(
+        &mut self,
+        logs_flusher: &LogsFlusher,
+        trace_flusher: &ServerlessTraceFlusher,
+        metrics_flusher: &Arc<TokioMutex<MetricsFlusher>>,
+    ) {
+        let mut joinset = tokio::task::JoinSet::new();
+
+        while let Some(retries) = self.trace_flush_handles.next().await {
+            match retries {
+                Ok(retry) => {
+                    let tf = trace_flusher.clone();
+                    if !retry.is_empty() {
+                        debug!("redriving {:?} trace payloads", retry.len());
+                        joinset.spawn(async move {
+                            tf.flush(Some(retry)).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("redrive trace error {e:?}");
+                }
+            }
+        }
+
+        while let Some(retries) = self.log_flush_handles.next().await {
+            match retries {
+                Ok(retry) => {
+                    debug!("redriving {:?} log payloads", retry.len());
+                    for item in retry {
+                        let lf = logs_flusher.clone();
+                        match item.try_clone() {
+                            Some(item_clone) => {
+                                joinset.spawn(async move {
+                                    lf.flush(Some(item_clone)).await;
+                                });
+                            }
+                            None => {
+                                error!("can't clone redrive log payloads");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("redrive log error {e:?}");
+                }
+            }
+        }
+
+        while let Some(retries) = self.metric_flush_handles.next().await {
+            let mf = metrics_flusher.clone();
+            match retries {
+                Ok((series, sketches)) => {
+                    if !series.is_empty() || !sketches.is_empty() {
+                        let series_clone = series.clone();
+                        let sketches_clone = sketches.clone();
+                        joinset.spawn(async move {
+                            let mut locked_flusher = mf.lock().await;
+                            locked_flusher
+                                .flush_with_retries(Some(series_clone), Some(sketches_clone))
+                                .await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("redrive metrics error {e:?}");
+                }
+            }
+        }
+
+        // Wait for all flush join operations to complete
+        while let Some(result) = joinset.join_next().await {
+            if let Err(e) = result {
+                error!("redrive request error {e:?}");
+            }
+        }
+    }
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -391,12 +485,7 @@ async fn extension_loop_active(
     );
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
-    let mut shutdown_trace_flush_handles =
-        FuturesOrdered::<tokio::task::JoinHandle<Vec<SendData>>>::new();
-    let mut shutdown_log_flush_handles =
-        FuturesOrdered::<tokio::task::JoinHandle<Vec<reqwest::RequestBuilder>>>::new();
-    let mut shutdown_metric_flush_handles =
-        FuturesOrdered::<tokio::task::JoinHandle<(Vec<Series>, Vec<SketchPayload>)>>::new();
+    let mut shutdown_handles = ShutdownHandles::new();
     let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
@@ -446,95 +535,32 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
-                let mut joinset = tokio::task::JoinSet::new();
-                while let Some(retries) = shutdown_trace_flush_handles.next().await {
-                    let tf = trace_flusher.clone();
-                    match retries {
-                        Ok(retry) => {
-                            if !retry.is_empty() {
-                                println!("AJ redriving {:?} trace payloads", retry.len());
-                                last_continuous_flush_error = true;
-                                joinset.spawn(async move {
-                                    tf.flush(Some(retry)).await;
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            println!("aj redrive trace request error {e:?}");
-                        }
-                    }
-                }
-                while let Some(retries) = shutdown_log_flush_handles.next().await {
-                    match retries {
-                        Ok(retry) => {
-                            for item in retry {
-                                println!("AJ redriving log request in parallel:");
-                                last_continuous_flush_error = true;
-                                let lf = logs_flusher.clone();
-                                match item.try_clone() {
-                                    Some(item_clone) => {
-                                        joinset.spawn(async move {
-                                            lf.flush(Some(item_clone)).await;
-                                        });
-                                    }
-                                    None => {
-                                        println!("can't clone");
-                                    }
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            println!("aj redrive log request error {e:?}");
-                        }
-                    }
-                }
-                while let Some(retries) = shutdown_metric_flush_handles.next().await {
-                    let mf = metrics_flusher.clone();
-                    match retries {
-                        Ok((series, sketches)) => {
-                            if !series.is_empty() || !sketches.is_empty() {
-                                println!("AJ redriving metrics request in parallel:");
-                                last_continuous_flush_error = true;
-                                let series_clone = series.clone();
-                                let sketches_clone = sketches.clone();
-                                joinset.spawn(async move {
-                                    let mut locked_flusher = mf.lock().await;
-                                    locked_flusher
-                                        .flush_with_retries(
-                                            Some(series_clone),
-                                            Some(sketches_clone),
-                                        )
-                                        .await;
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            println!("aj redrive metrics request error {e:?}");
-                        }
-                    }
-                }
-                // Wait for all flush join operations to complete
-                while let Some(result) = joinset.join_next().await {
-                    if let Err(e) = result {
-                        println!("Error in parallel flush: {e:?}");
-                    }
-                }
+                let tf = trace_flusher.clone();
+                shutdown_handles
+                    .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
+                    .await;
+
                 let val = logs_flusher.clone();
-                shutdown_log_flush_handles
+                shutdown_handles
+                    .log_flush_handles
                     .push_back(tokio::spawn(async move { val.flush(None).await }));
                 let traces_val = trace_flusher.clone();
-                shutdown_trace_flush_handles.push_back(tokio::spawn(async move {
-                    traces_val.flush(None).await.unwrap_or_default()
-                }));
+                shutdown_handles
+                    .trace_flush_handles
+                    .push_back(tokio::spawn(async move {
+                        traces_val.flush(None).await.unwrap_or_default()
+                    }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
-                shutdown_metric_flush_handles.push_back(tokio::spawn(async move {
-                    cloned_metrics_flusher
-                        .lock()
-                        .await
-                        .flush()
-                        .await
-                        .unwrap_or_default()
-                }));
+                shutdown_handles
+                    .metric_flush_handles
+                    .push_back(tokio::spawn(async move {
+                        cloned_metrics_flusher
+                            .lock()
+                            .await
+                            .flush()
+                            .await
+                            .unwrap_or_default()
+                    }));
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
                 // TODO(astuyve): still await the shutdown flush handles
@@ -592,73 +618,10 @@ async fn extension_loop_active(
 
         if shutdown {
             // Redrive/block on any failed payloads
-            let mut joinset = tokio::task::JoinSet::new();
-            while let Some(retries) = shutdown_trace_flush_handles.next().await {
-                let tf = trace_flusher.clone();
-                match retries {
-                    Ok(retry) => {
-                        if !retry.is_empty() {
-                            println!("AJ redriving {:?} trace payloads", retry.len());
-                            joinset.spawn(async move {
-                                tf.flush(Some(retry)).await;
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        println!("aj redrive trace request error {e:?}");
-                    }
-                }
-            }
-            while let Some(retries) = shutdown_log_flush_handles.next().await {
-                match retries {
-                    Ok(retry) => {
-                        for item in retry {
-                            println!("AJ redriving log request in parallel:");
-                            let lf = logs_flusher.clone();
-                            match item.try_clone() {
-                                Some(item_clone) => {
-                                    joinset.spawn(async move {
-                                        lf.flush(Some(item_clone)).await;
-                                    });
-                                }
-                                None => {
-                                    println!("can't clone");
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("aj redrive log request error {e:?}");
-                    }
-                }
-            }
-            while let Some(retries) = shutdown_metric_flush_handles.next().await {
-                let mf = metrics_flusher.clone();
-                match retries {
-                    Ok((series, sketches)) => {
-                        if !series.is_empty() || !sketches.is_empty() {
-                            println!("AJ redriving metrics request in parallel:");
-                            let series_clone = series.clone();
-                            let sketches_clone = sketches.clone();
-                            joinset.spawn(async move {
-                                let mut locked_flusher = mf.lock().await;
-                                locked_flusher
-                                    .flush_with_retries(Some(series_clone), Some(sketches_clone))
-                                    .await;
-                            });
-                        }
-                    }
-                    Err(e) => {
-                        println!("aj redrive metrics request error {e:?}");
-                    }
-                }
-            }
-            // Wait for all flush join operations to complete
-            while let Some(result) = joinset.join_next().await {
-                if let Err(e) = result {
-                    println!("Error in parallel flush: {e:?}");
-                }
-            }
+            let tf = trace_flusher.clone();
+            shutdown_handles
+                .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
+                .await;
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
