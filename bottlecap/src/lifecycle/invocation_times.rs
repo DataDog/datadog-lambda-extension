@@ -41,11 +41,6 @@ impl InvocationTimes {
         if should_adapt {
             // Both units here are in seconds
             if elapsed < flush_timeout {
-                println!(
-                    "AJ: elapsed is {}, flush timeout is {}, adapting to continuous",
-                    elapsed,
-                    flush_timeout * 1000
-                );
                 return FlushStrategy::Continuously(PeriodicStrategy {
                     interval: TWENTY_SECONDS,
                 });
