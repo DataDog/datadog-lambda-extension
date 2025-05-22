@@ -57,7 +57,7 @@ datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = 
 datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" , features = ["compression"] }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"  }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "21e4c0f2743c1469483fcac85095c477bb814c84", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "b1583da00e202985057cf6d48f05e1cac77ab910", default-features = false }
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "3f3347790d4c7f3393589ef7efb7ccf22405a89a" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "3f3347790d4c7f3393589ef7efb7ccf22405a89a", default-features = false }
 
