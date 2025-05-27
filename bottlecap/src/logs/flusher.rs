@@ -148,13 +148,6 @@ impl Flusher {
     async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
         let mut attempts = 0;
 
-        let Some(original_req) = req.try_clone() else {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "can't clone original request",
-            )));
-        };
-
         loop {
             let time = Instant::now();
             attempts += 1;
@@ -186,9 +179,7 @@ impl Flusher {
                             e
                         );
                         return Err(Box::new(FailedRequestError {
-                            request: original_req
-                                .try_clone()
-                                .expect("should be able to clone request"),
+                            request: req,
                             message: format!("Failed after {attempts} attempts: {e}"),
                         }));
                     }
