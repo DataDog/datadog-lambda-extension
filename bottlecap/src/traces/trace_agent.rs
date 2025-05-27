@@ -47,6 +47,8 @@ const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
 const DD_ADDITIONAL_TAGS_HEADER: &str = "X-Datadog-Additional-Tags";
 const INFO_ENDPOINT_PATH: &str = "/info";
+const DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const DEBUGGER_LOGS_INTAKE_PATH: &str = "/api/v2/logs";
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
@@ -338,6 +340,17 @@ impl TraceAgent {
                     StatusCode::INTERNAL_SERVER_ERROR,
                 ),
             },
+            (&Method::POST, DEBUGGER_ENDPOINT_PATH) => {
+                match Self::handle_debugger_logs_proxy(config, tags_provider, api_key, client, req)
+                    .await
+                {
+                    Ok(result) => Ok(result),
+                    Err(err) => log_and_create_http_response(
+                        &format!("Debugger logs endpoint error: {err}"),
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                    ),
+                }
+            }
             _ => {
                 let mut not_found = Response::default();
                 *not_found.status_mut() = StatusCode::NOT_FOUND;
@@ -458,6 +471,7 @@ impl TraceAgent {
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
                     LLM_OBS_SPANS_ENDPOINT_PATH,
+                    DEBUGGER_ENDPOINT_PATH,
                 ],
                 "client_drop_p0s": true,
             }
@@ -646,6 +660,26 @@ impl TraceAgent {
             "llmobs-intake",
             LLM_OBS_SPANS_INTAKE_PATH,
             "llm_obs_spans",
+        )
+        .await
+    }
+
+    async fn handle_debugger_logs_proxy(
+        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        api_key: String,
+        client: reqwest::Client,
+        req: hyper_migration::HttpRequest,
+    ) -> http::Result<hyper_migration::HttpResponse> {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            req,
+            "http-intake.logs",
+            DEBUGGER_LOGS_INTAKE_PATH,
+            "debugger_logs",
         )
         .await
     }

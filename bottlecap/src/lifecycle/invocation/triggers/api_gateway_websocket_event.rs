@@ -65,7 +65,7 @@ impl Trigger for APIGatewayWebSocketEvent {
         debug!("Enriching an Inferred Span for an API Gateway WebSocket Event");
         let resource = &self.request_context.route_key;
         let http_url = format!(
-            "{domain_name}{route_key}",
+            "https://{domain_name}{route_key}",
             domain_name = self.request_context.domain_name,
             route_key = self.request_context.route_key
         );
@@ -117,7 +117,7 @@ impl Trigger for APIGatewayWebSocketEvent {
             (
                 "http.url".to_string(),
                 format!(
-                    "{domain_name}{route_key}",
+                    "https://{domain_name}{route_key}",
                     domain_name = self.request_context.domain_name,
                     route_key = self.request_context.route_key
                 ),
@@ -293,7 +293,7 @@ mod tests {
                 ("resource_names".to_string(), "hello".to_string()),
                 (
                     "http.url".to_string(),
-                    "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()
+                    "https://85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()
                 ),
                 ("operation_name".to_string(), "aws.apigateway".to_string()),
                 ("request_id".to_string(), "ahVmYGOMmjQFhyg=".to_string()),
@@ -318,7 +318,7 @@ mod tests {
         let expected = HashMap::from([
             (
                 "http.url".to_string(),
-                "85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string(),
+                "https://85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string(),
             ),
             ("http.url_details.path".to_string(), "hello".to_string()),
             (
