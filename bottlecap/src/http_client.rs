@@ -32,7 +32,8 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn 
         .tcp_keepalive(Some(Duration::from_secs(120)));
 
     #[cfg(feature = "integration_test")]
-    let client = create_reqwest_client_builder();
+    let client =
+        create_reqwest_client_builder()?.timeout(Duration::from_secs(config.flush_timeout));
 
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
     if let Some(https_uri) = &config.https_proxy {
