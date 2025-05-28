@@ -42,7 +42,7 @@ pub const FD_MAX_METRIC: &str = "aws.lambda.enhanced.fd_max";
 pub const FD_USE_METRIC: &str = "aws.lambda.enhanced.fd_use";
 pub const THREADS_MAX_METRIC: &str = "aws.lambda.enhanced.threads_max";
 pub const THREADS_USE_METRIC: &str = "aws.lambda.enhanced.threads_use";
-pub const SPINDOWNS_METRIC: &str = "aws.lambda.enhanced.spindowns";
+pub const SHUTDOWNS_METRIC: &str = "aws.lambda.enhanced.shutdowns";
 //pub const ASM_INVOCATIONS_METRIC: &str = "aws.lambda.enhanced.asm.invocations";
 pub const ENHANCED_METRICS_ENV_VAR: &str = "DD_ENHANCED_METRICS";
 

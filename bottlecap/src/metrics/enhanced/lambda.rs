@@ -170,7 +170,7 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        self.increment_metric(constants::SPINDOWNS_METRIC, timestamp);
+        self.increment_metric(constants::SHUTDOWNS_METRIC, timestamp);
     }
 
     pub fn set_post_runtime_duration_metric(&self, duration_ms: f64, timestamp: i64) {
