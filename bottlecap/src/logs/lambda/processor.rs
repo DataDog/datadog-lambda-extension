@@ -164,7 +164,7 @@ impl LambdaProcessor {
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
                     if status == Status::Timeout {
-                        message.push_str(format!(" Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0).as_str());
+                        message.push_str(&format!(" Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0));
                     }
                 }
                 // Remove the `request_id` since no more orphan logs will be processed with this one
