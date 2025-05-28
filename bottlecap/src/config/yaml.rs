@@ -35,6 +35,18 @@ impl Config {
     }
 
     #[must_use]
+    pub fn otlp_config_receiver_protocols_grpc(&self) -> Option<&Value> {
+        self.otlp_config
+            .as_ref()?
+            .receiver
+            .as_ref()?
+            .protocols
+            .as_ref()?
+            .grpc
+            .as_ref()
+    }
+
+    #[must_use]
     pub fn otlp_config_traces_enabled(&self) -> bool {
         self.otlp_config.as_ref().is_some_and(|otlp_config| {
             otlp_config
@@ -71,6 +83,19 @@ impl Config {
             .and_then(|otlp_config| otlp_config.traces.as_ref())
             .map(|traces| traces.span_name_remappings.clone())
             .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub fn otlp_config_traces_probabilistic_sampler(&self) -> Option<&Value> {
+        self.otlp_config
+            .as_ref()
+            .and_then(|otlp_config| otlp_config.traces.as_ref())
+            .and_then(|traces| traces.probabilistic_sampler.as_ref())
+    }
+
+    #[must_use]
+    pub fn otlp_config_logs(&self) -> Option<&Value> {
+        self.otlp_config.as_ref().and_then(|otlp_config| otlp_config.logs.as_ref())
     }
 }
 
