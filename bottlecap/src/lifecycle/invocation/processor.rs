@@ -115,6 +115,8 @@ impl Processor {
     pub fn on_invoke_event(&mut self, request_id: String) {
         let invocation_span =
             create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
+        // Important! Call set_init_tags() before additing the invocation to the context buffer
+        self.set_init_tags();
         self.context_buffer
             .start_context(&request_id, invocation_span);
 
@@ -124,7 +126,6 @@ impl Processor {
             .as_secs()
             .try_into()
             .unwrap_or_default();
-        self.set_init_tags();
 
         if self.config.lambda_proc_enhanced_metrics {
             // Collect offsets for network and cpu metrics
