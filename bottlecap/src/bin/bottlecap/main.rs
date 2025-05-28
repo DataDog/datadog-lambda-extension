@@ -329,8 +329,7 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let mut metrics_flusher =
-        start_metrics_flusher(resolved_api_key.clone(), &metrics_aggr, config);
+    let mut metrics_flushers = start_metrics_flusher(&resolved_api_key, &metrics_aggr, config);
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -408,7 +407,7 @@ async fn extension_loop_active(
                     _ = race_flush_interval.tick() => {
                         flush_all(
                             &logs_flusher,
-                            &mut metrics_flusher,
+                            &mut metrics_flushers,
                             &*trace_flusher,
                             &*stats_flusher,
                             &mut race_flush_interval,
@@ -419,7 +418,7 @@ async fn extension_loop_active(
             // flush
             flush_all(
                 &logs_flusher,
-                &mut metrics_flusher,
+                &mut metrics_flushers,
                 &*trace_flusher,
                 &*stats_flusher,
                 &mut race_flush_interval,
@@ -433,7 +432,7 @@ async fn extension_loop_active(
                 // Should flush at the top of the invocation, which is now
                 flush_all(
                     &logs_flusher,
-                    &mut metrics_flusher,
+                    &mut metrics_flushers,
                     &*trace_flusher,
                     &*stats_flusher,
                     &mut race_flush_interval,
@@ -469,7 +468,7 @@ async fn extension_loop_active(
                     _ = race_flush_interval.tick() => {
                         flush_all(
                             &logs_flusher,
-                            &mut metrics_flusher,
+                            &mut metrics_flushers,
                             &*trace_flusher,
                             &*stats_flusher,
                             &mut race_flush_interval,
@@ -500,7 +499,7 @@ async fn extension_loop_active(
             telemetry_listener_cancel_token.cancel();
             flush_all(
                 &logs_flusher,
-                &mut metrics_flusher,
+                &mut metrics_flushers,
                 &*trace_flusher,
                 &*stats_flusher,
                 &mut race_flush_interval,
@@ -513,17 +512,23 @@ async fn extension_loop_active(
 
 async fn flush_all(
     logs_flusher: &LogsFlusher,
-    metrics_flusher: &mut MetricsFlusher,
+    metrics_flushers: &mut [MetricsFlusher],
     trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
+    println!("=== Starting flush_all for {} metrics flushers ===", metrics_flushers.len());
+    let metrics_futures: Vec<_> = metrics_flushers
+        .iter_mut()
+        .map(MetricsFlusher::flush)
+        .collect();
     tokio::join!(
         logs_flusher.flush(),
-        metrics_flusher.flush(),
+        futures::future::join_all(metrics_futures),
         trace_flusher.flush(),
         stats_flusher.flush()
     );
+    println!("=== Completed flush_all ===");
     race_flush_interval.reset();
 }
 
@@ -672,13 +677,15 @@ fn start_logs_agent(
 }
 
 fn start_metrics_flusher(
-    resolved_api_key: String,
+    resolved_api_key: &str,
     metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
     config: &Arc<Config>,
-) -> MetricsFlusher {
-    let metrics_intake_url = if !config.dd_url.is_empty() {
-        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+) -> Vec<MetricsFlusher> {
+    let mut flushers = Vec::new();
 
+    // Create primary flusher
+    let primary_metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
         let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
         MetricsIntakeUrlPrefix::new(None, prefix_override)
     } else if !config.url.is_empty() {
@@ -692,15 +699,42 @@ fn start_metrics_flusher(
         MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
     };
 
-    let flusher_config = MetricsFlusherConfig {
-        api_key: resolved_api_key,
-        aggregator: Arc::clone(metrics_aggr),
-        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
+    let primary_flusher_config = MetricsFlusherConfig {
+        api_key: resolved_api_key.to_string(),
+        aggregator: metrics_aggr.clone(),
+        metrics_intake_url_prefix: primary_metrics_intake_url
+            .expect("can't parse site or override"),
         https_proxy: config.https_proxy.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
         retry_strategy: DsdRetryStrategy::Immediate(3),
     };
-    MetricsFlusher::new(flusher_config)
+    flushers.push(MetricsFlusher::new(primary_flusher_config));
+
+    // Create additional flushers for dual shipping
+    for (endpoint_url, api_keys) in &config.additional_endpoints {
+        println!("=== Additional endpoint URL: {} ===", endpoint_url);
+        let dd_url = DdUrl::new(endpoint_url.clone()).expect("can't parse additional endpoint URL");
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        let metrics_intake_url = MetricsIntakeUrlPrefix::new(None, prefix_override)
+            .expect("can't parse additional endpoint URL");
+
+        // Create a flusher for each API key
+        for api_key in api_keys {
+            let additional_flusher_config = MetricsFlusherConfig {
+                api_key: api_key.clone(),
+                aggregator: metrics_aggr.clone(),
+                metrics_intake_url_prefix: metrics_intake_url.clone(),
+                https_proxy: config.https_proxy.clone(),
+                timeout: Duration::from_secs(config.flush_timeout),
+                retry_strategy: DsdRetryStrategy::Immediate(3),
+            };
+            flushers.push(MetricsFlusher::new(additional_flusher_config));
+        }
+    }
+
+    println!("=== Number of Metrics flushers: {:?} ===", flushers.len());
+
+    flushers
 }
 
 fn start_trace_agent(
