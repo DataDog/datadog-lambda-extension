@@ -1,6 +1,7 @@
 use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
+use crate::FLUSH_RETRY_COUNT;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
@@ -156,7 +157,7 @@ impl Flusher {
                     }
                 }
                 Err(e) => {
-                    if attempts > 3 {
+                    if attempts >= FLUSH_RETRY_COUNT {
                         // After 3 failed attempts, return the original request for later retry
                         // Create a custom error that can be downcast to get the RequestBuilder
                         error!(
