@@ -2,35 +2,22 @@ use crate::config;
 use crate::http_client;
 use crate::logs::aggregator::Aggregator;
 use reqwest::header::HeaderMap;
-use std::fmt;
+use std::error::Error;
 use std::time::Instant;
 use std::{
-    error::Error,
     io::Write,
     sync::{Arc, Mutex},
 };
+use thiserror::Error as ThisError;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
-// Custom error type to hold the failed request for later retry
+#[derive(ThisError, Debug)]
+#[error("{message}")]
 pub struct FailedRequestError {
     pub request: reqwest::RequestBuilder,
     pub message: String,
-}
-
-impl Error for FailedRequestError {}
-
-impl fmt::Debug for FailedRequestError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "FailedRequestError: {}", self.message)
-    }
-}
-
-impl fmt::Display for FailedRequestError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.message)
-    }
 }
 
 #[derive(Debug, Clone)]
