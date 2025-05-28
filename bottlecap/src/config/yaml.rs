@@ -95,7 +95,9 @@ impl Config {
 
     #[must_use]
     pub fn otlp_config_logs(&self) -> Option<&Value> {
-        self.otlp_config.as_ref().and_then(|otlp_config| otlp_config.logs.as_ref())
+        self.otlp_config
+            .as_ref()
+            .and_then(|otlp_config| otlp_config.logs.as_ref())
     }
 }
 
