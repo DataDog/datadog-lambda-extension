@@ -84,13 +84,11 @@ fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigEr
             .is_some()
         || config.otlp_config_logs_enabled;
 
-    let has_otlp_yaml_config = yaml_config.otlp_config.receiver.protocols.grpc.is_some()
+    let has_otlp_yaml_config = yaml_config.otlp_config_receiver_protocols_grpc().is_some()
         || yaml_config
-            .otlp_config
-            .traces
-            .probabilistic_sampler
+            .otlp_config_traces_probabilistic_sampler()
             .is_some()
-        || yaml_config.otlp_config.logs.is_some();
+        || yaml_config.otlp_config_logs().is_some();
 
     if has_otlp_env_config || has_otlp_yaml_config {
         log_fallback_reason("otel");
@@ -208,54 +206,41 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
     // OTLP
     //
     // - Receiver / HTTP
+    let yaml_otlp_config_receiver_protocols_http_endpoint =
+        yaml_config.otlp_config_receiver_protocols_http_endpoint();
     if config
         .otlp_config_receiver_protocols_http_endpoint
         .is_none()
-        && !yaml_config
-            .otlp_config
-            .receiver
-            .protocols
-            .http
-            .endpoint
-            .is_empty()
+        && yaml_otlp_config_receiver_protocols_http_endpoint.is_some()
     {
-        config.otlp_config_receiver_protocols_http_endpoint = Some(
-            yaml_config
-                .otlp_config
-                .receiver
-                .protocols
-                .http
-                .endpoint
-                .clone(),
-        );
+        config.otlp_config_receiver_protocols_http_endpoint =
+            yaml_otlp_config_receiver_protocols_http_endpoint.map(std::string::ToString::to_string);
     }
 
-    if !config.otlp_config_traces_enabled && yaml_config.otlp_config.traces.enabled {
+    if !config.otlp_config_traces_enabled && yaml_config.otlp_config_traces_enabled() {
         config.otlp_config_traces_enabled = true;
     }
 
     if !config.otlp_config_ignore_missing_datadog_fields
-        && yaml_config.otlp_config.traces.ignore_missing_datadog_fields
+        && yaml_config.otlp_config_traces_ignore_missing_datadog_fields()
     {
         config.otlp_config_ignore_missing_datadog_fields = true;
     }
 
     if !config.otlp_config_traces_span_name_as_resource_name
-        && yaml_config.otlp_config.traces.span_name_as_resource_name
+        && yaml_config.otlp_config_traces_span_name_as_resource_name()
     {
         config.otlp_config_traces_span_name_as_resource_name = true;
     }
 
+    let yaml_otlp_config_traces_span_name_remappings =
+        yaml_config.otlp_config_traces_span_name_remappings();
     if config.otlp_config_traces_span_name_remappings.is_empty()
-        && !yaml_config
-            .otlp_config
-            .traces
-            .span_name_remappings
-            .is_empty()
+        && !yaml_otlp_config_traces_span_name_remappings.is_empty()
     {
         config
             .otlp_config_traces_span_name_remappings
-            .clone_from(&yaml_config.otlp_config.traces.span_name_remappings);
+            .clone_from(&yaml_otlp_config_traces_span_name_remappings);
     }
 }
 
