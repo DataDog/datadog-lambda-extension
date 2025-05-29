@@ -127,7 +127,9 @@ impl ShutdownHandles {
         while let Some(retries) = self.log_flush_handles.next().await {
             match retries {
                 Ok(retry) => {
-                    debug!("redriving {:?} log payloads", retry.len());
+                    if !retry.is_empty() {
+                        debug!("redriving {:?} log payloads", retry.len());
+                    }
                     for item in retry {
                         let lf = logs_flusher.clone();
                         match item.try_clone() {
