@@ -155,6 +155,11 @@ impl ShutdownHandles {
             match retries {
                 Ok((series, sketches)) => {
                     if !series.is_empty() || !sketches.is_empty() {
+                        debug!(
+                            "redriving {:?} series and {:?} sketch payloads",
+                            series.len(),
+                            sketches.len()
+                        );
                         let series_clone = series.clone();
                         let sketches_clone = sketches.clone();
                         joinset.spawn(async move {
