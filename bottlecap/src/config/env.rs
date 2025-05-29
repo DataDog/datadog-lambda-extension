@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer};
+use tracing::error;
 use std::collections::HashMap;
 use std::vec;
 
@@ -75,6 +76,8 @@ pub struct Config {
     // Metrics overrides
     pub dd_url: String,
     pub url: String,
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    pub additional_endpoints: HashMap<String, Vec<String>>,
     // OTLP
     //
     // - Traces
@@ -172,6 +175,7 @@ impl Default for Config {
             apm_features: vec![],
             dd_url: String::default(),
             url: String::default(),
+            additional_endpoints: HashMap::new(),
             // OTLP
             //
             // - Receiver
@@ -228,5 +232,21 @@ where
         }
         Value::Number(n) => Ok(Some(n.to_string())),
         _ => Err(serde::de::Error::custom("expected a string or an integer")),
+    }
+}
+
+fn deserialize_additional_endpoints<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = Deserialize::deserialize(deserializer)?;
+    match serde_json::from_str(&s) {
+        Ok(map) => Ok(map),
+        Err(_) => {
+            error!("Failed to deserialize DD_ADDITIONAL_ENDPOINTS");
+            Ok(HashMap::new())
+        }
     }
 }
