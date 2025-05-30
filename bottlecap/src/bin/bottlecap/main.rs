@@ -167,10 +167,12 @@ impl PendingFlushHandles {
                             let mut locked_flushers = mf.lock().await;
                             let mut futures = Vec::new();
                             for flusher in locked_flushers.iter_mut() {
-                                futures.push(flusher.flush_metrics(
-                                    series_clone.clone(),
-                                    sketches_clone.clone()
-                                ));
+                                futures.push(
+                                    flusher.flush_metrics(
+                                        series_clone.clone(),
+                                        sketches_clone.clone(),
+                                    ),
+                                );
                             }
                             futures::future::join_all(futures).await;
                         });
@@ -572,20 +574,22 @@ async fn extension_loop_active(
                         traces_val.flush(None).await.unwrap_or_default()
                     }));
                 let (metrics_flushers, series, sketches) = {
-                    let locked_metrics_flusher = metrics_flusher.lock().await;
+                    let locked_metrics = metrics_flusher.lock().await;
                     let mut aggregator = metrics_aggr.lock().expect("lock poisoned");
-                    let series = aggregator.consume_metrics();
-                    let sketches = aggregator.consume_distributions();
-                    (locked_metrics_flusher.clone(), series, sketches)
+                    (
+                        locked_metrics.clone(),
+                        aggregator.consume_metrics(),
+                        aggregator.consume_distributions(),
+                    )
                 };
                 for mut flusher in metrics_flushers {
                     let series_clone = series.clone();
                     let sketches_clone = sketches.clone();
                     let handle = tokio::spawn(async move {
                         flusher
-                        .flush_metrics(series_clone.clone(), sketches_clone.clone())
-                        .await
-                        .unwrap_or_default()
+                            .flush_metrics(series_clone.clone(), sketches_clone.clone())
+                            .await
+                            .unwrap_or_default()
                     });
                     pending_flush_handles.metric_flush_handles.push_back(handle); 
                 }
@@ -696,7 +700,7 @@ async fn extension_loop_active(
 
 async fn blocking_flush_all(
     logs_flusher: &LogsFlusher,
-    metrics_flusher: &mut Vec<MetricsFlusher>,
+    metrics_flusher: &mut [MetricsFlusher],
     trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
@@ -704,7 +708,10 @@ async fn blocking_flush_all(
 ) {
     let (series, sketches) = {
         let mut aggregator = metrics_aggr.lock().expect("lock poisoned");
-        (aggregator.consume_metrics(), aggregator.consume_distributions())
+        (
+            aggregator.consume_metrics(),
+            aggregator.consume_distributions(),
+        )
     };
     let metrics_futures: Vec<_> = metrics_flusher
         .iter_mut()
@@ -901,7 +908,7 @@ fn start_metrics_flusher(
         retry_strategy: DsdRetryStrategy::Immediate(3),
     };
     flushers.push(MetricsFlusher::new(flusher_config));
-   
+
     for (endpoint_url, api_keys) in &config.additional_endpoints {
         let dd_url = DdUrl::new(endpoint_url.clone()).expect("can't parse additional endpoint URL");
         let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);

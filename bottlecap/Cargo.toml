@@ -57,9 +57,9 @@ datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = 
 datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" , features = ["compression"] }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"  }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "ba26f297f575163930ef8009864dc15872ac64a6", default-features = false }
-datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "ba26f297f575163930ef8009864dc15872ac64a6" }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "ba26f297f575163930ef8009864dc15872ac64a6", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "8613f3df6f584d0f7d95d7f693bce2455693bc3f", default-features = false }
+datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "8613f3df6f584d0f7d95d7f693bce2455693bc3f" }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "8613f3df6f584d0f7d95d7f693bce2455693bc3f", default-features = false }
 axum = { version = "0.8.4", default-features = false, features = ["default"] }
 
 [dev-dependencies]
