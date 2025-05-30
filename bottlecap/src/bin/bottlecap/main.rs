@@ -497,82 +497,39 @@ async fn extension_loop_active(
     let mut shutdown_handles = ShutdownHandles::new();
     let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+    let mut shutdown = false;
     loop {
-        let shutdown;
-
-        let current_flush_decision = flush_control.evaluate_flush_decision();
-        if current_flush_decision == FlushDecision::End {
-            // break loop after runtime done
-            // flush everything
-            // call next
-            // optionally flush after tick for long running invos
-            'flush_end: loop {
-                tokio::select! {
-                biased;
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
-                                break 'flush_end;
+        if !shutdown {
+            let current_flush_decision = flush_control.evaluate_flush_decision();
+            if current_flush_decision == FlushDecision::End {
+                // break loop after runtime done
+                // flush everything
+                // call next
+                // optionally flush after tick for long running invos
+                'flush_end: loop {
+                    tokio::select! {
+                    biased;
+                        Some(event) = event_bus.rx.recv() => {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                    break 'flush_end;
+                                }
                             }
                         }
-                    }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flusher.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                        )
-                        .await;
+                        _ = race_flush_interval.tick() => {
+                            let mut locked_metrics = metrics_flusher.lock().await;
+                            blocking_flush_all(
+                                &logs_flusher,
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &mut race_flush_interval,
+                            )
+                            .await;
+                        }
                     }
                 }
-            }
-            // flush
-            let mut locked_metrics = metrics_flusher.lock().await;
-            blocking_flush_all(
-                &logs_flusher,
-                &mut locked_metrics,
-                &*trace_flusher,
-                &*stats_flusher,
-                &mut race_flush_interval,
-            )
-            .await;
-            let next_response = next_event(client, &r.extension_id).await;
-            shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
-        } else {
-            //Periodic flush scenario, flush at top of invocation
-            if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
-                let tf = trace_flusher.clone();
-                shutdown_handles
-                    .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
-                    .await;
-
-                let val = logs_flusher.clone();
-                shutdown_handles
-                    .log_flush_handles
-                    .push_back(tokio::spawn(async move { val.flush(None).await }));
-                let traces_val = trace_flusher.clone();
-                shutdown_handles
-                    .trace_flush_handles
-                    .push_back(tokio::spawn(async move {
-                        traces_val.flush(None).await.unwrap_or_default()
-                    }));
-                let cloned_metrics_flusher = metrics_flusher.clone();
-                shutdown_handles
-                    .metric_flush_handles
-                    .push_back(tokio::spawn(async move {
-                        cloned_metrics_flusher
-                            .lock()
-                            .await
-                            .flush()
-                            .await
-                            .unwrap_or_default()
-                    }));
-                race_flush_interval.reset();
-            } else if current_flush_decision == FlushDecision::Periodic {
-                // TODO(astuyve): still await the shutdown flush handles
+                // flush
                 let mut locked_metrics = metrics_flusher.lock().await;
                 blocking_flush_all(
                     &logs_flusher,
@@ -582,50 +539,95 @@ async fn extension_loop_active(
                     &mut race_flush_interval,
                 )
                 .await;
-                last_continuous_flush_error = false;
-            }
-            // NO FLUSH SCENARIO
-            // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
-            // If we get platform.runtimeDone or platform.runtimeReport
-            // That's fine, we still wait to break until we get the response from next
-            // and then we break to determine if we'll flush or not
-            let next_lambda_response = next_event(client, &r.extension_id);
-            tokio::pin!(next_lambda_response);
-            'next_invocation: loop {
-                tokio::select! {
-                biased;
-                    next_response = &mut next_lambda_response => {
-                        // Dear reader this is important, you may be tempted to remove this
-                        // after all, why reset the flush interval if we're not flushing?
-                        // It's because the race_flush_interval is only for the RACE FLUSH
-                        // For long-running txns. The call to `flush_control.should_flush_end()`
-                        // has its own interval which is not reset here.
-                        race_flush_interval.reset();
-                        // Thank you for not removing race_flush_interval.reset();
-
-                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
-                        // Need to break here to re-call next
-                        break 'next_invocation;
-                    }
-                    Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
-                    }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flusher.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                        )
+                let next_response = next_event(client, &r.extension_id).await;
+                shutdown =
+                    handle_next_invocation(next_response, invocation_processor.clone()).await;
+            } else {
+                //Periodic flush scenario, flush at top of invocation
+                if current_flush_decision == FlushDecision::Continuous
+                    && !last_continuous_flush_error
+                {
+                    let tf = trace_flusher.clone();
+                    shutdown_handles
+                        .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
                         .await;
+
+                    let val = logs_flusher.clone();
+                    shutdown_handles
+                        .log_flush_handles
+                        .push_back(tokio::spawn(async move { val.flush(None).await }));
+                    let traces_val = trace_flusher.clone();
+                    shutdown_handles
+                        .trace_flush_handles
+                        .push_back(tokio::spawn(async move {
+                            traces_val.flush(None).await.unwrap_or_default()
+                        }));
+                    let cloned_metrics_flusher = metrics_flusher.clone();
+                    shutdown_handles
+                        .metric_flush_handles
+                        .push_back(tokio::spawn(async move {
+                            cloned_metrics_flusher
+                                .lock()
+                                .await
+                                .flush()
+                                .await
+                                .unwrap_or_default()
+                        }));
+                    race_flush_interval.reset();
+                } else if current_flush_decision == FlushDecision::Periodic {
+                    // TODO(astuyve): still await the shutdown flush handles
+                    let mut locked_metrics = metrics_flusher.lock().await;
+                    blocking_flush_all(
+                        &logs_flusher,
+                        &mut locked_metrics,
+                        &*trace_flusher,
+                        &*stats_flusher,
+                        &mut race_flush_interval,
+                    )
+                    .await;
+                    last_continuous_flush_error = false;
+                }
+                // NO FLUSH SCENARIO
+                // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
+                // If we get platform.runtimeDone or platform.runtimeReport
+                // That's fine, we still wait to break until we get the response from next
+                // and then we break to determine if we'll flush or not
+                let next_lambda_response = next_event(client, &r.extension_id);
+                tokio::pin!(next_lambda_response);
+                'next_invocation: loop {
+                    tokio::select! {
+                    biased;
+                        next_response = &mut next_lambda_response => {
+                            // Dear reader this is important, you may be tempted to remove this
+                            // after all, why reset the flush interval if we're not flushing?
+                            // It's because the race_flush_interval is only for the RACE FLUSH
+                            // For long-running txns. The call to `flush_control.should_flush_end()`
+                            // has its own interval which is not reset here.
+                            race_flush_interval.reset();
+                            // Thank you for not removing race_flush_interval.reset();
+
+                            shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                            // Need to break here to re-call next
+                            break 'next_invocation;
+                        }
+                        Some(event) = event_bus.rx.recv() => {
+                            handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        }
+                        _ = race_flush_interval.tick() => {
+                            let mut locked_metrics = metrics_flusher.lock().await;
+                            blocking_flush_all(
+                                &logs_flusher,
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &mut race_flush_interval,
+                            )
+                            .await;
+                        }
                     }
                 }
             }
-        }
-
-        if shutdown {
+        } else {
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             shutdown_handles
