@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer};
-use tracing::error;
 use std::collections::HashMap;
 use std::vec;
+use tracing::error;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use serde_aux::field_attributes::deserialize_bool_from_anything;
@@ -242,11 +242,10 @@ where
     D: Deserializer<'de>,
 {
     let s: String = Deserialize::deserialize(deserializer)?;
-    match serde_json::from_str(&s) {
-        Ok(map) => Ok(map),
-        Err(_) => {
-            error!("Failed to deserialize DD_ADDITIONAL_ENDPOINTS");
-            Ok(HashMap::new())
-        }
+    if let Ok(map) = serde_json::from_str::<HashMap<String, Vec<String>>>(&s) {
+        Ok(map)
+    } else {
+        error!("Failed to deserialize DD_ADDITIONAL_ENDPOINTS");
+        Ok(HashMap::new())
     }
 }
