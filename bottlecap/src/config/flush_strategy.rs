@@ -12,6 +12,7 @@ pub enum FlushStrategy {
     End,
     EndPeriodically(PeriodicStrategy),
     Periodically(PeriodicStrategy),
+    Continuously(PeriodicStrategy),
 }
 
 // Deserialize for FlushStrategy

@@ -16,10 +16,14 @@ pub trait TraceFlusher {
     fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self
     where
         Self: Sized;
-    /// Flushes traces to the Datadog trace intake.
-    async fn send(&self, traces: Vec<SendData>);
+    /// Given a `Vec<SendData>`, a tracer payload, send it to the Datadog intake endpoint.
+    /// Returns the traces back if there was an error sending them.
+    async fn send(&self, traces: Vec<SendData>) -> Option<Vec<SendData>>;
 
-    async fn flush(&self);
+    /// Flushes traces by getting every available batch on the aggregator.
+    /// If `failed_traces` is provided, it will attempt to send those instead of fetching new traces.
+    /// Returns any traces that failed to send and should be retried.
+    async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>>;
 }
 
 #[derive(Clone)]
@@ -35,37 +39,63 @@ impl TraceFlusher for ServerlessTraceFlusher {
         ServerlessTraceFlusher { aggregator, config }
     }
 
-    async fn flush(&self) {
-        let mut guard = self.aggregator.lock().await;
+    async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
+        let mut failed_batch: Option<Vec<SendData>> = None;
 
+        if let Some(traces) = failed_traces {
+            // If we have traces from a previous failed attempt, try to send those first
+            if !traces.is_empty() {
+                debug!("Retrying to send {} previously failed traces", traces.len());
+                let retry_result = self.send(traces).await;
+                if retry_result.is_some() {
+                    // Still failed, return to retry later
+                    return retry_result;
+                }
+            }
+        }
+
+        // Process new traces from the aggregator
+        let mut guard = self.aggregator.lock().await;
         let mut traces = guard.get_batch();
+
         while !traces.is_empty() {
-            self.send(traces).await;
+            if let Some(failed) = self.send(traces).await {
+                // Keep track of the failed batch
+                failed_batch = Some(failed);
+                // Stop processing more batches if we have a failure
+                break;
+            }
 
             traces = guard.get_batch();
         }
+
+        failed_batch
     }
 
-    async fn send(&self, traces: Vec<SendData>) {
+    async fn send(&self, traces: Vec<SendData>) -> Option<Vec<SendData>> {
         if traces.is_empty() {
-            return;
+            return None;
         }
-
         let start = std::time::Instant::now();
         debug!("Flushing {} traces", traces.len());
 
-        for traces in trace_utils::coalesce_send_data(traces) {
-            match traces
+        // Since we return the original traces on error, we need to clone them before coalescing
+        let traces_clone = traces.clone();
+
+        for coalesced_traces in trace_utils::coalesce_send_data(traces) {
+            match coalesced_traces
                 .send_proxy(self.config.https_proxy.as_deref())
                 .await
                 .last_result
             {
-                Ok(_) => debug!("Successfully flushed traces"),
+                Ok(_) => debug!("Flushing traces took {}ms", start.elapsed().as_millis()),
                 Err(e) => {
                     error!("Error sending trace: {e:?}");
+                    // Return the original traces for retry
+                    return Some(traces_clone);
                 }
             }
         }
-        debug!("Flushing traces took {}ms", start.elapsed().as_millis());
+        None
     }
 }
