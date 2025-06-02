@@ -52,7 +52,7 @@ go agent ({{ $flavor.name }}):
   tags: ["arch:amd64"]
   needs: []
   artifacts:
-    expire_in: 1 hr
+    expire_in: 1 week
     paths:
       - .binaries/datadog-agent-{{ $flavor.suffix }}
   variables:
@@ -74,7 +74,7 @@ bottlecap ({{ $flavor.name }}):
   tags: ["arch:amd64"]
   needs: []
   artifacts:
-    expire_in: 1 hr
+    expire_in: 1 week
     paths:
       - .binaries/bottlecap-{{ $flavor.suffix }}
   variables:
@@ -99,7 +99,7 @@ layer ({{ $flavor.name }}):
     - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
   artifacts:
-    expire_in: 1 hr
+    expire_in: 1 week
     paths:
       - .layers/datadog_extension-{{ $flavor.suffix }}.zip
       - .layers/datadog_extension-{{ $flavor.suffix }}/*
@@ -142,7 +142,7 @@ sign layer ({{ $flavor.name }}):
   dependencies:
     - layer ({{ $flavor.name }})
   artifacts: # Re specify artifacts so the modified signed file is passed
-    expire_in: 1 week # Signed layers should expire after 1 week
+    expire_in: 2 weeks # Signed layers should expire after 2 weeks
     paths:
       - .layers/datadog_extension-{{ $flavor.suffix }}.zip
   variables:
@@ -306,7 +306,7 @@ layer bundle:
     - layer ({{ .name }})
     {{ end }} # end flavors
   artifacts:
-    expire_in: 1 hr
+    expire_in: 1 week
     paths:
       - datadog_extension-bundle-${CI_JOB_ID}/
     name: datadog_extension-bundle-${CI_JOB_ID}
@@ -330,7 +330,7 @@ signed layer bundle:
     - sign layer ({{ .name }})
     {{ end }}{{ end }} # end flavors if needs_layer_publish
   artifacts:
-    expire_in: 1 week
+    expire_in: 2 weeks
     paths:
       - datadog_extension-signed-bundle-${CI_JOB_ID}/
     name: datadog_extension-signed-bundle-${CI_JOB_ID}
