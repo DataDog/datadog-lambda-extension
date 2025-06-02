@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 async-trait = { version = "0.1", default-features = false }
+axum = { version = "0.8.4", default-features = false, features = ["default"] }
 bytes = { version = "1.2", default-features = false }
 chrono = { version = "0.4", features = ["serde", "std", "now"], default-features = false }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
@@ -50,7 +51,8 @@ rustls-native-certs = { version = "0.8.1", optional = true }
 # method in favor of our
 # datadog_fips::reqwest_adapter::create_reqwest_client_builder. An example can
 # be found in the clippy.toml file adjacent to this Cargo.toml.
-datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "c89b58e5784b985819baf11f13f7d35876741222"}
+libddwaf = { version = "1.24.1", default-features = false, git = "https://github.com/DataDog/libddwaf-rust", features = ["default"] }
+datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" }
 datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"  }
@@ -60,7 +62,6 @@ datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "b1583da00e202985057cf6d48f05e1cac77ab910", default-features = false }
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "3f3347790d4c7f3393589ef7efb7ccf22405a89a" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "3f3347790d4c7f3393589ef7efb7ccf22405a89a", default-features = false }
-axum = { version = "0.8.4", default-features = false, features = ["default"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }

@@ -45,6 +45,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e16d2d3311acee920a9eb8d33b8cbc1787ce4a264e85f964c2404b969bdcd487"
 
 [[package]]
+name = "arc-swap"
+version = "1.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
+
+[[package]]
 name = "ascii-canvas"
 version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -493,7 +499,7 @@ dependencies = [
  "bytes 1.10.1",
  "chrono",
  "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=3f3347790d4c7f3393589ef7efb7ccf22405a89a)",
- "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/)",
  "datadog-trace-agent",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
@@ -512,6 +518,7 @@ dependencies = [
  "hyper 1.6.0",
  "hyper-util",
  "lazy_static",
+ "libddwaf",
  "log",
  "nix 0.26.4",
  "opentelemetry-proto",
@@ -1912,6 +1919,18 @@ name = "libc"
 version = "0.2.172"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
+
+[[package]]
+name = "libddwaf"
+version = "1.24.1"
+source = "git+https://github.com/DataDog/libddwaf-rust#d492ee9925219b0b7c5374171183b61adb14b412"
+dependencies = [
+ "arc-swap",
+ "bindgen",
+ "cc",
+ "libc",
+ "serde",
+]
 
 [[package]]
 name = "libloading"
