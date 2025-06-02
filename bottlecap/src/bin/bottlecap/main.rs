@@ -181,7 +181,7 @@ impl PendingFlushHandles {
         while let Some(result) = joinset.join_next().await {
             if let Err(e) = result {
                 error!("redrive request error {e:?}");
-                flush_error = true
+                flush_error = true;
             }
         }
         flush_error
