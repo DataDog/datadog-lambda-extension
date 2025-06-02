@@ -84,13 +84,13 @@ use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 
 #[allow(clippy::struct_field_names)]
-struct ShutdownHandles {
+struct PendingFlushHandles {
     trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
     log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
     metric_flush_handles: FuturesOrdered<JoinHandle<(Vec<Series>, Vec<SketchPayload>)>>,
 }
 
-impl ShutdownHandles {
+impl PendingFlushHandles {
     fn new() -> Self {
         Self {
             trace_flush_handles: FuturesOrdered::new(),
@@ -104,8 +104,9 @@ impl ShutdownHandles {
         logs_flusher: &LogsFlusher,
         trace_flusher: &ServerlessTraceFlusher,
         metrics_flusher: &Arc<TokioMutex<MetricsFlusher>>,
-    ) {
+    ) -> bool {
         let mut joinset = tokio::task::JoinSet::new();
+        let mut flush_error = false;
 
         while let Some(retries) = self.trace_flush_handles.next().await {
             match retries {
@@ -180,8 +181,10 @@ impl ShutdownHandles {
         while let Some(result) = joinset.join_next().await {
             if let Err(e) = result {
                 error!("redrive request error {e:?}");
+                flush_error = true
             }
         }
+        flush_error
     }
 }
 
@@ -494,7 +497,7 @@ async fn extension_loop_active(
     );
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
-    let mut shutdown_handles = ShutdownHandles::new();
+    let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
@@ -545,22 +548,23 @@ async fn extension_loop_active(
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
                 let tf = trace_flusher.clone();
-                shutdown_handles
+                // Await any previous flush handles. This
+                last_continuous_flush_error = pending_flush_handles
                     .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
                     .await;
 
                 let val = logs_flusher.clone();
-                shutdown_handles
+                pending_flush_handles
                     .log_flush_handles
                     .push_back(tokio::spawn(async move { val.flush(None).await }));
                 let traces_val = trace_flusher.clone();
-                shutdown_handles
+                pending_flush_handles
                     .trace_flush_handles
                     .push_back(tokio::spawn(async move {
                         traces_val.flush(None).await.unwrap_or_default()
                     }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
-                shutdown_handles
+                pending_flush_handles
                     .metric_flush_handles
                     .push_back(tokio::spawn(async move {
                         cloned_metrics_flusher
@@ -628,7 +632,7 @@ async fn extension_loop_active(
         if shutdown {
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
-            shutdown_handles
+            pending_flush_handles
                 .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
                 .await;
             'shutdown: loop {
