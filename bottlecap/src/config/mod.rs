@@ -1,4 +1,3 @@
-pub mod appsec;
 pub mod apm_replace_rule;
 pub mod aws;
 pub mod env;
@@ -17,8 +16,8 @@ use figment::{providers::Env, Figment};
 
 use crate::config::{
     apm_replace_rule::deserialize_apm_replace_rules,
-    processing_rule::{deserialize_processing_rules, ProcessingRule},
     env::Config as EnvConfig,
+    processing_rule::{deserialize_processing_rules, ProcessingRule},
     yaml::Config as YamlConfig,
 };
 
