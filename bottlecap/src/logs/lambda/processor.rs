@@ -103,6 +103,7 @@ impl LambdaProcessor {
                         None,
                         self.function_arn.clone(),
                         event.time.timestamp_millis(),
+                        None,
                     ));
                 }
 
@@ -125,6 +126,7 @@ impl LambdaProcessor {
                     None,
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
+                    None,
                 ))
             },
             // TODO: check if we could do anything with the fields from `PlatformInitReport`
@@ -153,18 +155,24 @@ impl LambdaProcessor {
                     Some(request_id),
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
+                    None,
                 ))
             },
-            TelemetryRecord::PlatformRuntimeDone { request_id, status, metrics, .. } => {  // TODO: check what to do with rest of the fields
+            TelemetryRecord::PlatformRuntimeDone { request_id, status, metrics, error_type, .. } => {  // TODO: check what to do with rest of the fields
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
                 let mut message = format!("END RequestId: {request_id}"); 
+                let mut result_status = "info".to_string();
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;
                     if status == Status::Timeout {
                         message.push_str(&format!(" Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0));
+                        result_status = "error".to_string();
+                    } else if status == Status::Error {
+                        message.push_str(&format!(" Task failed: {:?}", error_type.unwrap_or_default()));
+                        result_status = "error".to_string();
                     }
                 }
                 // Remove the `request_id` since no more orphan logs will be processed with this one
@@ -175,6 +183,7 @@ impl LambdaProcessor {
                     Some(request_id),
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
+                    Some(result_status),
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
@@ -209,6 +218,7 @@ impl LambdaProcessor {
                     Some(request_id),
                     self.function_arn.clone(),
                     event.time.timestamp_millis(),
+                    None,
                 ))
             },
             // TODO: PlatformInitRuntimeDone
@@ -522,7 +532,7 @@ mod tests {
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
+                    status: "error".to_string(),
                 },
         ),
 
