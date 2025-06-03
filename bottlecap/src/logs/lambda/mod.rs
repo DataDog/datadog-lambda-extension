@@ -43,6 +43,7 @@ impl Message {
         request_id: Option<String>,
         function_arn: String,
         timestamp: i64,
+        status: Option<String>,
     ) -> Message {
         Message {
             message,
@@ -51,7 +52,7 @@ impl Message {
                 request_id,
             },
             timestamp,
-            status: "info".to_string(),
+            status: status.unwrap_or("info".to_string()),
         }
     }
 }

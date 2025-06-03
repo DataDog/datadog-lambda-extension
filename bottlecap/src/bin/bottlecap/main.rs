@@ -638,6 +638,8 @@ async fn extension_loop_active(
             pending_flush_handles
                 .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
                 .await;
+            // The Shutdown event we get during a timeout will
+            // never include a report log
             if shutdown_reason != "timeout" {
                 'shutdown: loop {
                     tokio::select! {
