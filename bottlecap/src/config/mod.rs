@@ -1,3 +1,4 @@
+pub mod appsec;
 pub mod apm_replace_rule;
 pub mod aws;
 pub mod env;
@@ -16,8 +17,8 @@ use figment::{providers::Env, Figment};
 
 use crate::config::{
     apm_replace_rule::deserialize_apm_replace_rules,
-    env::Config as EnvConfig,
     processing_rule::{deserialize_processing_rules, ProcessingRule},
+    env::Config as EnvConfig,
     yaml::Config as YamlConfig,
 };
 
@@ -47,11 +48,6 @@ fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigEr
         return Err(ConfigError::UnsupportedField(
             "extension_version".to_string(),
         ));
-    }
-
-    if config.serverless_appsec_enabled || config.appsec_enabled {
-        log_fallback_reason("appsec_enabled");
-        return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
     }
 
     // OTLP
@@ -256,10 +252,11 @@ pub mod tests {
 
     use super::*;
 
-    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
-    use crate::config::log_level::LogLevel;
-    use crate::config::processing_rule;
-    use crate::config::trace_propagation_style::TracePropagationStyle;
+    use crate::config::{
+        flush_strategy::{FlushStrategy, PeriodicStrategy},
+        log_level::LogLevel,
+        trace_propagation_style::TracePropagationStyle,
+    };
 
     #[test]
     fn test_reject_on_opted_out() {

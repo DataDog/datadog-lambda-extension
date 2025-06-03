@@ -88,14 +88,17 @@ pub struct Config {
     // - Receiver / HTTP
     pub otlp_config_receiver_protocols_http_endpoint: Option<String>,
     //
-    //
-    // Fallback Config
-    pub extension_version: Option<String>,
-    // AppSec
+    // K9 / ASM / AAP
     #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub serverless_appsec_enabled: bool,
     #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub appsec_enabled: bool,
+    pub appsec_rules: Option<String>,
+    pub appsec_waf_timeout: u64,
+    //
+    //
+    // Fallback Config
+    pub extension_version: Option<String>,
     // OTLP
     //
     // - Receiver / GRPC
@@ -182,11 +185,14 @@ impl Default for Config {
             otlp_config_traces_span_name_as_resource_name: false,
             otlp_config_traces_span_name_remappings: HashMap::new(),
             //
-            // Fallback Config (NOT SUPPORTED yet)
-            extension_version: None,
-            // AppSec
+            // K9 / ASM / AAP
             serverless_appsec_enabled: false,
             appsec_enabled: false,
+            appsec_rules: None,
+            appsec_waf_timeout: 1,
+            //
+            // Fallback Config (NOT SUPPORTED yet)
+            extension_version: None,
             // OTLP
             //
             // - Receiver
