@@ -1,4 +1,5 @@
 use crate::{
+    appsec,
     config::{aws::AwsConfig, Config},
     lifecycle::invocation::processor::Processor as InvocationProcessor,
     lwa, EXTENSION_HOST,
@@ -175,7 +176,7 @@ async fn invocation_next_proxy(
     }
 
     // K9 / ASM
-    if config.appsec_enabled || config.serverless_appsec_enabled {
+    if appsec::is_enabled(&config) {
         // TODO: do something here
     }
 
@@ -223,7 +224,7 @@ async fn invocation_response_proxy(
     }
 
     // K9 / ASM
-    if config.appsec_enabled || config.serverless_appsec_enabled {
+    if appsec::is_enabled(&config) {
         // TODO: do something here
     }
 
