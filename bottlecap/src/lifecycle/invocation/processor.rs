@@ -115,7 +115,7 @@ impl Processor {
     pub fn on_invoke_event(&mut self, request_id: String) {
         let invocation_span =
             create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
-        // Important! Call set_init_tags() before additing the invocation to the context buffer
+        // Important! Call set_init_tags() before adding the invocation to the context buffer
         self.set_init_tags();
         self.context_buffer
             .start_context(&request_id, invocation_span);
@@ -558,6 +558,15 @@ impl Processor {
                     .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
             }
         }
+    }
+
+    pub fn on_shutdown_event(&mut self) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs();
+        self.enhanced_metrics
+            .set_shutdown_metric(i64::try_from(now).expect("can't convert now to i64"));
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented

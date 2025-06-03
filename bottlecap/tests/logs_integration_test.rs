@@ -76,7 +76,7 @@ async fn test_logs() {
 
     logs_agent.sync_consume().await;
 
-    let _ = logs_flusher.flush().await;
+    let _ = logs_flusher.flush(None).await;
 
     hello_mock.assert();
 }

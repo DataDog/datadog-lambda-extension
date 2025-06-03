@@ -20,7 +20,8 @@ use bottlecap::{
     events::Event,
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
-        flush_control::FlushControl, invocation::processor::Processor as InvocationProcessor,
+        flush_control::{FlushControl, FlushDecision},
+        invocation::processor::Processor as InvocationProcessor,
         listener::Listener as LifecycleListener,
     },
     logger,
@@ -41,7 +42,7 @@ use bottlecap::{
         stats_aggregator::StatsAggregator,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent, trace_aggregator,
-        trace_flusher::{self, TraceFlusher},
+        trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
@@ -49,6 +50,7 @@ use bottlecap::{
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
+use datadog_protos::metrics::SketchPayload;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
@@ -57,12 +59,13 @@ use dogstatsd::{
     constants::CONTEXTS,
     datadog::{
         DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
-        RetryStrategy as DsdRetryStrategy, Site as MetricsSite,
+        RetryStrategy as DsdRetryStrategy, Series, Site as MetricsSite,
     },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{SortedTags, EMPTY_TAGS},
 };
+use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
@@ -75,10 +78,115 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::sync::{mpsc::Sender, Mutex as TokioMutex};
+use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+
+#[allow(clippy::struct_field_names)]
+struct PendingFlushHandles {
+    trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
+    log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
+    metric_flush_handles: FuturesOrdered<JoinHandle<(Vec<Series>, Vec<SketchPayload>)>>,
+}
+
+impl PendingFlushHandles {
+    fn new() -> Self {
+        Self {
+            trace_flush_handles: FuturesOrdered::new(),
+            log_flush_handles: FuturesOrdered::new(),
+            metric_flush_handles: FuturesOrdered::new(),
+        }
+    }
+
+    async fn await_flush_handles(
+        &mut self,
+        logs_flusher: &LogsFlusher,
+        trace_flusher: &ServerlessTraceFlusher,
+        metrics_flusher: &Arc<TokioMutex<MetricsFlusher>>,
+    ) -> bool {
+        let mut joinset = tokio::task::JoinSet::new();
+        let mut flush_error = false;
+
+        while let Some(retries) = self.trace_flush_handles.next().await {
+            match retries {
+                Ok(retry) => {
+                    let tf = trace_flusher.clone();
+                    if !retry.is_empty() {
+                        debug!("redriving {:?} trace payloads", retry.len());
+                        joinset.spawn(async move {
+                            tf.flush(Some(retry)).await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("redrive trace error {e:?}");
+                }
+            }
+        }
+
+        while let Some(retries) = self.log_flush_handles.next().await {
+            match retries {
+                Ok(retry) => {
+                    if !retry.is_empty() {
+                        debug!("redriving {:?} log payloads", retry.len());
+                    }
+                    for item in retry {
+                        let lf = logs_flusher.clone();
+                        match item.try_clone() {
+                            Some(item_clone) => {
+                                joinset.spawn(async move {
+                                    lf.flush(Some(item_clone)).await;
+                                });
+                            }
+                            None => {
+                                error!("can't clone redrive log payloads");
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("redrive log error {e:?}");
+                }
+            }
+        }
+
+        while let Some(retries) = self.metric_flush_handles.next().await {
+            let mf = metrics_flusher.clone();
+            match retries {
+                Ok((series, sketches)) => {
+                    if !series.is_empty() || !sketches.is_empty() {
+                        debug!(
+                            "redriving {:?} series and {:?} sketch payloads",
+                            series.len(),
+                            sketches.len()
+                        );
+                        let series_clone = series.clone();
+                        let sketches_clone = sketches.clone();
+                        joinset.spawn(async move {
+                            let mut locked_flusher = mf.lock().await;
+                            locked_flusher
+                                .flush_with_retries(Some(series_clone), Some(sketches_clone))
+                                .await;
+                        });
+                    }
+                }
+                Err(e) => {
+                    error!("redrive metrics error {e:?}");
+                }
+            }
+        }
+
+        // Wait for all flush join operations to complete
+        while let Some(result) = joinset.join_next().await {
+            if let Err(e) = result {
+                error!("redrive request error {e:?}");
+                flush_error = true;
+            }
+        }
+        flush_error
+    }
+}
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -329,8 +437,11 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
-    let mut metrics_flusher =
-        start_metrics_flusher(resolved_api_key.clone(), &metrics_aggr, config);
+    let metrics_flusher = Arc::new(TokioMutex::new(start_metrics_flusher(
+        resolved_api_key.clone(),
+        &metrics_aggr,
+        config,
+    )));
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -374,7 +485,8 @@ async fn extension_loop_active(
         trace_agent_channel.clone(),
     );
 
-    let mut flush_control = FlushControl::new(config.serverless_flush_strategy);
+    let mut flush_control =
+        FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
 
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
@@ -385,12 +497,14 @@ async fn extension_loop_active(
     );
     // first invoke we must call next
     let next_lambda_response = next_event(client, &r.extension_id).await;
-
+    let mut pending_flush_handles = PendingFlushHandles::new();
+    let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let shutdown;
 
-        if flush_control.should_flush_end() {
+        let current_flush_decision = flush_control.evaluate_flush_decision();
+        if current_flush_decision == FlushDecision::End {
             // break loop after runtime done
             // flush everything
             // call next
@@ -406,20 +520,23 @@ async fn extension_loop_active(
                         }
                     }
                     _ = race_flush_interval.tick() => {
-                        flush_all(
+                        let mut locked_metrics = metrics_flusher.lock().await;
+                        blocking_flush_all(
                             &logs_flusher,
-                            &mut metrics_flusher,
+                            &mut locked_metrics,
                             &*trace_flusher,
                             &*stats_flusher,
                             &mut race_flush_interval,
-                        ).await;
+                        )
+                        .await;
                     }
                 }
             }
             // flush
-            flush_all(
+            let mut locked_metrics = metrics_flusher.lock().await;
+            blocking_flush_all(
                 &logs_flusher,
-                &mut metrics_flusher,
+                &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
                 &mut race_flush_interval,
@@ -429,16 +546,47 @@ async fn extension_loop_active(
             shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
-            if flush_control.should_periodic_flush() {
-                // Should flush at the top of the invocation, which is now
-                flush_all(
+            if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
+                let tf = trace_flusher.clone();
+                // Await any previous flush handles. This
+                last_continuous_flush_error = pending_flush_handles
+                    .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
+                    .await;
+
+                let val = logs_flusher.clone();
+                pending_flush_handles
+                    .log_flush_handles
+                    .push_back(tokio::spawn(async move { val.flush(None).await }));
+                let traces_val = trace_flusher.clone();
+                pending_flush_handles
+                    .trace_flush_handles
+                    .push_back(tokio::spawn(async move {
+                        traces_val.flush(None).await.unwrap_or_default()
+                    }));
+                let cloned_metrics_flusher = metrics_flusher.clone();
+                pending_flush_handles
+                    .metric_flush_handles
+                    .push_back(tokio::spawn(async move {
+                        cloned_metrics_flusher
+                            .lock()
+                            .await
+                            .flush()
+                            .await
+                            .unwrap_or_default()
+                    }));
+                race_flush_interval.reset();
+            } else if current_flush_decision == FlushDecision::Periodic {
+                // TODO(astuyve): still await the shutdown flush handles
+                let mut locked_metrics = metrics_flusher.lock().await;
+                blocking_flush_all(
                     &logs_flusher,
-                    &mut metrics_flusher,
+                    &mut locked_metrics,
                     &*trace_flusher,
                     &*stats_flusher,
                     &mut race_flush_interval,
                 )
                 .await;
+                last_continuous_flush_error = false;
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
@@ -467,23 +615,30 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        flush_all(
+                        let mut locked_metrics = metrics_flusher.lock().await;
+                        blocking_flush_all(
                             &logs_flusher,
-                            &mut metrics_flusher,
+                            &mut locked_metrics,
                             &*trace_flusher,
                             &*stats_flusher,
                             &mut race_flush_interval,
-                        ).await;
+                        )
+                        .await;
                     }
                 }
             }
         }
 
         if shutdown {
+            // Redrive/block on any failed payloads
+            let tf = trace_flusher.clone();
+            pending_flush_handles
+                .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
+                .await;
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
                                 // Wait for the report event before shutting down
                                 break 'shutdown;
@@ -498,9 +653,12 @@ async fn extension_loop_active(
             }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
-            flush_all(
+
+            // gotta lock here
+            let mut locked_metrics = metrics_flusher.lock().await;
+            blocking_flush_all(
                 &logs_flusher,
-                &mut metrics_flusher,
+                &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
                 &mut race_flush_interval,
@@ -511,7 +669,7 @@ async fn extension_loop_active(
     }
 }
 
-async fn flush_all(
+async fn blocking_flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flusher: &mut MetricsFlusher,
     trace_flusher: &impl TraceFlusher,
@@ -519,9 +677,9 @@ async fn flush_all(
     race_flush_interval: &mut tokio::time::Interval,
 ) {
     tokio::join!(
-        logs_flusher.flush(),
+        logs_flusher.flush(None),
         metrics_flusher.flush(),
-        trace_flusher.flush(),
+        trace_flusher.flush(None),
         stats_flusher.flush()
     );
     race_flush_interval.reset();
@@ -623,6 +781,8 @@ async fn handle_next_invocation(
             shutdown_reason,
             deadline_ms,
         }) => {
+            let mut p = invocation_processor.lock().await;
+            p.on_shutdown_event();
             println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
             true
         }
