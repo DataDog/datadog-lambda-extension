@@ -499,7 +499,7 @@ dependencies = [
  "bytes 1.10.1",
  "chrono",
  "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=3f3347790d4c7f3393589ef7efb7ccf22405a89a)",
- "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/)",
+ "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "datadog-trace-agent",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
