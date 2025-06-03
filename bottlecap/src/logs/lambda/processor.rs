@@ -171,7 +171,7 @@ impl LambdaProcessor {
                         message.push_str(&format!(" Task timed out after {:.2} seconds", metrics.duration_ms / 1000.0));
                         result_status = "error".to_string();
                     } else if status == Status::Error {
-                        message.push_str(&format!(" Task failed: {error_type:?}"));
+                        message.push_str(&format!(" Task failed: {:?}", error_type.unwrap_or_default()));
                         result_status = "error".to_string();
                     }
                 }
