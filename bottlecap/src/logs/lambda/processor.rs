@@ -532,7 +532,7 @@ mod tests {
                         request_id: Some("test-request-id".to_string()),
                     },
                     timestamp: 1_673_061_827_000,
-                    status: "info".to_string(),
+                    status: "error".to_string(),
                 },
         ),
 
