@@ -496,12 +496,11 @@ async fn extension_loop_active(
         start_time.elapsed().as_millis().to_string()
     );
     // first invoke we must call next
-    let next_lambda_response = next_event(client, &r.extension_id).await;
     let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
-    handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+    handle_next_invocation(client, &r.extension_id, invocation_processor.clone()).await;
     loop {
-        let shutdown;
+        let maybe_shutdown_event;
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
         if current_flush_decision == FlushDecision::End {
@@ -542,8 +541,8 @@ async fn extension_loop_active(
                 &mut race_flush_interval,
             )
             .await;
-            let next_response = next_event(client, &r.extension_id).await;
-            shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+            maybe_shutdown_event =
+                handle_next_invocation(client, &r.extension_id, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
@@ -593,7 +592,8 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
-            let next_lambda_response = next_event(client, &r.extension_id);
+            let next_lambda_response =
+                handle_next_invocation(client, &r.extension_id, invocation_processor.clone());
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
                 tokio::select! {
@@ -607,7 +607,7 @@ async fn extension_loop_active(
                         race_flush_interval.reset();
                         // Thank you for not removing race_flush_interval.reset();
 
-                        shutdown = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                        maybe_shutdown_event= next_response;
                         // Need to break here to re-call next
                         break 'next_invocation;
                     }
@@ -629,19 +629,24 @@ async fn extension_loop_active(
             }
         }
 
-        if shutdown {
+        if let NextEventResponse::Shutdown {
+            shutdown_reason, ..
+        } = maybe_shutdown_event
+        {
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
                 .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
                 .await;
-            'shutdown: loop {
-                tokio::select! {
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                            if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
-                                // Wait for the report event before shutting down
-                                break 'shutdown;
+            if shutdown_reason != "timeout" {
+                'shutdown: loop {
+                    tokio::select! {
+                        Some(event) = event_bus.rx.recv() => {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                                if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
+                                    // Wait for the report event before shutting down
+                                    break 'shutdown;
+                                }
                             }
                         }
                     }
@@ -759,39 +764,44 @@ async fn handle_event_bus_event(
 }
 
 async fn handle_next_invocation(
-    next_response: Result<NextEventResponse>,
+    client: &Client,
+    ext_id: &str,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
-) -> bool {
+) -> NextEventResponse {
+    let next_response = next_event(client, ext_id).await;
     match next_response {
         Ok(NextEventResponse::Invoke {
-            request_id,
+            ref request_id,
             deadline_ms,
-            invoked_function_arn,
+            ref invoked_function_arn,
         }) => {
             debug!(
                 "Invoke event {}; deadline: {}, invoked_function_arn: {}",
-                request_id, deadline_ms, invoked_function_arn
+                request_id.clone(),
+                deadline_ms,
+                invoked_function_arn.clone()
             );
             let mut p = invocation_processor.lock().await;
-            p.on_invoke_event(request_id);
+            p.on_invoke_event(request_id.into());
             drop(p);
-            false
         }
         Ok(NextEventResponse::Shutdown {
-            shutdown_reason,
+            ref shutdown_reason,
             deadline_ms,
         }) => {
             let mut p = invocation_processor.lock().await;
             p.on_shutdown_event();
             println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
-            true
         }
-        Err(err) => {
+        Err(ref err) => {
             eprintln!("Error: {err:?}");
             println!("Exiting");
-            true
         }
     }
+    next_response.unwrap_or(NextEventResponse::Shutdown {
+        shutdown_reason: "panic".into(),
+        deadline_ms: 0,
+    })
 }
 
 fn setup_tag_provider(
