@@ -17,6 +17,7 @@
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::needless_pass_by_value)]
 
+pub mod appsec;
 pub mod config;
 pub mod event_bus;
 pub mod events;

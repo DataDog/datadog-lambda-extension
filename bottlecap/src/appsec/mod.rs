@@ -2,7 +2,7 @@ use std::env;
 
 use crate::config::Config;
 
-// pub mod processor;
+pub mod processor;
 
 #[must_use]
 pub fn is_enabled(config: &Config) -> bool {
