@@ -495,10 +495,11 @@ async fn extension_loop_active(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
+    let next_lambda_response = next_event(client, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
-    handle_next_invocation(client, &r.extension_id, invocation_processor.clone()).await;
+    handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let maybe_shutdown_event;
 
@@ -541,8 +542,9 @@ async fn extension_loop_active(
                 &mut race_flush_interval,
             )
             .await;
+            let next_response = next_event(client, &r.extension_id).await;
             maybe_shutdown_event =
-                handle_next_invocation(client, &r.extension_id, invocation_processor.clone()).await;
+                handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
@@ -592,8 +594,7 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
-            let next_lambda_response =
-                handle_next_invocation(client, &r.extension_id, invocation_processor.clone());
+            let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
                 tokio::select! {
@@ -607,7 +608,7 @@ async fn extension_loop_active(
                         race_flush_interval.reset();
                         // Thank you for not removing race_flush_interval.reset();
 
-                        maybe_shutdown_event= next_response;
+                        maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
                         break 'next_invocation;
                     }
@@ -766,11 +767,9 @@ async fn handle_event_bus_event(
 }
 
 async fn handle_next_invocation(
-    client: &Client,
-    ext_id: &str,
+    next_response: Result<NextEventResponse>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
 ) -> NextEventResponse {
-    let next_response = next_event(client, ext_id).await;
     match next_response {
         Ok(NextEventResponse::Invoke {
             ref request_id,
