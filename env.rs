@@ -135,7 +135,7 @@ impl Default for Config {
             api_key_secret_arn: String::default(),
             kms_api_key: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
-            flush_timeout: 10,
+            flush_timeout: 30,
             // Unified Tagging
             env: None,
             service: None,
