@@ -242,6 +242,13 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
             .otlp_config_traces_span_name_remappings
             .clone_from(&yaml_otlp_config_traces_span_name_remappings);
     }
+
+    // Dual Shipping
+    //
+    // - Metrics
+    if config.additional_endpoints.is_empty() {
+        config.additional_endpoints = yaml_config.additional_endpoints.clone();
+    }
 }
 
 #[inline]
