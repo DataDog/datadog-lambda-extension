@@ -247,7 +247,9 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
     //
     // - Metrics
     if config.additional_endpoints.is_empty() {
-        config.additional_endpoints = yaml_config.additional_endpoints.clone();
+        config
+            .additional_endpoints
+            .clone_from(&yaml_config.additional_endpoints);
     }
 }
 

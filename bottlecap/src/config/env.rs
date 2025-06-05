@@ -235,12 +235,14 @@ where
     }
 }
 
-pub (crate) fn deserialize_additional_endpoints<'de, D>(deserializer: D) -> Result<HashMap<String, Vec<String>>, D::Error>
+pub(crate) fn deserialize_additional_endpoints<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, Vec<String>>, D::Error>
 where
     D: Deserializer<'de>,
 {
     let value = Value::deserialize(deserializer)?;
-    
+
     match value {
         Value::Object(map) => {
             // For YAML format (object) in datadog.yaml
@@ -263,12 +265,11 @@ where
         }
         Value::String(s) if !s.is_empty() => {
             // For JSON format (string) in DD_ADDITIONAL_ENDPOINTS
-            match serde_json::from_str(&s) {
-                Ok(map) => Ok(map),
-                _ => {
-                    error!("Failed to deserialize additional endpoints - Invalid JSON format");
-                    Ok(HashMap::new())
-                }
+            if let Ok(map) = serde_json::from_str(&s) {
+                Ok(map)
+            } else {
+                error!("Failed to deserialize additional endpoints - Invalid JSON format");
+                Ok(HashMap::new())
             }
         }
         _ => Ok(HashMap::new()),

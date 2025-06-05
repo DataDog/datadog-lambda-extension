@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use crate::config::{deserialize_apm_replace_rules, deserialize_processing_rules, ProcessingRule};
 use crate::config::env::deserialize_additional_endpoints;
+use crate::config::{deserialize_apm_replace_rules, deserialize_processing_rules, ProcessingRule};
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use serde::Deserialize;
 use serde_aux::field_attributes::deserialize_bool_from_anything;
@@ -224,8 +224,8 @@ pub struct OtlpTracesConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
     use std::collections::HashMap;
+    use std::path::Path;
 
     use crate::config::get_config;
 
@@ -254,7 +254,7 @@ mod tests {
             Ok(())
         });
     }
-    
+
     #[test]
     fn test_parse_additional_endpoints_from_yaml() {
         figment::Jail::expect_with(|jail| {
@@ -273,8 +273,14 @@ additional_endpoints:
 
             let config = get_config(Path::new("")).expect("should parse config");
             let mut expected = HashMap::new();
-            expected.insert("https://app.datadoghq.com".to_string(), vec!["apikey2".to_string(), "apikey3".to_string()]);
-            expected.insert("https://app.datadoghq.eu".to_string(), vec!["apikey4".to_string()]);
+            expected.insert(
+                "https://app.datadoghq.com".to_string(),
+                vec!["apikey2".to_string(), "apikey3".to_string()],
+            );
+            expected.insert(
+                "https://app.datadoghq.eu".to_string(),
+                vec!["apikey4".to_string()],
+            );
             assert_eq!(config.additional_endpoints, expected);
             Ok(())
         });
