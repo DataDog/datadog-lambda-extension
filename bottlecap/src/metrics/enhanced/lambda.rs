@@ -3,7 +3,7 @@ use crate::metrics::enhanced::{
     statfs::statfs_info,
 };
 use crate::proc::{self, CPUData, NetworkData};
-use crate::telemetry::events::{ReportMetrics, RuntimeDoneMetrics};
+use crate::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
 use dogstatsd::metric;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator::Aggregator, metric::SortedTags};
@@ -86,10 +86,17 @@ impl Lambda {
         self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
     }
 
-    pub fn set_init_duration_metric(&self, init_duration_ms: f64, timestamp: i64) {
+    pub fn set_init_duration_metric(
+        &mut self,
+        init_type: InitType,
+        init_duration_ms: f64,
+        timestamp: i64,
+    ) {
         if !self.config.enhanced_metrics {
             return;
         }
+        self.dynamic_value_tags
+            .insert(String::from("init_type"), init_type.to_string());
         let metric = Metric::new(
             constants::INIT_DURATION_METRIC.into(),
             MetricValue::distribution(init_duration_ms * constants::MS_TO_SEC),
@@ -856,7 +863,7 @@ mod tests {
             enhanced_metrics: false,
             ..no_config.as_ref().clone()
         });
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -866,7 +873,7 @@ mod tests {
         lambda.increment_invocation_metric(now);
         lambda.increment_errors_metric(now);
         lambda.increment_timeout_metric(now);
-        lambda.set_init_duration_metric(100.0, now);
+        lambda.set_init_duration_metric(InitType::OnDemand, 100.0, now);
         lambda.set_runtime_done_metrics(
             &RuntimeDoneMetrics {
                 duration_ms: 100.0,

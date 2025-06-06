@@ -717,9 +717,17 @@ async fn handle_event_bus_event(
                     p.on_platform_init_start(event.time);
                     drop(p);
                 }
-                TelemetryRecord::PlatformInitReport { metrics, .. } => {
+                TelemetryRecord::PlatformInitReport {
+                    metrics,
+                    initialization_type,
+                    ..
+                } => {
                     let mut p = invocation_processor.lock().await;
-                    p.on_platform_init_report(metrics.duration_ms, event.time.timestamp());
+                    p.on_platform_init_report(
+                        initialization_type,
+                        metrics.duration_ms,
+                        event.time.timestamp(),
+                    );
                     drop(p);
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {

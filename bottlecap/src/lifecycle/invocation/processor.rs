@@ -25,7 +25,7 @@ use crate::{
         CPUData, NetworkData,
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
-    telemetry::events::{ReportMetrics, RuntimeDoneMetrics, Status},
+    telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{
@@ -243,9 +243,14 @@ impl Processor {
     /// Given the duration of the platform init report, set the init duration metric.
     ///
     #[allow(clippy::cast_possible_truncation)]
-    pub fn on_platform_init_report(&mut self, duration_ms: f64, timestamp: i64) {
+    pub fn on_platform_init_report(
+        &mut self,
+        init_type: InitType,
+        duration_ms: f64,
+        timestamp: i64,
+    ) {
         self.enhanced_metrics
-            .set_init_duration_metric(duration_ms, timestamp);
+            .set_init_duration_metric(init_type, duration_ms, timestamp);
 
         let Some(context) = self.context_buffer.get_closest_mut(timestamp) else {
             debug!("Cannot process on platform init report, no invocation context found");

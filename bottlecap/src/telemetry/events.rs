@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 
 use serde::Deserialize;
 use serde_json::Value;
+use std::fmt::Display;
 
 /// Payload received from the Telemetry API
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -161,6 +162,17 @@ pub enum InitType {
     ProvisionedConcurrency,
     /// `SnapStart`
     SnapStart,
+}
+
+impl Display for InitType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let style = match self {
+            InitType::OnDemand => "on-demand",
+            InitType::ProvisionedConcurrency => "provisioned-concurrency",
+            InitType::SnapStart => "SnapStart",
+        };
+        write!(f, "{style}")
+    }
 }
 
 /// Phase in which initialization occurs
