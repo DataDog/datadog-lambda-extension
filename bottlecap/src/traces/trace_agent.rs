@@ -29,6 +29,7 @@ use datadog_trace_agent::http_utils::{
 };
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
+use datadog_trace_utils::tracer_header_tags::TracerHeaderTags;
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -378,7 +379,7 @@ impl TraceAgent {
             return response;
         }
 
-        let tracer_header_tags = (&parts.headers).into();
+        let headers_clone = parts.headers.clone();
 
         let (body_size, mut traces) = match version {
             ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
@@ -400,63 +401,85 @@ impl TraceAgent {
                 }
             },
         };
-        let mut reparenting_info = {
-            let invocation_processor = invocation_processor.lock().await;
-            invocation_processor.get_reparenting_info()
-        };
 
-        for chunk in &mut traces {
-            for span in chunk.iter_mut() {
-                // If the aws.lambda.load span is found, we're in Python or Node.
-                // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
-                // span to the cold start span, and eventually send the cold start span.
-                if span.name == LAMBDA_LOAD_SPAN {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    if let Some(cold_start_span_id) =
-                        invocation_processor.set_cold_start_span_trace_id(span.trace_id)
-                    {
-                        span.parent_id = cold_start_span_id;
-                    }
-                }
-
-                if span.resource == INVOCATION_SPAN_RESOURCE {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    invocation_processor.add_tracer_span(span);
-                }
-                handle_reparenting(&mut reparenting_info, span);
-            }
-        }
-
-        {
-            let mut invocation_processor = invocation_processor.lock().await;
-            for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
-                debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
-                invocation_processor
-                    .send_ctx_spans(&tags_provider, &trace_processor, &trace_tx, ctx_to_send)
-                    .await;
-            }
-        }
-
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
+        // Process the traces asynchronously but immediately return a response
+        // First, prepare a successful response to return immediately
+        let response = log_and_create_traces_success_http_response(
+            "Successfully received traces for processing.",
+            StatusCode::OK,
         );
 
-        // send trace payload to our trace flusher
-        match trace_tx.send(send_data).await {
-            Ok(()) => log_and_create_traces_success_http_response(
-                "Successfully buffered traces to be flushed.",
-                StatusCode::OK,
-            ),
-            Err(err) => log_and_create_http_response(
-                &format!("Error sending traces to the trace flusher: {err}"),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            ),
-        }
+        // Clone necessary dependencies for the async task
+        let trace_processor_clone = trace_processor.clone();
+        let invocation_processor_clone = invocation_processor.clone();
+        let tags_provider_clone = tags_provider.clone();
+        let trace_tx_clone = trace_tx.clone();
+        let config_clone = config.clone();
+
+        // Spawn a tokio task to handle the heavy processing work asynchronously
+        tokio::spawn(async move {
+            let mut reparenting_info = {
+                let invocation_processor = invocation_processor_clone.lock().await;
+                invocation_processor.get_reparenting_info()
+            };
+
+            for chunk in &mut traces {
+                for span in chunk.iter_mut() {
+                    // If the aws.lambda.load span is found, we're in Python or Node.
+                    // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
+                    // span to the cold start span, and eventually send the cold start span.
+                    if span.name == LAMBDA_LOAD_SPAN {
+                        let mut invocation_processor = invocation_processor_clone.lock().await;
+                        if let Some(cold_start_span_id) =
+                            invocation_processor.set_cold_start_span_trace_id(span.trace_id)
+                        {
+                            span.parent_id = cold_start_span_id;
+                        }
+                    }
+
+                    if span.resource == INVOCATION_SPAN_RESOURCE {
+                        let mut invocation_processor = invocation_processor_clone.lock().await;
+                        invocation_processor.add_tracer_span(span);
+                    }
+                    handle_reparenting(&mut reparenting_info, span);
+                }
+            }
+
+            {
+                let mut invocation_processor = invocation_processor_clone.lock().await;
+                for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
+                    debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
+                    invocation_processor
+                        .send_ctx_spans(
+                            &tags_provider_clone,
+                            &trace_processor_clone,
+                            &trace_tx_clone,
+                            ctx_to_send,
+                        )
+                        .await;
+                }
+            }
+
+            // Create tracer header tags inside the task from the cloned headers
+            let tracer_header_tags: TracerHeaderTags = (&headers_clone).into();
+
+            let send_data = trace_processor_clone.process_traces(
+                config_clone,
+                tags_provider_clone,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            );
+
+            // send trace payload to our trace flusher
+            if let Err(err) = trace_tx_clone.send(send_data).await {
+                error!("Error sending traces to the trace flusher: {err}");
+            }
+        });
+
+        // Return the response immediately while processing continues in the background
+        response
     }
 
     fn info_handler() -> http::Result<hyper_migration::HttpResponse> {
