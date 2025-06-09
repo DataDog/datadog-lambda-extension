@@ -275,3 +275,75 @@ where
         _ => Ok(HashMap::new()),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_deserialize_additional_endpoints_yaml() {
+        // Test YAML format (object)
+        let input = json!({
+            "https://app.datadoghq.com": ["key1", "key2"],
+            "https://app.datadoghq.eu": ["key3"]
+        });
+
+        let result = deserialize_additional_endpoints(input).unwrap();
+
+        let mut expected = HashMap::new();
+        expected.insert(
+            "https://app.datadoghq.com".to_string(),
+            vec!["key1".to_string(), "key2".to_string()],
+        );
+        expected.insert(
+            "https://app.datadoghq.eu".to_string(),
+            vec!["key3".to_string()],
+        );
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_deserialize_additional_endpoints_json() {
+        // Test JSON string format
+        let input = json!("{\"https://app.datadoghq.com\":[\"key1\",\"key2\"],\"https://app.datadoghq.eu\":[\"key3\"]}");
+
+        let result = deserialize_additional_endpoints(input).unwrap();
+
+        let mut expected = HashMap::new();
+        expected.insert(
+            "https://app.datadoghq.com".to_string(),
+            vec!["key1".to_string(), "key2".to_string()],
+        );
+        expected.insert(
+            "https://app.datadoghq.eu".to_string(),
+            vec!["key3".to_string()],
+        );
+
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_deserialize_additional_endpoints_invalid_or_empty() {
+        // Test empty YAML
+        let input = json!({});
+        let result = deserialize_additional_endpoints(input).unwrap();
+        assert!(result.is_empty());
+
+        // Test empty JSON
+        let input = json!("");
+        let result = deserialize_additional_endpoints(input).unwrap();
+        assert!(result.is_empty());
+
+        let input = json!({
+            "https://app.datadoghq.com": "invalid-yaml"
+        });
+        let result = deserialize_additional_endpoints(input).unwrap();
+        assert!(result.is_empty());
+
+        let input = json!("invalid-json");
+        let result = deserialize_additional_endpoints(input).unwrap();
+        assert!(result.is_empty());
+    }
+}
