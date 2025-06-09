@@ -58,6 +58,11 @@ impl Lambda {
             .insert(String::from("runtime"), runtime.to_string());
     }
 
+    pub fn set_version_tag(&mut self, function_version: String) {
+        self.dynamic_value_tags
+            .insert(String::from("function_version"), function_version);
+    }
+
     fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
         let vec_tags: Vec<String> = self
             .dynamic_value_tags

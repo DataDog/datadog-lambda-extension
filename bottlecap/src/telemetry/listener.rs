@@ -146,6 +146,7 @@ mod tests {
             DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").expect("failed to parse time");
         assert_eq!(telemetry_event.time, expected_time);
         assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
+            function_version: Some("$LATEST".to_string()),
             initialization_type: InitType::OnDemand,
             phase: InitPhase::Init,
             runtime_version: Some("nodejs:20.v22".to_string()),

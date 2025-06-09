@@ -71,6 +71,7 @@ pub struct Processor {
     /// from the proc filesystem, it's not possible to know the
     /// runtime before the first invocation.
     runtime: Option<String>,
+    version: Option<String>,
     config: Arc<config::Config>,
     service: String,
     resource: String,
@@ -103,6 +104,7 @@ impl Processor {
             aws_config: aws_config.clone(),
             tracer_detected: false,
             runtime: None,
+            version: None,
             config: Arc::clone(&config),
             service,
             resource,
@@ -214,7 +216,11 @@ impl Processor {
     ///
     /// This is used to create a cold start span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the cold start.
-    pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
+    pub fn on_platform_init_start(
+        &mut self,
+        function_version: Option<String>,
+        time: DateTime<Utc>,
+    ) {
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -238,6 +244,15 @@ impl Processor {
         cold_start_span.start = start_time;
 
         context.cold_start_span = Some(cold_start_span);
+        if let Some(mut version) = function_version {
+            if version == "$LATEST" {
+                version = "LATEST".to_string();
+            }
+            self.version = Some(version.clone());
+            self.dynamic_tags
+                .insert(String::from("function_version"), version.clone());
+            self.enhanced_metrics.set_version_tag(version);
+        }
     }
 
     /// Given the duration of the platform init report, set the init duration metric.

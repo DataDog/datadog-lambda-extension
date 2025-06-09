@@ -451,6 +451,7 @@ mod tests {
                 record: TelemetryRecord::PlatformInitStart {
                     runtime_version: Some("test-runtime-version".to_string()),
                     runtime_version_arn: Some("test-runtime-version-arn".to_string()),
+                    function_version: Some("$LATEST".to_string()),
                     initialization_type: InitType::OnDemand,
                     phase: InitPhase::Init,
                 }

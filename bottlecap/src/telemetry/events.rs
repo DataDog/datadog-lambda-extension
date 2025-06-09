@@ -35,6 +35,7 @@ pub enum TelemetryRecord {
         runtime_version: Option<String>,
         /// Lambda runtime version ARN
         runtime_version_arn: Option<String>,
+        function_version: Option<String>,
     },
 
     /// Platform init runtime done record
@@ -280,6 +281,7 @@ mod tests {
                 phase: InitPhase::Init,
                 runtime_version: None,
                 runtime_version_arn: None,
+                function_version: Some("$LATEST".to_string()),
             },
         ),
 
