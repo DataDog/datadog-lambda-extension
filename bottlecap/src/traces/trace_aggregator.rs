@@ -60,10 +60,7 @@ impl TraceAggregator {
             }
         }
 
-        let mut result = Vec::with_capacity(self.buffer.len());
-        std::mem::swap(&mut result, &mut self.buffer);
-        self.buffer.reserve(16);
-        result
+        std::mem::replace(&mut self.buffer, Vec::with_capacity(16))
     }
 }
 
