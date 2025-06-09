@@ -17,9 +17,9 @@ pub struct TraceAggregator {
 impl Default for TraceAggregator {
     fn default() -> Self {
         TraceAggregator {
-            queue: VecDeque::new(),
+            queue: VecDeque::with_capacity(16),
             max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
-            buffer: Vec::new(),
+            buffer: Vec::with_capacity(16),
         }
     }
 }
@@ -29,9 +29,9 @@ impl TraceAggregator {
     #[allow(clippy::must_use_candidate)]
     pub fn new(max_content_size_bytes: usize) -> Self {
         TraceAggregator {
-            queue: VecDeque::new(),
+            queue: VecDeque::with_capacity(16),
             max_content_size_bytes,
-            buffer: Vec::new(),
+            buffer: Vec::with_capacity(16),
         }
     }
 
@@ -60,7 +60,12 @@ impl TraceAggregator {
             }
         }
 
-        std::mem::take(&mut self.buffer)
+        // Replace std::mem::take with buffer swap to avoid allocation
+        let mut result = Vec::with_capacity(self.buffer.len());
+        std::mem::swap(&mut result, &mut self.buffer);
+        // Pre-allocate capacity for future use
+        self.buffer.reserve(16);
+        result
     }
 }
 
