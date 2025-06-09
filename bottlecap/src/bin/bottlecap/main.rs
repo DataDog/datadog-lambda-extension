@@ -87,7 +87,13 @@ use tracing_subscriber::EnvFilter;
 struct PendingFlushHandles {
     trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
     log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
-    metric_flush_handles: FuturesOrdered<JoinHandle<(Vec<Series>, Vec<SketchPayload>)>>,
+    metric_flush_handles: FuturesOrdered<JoinHandle<MetricsRetryBatch>>,
+}
+
+struct MetricsRetryBatch {
+    flusher_id: usize,
+    series: Vec<Series>,
+    sketches: Vec<SketchPayload>,
 }
 
 impl PendingFlushHandles {
@@ -154,27 +160,20 @@ impl PendingFlushHandles {
         while let Some(retries) = self.metric_flush_handles.next().await {
             let mf = metrics_flusher.clone();
             match retries {
-                Ok((series, sketches)) => {
-                    if !series.is_empty() || !sketches.is_empty() {
+                Ok(retry_batch) => {
+                    if !retry_batch.series.is_empty() || !retry_batch.sketches.is_empty() {
                         debug!(
                             "redriving {:?} series and {:?} sketch payloads",
-                            series.len(),
-                            sketches.len()
+                            retry_batch.series.len(),
+                            retry_batch.sketches.len()
                         );
-                        let series_clone = series.clone();
-                        let sketches_clone = sketches.clone();
                         joinset.spawn(async move {
                             let mut locked_flushers = mf.lock().await;
-                            let mut futures = Vec::new();
-                            for flusher in locked_flushers.iter_mut() {
-                                futures.push(
-                                    flusher.flush_metrics(
-                                        series_clone.clone(),
-                                        sketches_clone.clone(),
-                                    ),
-                                );
+                            if let Some(flusher) = locked_flushers.get_mut(retry_batch.flusher_id) {
+                                flusher
+                                    .flush_metrics(retry_batch.series, retry_batch.sketches)
+                                    .await;
                             }
-                            futures::future::join_all(futures).await;
                         });
                     }
                 }
@@ -582,14 +581,19 @@ async fn extension_loop_active(
                         aggregator.consume_distributions(),
                     )
                 };
-                for mut flusher in metrics_flushers {
+                for (idx, mut flusher) in metrics_flushers.into_iter().enumerate() {
                     let series_clone = series.clone();
                     let sketches_clone = sketches.clone();
                     let handle = tokio::spawn(async move {
-                        flusher
+                        let (retry_series, retry_sketches) = flusher
                             .flush_metrics(series_clone.clone(), sketches_clone.clone())
                             .await
-                            .unwrap_or_default()
+                            .unwrap_or_default();
+                        MetricsRetryBatch {
+                            flusher_id: idx,
+                            series: retry_series,
+                            sketches: retry_sketches,
+                        }
                     });
                     pending_flush_handles.metric_flush_handles.push_back(handle); 
                 }
