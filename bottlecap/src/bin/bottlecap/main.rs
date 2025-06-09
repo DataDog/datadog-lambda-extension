@@ -595,7 +595,7 @@ async fn extension_loop_active(
                             sketches: retry_sketches,
                         }
                     });
-                    pending_flush_handles.metric_flush_handles.push_back(handle); 
+                    pending_flush_handles.metric_flush_handles.push_back(handle);
                 }
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
