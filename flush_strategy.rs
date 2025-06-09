@@ -36,6 +36,9 @@ impl<'de> Deserialize<'de> for FlushStrategy {
                 (Some("periodically"), Some(interval)) => {
                     Ok(FlushStrategy::Periodically(PeriodicStrategy { interval }))
                 }
+                (Some("continuously"), Some(interval)) => {
+                    Ok(FlushStrategy::Continuously(PeriodicStrategy { interval }))
+                }
                 (Some("end"), Some(interval)) => {
                     Ok(FlushStrategy::EndPeriodically(PeriodicStrategy {
                         interval,
