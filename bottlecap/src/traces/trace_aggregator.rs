@@ -60,10 +60,8 @@ impl TraceAggregator {
             }
         }
 
-        // Replace std::mem::take with buffer swap to avoid allocation
         let mut result = Vec::with_capacity(self.buffer.len());
         std::mem::swap(&mut result, &mut self.buffer);
-        // Pre-allocate capacity for future use
         self.buffer.reserve(16);
         result
     }
