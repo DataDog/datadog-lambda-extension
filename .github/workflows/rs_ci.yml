@@ -139,7 +139,7 @@ jobs:
           tool: nextest@0.9
       - uses: mozilla-actions/sccache-action@v0.0.9
       - working-directory: bottlecap
-        run: cargo nextest run --workspace --features integration_test
+        run: cargo nextest run --workspace
 
   format:
     name: Format

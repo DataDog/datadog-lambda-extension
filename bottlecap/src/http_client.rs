@@ -18,16 +18,11 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
 }
 
 fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn Error>> {
-    #[cfg(not(feature = "integration_test"))]
     let mut client = create_reqwest_client_builder()?
         .timeout(Duration::from_secs(config.flush_timeout))
         .pool_idle_timeout(Some(Duration::from_secs(270)))
         // Enable TCP keepalive
         .tcp_keepalive(Some(Duration::from_secs(120)));
-
-    #[cfg(feature = "integration_test")]
-    let mut client =
-        create_reqwest_client_builder()?.timeout(Duration::from_secs(config.flush_timeout));
 
     // Determine if we should use HTTP/1 or HTTP/2
     let should_use_http1 = match config.use_http1 {
