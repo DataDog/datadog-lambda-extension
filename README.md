@@ -22,7 +22,7 @@ You can opt out of the next-generation Lambda Extension by setting the environme
 Today, all workloads using Logs and Metrics are supported.
 
 APM Tracing is supported for Python, NodeJS, Go, Java, and .NET runtimes.
-Profiling and ASM are not yet supported, and will fallback to compatibility mode.
+ASM is not yet supported, and will fallback to compatibility mode.
 
 ### Feedback
 
