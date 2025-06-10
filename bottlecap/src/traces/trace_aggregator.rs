@@ -29,9 +29,9 @@ impl TraceAggregator {
     #[allow(clippy::must_use_candidate)]
     pub fn new(max_content_size_bytes: usize) -> Self {
         TraceAggregator {
-            queue: VecDeque::with_capacity(16),
+            queue: VecDeque::new(),
             max_content_size_bytes,
-            buffer: Vec::with_capacity(16),
+            buffer: Vec::new(),
         }
     }
 
@@ -60,7 +60,7 @@ impl TraceAggregator {
             }
         }
 
-        std::mem::replace(&mut self.buffer, Vec::with_capacity(16))
+        std::mem::replace(&mut self.buffer, Vec::new())
     }
 }
 
