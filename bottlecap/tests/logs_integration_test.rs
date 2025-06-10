@@ -42,6 +42,7 @@ async fn test_logs() {
     });
 
     let arc_conf = Arc::new(Config {
+        http_protocol: Some("http1".to_string()),
         logs_config_use_compression: false,
         logs_config_logs_dd_url: server.url(""),
         ..Config::default()
