@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::config::env::deserialize_additional_endpoints;
+use crate::config::additional_endpoints::deserialize_additional_endpoints;
 use crate::config::{deserialize_apm_replace_rules, deserialize_processing_rules, ProcessingRule};
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use serde::Deserialize;
