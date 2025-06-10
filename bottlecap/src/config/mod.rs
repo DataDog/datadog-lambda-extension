@@ -49,11 +49,6 @@ fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigEr
         ));
     }
 
-    if config.serverless_appsec_enabled || config.appsec_enabled {
-        log_fallback_reason("appsec_enabled");
-        return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
-    }
-
     // OTLP
     let has_otlp_env_config = config
         .otlp_config_receiver_protocols_grpc_endpoint
@@ -256,10 +251,11 @@ pub mod tests {
 
     use super::*;
 
-    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
-    use crate::config::log_level::LogLevel;
-    use crate::config::processing_rule;
-    use crate::config::trace_propagation_style::TracePropagationStyle;
+    use crate::config::{
+        flush_strategy::{FlushStrategy, PeriodicStrategy},
+        log_level::LogLevel,
+        trace_propagation_style::TracePropagationStyle,
+    };
 
     #[test]
     fn test_reject_on_opted_out() {
