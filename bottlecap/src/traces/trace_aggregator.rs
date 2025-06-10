@@ -17,9 +17,9 @@ pub struct TraceAggregator {
 impl Default for TraceAggregator {
     fn default() -> Self {
         TraceAggregator {
-            queue: VecDeque::with_capacity(16),
+            queue: VecDeque::new(),
             max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
-            buffer: Vec::with_capacity(16),
+            buffer: Vec::new(),
         }
     }
 }
