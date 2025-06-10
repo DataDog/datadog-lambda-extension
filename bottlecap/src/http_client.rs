@@ -25,11 +25,9 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn 
         .tcp_keepalive(Some(Duration::from_secs(120)));
 
     // Determine if we should use HTTP/1 or HTTP/2
-    let should_use_http1 = match config.use_http1 {
+    let should_use_http1 = match &config.http_protocol {
         // Explicitly set to true - use HTTP/1
-        Some(true) => true,
-        // Explicitly set to false - use HTTP/2
-        Some(false) => false,
+        Some(val) => *val == "http1".to_string(),
         // Not set - use HTTP/1 if proxy is configured, otherwise HTTP/2
         None => config.https_proxy.is_some(),
     };
