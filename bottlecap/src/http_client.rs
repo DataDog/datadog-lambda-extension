@@ -19,21 +19,34 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
 
 fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn Error>> {
     #[cfg(not(feature = "integration_test"))]
-    let client = create_reqwest_client_builder()?
+    let mut client = create_reqwest_client_builder()?
         .timeout(Duration::from_secs(config.flush_timeout))
-        // Enable HTTP/2 for better multiplexing
-        .http2_prior_knowledge()
-        .http2_keep_alive_interval(Some(Duration::from_secs(10)))
-        .http2_keep_alive_while_idle(true)
-        .http2_keep_alive_timeout(Duration::from_secs(1000))
-        // Set keep-alive timeout
         .pool_idle_timeout(Some(Duration::from_secs(270)))
         // Enable TCP keepalive
         .tcp_keepalive(Some(Duration::from_secs(120)));
 
     #[cfg(feature = "integration_test")]
-    let client =
+    let mut client =
         create_reqwest_client_builder()?.timeout(Duration::from_secs(config.flush_timeout));
+
+    // Determine if we should use HTTP/1 or HTTP/2
+    let should_use_http1 = match config.use_http1 {
+        // Explicitly set to true - use HTTP/1
+        Some(true) => true,
+        // Explicitly set to false - use HTTP/2
+        Some(false) => false,
+        // Not set - use HTTP/1 if proxy is configured, otherwise HTTP/2
+        None => config.https_proxy.is_some(),
+    };
+
+    // Configure HTTP/2 if we're not using HTTP/1
+    if !should_use_http1 {
+        client = client
+            .http2_prior_knowledge()
+            .http2_keep_alive_interval(Some(Duration::from_secs(10)))
+            .http2_keep_alive_while_idle(true)
+            .http2_keep_alive_timeout(Duration::from_secs(1000));
+    }
 
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
     if let Some(https_uri) = &config.https_proxy {

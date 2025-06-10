@@ -39,6 +39,7 @@ pub struct Config {
     pub logs_config_compression_level: i32,
     pub logs_config_logs_dd_url: String,
     pub serverless_flush_strategy: FlushStrategy,
+    pub use_http1: Option<bool>,
     #[serde(deserialize_with = "deserialize_bool_from_anything")]
     pub enhanced_metrics: bool,
     pub lambda_proc_enhanced_metrics: bool,
@@ -135,6 +136,7 @@ impl Default for Config {
             api_key_secret_arn: String::default(),
             kms_api_key: String::default(),
             serverless_flush_strategy: FlushStrategy::Default,
+            use_http1: None, // None means: use HTTP/2 by default, but fall back to HTTP/1 if proxy is configured
             flush_timeout: 30,
             // Unified Tagging
             env: None,
