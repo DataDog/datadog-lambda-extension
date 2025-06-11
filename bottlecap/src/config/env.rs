@@ -1,3 +1,4 @@
+use crate::config::additional_endpoints::deserialize_additional_endpoints;
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::vec;
@@ -76,6 +77,8 @@ pub struct Config {
     // Metrics overrides
     pub dd_url: String,
     pub url: String,
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    pub additional_endpoints: HashMap<String, Vec<String>>,
     // OTLP
     //
     // - Traces
@@ -174,6 +177,7 @@ impl Default for Config {
             apm_features: vec![],
             dd_url: String::default(),
             url: String::default(),
+            additional_endpoints: HashMap::new(),
             // OTLP
             //
             // - Receiver
