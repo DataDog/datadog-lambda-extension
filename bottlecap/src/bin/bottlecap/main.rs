@@ -489,6 +489,7 @@ async fn extension_loop_active(
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
 
     let mut race_flush_interval = flush_control.get_flush_interval();
+    race_flush_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
     debug!(
