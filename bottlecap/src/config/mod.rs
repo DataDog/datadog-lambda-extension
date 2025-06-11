@@ -9,20 +9,25 @@ pub mod service_mapping;
 pub mod trace_propagation_style;
 pub mod yaml;
 
+use datadog_trace_obfuscation::replacer::ReplaceRule;
 use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
-use std::path::Path;
+use serde::{Deserialize, Deserializer};
+use serde_aux::prelude::deserialize_bool_from_anything;
+use serde_json::Value;
 
-use figment::providers::{Format, Yaml};
-use figment::{providers::Env, Figment};
+use std::path::Path;
+use std::{collections::HashMap, fmt};
+use tracing::{debug, error};
 
 use crate::config::{
     apm_replace_rule::deserialize_apm_replace_rules,
-    env::Config as EnvConfig,
+    env::EnvConfigSource,
+    flush_strategy::FlushStrategy,
+    log_level::LogLevel,
     processing_rule::{deserialize_processing_rules, ProcessingRule},
-    yaml::Config as YamlConfig,
+    trace_propagation_style::TracePropagationStyle,
+    yaml::YamlConfigSource,
 };
-
-pub type Config = EnvConfig;
 
 #[derive(Debug, PartialEq)]
 #[allow(clippy::module_name_repetitions)]
@@ -31,11 +36,272 @@ pub enum ConfigError {
     UnsupportedField(String),
 }
 
+#[allow(clippy::module_name_repetitions)]
+pub trait ConfigSource {
+    fn load(&self, config: &mut Config) -> Result<(), ConfigError>;
+}
+
+#[derive(Default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct ConfigBuilder {
+    sources: Vec<Box<dyn ConfigSource>>,
+    config: Config,
+}
+
+#[allow(clippy::module_name_repetitions)]
+impl ConfigBuilder {
+    #[must_use]
+    pub fn add_source(mut self, source: Box<dyn ConfigSource>) -> Self {
+        self.sources.push(source);
+        self
+    }
+
+    pub fn build(&mut self) -> Config {
+        let mut failed_sources = 0;
+        for source in &self.sources {
+            match source.load(&mut self.config) {
+                Ok(()) => (),
+                Err(e) => {
+                    error!("Failed to load config: {:?}", e);
+                    failed_sources += 1;
+                }
+            }
+        }
+
+        if failed_sources == self.sources.len() {
+            debug!("All sources failed to load config, using default config.");
+        }
+
+        if self.config.site.is_empty() {
+            self.config.site = "datadoghq.com".to_string();
+        }
+
+        // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
+        // if it exists
+        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
+            if self.config.proxy_https.is_none() {
+                self.config.proxy_https = Some(https_proxy);
+            }
+        }
+
+        // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable
+        // or in the `proxy_no_proxy` config field.
+        if self.config.proxy_https.is_some() {
+            let site_in_no_proxy = std::env::var("NO_PROXY")
+                .map_or(false, |no_proxy| no_proxy.contains(&self.config.site))
+                || self
+                    .config
+                    .proxy_no_proxy
+                    .iter()
+                    .any(|no_proxy| no_proxy.contains(&self.config.site));
+            if site_in_no_proxy {
+                self.config.proxy_https = None;
+            }
+        }
+
+        // If extraction is not set, set it to the same as the propagation style
+        if self.config.trace_propagation_style_extract.is_empty() {
+            self.config
+                .trace_propagation_style_extract
+                .clone_from(&self.config.trace_propagation_style);
+        }
+
+        // If Logs URL is not set, set it to the default
+        if self.config.logs_config_logs_dd_url.is_empty() {
+            self.config.logs_config_logs_dd_url = build_fqdn_logs(self.config.site.clone());
+        }
+
+        // If APM URL is not set, set it to the default
+        if self.config.apm_config_apm_dd_url.is_empty() {
+            self.config.apm_config_apm_dd_url = trace_intake_url(self.config.site.clone().as_str());
+        } else {
+            // If APM URL is set, add the site to the URL
+            self.config.apm_config_apm_dd_url =
+                trace_intake_url_prefixed(self.config.apm_config_apm_dd_url.as_str());
+        }
+
+        self.config.clone()
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+#[allow(clippy::module_name_repetitions)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct Config {
+    pub site: String,
+    pub api_key: String,
+    pub log_level: LogLevel,
+
+    pub flush_timeout: u64,
+
+    // Proxy
+    pub proxy_https: Option<String>,
+    pub proxy_no_proxy: Vec<String>,
+    pub dd_url: String,
+    pub url: String,
+
+    // Unified Service Tagging
+    pub env: Option<String>,
+    pub service: Option<String>,
+    pub version: Option<String>,
+    pub tags: HashMap<String, String>,
+
+    // Logs
+    pub logs_config_logs_dd_url: String,
+    pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
+    pub logs_config_use_compression: bool,
+    pub logs_config_compression_level: i32,
+
+    // APM
+    //
+    pub service_mapping: HashMap<String, String>,
+    //
+    // AppSec
+    pub appsec_enabled: bool,
+    //
+    pub apm_config_apm_dd_url: String,
+    pub apm_replace_tags: Option<Vec<ReplaceRule>>,
+    pub apm_config_obfuscation_http_remove_query_string: bool,
+    pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
+    pub apm_features: Vec<String>,
+    //
+    // Trace Propagation
+    pub trace_propagation_style: Vec<TracePropagationStyle>,
+    pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
+    pub trace_propagation_extract_first: bool,
+    pub trace_propagation_http_baggage_enabled: bool,
+
+    // OTLP
+    //
+    // - APM / Traces
+    pub otlp_config_traces_enabled: bool,
+    pub otlp_config_traces_span_name_as_resource_name: bool,
+    pub otlp_config_traces_span_name_remappings: HashMap<String, String>,
+    pub otlp_config_ignore_missing_datadog_fields: bool,
+    //
+    // - Receiver / HTTP
+    pub otlp_config_receiver_protocols_http_endpoint: Option<String>,
+    // - Unsupported Configuration
+    //
+    // - Receiver / GRPC
+    pub otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
+    pub otlp_config_receiver_protocols_grpc_transport: Option<String>,
+    pub otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib: Option<i32>,
+    // - Metrics
+    pub otlp_config_metrics_enabled: bool,
+    pub otlp_config_metrics_resource_attributes_as_tags: bool,
+    pub otlp_config_metrics_instrumentation_scope_metadata_as_tags: bool,
+    pub otlp_config_metrics_tag_cardinality: Option<String>,
+    pub otlp_config_metrics_delta_ttl: Option<i32>,
+    pub otlp_config_metrics_histograms_mode: Option<String>,
+    pub otlp_config_metrics_histograms_send_count_sum_metrics: bool,
+    pub otlp_config_metrics_histograms_send_aggregation_metrics: bool,
+    pub otlp_config_metrics_sums_cumulative_monotonic_mode: Option<String>,
+    pub otlp_config_metrics_sums_initial_cumulativ_monotonic_value: Option<String>,
+    pub otlp_config_metrics_summaries_mode: Option<String>,
+    // - Traces
+    pub otlp_config_traces_probabilistic_sampler_sampling_percentage: Option<i32>,
+    // - Logs
+    pub otlp_config_logs_enabled: bool,
+
+    // AWS Lambda
+    pub api_key_secret_arn: String,
+    pub kms_api_key: String,
+    pub serverless_logs_enabled: bool,
+    pub serverless_flush_strategy: FlushStrategy,
+    pub enhanced_metrics: bool,
+    pub lambda_proc_enhanced_metrics: bool,
+    pub capture_lambda_payload: bool,
+    pub capture_lambda_payload_max_depth: u32,
+    pub serverless_appsec_enabled: bool,
+    pub extension_version: Option<String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            site: String::default(),
+            api_key: String::default(),
+            log_level: LogLevel::default(),
+            flush_timeout: 30,
+
+            // Proxy
+            proxy_https: None,
+            proxy_no_proxy: vec![],
+            dd_url: String::default(),
+            url: String::default(),
+
+            // Unified Service Tagging
+            env: None,
+            service: None,
+            version: None,
+            tags: HashMap::new(),
+
+            // Logs
+            logs_config_logs_dd_url: String::default(),
+            logs_config_processing_rules: None,
+            logs_config_use_compression: true,
+            logs_config_compression_level: 6,
+
+            // APM
+            service_mapping: HashMap::new(),
+            appsec_enabled: false,
+            apm_config_apm_dd_url: String::default(),
+            apm_replace_tags: None,
+            apm_config_obfuscation_http_remove_query_string: false,
+            apm_config_obfuscation_http_remove_paths_with_digits: false,
+            apm_features: vec![],
+            trace_propagation_style: vec![
+                TracePropagationStyle::Datadog,
+                TracePropagationStyle::TraceContext,
+            ],
+            trace_propagation_style_extract: vec![],
+            trace_propagation_extract_first: false,
+            trace_propagation_http_baggage_enabled: false,
+
+            // OTLP
+            otlp_config_traces_enabled: true,
+            otlp_config_traces_span_name_as_resource_name: false,
+            otlp_config_traces_span_name_remappings: HashMap::new(),
+            otlp_config_ignore_missing_datadog_fields: false,
+            otlp_config_receiver_protocols_http_endpoint: None,
+            otlp_config_receiver_protocols_grpc_endpoint: None,
+            otlp_config_receiver_protocols_grpc_transport: None,
+            otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib: None,
+            otlp_config_metrics_enabled: false, // TODO(duncanista): Go Agent default is to true
+            otlp_config_metrics_resource_attributes_as_tags: false,
+            otlp_config_metrics_instrumentation_scope_metadata_as_tags: false,
+            otlp_config_metrics_tag_cardinality: None,
+            otlp_config_metrics_delta_ttl: None,
+            otlp_config_metrics_histograms_mode: None,
+            otlp_config_metrics_histograms_send_count_sum_metrics: false,
+            otlp_config_metrics_histograms_send_aggregation_metrics: false,
+            otlp_config_metrics_sums_cumulative_monotonic_mode: None,
+            otlp_config_metrics_sums_initial_cumulativ_monotonic_value: None,
+            otlp_config_metrics_summaries_mode: None,
+            otlp_config_traces_probabilistic_sampler_sampling_percentage: None,
+            otlp_config_logs_enabled: false,
+
+            // AWS Lambda
+            api_key_secret_arn: String::default(),
+            kms_api_key: String::default(),
+            serverless_logs_enabled: true,
+            serverless_flush_strategy: FlushStrategy::Default,
+            enhanced_metrics: true,
+            lambda_proc_enhanced_metrics: true,
+            capture_lambda_payload: false,
+            capture_lambda_payload_max_depth: 10,
+            serverless_appsec_enabled: false,
+            extension_version: None,
+        }
+    }
+}
+
 fn log_fallback_reason(reason: &str) {
     println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
-fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigError> {
+fn fallback(config: &Config) -> Result<(), ConfigError> {
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match config.extension_version.as_deref() {
         Some("compatibility") => true,
@@ -56,7 +322,7 @@ fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigEr
     }
 
     // OTLP
-    let has_otlp_env_config = config
+    let has_otlp_config = config
         .otlp_config_receiver_protocols_grpc_endpoint
         .is_some()
         || config
@@ -85,13 +351,7 @@ fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigEr
             .is_some()
         || config.otlp_config_logs_enabled;
 
-    let has_otlp_yaml_config = yaml_config.otlp_config_receiver_protocols_grpc().is_some()
-        || yaml_config
-            .otlp_config_traces_probabilistic_sampler()
-            .is_some()
-        || yaml_config.otlp_config_logs().is_some();
-
-    if has_otlp_env_config || has_otlp_yaml_config {
+    if has_otlp_config {
         log_fallback_reason("otel");
         return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
@@ -100,164 +360,97 @@ fn fallback(config: &EnvConfig, yaml_config: &YamlConfig) -> Result<(), ConfigEr
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub fn get_config(config_directory: &Path) -> Result<EnvConfig, ConfigError> {
-    let path = config_directory.join("datadog.yaml");
+pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
+    let path: std::path::PathBuf = config_directory.join("datadog.yaml");
+    let mut config_builder = ConfigBuilder::default()
+        .add_source(Box::new(YamlConfigSource { path }))
+        .add_source(Box::new(EnvConfigSource));
 
-    // Get default config fields (and ENV specific ones)
-    let figment = Figment::new()
-        .merge(Yaml::file(&path))
-        .merge(Env::prefixed("DATADOG_"))
-        .merge(Env::prefixed("DD_"))
-        .merge(Env::raw().only(&["HTTPS_PROXY"]));
+    let config = config_builder.build();
 
-    // Get YAML nested fields
-    let yaml_figment = Figment::from(Yaml::file(&path));
+    fallback(&config)?;
 
-    let (mut config, yaml_config): (EnvConfig, YamlConfig) =
-        match (figment.extract(), yaml_figment.extract()) {
-            (Ok(env_config), Ok(yaml_config)) => (env_config, yaml_config),
-            (_, Err(err)) | (Err(err), _) => {
-                println!("Failed to parse Datadog config: {err}");
-                return Err(ConfigError::ParseError(err.to_string()));
-            }
-        };
-
-    fallback(&config, &yaml_config)?;
-
-    // Set site if empty
-    if config.site.is_empty() {
-        config.site = "datadoghq.com".to_string();
-    }
-
-    // NOTE: Must happen after config.site is set
-    // Prefer DD_PROXY_HTTPS over HTTPS_PROXY
-    // No else needed as HTTPS_PROXY is handled by reqwest and built into trace client
-    if let Ok(https_proxy) = std::env::var("DD_PROXY_HTTPS").or_else(|_| {
-        yaml_config
-            .proxy
-            .https
-            .clone()
-            .ok_or(std::env::VarError::NotPresent)
-    }) {
-        let no_proxy = yaml_config.proxy.no_proxy.clone();
-        if std::env::var("NO_PROXY").map_or(false, |no_proxy| no_proxy.contains(&config.site))
-            || no_proxy.map_or(false, |no_proxy| no_proxy.contains(&config.site))
-        {
-            config.https_proxy = None;
-        } else {
-            config.https_proxy = Some(https_proxy);
-        }
-    }
-
-    merge_config(&mut config, &yaml_config);
-
-    // Metrics are handled by dogstatsd in Main
     Ok(config)
-}
-
-/// Merge YAML nested fields into `EnvConfig`
-///
-fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
-    // Set logs_config_processing_rules if not defined in env
-    if config.logs_config_processing_rules.is_none() {
-        if let Some(processing_rules) = yaml_config.logs_config.processing_rules.as_ref() {
-            config.logs_config_processing_rules = Some(processing_rules.clone());
-        }
-    }
-
-    // Trace Propagation
-    //
-    // If not set by the user, set defaults
-    if config.trace_propagation_style_extract.is_empty() {
-        config
-            .trace_propagation_style_extract
-            .clone_from(&config.trace_propagation_style);
-    }
-    if config.logs_config_logs_dd_url.is_empty() {
-        config.logs_config_logs_dd_url = build_fqdn_logs(config.site.clone());
-    }
-
-    if config.apm_config_apm_dd_url.is_empty() {
-        config.apm_config_apm_dd_url = trace_intake_url(config.site.clone().as_str());
-    } else {
-        config.apm_config_apm_dd_url =
-            trace_intake_url_prefixed(config.apm_config_apm_dd_url.as_str());
-    }
-
-    if config.apm_replace_tags.is_none() {
-        if let Some(rules) = yaml_config.apm_config.replace_tags.as_ref() {
-            config.apm_replace_tags = Some(rules.clone());
-        }
-    }
-
-    if !config.apm_config_obfuscation_http_remove_paths_with_digits {
-        if let Some(obfuscation) = yaml_config.apm_config.obfuscation {
-            config.apm_config_obfuscation_http_remove_paths_with_digits =
-                obfuscation.http.remove_paths_with_digits;
-        }
-    }
-
-    if !config.apm_config_obfuscation_http_remove_query_string {
-        if let Some(obfuscation) = yaml_config.apm_config.obfuscation {
-            config.apm_config_obfuscation_http_remove_query_string =
-                obfuscation.http.remove_query_string;
-        }
-    }
-
-    // OTLP
-    //
-    // - Receiver / HTTP
-    let yaml_otlp_config_receiver_protocols_http_endpoint =
-        yaml_config.otlp_config_receiver_protocols_http_endpoint();
-    if config
-        .otlp_config_receiver_protocols_http_endpoint
-        .is_none()
-        && yaml_otlp_config_receiver_protocols_http_endpoint.is_some()
-    {
-        config.otlp_config_receiver_protocols_http_endpoint =
-            yaml_otlp_config_receiver_protocols_http_endpoint.map(std::string::ToString::to_string);
-    }
-
-    if !config.otlp_config_traces_enabled && yaml_config.otlp_config_traces_enabled() {
-        config.otlp_config_traces_enabled = true;
-    }
-
-    if !config.otlp_config_ignore_missing_datadog_fields
-        && yaml_config.otlp_config_traces_ignore_missing_datadog_fields()
-    {
-        config.otlp_config_ignore_missing_datadog_fields = true;
-    }
-
-    if !config.otlp_config_traces_span_name_as_resource_name
-        && yaml_config.otlp_config_traces_span_name_as_resource_name()
-    {
-        config.otlp_config_traces_span_name_as_resource_name = true;
-    }
-
-    let yaml_otlp_config_traces_span_name_remappings =
-        yaml_config.otlp_config_traces_span_name_remappings();
-    if config.otlp_config_traces_span_name_remappings.is_empty()
-        && !yaml_otlp_config_traces_span_name_remappings.is_empty()
-    {
-        config
-            .otlp_config_traces_span_name_remappings
-            .clone_from(&yaml_otlp_config_traces_span_name_remappings);
-    }
-
-    // Dual Shipping
-    //
-    // - Metrics
-    if config.additional_endpoints.is_empty() {
-        config
-            .additional_endpoints
-            .clone_from(&yaml_config.additional_endpoints);
-    }
 }
 
 #[inline]
 #[must_use]
 fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
+}
+
+pub fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Value::deserialize(deserializer)?;
+    match value {
+        Value::String(s) => {
+            if s.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(s))
+            }
+        }
+        Value::Number(n) => Ok(Some(n.to_string())),
+        _ => Err(serde::de::Error::custom("expected a string or an integer")),
+    }
+}
+
+pub fn deserialize_optional_bool_from_anything<'de, D>(
+    deserializer: D,
+) -> Result<Option<bool>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    // First try to deserialize as Option<_> to handle null/missing values
+    let opt: Option<serde_json::Value> = Option::deserialize(deserializer)?;
+
+    match opt {
+        None => Ok(None),
+        Some(value) => {
+            // Use your existing method by deserializing the value
+            let bool_result = deserialize_bool_from_anything(value).map_err(|e| {
+                serde::de::Error::custom(format!("Failed to deserialize bool: {e}"))
+            })?;
+            Ok(Some(bool_result))
+        }
+    }
+}
+
+pub fn deserialize_key_value_pairs<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct KeyValueVisitor;
+
+    impl<'de> serde::de::Visitor<'de> for KeyValueVisitor {
+        type Value = HashMap<String, String>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a string in format 'key1:value1,key2:value2' or 'key1:value1'")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            let mut map = HashMap::new();
+
+            for tag in value.split(',') {
+                let parts = tag.split(':').collect::<Vec<&str>>();
+                if parts.len() == 2 {
+                    map.insert(parts[0].to_string(), parts[1].to_string());
+                }
+            }
+
+            Ok(map)
+        }
+    }
+
+    deserializer.deserialize_str(KeyValueVisitor)
 }
 
 #[cfg(test)]
@@ -482,7 +675,7 @@ pub mod tests {
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
-                EnvConfig {
+                Config {
                     site: "datadoghq.com".to_string(),
                     trace_propagation_style_extract: vec![
                         TracePropagationStyle::Datadog,
@@ -491,7 +684,7 @@ pub mod tests {
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
                     apm_config_apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
                     dd_url: String::new(), // We add the prefix in main.rs
-                    ..EnvConfig::default()
+                    ..Config::default()
                 }
             );
             Ok(())
@@ -504,7 +697,7 @@ pub mod tests {
             jail.clear_env();
             jail.set_env("DD_PROXY_HTTPS", "my-proxy:3128");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(config.https_proxy, Some("my-proxy:3128".to_string()));
+            assert_eq!(config.proxy_https, Some("my-proxy:3128".to_string()));
             Ok(())
         });
     }
@@ -520,7 +713,7 @@ pub mod tests {
                 "127.0.0.1,localhost,172.16.0.0/12,us-east-1.amazonaws.com,datadoghq.eu",
             );
             let config = get_config(Path::new("")).expect("should parse noproxy");
-            assert_eq!(config.https_proxy, None);
+            assert_eq!(config.proxy_https, None);
             Ok(())
         });
     }
@@ -538,7 +731,7 @@ pub mod tests {
             )?;
 
             let config = get_config(Path::new("")).expect("should parse weird proxy config");
-            assert_eq!(config.https_proxy, Some("my-proxy:3128".to_string()));
+            assert_eq!(config.proxy_https, Some("my-proxy:3128".to_string()));
             Ok(())
         });
     }
@@ -558,7 +751,7 @@ pub mod tests {
             )?;
 
             let config = get_config(Path::new("")).expect("should parse weird proxy config");
-            assert_eq!(config.https_proxy, None);
+            assert_eq!(config.proxy_https, None);
             // Assertion to ensure config.site runs before proxy
             // because we chenck that noproxy contains the site
             assert_eq!(config.site, "datadoghq.com");
