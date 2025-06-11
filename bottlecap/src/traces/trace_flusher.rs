@@ -82,20 +82,34 @@ impl TraceFlusher for ServerlessTraceFlusher {
         // Since we return the original traces on error, we need to clone them before coalescing
         let traces_clone = traces.clone();
 
-        for coalesced_traces in trace_utils::coalesce_send_data(traces) {
-            match coalesced_traces
-                .send_proxy(self.config.https_proxy.as_deref())
-                .await
-                .last_result
-            {
-                Ok(_) => debug!("Flushing traces took {}ms", start.elapsed().as_millis()),
+        let coalesced_traces = trace_utils::coalesce_send_data(traces);
+        let mut tasks = Vec::with_capacity(coalesced_traces.len());
+
+        for traces in coalesced_traces {
+            let https_proxy = self.config.https_proxy.clone();
+            tasks.push(tokio::spawn(async move {
+                traces.send_proxy(https_proxy.as_deref()).await.last_result
+            }));
+        }
+
+        for task in tasks {
+            match task.await {
+                Ok(result) => match result {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Error sending trace: {e:?}");
+                        // Return the original traces for retry
+                        return Some(traces_clone);
+                    }
+                },
                 Err(e) => {
-                    error!("Error sending trace: {e:?}");
-                    // Return the original traces for retry
+                    error!("Task join error: {e:?}");
+                    // Return the original traces for retry if a task panics
                     return Some(traces_clone);
                 }
             }
         }
+        debug!("Flushing traces took {}ms", start.elapsed().as_millis());
         None
     }
 }
