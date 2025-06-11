@@ -10,12 +10,19 @@ pub mod trace_propagation_style;
 pub mod yaml;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
+use datadog_trace_obfuscation::replacer::ReplaceRule;
 use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 use serde::{Deserialize, Deserializer};
 use serde_aux::prelude::deserialize_bool_from_anything;
 use serde_json::Value;
 
+use serde::{Deserialize, Deserializer};
+use serde_aux::prelude::deserialize_bool_from_anything;
+use serde_json::Value;
+
 use std::path::Path;
+use std::{collections::HashMap, fmt};
+use tracing::{debug, error};
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
