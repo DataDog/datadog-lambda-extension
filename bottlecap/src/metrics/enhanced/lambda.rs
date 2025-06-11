@@ -782,7 +782,7 @@ mod tests {
     fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
