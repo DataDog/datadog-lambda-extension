@@ -84,7 +84,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         for coalesced_traces in trace_utils::coalesce_send_data(traces) {
             match coalesced_traces
-                .send_proxy(self.config.https_proxy.as_deref())
+                .send_proxy(self.config.proxy_https.as_deref())
                 .await
                 .last_result
             {
