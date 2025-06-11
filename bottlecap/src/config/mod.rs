@@ -137,8 +137,12 @@ pub struct Config {
     // Proxy
     pub proxy_https: Option<String>,
     pub proxy_no_proxy: Vec<String>,
+    pub http_protocol: Option<String>,
+
+    // Endpoints
     pub dd_url: String,
     pub url: String,
+    pub additional_endpoints: HashMap<String, Vec<String>>,
 
     // Unified Service Tagging
     pub env: Option<String>,
@@ -228,8 +232,12 @@ impl Default for Config {
             // Proxy
             proxy_https: None,
             proxy_no_proxy: vec![],
+            http_protocol: None,
+
+            // Endpoints
             dd_url: String::default(),
             url: String::default(),
+            additional_endpoints: HashMap::new(),
 
             // Unified Service Tagging
             env: None,

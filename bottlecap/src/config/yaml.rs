@@ -1,6 +1,7 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::config::{
+    additional_endpoints::deserialize_additional_endpoints,
     deserialize_apm_replace_rules, deserialize_key_value_pairs,
     deserialize_optional_bool_from_anything, deserialize_processing_rules,
     deserialize_string_or_int,
@@ -34,6 +35,12 @@ pub struct YamlConfig {
     // Proxy
     pub proxy: ProxyConfig,
     pub dd_url: Option<String>,
+    pub http_protocol: Option<String>,
+
+    // Endpoints
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    /// Field used for Dual Shipping for Metrics
+    pub additional_endpoints: HashMap<String, Vec<String>>,
 
     // Unified Service Tagging
     #[serde(deserialize_with = "deserialize_string_or_int")]
@@ -374,6 +381,16 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     }
     if let Some(no_proxy) = &yaml_config.proxy.no_proxy {
         config.proxy_no_proxy.clone_from(no_proxy);
+    }
+    if yaml_config.http_protocol.is_some() {
+        config.http_protocol.clone_from(&yaml_config.http_protocol);
+    }
+
+    // Endpoints
+    if !yaml_config.additional_endpoints.is_empty() {
+        config
+            .additional_endpoints
+            .clone_from(&yaml_config.additional_endpoints);
     }
 
     // This is the equivalent of `DD_DD_URL` in environment variables.

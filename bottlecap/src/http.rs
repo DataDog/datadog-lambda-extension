@@ -35,7 +35,7 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn 
         // Explicitly set to true - use HTTP/1
         Some(val) => val == "http1",
         // Not set - use HTTP/1 if proxy is configured, otherwise HTTP/2
-        None => config.https_proxy.is_some(),
+        None => config.proxy_https.is_some(),
     };
 
     // Configure HTTP/2 if we're not using HTTP/1

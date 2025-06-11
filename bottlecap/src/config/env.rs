@@ -1,11 +1,11 @@
-use crate::config::additional_endpoints::deserialize_additional_endpoints;
-use serde::{Deserialize, Deserializer};
 use figment::{providers::Env, Figment};
+use serde::Deserialize;
 use std::collections::HashMap;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 
 use crate::config::{
+    additional_endpoints::deserialize_additional_endpoints,
     apm_replace_rule::deserialize_apm_replace_rules,
     deserialize_key_value_pairs, deserialize_optional_bool_from_anything,
     deserialize_string_or_int,
@@ -32,8 +32,13 @@ pub struct EnvConfig {
     // Proxy
     pub proxy_https: Option<String>,
     pub proxy_no_proxy: Vec<String>,
+    pub http_protocol: Option<String>,
+
+    // Endpoints
     pub dd_url: Option<String>,
     pub url: Option<String>,
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    pub additional_endpoints: HashMap<String, Vec<String>>,
 
     // Unified Service Tagging
     #[serde(deserialize_with = "deserialize_string_or_int")]
@@ -177,11 +182,21 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     if !env_config.proxy_no_proxy.is_empty() {
         config.proxy_no_proxy.clone_from(&env_config.proxy_no_proxy);
     }
+    if env_config.http_protocol.is_some() {
+        config.http_protocol.clone_from(&env_config.http_protocol);
+    }
+
+    // Endpoints
     if let Some(dd_url) = &env_config.dd_url {
         config.dd_url.clone_from(dd_url);
     }
     if let Some(url) = &env_config.url {
         config.url.clone_from(url);
+    }
+    if !env_config.additional_endpoints.is_empty() {
+        config
+            .additional_endpoints
+            .clone_from(&env_config.additional_endpoints);
     }
 
     // Logs
