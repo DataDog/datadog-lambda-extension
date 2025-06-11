@@ -78,7 +78,9 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, task::JoinHandle};
+use tokio::{
+    sync::mpsc::Sender, sync::Mutex as TokioMutex, task::JoinHandle, time::MissedTickBehavior,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -489,6 +491,7 @@ async fn extension_loop_active(
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
 
     let mut race_flush_interval = flush_control.get_flush_interval();
+    race_flush_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
     debug!(
@@ -501,6 +504,7 @@ async fn extension_loop_active(
     let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
+        race_flush_interval.reset();
         let maybe_shutdown_event;
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
@@ -548,36 +552,49 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
+                race_flush_interval.reset();
                 let tf = trace_flusher.clone();
-                // Await any previous flush handles. This
+                // Await any previous flush handles.
+                let start = Instant::now();
+                println!("AJ starting catchup flush");
                 last_continuous_flush_error = pending_flush_handles
                     .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flusher)
                     .await;
-
+                println!("AJ catchup flush duration: {:?}", start.elapsed());
+                let flush_all_time = Instant::now();
                 let val = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
-                    .push_back(tokio::spawn(async move { val.flush(None).await }));
+                    .push_back(tokio::task::spawn_blocking(move || {
+                        tokio::runtime::Handle::current()
+                            .block_on(async move { val.flush(None).await })
+                    }));
                 let traces_val = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
-                    .push_back(tokio::spawn(async move {
-                        traces_val.flush(None).await.unwrap_or_default()
+                    .push_back(tokio::task::spawn_blocking(move || {
+                        tokio::runtime::Handle::current().block_on(async move {
+                            traces_val.flush(None).await.unwrap_or_default()
+                        })
                     }));
                 let cloned_metrics_flusher = metrics_flusher.clone();
                 pending_flush_handles
                     .metric_flush_handles
-                    .push_back(tokio::spawn(async move {
-                        cloned_metrics_flusher
-                            .lock()
-                            .await
-                            .flush()
-                            .await
-                            .unwrap_or_default()
+                    .push_back(tokio::task::spawn_blocking(move || {
+                        tokio::runtime::Handle::current().block_on(async move {
+                            cloned_metrics_flusher
+                                .lock()
+                                .await
+                                .flush()
+                                .await
+                                .unwrap_or_default()
+                        })
                     }));
-                race_flush_interval.reset();
+                println!("AJ flush all dispatch took: {:?}", flush_all_time.elapsed());
             } else if current_flush_decision == FlushDecision::Periodic {
                 // TODO(astuyve): still await the shutdown flush handles
+                println!("AJ STARTING PERIODIC FLUSH");
+                let periodic_interval = Instant::now();
                 let mut locked_metrics = metrics_flusher.lock().await;
                 blocking_flush_all(
                     &logs_flusher,
@@ -588,6 +605,7 @@ async fn extension_loop_active(
                 )
                 .await;
                 last_continuous_flush_error = false;
+                println!("aj periodic took: {:?}", periodic_interval.elapsed());
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
@@ -616,15 +634,19 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flusher.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                        )
-                        .await;
+                        println!("AJ RACE FLUSH HIT");
+                        // let race_duration = Instant::now();
+                        // println!("AJ starting race flush");
+                        // let mut locked_metrics = metrics_flusher.lock().await;
+                        // blocking_flush_all(
+                        //     &logs_flusher,
+                        //     &mut locked_metrics,
+                        //     &*trace_flusher,
+                        //     &*stats_flusher,
+                        //     &mut race_flush_interval,
+                        // )
+                        // .await;
+                        // println!("AJ race flush took: {:?}", race_duration.elapsed());
                     }
                 }
             }
@@ -662,7 +684,6 @@ async fn extension_loop_active(
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
 
-            // gotta lock here
             let mut locked_metrics = metrics_flusher.lock().await;
             blocking_flush_all(
                 &logs_flusher,
@@ -684,13 +705,13 @@ async fn blocking_flush_all(
     stats_flusher: &impl StatsFlusher,
     race_flush_interval: &mut tokio::time::Interval,
 ) {
+    race_flush_interval.reset();
     tokio::join!(
         logs_flusher.flush(None),
         metrics_flusher.flush(),
         trace_flusher.flush(None),
         stats_flusher.flush()
     );
-    race_flush_interval.reset();
 }
 
 async fn handle_event_bus_event(
