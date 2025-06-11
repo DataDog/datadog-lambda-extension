@@ -207,7 +207,10 @@ mod tests {
         Arc::new(Config {
             apm_config_apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             service: Some("test-service".to_string()),
-            tags: Some("test:tag,env:test-env".to_string()),
+            tags: HashMap::from([
+                ("test".to_string(), "tag".to_string()),
+                ("env".to_string(), "test-env".to_string()),
+            ]),
             ..Config::default()
         })
     }

@@ -378,9 +378,10 @@ mod tests {
                 async fn $name() {
                     let (input, expected): (&TelemetryEvent, Message) = $value;
 
+                    let tags = HashMap::from([("test".to_string(), "tags".to_string())]);
                     let config = Arc::new(config::Config {
                         service: Some("test-service".to_string()),
-                        tags: Some("test:tags".to_string()),
+                        tags: tags.clone(),
                         ..config::Config::default()
                     });
 
@@ -395,7 +396,7 @@ mod tests {
                         tags_provider,
                         Arc::new(config::Config {
                             service: Some("test-service".to_string()),
-                            tags: Some("test:tag,env:test".to_string()),
+                            tags,
                             ..config::Config::default()}),
                         tx.clone(),
                     );
@@ -600,7 +601,7 @@ mod tests {
     async fn test_get_intake_log() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
@@ -646,7 +647,7 @@ mod tests {
     async fn test_get_intake_log_errors_with_orphan() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
@@ -679,7 +680,7 @@ mod tests {
     async fn test_get_intake_log_no_orphan_after_seeing_request_id() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
@@ -723,7 +724,7 @@ mod tests {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
@@ -774,7 +775,7 @@ mod tests {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             serverless_logs_enabled: false,
             ..config::Config::default()
         });
@@ -810,7 +811,7 @@ mod tests {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
@@ -842,7 +843,7 @@ mod tests {
         let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
@@ -924,7 +925,7 @@ mod tests {
     async fn test_process_logs_structured_ddtags() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
@@ -981,7 +982,7 @@ mod tests {
     async fn test_process_logs_structured_no_ddtags() {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 

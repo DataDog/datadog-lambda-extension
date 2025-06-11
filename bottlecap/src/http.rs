@@ -48,7 +48,7 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn 
     }
 
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
-    if let Some(https_uri) = &config.https_proxy {
+    if let Some(https_uri) = &config.proxy_https {
         let proxy = reqwest::Proxy::https(https_uri.clone())?;
         Ok(client.proxy(proxy).build()?)
     } else {
