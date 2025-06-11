@@ -612,12 +612,14 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
+            println!("AJ calling for /next");
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
+                        println!("aj got next");
                         // Dear reader this is important, you may be tempted to remove this
                         // after all, why reset the flush interval if we're not flushing?
                         // It's because the race_flush_interval is only for the RACE FLUSH
