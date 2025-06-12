@@ -67,7 +67,7 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub appsec_enabled: Option<bool>,
     //
-    pub apm_config_apm_dd_url: Option<String>,
+    pub apm_dd_url: Option<String>,
     #[serde(deserialize_with = "deserialize_apm_replace_rules")]
     pub apm_replace_tags: Option<Vec<ReplaceRule>>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
@@ -234,10 +234,8 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         config.appsec_enabled.clone_from(appsec_enabled);
     }
 
-    if let Some(apm_config_apm_dd_url) = &env_config.apm_config_apm_dd_url {
-        config
-            .apm_config_apm_dd_url
-            .clone_from(apm_config_apm_dd_url);
+    if let Some(apm_dd_url) = &env_config.apm_dd_url {
+        config.apm_dd_url.clone_from(apm_dd_url);
     }
 
     if env_config.apm_replace_tags.is_some() {
