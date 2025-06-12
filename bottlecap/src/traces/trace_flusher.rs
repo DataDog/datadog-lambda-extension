@@ -94,14 +94,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         for task in tasks {
             match task.await {
-                Ok(result) => match result {
-                    Ok(_) => {}
-                    Err(e) => {
+                Ok(result) => {
+                    if let Err(e) = result {
                         error!("Error sending trace: {e:?}");
                         // Return the original traces for retry
                         return Some(traces_clone);
                     }
-                },
+                }
                 Err(e) => {
                     error!("Task join error: {e:?}");
                     // Return the original traces for retry if a task panics
