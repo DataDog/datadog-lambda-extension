@@ -94,7 +94,7 @@ impl Agent {
             let listener = TcpListener::bind(&socket)
                 .await
                 .expect("Failed to bind socket");
-            debug!("OTLP | Starting on collector on {socket}");
+            debug!("OTLP | Starting collector on {}", socket);
             axum::serve(listener, router)
                 .with_graceful_shutdown(Self::graceful_shutdown(shutdown_token_clone))
                 .await
