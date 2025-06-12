@@ -1,11 +1,10 @@
 use axum::{
-    extract::{FromRequest, Request, State},
+    extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
     Router,
 };
-use bytes::Bytes;
 use datadog_trace_utils::send_data::SendData;
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use serde_json::json;
@@ -16,7 +15,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 use crate::{
-    config::Config, otlp::processor::Processor as OtlpProcessor, tags::provider,
+    config::Config,
+    http::{extract_request_body, handler_not_found},
+    otlp::processor::Processor as OtlpProcessor,
+    tags::provider,
     traces::trace_processor::TraceProcessor,
 };
 
@@ -37,7 +39,7 @@ pub struct Agent {
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendData>,
     port: u16,
-    pub shutdown_token: CancellationToken,
+    shutdown_token: CancellationToken,
 }
 
 impl Agent {
@@ -189,19 +191,6 @@ impl Agent {
             }
         }
     }
-}
-
-async fn handler_not_found() -> Response {
-    (StatusCode::NOT_FOUND, "Not Found").into_response()
-}
-
-async fn extract_request_body(
-    request: Request,
-) -> Result<(hyper::http::request::Parts, Bytes), Box<dyn std::error::Error>> {
-    let (parts, body) = request.into_parts();
-    let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
-
-    Ok((parts, bytes))
 }
 
 #[cfg(test)]
