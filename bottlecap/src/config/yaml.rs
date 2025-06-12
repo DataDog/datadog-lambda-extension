@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::config::additional_endpoints::deserialize_additional_endpoints;
+use crate::config::logs_additional_endpoints::LogsAdditionalEndpoint;
 use crate::config::{deserialize_apm_replace_rules, deserialize_processing_rules, ProcessingRule};
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use serde::Deserialize;
@@ -113,6 +114,8 @@ impl Config {
 pub struct LogsConfig {
     #[serde(deserialize_with = "deserialize_processing_rules")]
     pub processing_rules: Option<Vec<ProcessingRule>>,
+    pub force_use_http: bool,
+    pub additional_endpoints: Vec<LogsAdditionalEndpoint>,
 }
 
 /// APM Config

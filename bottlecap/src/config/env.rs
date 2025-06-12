@@ -1,4 +1,7 @@
-use crate::config::additional_endpoints::deserialize_additional_endpoints;
+use crate::config::{
+    additional_endpoints::deserialize_additional_endpoints,
+    logs_additional_endpoints::{deserialize_logs_additional_endpoints, LogsAdditionalEndpoint},
+};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::vec;
@@ -39,6 +42,9 @@ pub struct Config {
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
     pub logs_config_logs_dd_url: String,
+    pub logs_config_force_use_http: bool,
+    #[serde(deserialize_with = "deserialize_logs_additional_endpoints")]
+    pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
     pub serverless_flush_strategy: FlushStrategy,
     pub http_protocol: Option<String>,
     #[serde(deserialize_with = "deserialize_bool_from_anything")]
@@ -152,6 +158,8 @@ impl Default for Config {
             logs_config_use_compression: true,
             logs_config_compression_level: 6,
             logs_config_logs_dd_url: String::default(),
+            logs_config_force_use_http: false,
+            logs_config_additional_endpoints: Vec::new(),
             // Metrics
             enhanced_metrics: true,
             lambda_proc_enhanced_metrics: true,

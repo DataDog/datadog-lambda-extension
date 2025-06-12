@@ -4,6 +4,7 @@ pub mod aws;
 pub mod env;
 pub mod flush_strategy;
 pub mod log_level;
+pub mod logs_additional_endpoints;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
@@ -251,6 +252,13 @@ fn merge_config(config: &mut EnvConfig, yaml_config: &YamlConfig) {
         config
             .additional_endpoints
             .clone_from(&yaml_config.additional_endpoints);
+    }
+    // - Logs
+    if config.logs_config_additional_endpoints.is_empty() {
+        config.logs_config_force_use_http = yaml_config.logs_config.force_use_http;
+        config
+            .logs_config_additional_endpoints
+            .clone_from(&yaml_config.logs_config.additional_endpoints);
     }
 }
 
