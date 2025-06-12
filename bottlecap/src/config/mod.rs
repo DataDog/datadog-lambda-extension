@@ -112,12 +112,11 @@ impl ConfigBuilder {
         }
 
         // If APM URL is not set, set it to the default
-        if self.config.apm_config_apm_dd_url.is_empty() {
-            self.config.apm_config_apm_dd_url = trace_intake_url(self.config.site.clone().as_str());
+        if self.config.apm_dd_url.is_empty() {
+            self.config.apm_dd_url = trace_intake_url(self.config.site.clone().as_str());
         } else {
             // If APM URL is set, add the site to the URL
-            self.config.apm_config_apm_dd_url =
-                trace_intake_url_prefixed(self.config.apm_config_apm_dd_url.as_str());
+            self.config.apm_dd_url = trace_intake_url_prefixed(self.config.apm_dd_url.as_str());
         }
 
         self.config.clone()
@@ -163,7 +162,7 @@ pub struct Config {
     // AppSec
     pub appsec_enabled: bool,
     //
-    pub apm_config_apm_dd_url: String,
+    pub apm_dd_url: String,
     pub apm_replace_tags: Option<Vec<ReplaceRule>>,
     pub apm_config_obfuscation_http_remove_query_string: bool,
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
@@ -254,7 +253,7 @@ impl Default for Config {
             // APM
             service_mapping: HashMap::new(),
             appsec_enabled: false,
-            apm_config_apm_dd_url: String::default(),
+            apm_dd_url: String::default(),
             apm_replace_tags: None,
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
@@ -558,14 +557,11 @@ pub mod tests {
     fn test_support_pci_traces_intake_url() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env(
-                "DD_APM_CONFIG_APM_DD_URL",
-                "https://trace-pci.agent.datadoghq.com",
-            );
+            jail.set_env("DD_APM_DD_URL", "https://trace-pci.agent.datadoghq.com");
 
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
-                config.apm_config_apm_dd_url,
+                config.apm_dd_url,
                 "https://trace-pci.agent.datadoghq.com/api/v0.2/traces".to_string()
             );
             Ok(())
@@ -690,7 +686,7 @@ pub mod tests {
                         TracePropagationStyle::TraceContext
                     ],
                     logs_config_logs_dd_url: "https://http-intake.logs.datadoghq.com".to_string(),
-                    apm_config_apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
+                    apm_dd_url: trace_intake_url("datadoghq.com").to_string(),
                     dd_url: String::new(), // We add the prefix in main.rs
                     ..Config::default()
                 }
