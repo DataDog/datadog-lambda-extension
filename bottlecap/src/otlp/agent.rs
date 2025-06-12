@@ -1,31 +1,45 @@
-use datadog_trace_agent::http_utils::{
-    log_and_create_http_response, log_and_create_traces_success_http_response,
+use axum::{
+    extract::{Request, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::post,
+    Router,
 };
 use datadog_trace_utils::send_data::SendData;
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
-use ddcommon::hyper_migration;
-use http_body_util::BodyExt;
-use hyper::{http, service::service_fn, Method, Response, StatusCode};
-use std::io;
+use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::sync::mpsc::Sender;
+use tokio::{net::TcpListener, sync::mpsc::Sender};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 use crate::{
-    config::Config, otlp::processor::Processor as OtlpProcessor, tags::provider,
+    config::Config,
+    http::{extract_request_body, handler_not_found},
+    otlp::processor::Processor as OtlpProcessor,
+    tags::provider,
     traces::trace_processor::TraceProcessor,
 };
 
 const OTLP_AGENT_HTTP_PORT: u16 = 4318;
 
+type AgentState = (
+    Arc<Config>,
+    Arc<provider::Provider>,
+    OtlpProcessor,
+    Arc<dyn TraceProcessor + Send + Sync>,
+    Sender<SendData>,
+);
+
 pub struct Agent {
-    pub config: Arc<Config>,
-    pub tags_provider: Arc<provider::Provider>,
-    pub processor: OtlpProcessor,
-    pub trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-    pub trace_tx: Sender<SendData>,
+    config: Arc<Config>,
+    tags_provider: Arc<provider::Provider>,
+    processor: OtlpProcessor,
+    trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
+    trace_tx: Sender<SendData>,
     port: u16,
+    shutdown_token: CancellationToken,
 }
 
 impl Agent {
@@ -39,15 +53,22 @@ impl Agent {
             &config.otlp_config_receiver_protocols_http_endpoint,
             OTLP_AGENT_HTTP_PORT,
         );
+        let shutdown_token = CancellationToken::new();
 
         Self {
-            config: config.clone(),
-            tags_provider: tags_provider.clone(),
-            processor: OtlpProcessor::new(config.clone()),
+            config: Arc::clone(&config),
+            tags_provider: Arc::clone(&tags_provider),
+            processor: OtlpProcessor::new(Arc::clone(&config)),
             trace_processor,
             trace_tx,
             port,
+            shutdown_token,
         }
+    }
+
+    #[must_use]
+    pub fn shutdown_token(&self) -> CancellationToken {
+        self.shutdown_token.clone()
     }
 
     fn parse_port(endpoint: &Option<String>, default_port: u16) -> u16 {
@@ -66,140 +87,107 @@ impl Agent {
         default_port
     }
 
-    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let config = self.config.clone();
-        let tags_provider = self.tags_provider.clone();
-        let processor = self.processor.clone();
-        let trace_tx = self.trace_tx.clone();
-        let trace_processor = self.trace_processor.clone();
-        let service = service_fn(move |req| {
-            Self::handler(
-                req.map(hyper_migration::Body::incoming),
-                config.clone(),
-                tags_provider.clone(),
-                processor.clone(),
-                trace_processor.clone(),
-                trace_tx.clone(),
-            )
+    pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let socket = SocketAddr::from(([127, 0, 0, 1], self.port));
+        let router = self.make_router();
+
+        let shutdown_token_clone = self.shutdown_token.clone();
+        tokio::spawn(async move {
+            let listener = TcpListener::bind(&socket)
+                .await
+                .expect("Failed to bind socket");
+            debug!("OTLP | Starting collector on {}", socket);
+            axum::serve(listener, router)
+                .with_graceful_shutdown(Self::graceful_shutdown(shutdown_token_clone))
+                .await
+                .expect("Failed to start OTLP agent");
         });
 
-        let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
-        let server = hyper::server::conn::http1::Builder::new();
-        let mut joinset = tokio::task::JoinSet::new();
-        debug!("OTLP started on {}", addr);
-        loop {
-            let conn = tokio::select! {
-                con_res = listener.accept() => match con_res {
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            io::ErrorKind::ConnectionAborted
-                                | io::ErrorKind::ConnectionReset
-                                | io::ErrorKind::ConnectionRefused
-                        ) =>
-                    {
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("OTLP Receiver error: {e}");
-                        return Err(e.into());
-                    }
-                    Ok((conn, _)) => conn,
-                },
-                finished = async {
-                    match joinset.join_next().await {
-                        Some(finished) => finished,
-                        None => std::future::pending().await,
-                    }
-                } => match finished {
-                    Err(e) if e.is_panic() => {
-                        std::panic::resume_unwind(e.into_panic());
-                    },
-                    Ok(()) | Err(_) => continue,
-                },
-            };
-            let conn = hyper_util::rt::TokioIo::new(conn);
-            let server = server.clone();
-            let service = service.clone();
-            joinset.spawn(async move {
-                if let Err(e) = server.serve_connection(conn, service).await {
-                    debug!("OTLP Receiver connection error: {e}");
-                }
-            });
-        }
+        Ok(())
     }
 
-    #[allow(clippy::pedantic)]
-    async fn handler(
-        req: hyper_migration::HttpRequest,
-        config: Arc<Config>,
-        tags_provider: Arc<provider::Provider>,
-        processor: OtlpProcessor,
-        trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendData>,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        match (req.method(), req.uri().path()) {
-            (&Method::POST, "/v1/traces") => {
-                let headers = req.headers().clone();
-                let body = match req.collect().await {
-                    Ok(body_bytes_collected) => body_bytes_collected.to_bytes().to_vec(),
-                    Err(e) => {
-                        error!("Failed to collect body: {:?}", e);
-                        return Ok(Response::builder()
-                            .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
-                            .body(hyper_migration::Body::from("Failed to collect body"))
-                            .expect("infallible"));
-                    }
-                };
+    fn make_router(&self) -> Router {
+        let state: AgentState = (
+            Arc::clone(&self.config),
+            Arc::clone(&self.tags_provider),
+            self.processor.clone(),
+            Arc::clone(&self.trace_processor),
+            self.trace_tx.clone(),
+        );
 
-                let traces = match processor.process(&body) {
-                    Ok(traces) => traces,
-                    Err(e) => {
-                        error!("Failed to process OTLP request: {:?}", e);
-                        return Ok(Response::builder()
-                            .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
-                            .body(hyper_migration::Body::from(
-                                "Failed to process OTLP request",
-                            ))
-                            .expect("infallible"));
-                    }
-                };
+        Router::new()
+            .route("/v1/traces", post(Self::v1_traces))
+            .fallback(handler_not_found)
+            .with_state(state)
+    }
 
-                let tracer_header_tags: DatadogTracerHeaderTags = (&headers).into();
+    async fn graceful_shutdown(shutdown_token: CancellationToken) {
+        shutdown_token.cancelled().await;
+        debug!("OTLP | Shutdown signal received, shutting down");
+    }
 
-                let body_size = size_of_val(&traces);
-                let send_data = trace_processor.process_traces(
-                    config,
-                    tags_provider.clone(),
-                    tracer_header_tags,
-                    traces,
-                    body_size,
-                    None,
-                );
-
-                if send_data.is_empty() {
-                    return log_and_create_http_response(
-                        "Not sending traces, processor returned empty data",
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    );
-                }
-
-                match trace_tx.send(send_data).await {
-                    Ok(()) => log_and_create_traces_success_http_response(
-                        "Successfully buffered traces to be flushed.",
-                        StatusCode::OK,
-                    ),
-                    Err(err) => log_and_create_http_response(
-                        &format!("Error sending traces to the trace flusher: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
+    async fn v1_traces(
+        State((config, tags_provider, processor, trace_processor, trace_tx)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        let (parts, body) = match extract_request_body(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("OTLP | Failed to extract request body: {e}"),
+                )
+                    .into_response();
             }
-            _ => {
-                let mut not_found = Response::default();
-                *not_found.status_mut() = StatusCode::NOT_FOUND;
-                Ok(not_found)
+        };
+
+        let traces = match processor.process(&body) {
+            Ok(traces) => traces,
+            Err(e) => {
+                error!("OTLP | Failed to process request: {:?}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to process request: {e}"),
+                )
+                    .into_response();
+            }
+        };
+
+        let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
+        let body_size = size_of_val(&traces);
+        let send_data = trace_processor.process_traces(
+            config,
+            tags_provider,
+            tracer_header_tags,
+            traces,
+            body_size,
+            None,
+        );
+
+        if send_data.is_empty() {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "message": "Not sending traces, processor returned empty data" })
+                    .to_string(),
+            )
+                .into_response();
+        }
+
+        match trace_tx.send(send_data).await {
+            Ok(()) => {
+                debug!("OTLP | Successfully buffered traces to be flushed.");
+                (
+                    StatusCode::OK,
+                    json!({"rate_by_service":{"service:,env:":1}}).to_string(),
+                )
+                    .into_response()
+            }
+            Err(err) => {
+                error!("OTLP | Error sending traces to the trace flusher: {err}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({ "message": format!("Error sending traces to the trace flusher: {err}") }).to_string()
+                ).into_response()
             }
         }
     }
