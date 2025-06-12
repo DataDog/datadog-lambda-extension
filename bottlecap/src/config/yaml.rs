@@ -434,7 +434,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     }
 
     if let Some(apm_dd_url) = &yaml_config.apm_config.apm_dd_url {
-        config.apm_config_apm_dd_url.clone_from(apm_dd_url);
+        config.apm_dd_url.clone_from(apm_dd_url);
     }
 
     if yaml_config.apm_config.replace_tags.is_some() {
