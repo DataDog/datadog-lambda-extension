@@ -114,7 +114,10 @@ mod tests {
     fn test_provider_new() {
         let config = Arc::new(Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tag,env:test".to_string()),
+            tags: HashMap::from([
+                ("test".to_string(), "tag".to_string()),
+                ("env".to_string(), "test".to_string()),
+            ]),
             ..config::Config::default()
         });
         let mut metadata = HashMap::new();
