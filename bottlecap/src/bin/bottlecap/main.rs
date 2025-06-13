@@ -25,7 +25,7 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher},
+    logs::{agent::LogsAgent, flusher::LogsFlusher},
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
