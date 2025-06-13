@@ -68,11 +68,18 @@ impl Flusher {
             headers,
         }
     }
-
-    pub async fn flush(&self, batches: Option<Vec<Vec<u8>>>) -> Vec<reqwest::RequestBuilder> {
+    pub async fn flush(
+        &self,
+        batches: Option<Vec<Vec<u8>>>,
+        retry_request: Option<reqwest::RequestBuilder>,
+    ) -> Vec<reqwest::RequestBuilder> {
         let mut set = JoinSet::new();
 
-        if let Some(logs_batches) = batches {
+        // If retry_request is provided, only process that request
+        if let Some(req) = retry_request {
+            set.spawn(async move { Self::send(req).await });
+        } else if let Some(logs_batches) = batches {
+            // Process provided batches
             for batch in logs_batches {
                 if batch.is_empty() {
                     continue;
@@ -224,20 +231,13 @@ impl LogsFlusher {
         retry_request: Option<reqwest::RequestBuilder>,
     ) -> Vec<reqwest::RequestBuilder> {
         let mut failed_requests = Vec::new();
+        let mut set = JoinSet::new();
 
         // If retry_request is provided, only process that request
         if let Some(req) = retry_request {
-            if let Some(req_clone) = req.try_clone() {
-                if let Err(e) = Flusher::send(req_clone).await {
-                    if let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>() {
-                        failed_requests.push(
-                            failed_req_err
-                                .request
-                                .try_clone()
-                                .expect("should be able to clone request"),
-                        );
-                    }
-                }
+            let req_clone = req.try_clone();
+            if let Some(req_clone) = req_clone {
+                set.spawn(async move { Flusher::send(req_clone).await });
             }
         } else {
             // Get batches from primary flusher's aggregator
@@ -252,18 +252,13 @@ impl LogsFlusher {
                 batches
             };
 
-            // Send batches to each flusher
-            let futures = self.flushers.iter().map(|flusher| {
-                let batches = logs_batches.clone();
-                let flusher = flusher.clone();
-                async move { flusher.flush(Some(batches)).await }
-            });
-
-            let results = join_all(futures).await;
-            for failed in results {
+            // Send each batch to all flushers
+            for flusher in &self.flushers {
+                let failed = flusher.flush(Some(logs_batches.clone()), None).await;
                 failed_requests.extend(failed);
             }
         }
+
         failed_requests
     }
 }
