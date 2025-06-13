@@ -1,6 +1,6 @@
 use bottlecap::config::Config;
 use bottlecap::event_bus::bus::EventBus;
-use bottlecap::logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher};
+use bottlecap::logs::{agent::LogsAgent, flusher::LogsFlusher};
 use bottlecap::tags::provider::Provider;
 use bottlecap::telemetry::events::TelemetryEvent;
 use bottlecap::LAMBDA_RUNTIME_SLUG;

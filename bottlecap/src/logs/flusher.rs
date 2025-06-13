@@ -24,6 +24,7 @@ pub struct FailedRequestError {
 #[derive(Debug, Clone)]
 pub struct Flusher {
     client: reqwest::Client,
+    endpoint: String,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
     headers: HeaderMap,
@@ -32,6 +33,7 @@ pub struct Flusher {
 impl Flusher {
     pub fn new(
         api_key: String,
+        endpoint: String,
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
@@ -59,6 +61,7 @@ impl Flusher {
 
         Flusher {
             client,
+            endpoint,
             aggregator,
             config,
             headers,
@@ -66,6 +69,7 @@ impl Flusher {
     }
     pub async fn flush(
         &self,
+        batches: Option<Vec<Vec<u8>>>,
         retry_request: Option<reqwest::RequestBuilder>,
     ) -> Vec<reqwest::RequestBuilder> {
         let mut set = JoinSet::new();
@@ -73,20 +77,8 @@ impl Flusher {
         // If retry_request is provided, only process that request
         if let Some(req) = retry_request {
             set.spawn(async move { Self::send(req).await });
-        } else {
-            // Process log batches only if no retry_request is provided
-            let logs_batches = {
-                let mut guard = self.aggregator.lock().expect("lock poisoned");
-                let mut batches = Vec::new();
-                let mut current_batch = guard.get_batch();
-                while !current_batch.is_empty() {
-                    batches.push(current_batch);
-                    current_batch = guard.get_batch();
-                }
-
-                batches
-            };
-
+        } else if let Some(logs_batches) = batches {
+            // Process provided batches
             for batch in logs_batches {
                 if batch.is_empty() {
                     continue;
@@ -124,7 +116,7 @@ impl Flusher {
     }
 
     fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
-        let url = format!("{}/api/v2/logs", self.config.logs_config_logs_dd_url);
+        let url = format!("{}/api/v2/logs", self.endpoint);
         let body = self.compress(data);
         self.client
             .post(&url)
@@ -194,5 +186,78 @@ impl Flusher {
         let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
         encoder.write_all(data)?;
         encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
+    }
+}
+
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone)]
+pub struct LogsFlusher {
+    pub flushers: Vec<Flusher>,
+}
+
+impl LogsFlusher {
+    pub fn new(
+        api_key: String,
+        aggregator: Arc<Mutex<Aggregator>>,
+        config: Arc<config::Config>,
+    ) -> Self {
+        let mut flushers = Vec::new();
+
+        // Create primary flusher
+        flushers.push(Flusher::new(
+            api_key.clone(),
+            config.logs_config_logs_dd_url.clone(),
+            aggregator.clone(),
+            config.clone(),
+        ));
+
+        // Create flushers for additional endpoints
+        for endpoint in &config.logs_config_additional_endpoints {
+            let endpoint_url = format!("https://{}:{}", endpoint.host, endpoint.port);
+            flushers.push(Flusher::new(
+                endpoint.api_key.clone(),
+                endpoint_url,
+                aggregator.clone(),
+                config.clone(),
+            ));
+        }
+
+        LogsFlusher { flushers }
+    }
+
+    pub async fn flush(
+        &self,
+        retry_request: Option<reqwest::RequestBuilder>,
+    ) -> Vec<reqwest::RequestBuilder> {
+        let mut failed_requests = Vec::new();
+        let mut set = JoinSet::new();
+
+        // If retry_request is provided, only process that request
+        if let Some(req) = retry_request {
+            let req_clone = req.try_clone();
+            if let Some(req_clone) = req_clone {
+                set.spawn(async move { Flusher::send(req_clone).await });
+            }
+        } else {
+            // Get batches from primary flusher's aggregator
+            let logs_batches = {
+                let mut guard = self.flushers[0].aggregator.lock().expect("lock poisoned");
+                let mut batches = Vec::new();
+                let mut current_batch = guard.get_batch();
+                while !current_batch.is_empty() {
+                    batches.push(current_batch);
+                    current_batch = guard.get_batch();
+                }
+                batches
+            };
+
+            // Send each batch to all flushers
+            for flusher in &self.flushers {
+                let failed = flusher.flush(Some(logs_batches.clone()), None).await;
+                failed_requests.extend(failed);
+            }
+        }
+
+        failed_requests
     }
 }
