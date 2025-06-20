@@ -70,10 +70,18 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         debug!("Stats payload to be sent: {stats_payload:?}");
 
-        let serialized_stats_payload = match stats_utils::serialize_stats_payload(stats_payload) {
-            Ok(res) => res,
-            Err(err) => {
+        let serialized_stats_payload = match tokio::task::spawn_blocking(move || {
+            stats_utils::serialize_stats_payload(stats_payload)
+        })
+        .await
+        {
+            Ok(Ok(res)) => res,
+            Ok(Err(err)) => {
                 error!("Failed to serialize stats payload, dropping stats: {err}");
+                return;
+            }
+            Err(err) => {
+                error!("Failed to spawn serialization task: {err}");
                 return;
             }
         };

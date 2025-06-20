@@ -495,7 +495,6 @@ async fn extension_loop_active(
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
 
     let mut race_flush_interval = flush_control.get_flush_interval();
-    race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",
@@ -506,7 +505,11 @@ async fn extension_loop_active(
     let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+    // Resets the interval so we don't trigger it
+    // on a proactive initialization or provisioned concurrency
+    race_flush_interval.tick().await; // discard first tick, which is instantaneous
     loop {
+        race_flush_interval.reset();
         let maybe_shutdown_event;
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
@@ -610,6 +613,7 @@ async fn extension_loop_active(
                 )
                 .await;
                 last_continuous_flush_error = false;
+                println!("AJ PERIODIC FLUSH DONE");
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
@@ -638,16 +642,17 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr,
-                        )
-                        .await;
+                        println!("ASTUYVE RACE FLUSH");
+                        // let mut locked_metrics = metrics_flushers.lock().await;
+                        // blocking_flush_all(
+                        //     &logs_flusher,
+                        //     &mut locked_metrics,
+                        //     &*trace_flusher,
+                        //     &*stats_flusher,
+                        //     &mut race_flush_interval,
+                        //     &metrics_aggr,
+                        // )
+                        // .await;
                     }
                 }
             }

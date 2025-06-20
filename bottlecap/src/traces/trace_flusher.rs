@@ -87,8 +87,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         for traces in coalesced_traces {
             let https_proxy = self.config.https_proxy.clone();
-            tasks.push(tokio::spawn(async move {
-                traces.send_proxy(https_proxy.as_deref()).await.last_result
+            tasks.push(tokio::task::spawn_blocking(move || {
+                tokio::runtime::Handle::current().block_on(async move {
+                    traces.send_proxy(https_proxy.as_deref()).await.last_result
+                })
             }));
         }
 

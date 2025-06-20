@@ -91,7 +91,7 @@ impl Flusher {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch);
+                let req = self.create_request(batch).await;
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -123,9 +123,9 @@ impl Flusher {
         failed_requests
     }
 
-    fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
+    async fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
         let url = format!("{}/api/v2/logs", self.config.logs_config_logs_dd_url);
-        let body = self.compress(data);
+        let body = self.compress(data).await;
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
@@ -176,23 +176,41 @@ impl Flusher {
         }
     }
 
-    fn compress(&self, data: Vec<u8>) -> Vec<u8> {
+    async fn compress(&self, data: Vec<u8>) -> Vec<u8> {
         if !self.config.logs_config_use_compression {
             return data;
         }
 
-        match self.encode(&data) {
-            Ok(compressed_data) => compressed_data,
+        let compression_level = self.config.logs_config_compression_level;
+        // Use an enum to handle both success and error cases without cloning
+        enum CompressionResult {
+            Compressed(Vec<u8>),
+            Failed(Vec<u8>),
+        }
+        
+        match tokio::task::spawn_blocking(move || -> CompressionResult {
+            match (|| -> Result<Vec<u8>, Box<dyn Error + Send + Sync>> {
+                let mut encoder = Encoder::new(Vec::new(), compression_level)?;
+                encoder.write_all(&data)?;
+                Ok(encoder.finish()?)
+            })() {
+                Ok(compressed) => CompressionResult::Compressed(compressed),
+                Err(e) => {
+                    debug!("Failed to compress data: {}", e);
+                    CompressionResult::Failed(data)
+                }
+            }
+        })
+        .await
+        {
+            Ok(CompressionResult::Compressed(compressed)) => compressed,
+            Ok(CompressionResult::Failed(original)) => original,
             Err(e) => {
-                debug!("Failed to compress data: {}", e);
-                data
+                debug!("Failed to spawn compression task: {}", e);
+                // If we can't spawn the task, we can't recover the data
+                // This should be very rare - only if the runtime is shutting down
+                Vec::new()
             }
         }
-    }
-
-    fn encode(&self, data: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
-        let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
-        encoder.write_all(data)?;
-        encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
     }
 }
