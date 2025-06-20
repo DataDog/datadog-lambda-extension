@@ -484,7 +484,7 @@ async fn extension_loop_active(
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
-    start_otlp_agent(
+    let otlp_shutdown_token = start_otlp_agent(
         config,
         tags_provider.clone(),
         trace_processor.clone(),
@@ -681,6 +681,9 @@ async fn extension_loop_active(
 
             if let Some(api_runtime_proxy_cancel_token) = api_runtime_proxy_shutdown_signal {
                 api_runtime_proxy_cancel_token.cancel();
+            }
+            if let Some(otlp_shutdown_token) = otlp_shutdown_token {
+                otlp_shutdown_token.cancel();
             }
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
@@ -1066,18 +1069,20 @@ fn start_otlp_agent(
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendData>,
-) {
+) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
-        return;
+        return None;
     }
 
     let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
-
+    let shutdown_token = agent.shutdown_token();
     tokio::spawn(async move {
-        if let Err(e) = agent.start().await {
+        if let Err(e) = agent.start() {
             error!("Error starting OTLP agent: {e:?}");
         }
     });
+
+    Some(shutdown_token)
 }
 
 fn start_api_runtime_proxy(

@@ -1,5 +1,5 @@
 use crate::config;
-use crate::http_client;
+use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use crate::FLUSH_RETRY_COUNT;
 use reqwest::header::HeaderMap;
@@ -35,7 +35,7 @@ impl Flusher {
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
-        let client = http_client::get_client(config.clone());
+        let client = get_client(config.clone());
         let mut headers = HeaderMap::new();
         headers.insert(
             "DD-API-KEY",

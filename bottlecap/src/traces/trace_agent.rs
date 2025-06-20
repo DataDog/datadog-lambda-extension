@@ -17,7 +17,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::config;
-use crate::http_client;
+use crate::http::get_client;
 use crate::lifecycle::invocation::context::ReparentingInfo;
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 use crate::tags::provider;
@@ -108,7 +108,7 @@ impl TraceAgent {
             stats_processor,
             invocation_processor,
             tags_provider,
-            http_client: http_client::get_client(config),
+            http_client: get_client(config),
             tx: trace_tx,
             api_key: resolved_api_key,
         }
