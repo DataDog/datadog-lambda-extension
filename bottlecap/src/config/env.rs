@@ -73,9 +73,6 @@ pub struct EnvConfig {
     pub dd_url: Option<String>,
     /// @env `DD_URL`
     pub url: Option<String>,
-    #[serde(deserialize_with = "deserialize_additional_endpoints")]
-    pub additional_endpoints: HashMap<String, Vec<String>>,
-
     /// @env `DD_ADDITIONAL_ENDPOINTS`
     ///
     /// Additional endpoints to send telemetry to.
