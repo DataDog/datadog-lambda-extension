@@ -23,6 +23,10 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
 
+const ORIGIN_KEY: &str = "origin";
+const DD_ORIGIN_KEY: &str = "_dd.origin";
+const LAMBDA_VALUE: &str = "lambda";
+
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
@@ -50,13 +54,16 @@ impl TraceChunkProcessor for ChunkProcessor {
                 }
             }
 
-            self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
-                span.meta.insert(k.clone(), v.clone());
-            });
+            for (k, v) in self.tags_provider.get_tags_map().iter() {
+                span.meta.entry(k.clone()).or_insert_with(|| v.clone());
+            }
             // TODO(astuyve) generalize this and delegate to an enum
-            span.meta.insert("origin".to_string(), "lambda".to_string());
             span.meta
-                .insert("_dd.origin".to_string(), "lambda".to_string());
+                .entry(ORIGIN_KEY.to_string())
+                .or_insert_with(|| LAMBDA_VALUE.to_string());
+            span.meta
+                .entry(DD_ORIGIN_KEY.to_string())
+                .or_insert_with(|| LAMBDA_VALUE.to_string());
             obfuscate_span(span, &self.obfuscation_config);
         }
 

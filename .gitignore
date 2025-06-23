@@ -27,3 +27,4 @@ bottlecap/target
 bottlecap/proptest-regressions
 
 .gitlab/pipeline*
+claude.md
