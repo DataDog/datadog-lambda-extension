@@ -4,17 +4,20 @@ use std::collections::HashMap;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 
-use crate::config::{
-    additional_endpoints::deserialize_additional_endpoints,
-    apm_replace_rule::deserialize_apm_replace_rules,
-    deserialize_key_value_pairs, deserialize_optional_bool_from_anything,
-    deserialize_string_or_int,
-    flush_strategy::FlushStrategy,
-    log_level::LogLevel,
-    processing_rule::{deserialize_processing_rules, ProcessingRule},
-    service_mapping::deserialize_service_mapping,
-    trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
-    Config, ConfigError, ConfigSource,
+use crate::{
+    config::{
+        additional_endpoints::deserialize_additional_endpoints,
+        apm_replace_rule::deserialize_apm_replace_rules,
+        deserialize_key_value_pairs, deserialize_optional_bool_from_anything,
+        deserialize_string_or_int,
+        flush_strategy::FlushStrategy,
+        log_level::LogLevel,
+        processing_rule::{deserialize_processing_rules, ProcessingRule},
+        service_mapping::deserialize_service_mapping,
+        trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
+        Config, ConfigError, ConfigSource,
+    },
+    merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
 
 #[derive(Debug, PartialEq, Deserialize, Clone, Default)]
@@ -286,358 +289,143 @@ pub struct EnvConfig {
 
 #[allow(clippy::too_many_lines)]
 fn merge_config(config: &mut Config, env_config: &EnvConfig) {
-    if let Some(site) = &env_config.site {
-        config.site.clone_from(site);
-    }
-    if let Some(api_key) = &env_config.api_key {
-        config.api_key.clone_from(api_key);
-    }
-    if let Some(log_level) = &env_config.log_level {
-        config.log_level.clone_from(log_level);
-    }
-
-    if let Some(flush_timeout) = &env_config.flush_timeout {
-        config.flush_timeout.clone_from(flush_timeout);
-    }
+    // Basic fields
+    merge_string!(config, env_config, site);
+    merge_string!(config, env_config, api_key);
+    merge_option_to_value!(config, env_config, log_level);
+    merge_option_to_value!(config, env_config, flush_timeout);
 
     // Unified Service Tagging
-    if env_config.env.is_some() {
-        config.env.clone_from(&env_config.env);
-    }
-    if env_config.service.is_some() {
-        config.service.clone_from(&env_config.service);
-    }
-    if env_config.version.is_some() {
-        config.version.clone_from(&env_config.version);
-    }
-    if !env_config.tags.is_empty() {
-        config.tags.clone_from(&env_config.tags);
-    }
+    merge_option!(config, env_config, env);
+    merge_option!(config, env_config, service);
+    merge_option!(config, env_config, version);
+    merge_hashmap!(config, env_config, tags);
 
     // Proxy
-    if env_config.proxy_https.is_some() {
-        config.proxy_https.clone_from(&env_config.proxy_https);
-    }
-    if !env_config.proxy_no_proxy.is_empty() {
-        config.proxy_no_proxy.clone_from(&env_config.proxy_no_proxy);
-    }
-    if env_config.http_protocol.is_some() {
-        config.http_protocol.clone_from(&env_config.http_protocol);
-    }
+    merge_option!(config, env_config, proxy_https);
+    merge_vec!(config, env_config, proxy_no_proxy);
+    merge_option!(config, env_config, http_protocol);
 
     // Endpoints
-    if let Some(dd_url) = &env_config.dd_url {
-        config.dd_url.clone_from(dd_url);
-    }
-    if let Some(url) = &env_config.url {
-        config.url.clone_from(url);
-    }
-    if !env_config.additional_endpoints.is_empty() {
-        config
-            .additional_endpoints
-            .clone_from(&env_config.additional_endpoints);
-    }
+    merge_string!(config, env_config, dd_url);
+    merge_string!(config, env_config, url);
+    merge_hashmap!(config, env_config, additional_endpoints);
 
     // Logs
-    if let Some(logs_config_logs_dd_url) = &env_config.logs_config_logs_dd_url {
-        config
-            .logs_config_logs_dd_url
-            .clone_from(logs_config_logs_dd_url);
-    }
-
-    if env_config.logs_config_processing_rules.is_some() {
-        config
-            .logs_config_processing_rules
-            .clone_from(&env_config.logs_config_processing_rules);
-    }
-    if let Some(logs_config_use_compression) = &env_config.logs_config_use_compression {
-        config
-            .logs_config_use_compression
-            .clone_from(logs_config_use_compression);
-    }
-
-    if let Some(logs_config_compression_level) = &env_config.logs_config_compression_level {
-        config
-            .logs_config_compression_level
-            .clone_from(logs_config_compression_level);
-    }
+    merge_string!(config, env_config, logs_config_logs_dd_url);
+    merge_option!(config, env_config, logs_config_processing_rules);
+    merge_option_to_value!(config, env_config, logs_config_use_compression);
+    merge_option_to_value!(config, env_config, logs_config_compression_level);
 
     // APM
-    if !env_config.service_mapping.is_empty() {
-        config
-            .service_mapping
-            .clone_from(&env_config.service_mapping);
-    }
+    merge_hashmap!(config, env_config, service_mapping);
+    merge_option_to_value!(config, env_config, appsec_enabled);
+    merge_string!(config, env_config, apm_dd_url);
+    merge_option!(config, env_config, apm_replace_tags);
+    merge_option_to_value!(
+        config,
+        env_config,
+        apm_config_obfuscation_http_remove_query_string
+    );
+    merge_option_to_value!(
+        config,
+        env_config,
+        apm_config_obfuscation_http_remove_paths_with_digits
+    );
+    merge_vec!(config, env_config, apm_features);
 
-    if let Some(appsec_enabled) = &env_config.appsec_enabled {
-        config.appsec_enabled.clone_from(appsec_enabled);
-    }
-
-    if let Some(apm_dd_url) = &env_config.apm_dd_url {
-        config.apm_dd_url.clone_from(apm_dd_url);
-    }
-
-    if env_config.apm_replace_tags.is_some() {
-        config
-            .apm_replace_tags
-            .clone_from(&env_config.apm_replace_tags);
-    }
-
-    if let Some(apm_config_obfuscation_http_remove_query_string) =
-        &env_config.apm_config_obfuscation_http_remove_query_string
-    {
-        config
-            .apm_config_obfuscation_http_remove_query_string
-            .clone_from(apm_config_obfuscation_http_remove_query_string);
-    }
-
-    if let Some(apm_config_obfuscation_http_remove_paths_with_digits) =
-        &env_config.apm_config_obfuscation_http_remove_paths_with_digits
-    {
-        config
-            .apm_config_obfuscation_http_remove_paths_with_digits
-            .clone_from(apm_config_obfuscation_http_remove_paths_with_digits);
-    }
-
-    if !env_config.apm_features.is_empty() {
-        config.apm_features.clone_from(&env_config.apm_features);
-    }
-
-    if !env_config.trace_propagation_style.is_empty() {
-        config
-            .trace_propagation_style
-            .clone_from(&env_config.trace_propagation_style);
-    }
-
-    if !env_config.trace_propagation_style_extract.is_empty() {
-        config
-            .trace_propagation_style_extract
-            .clone_from(&env_config.trace_propagation_style_extract);
-    }
-
-    if let Some(trace_propagation_extract_first) = &env_config.trace_propagation_extract_first {
-        config
-            .trace_propagation_extract_first
-            .clone_from(trace_propagation_extract_first);
-    }
-
-    if let Some(trace_propagation_http_baggage_enabled) =
-        &env_config.trace_propagation_http_baggage_enabled
-    {
-        config
-            .trace_propagation_http_baggage_enabled
-            .clone_from(trace_propagation_http_baggage_enabled);
-    }
+    // Trace Propagation
+    merge_vec!(config, env_config, trace_propagation_style);
+    merge_vec!(config, env_config, trace_propagation_style_extract);
+    merge_option_to_value!(config, env_config, trace_propagation_extract_first);
+    merge_option_to_value!(config, env_config, trace_propagation_http_baggage_enabled);
 
     // OTLP
-    if let Some(otlp_config_traces_enabled) = &env_config.otlp_config_traces_enabled {
-        config
-            .otlp_config_traces_enabled
-            .clone_from(otlp_config_traces_enabled);
-    }
-
-    if let Some(otlp_config_traces_span_name_as_resource_name) =
-        &env_config.otlp_config_traces_span_name_as_resource_name
-    {
-        config
-            .otlp_config_traces_span_name_as_resource_name
-            .clone_from(otlp_config_traces_span_name_as_resource_name);
-    }
-
-    if !env_config
-        .otlp_config_traces_span_name_remappings
-        .is_empty()
-    {
-        config
-            .otlp_config_traces_span_name_remappings
-            .clone_from(&env_config.otlp_config_traces_span_name_remappings);
-    }
-
-    if let Some(otlp_config_ignore_missing_datadog_fields) =
-        &env_config.otlp_config_ignore_missing_datadog_fields
-    {
-        config
-            .otlp_config_ignore_missing_datadog_fields
-            .clone_from(otlp_config_ignore_missing_datadog_fields);
-    }
-
-    if env_config
-        .otlp_config_receiver_protocols_http_endpoint
-        .is_some()
-    {
-        config
-            .otlp_config_receiver_protocols_http_endpoint
-            .clone_from(&env_config.otlp_config_receiver_protocols_http_endpoint);
-    }
-
-    if env_config
-        .otlp_config_receiver_protocols_grpc_endpoint
-        .is_some()
-    {
-        config
-            .otlp_config_receiver_protocols_grpc_endpoint
-            .clone_from(&env_config.otlp_config_receiver_protocols_grpc_endpoint);
-    }
-
-    if env_config
-        .otlp_config_receiver_protocols_grpc_transport
-        .is_some()
-    {
-        config
-            .otlp_config_receiver_protocols_grpc_transport
-            .clone_from(&env_config.otlp_config_receiver_protocols_grpc_transport);
-    }
-
-    if env_config
-        .otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib
-        .is_some()
-    {
-        config
-            .otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib
-            .clone_from(&env_config.otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib);
-    }
-
-    if let Some(otlp_config_metrics_enabled) = &env_config.otlp_config_metrics_enabled {
-        config
-            .otlp_config_metrics_enabled
-            .clone_from(otlp_config_metrics_enabled);
-    }
-
-    if let Some(otlp_config_metrics_resource_attributes_as_tags) =
-        &env_config.otlp_config_metrics_resource_attributes_as_tags
-    {
-        config
-            .otlp_config_metrics_resource_attributes_as_tags
-            .clone_from(otlp_config_metrics_resource_attributes_as_tags);
-    }
-
-    if let Some(otlp_config_metrics_instrumentation_scope_metadata_as_tags) =
-        &env_config.otlp_config_metrics_instrumentation_scope_metadata_as_tags
-    {
-        config
-            .otlp_config_metrics_instrumentation_scope_metadata_as_tags
-            .clone_from(otlp_config_metrics_instrumentation_scope_metadata_as_tags);
-    }
-
-    if env_config.otlp_config_metrics_tag_cardinality.is_some() {
-        config
-            .otlp_config_metrics_tag_cardinality
-            .clone_from(&env_config.otlp_config_metrics_tag_cardinality);
-    }
-
-    if env_config.otlp_config_metrics_delta_ttl.is_some() {
-        config
-            .otlp_config_metrics_delta_ttl
-            .clone_from(&env_config.otlp_config_metrics_delta_ttl);
-    }
-
-    if env_config.otlp_config_metrics_histograms_mode.is_some() {
-        config
-            .otlp_config_metrics_histograms_mode
-            .clone_from(&env_config.otlp_config_metrics_histograms_mode);
-    }
-
-    if let Some(otlp_config_metrics_histograms_send_count_sum_metrics) =
-        &env_config.otlp_config_metrics_histograms_send_count_sum_metrics
-    {
-        config
-            .otlp_config_metrics_histograms_send_count_sum_metrics
-            .clone_from(otlp_config_metrics_histograms_send_count_sum_metrics);
-    }
-
-    if let Some(otlp_config_metrics_histograms_send_aggregation_metrics) =
-        &env_config.otlp_config_metrics_histograms_send_aggregation_metrics
-    {
-        config
-            .otlp_config_metrics_histograms_send_aggregation_metrics
-            .clone_from(otlp_config_metrics_histograms_send_aggregation_metrics);
-    }
-
-    if env_config
-        .otlp_config_metrics_sums_cumulative_monotonic_mode
-        .is_some()
-    {
-        config
-            .otlp_config_metrics_sums_cumulative_monotonic_mode
-            .clone_from(&env_config.otlp_config_metrics_sums_cumulative_monotonic_mode);
-    }
-
-    if env_config
-        .otlp_config_metrics_sums_initial_cumulativ_monotonic_value
-        .is_some()
-    {
-        config
-            .otlp_config_metrics_sums_initial_cumulativ_monotonic_value
-            .clone_from(&env_config.otlp_config_metrics_sums_initial_cumulativ_monotonic_value);
-    }
-
-    if env_config.otlp_config_metrics_summaries_mode.is_some() {
-        config
-            .otlp_config_metrics_summaries_mode
-            .clone_from(&env_config.otlp_config_metrics_summaries_mode);
-    }
-
-    if env_config
-        .otlp_config_traces_probabilistic_sampler_sampling_percentage
-        .is_some()
-    {
-        config
-            .otlp_config_traces_probabilistic_sampler_sampling_percentage
-            .clone_from(&env_config.otlp_config_traces_probabilistic_sampler_sampling_percentage);
-    }
-
-    if let Some(otlp_config_logs_enabled) = &env_config.otlp_config_logs_enabled {
-        config
-            .otlp_config_logs_enabled
-            .clone_from(otlp_config_logs_enabled);
-    }
+    merge_option_to_value!(config, env_config, otlp_config_traces_enabled);
+    merge_option_to_value!(
+        config,
+        env_config,
+        otlp_config_traces_span_name_as_resource_name
+    );
+    merge_hashmap!(config, env_config, otlp_config_traces_span_name_remappings);
+    merge_option_to_value!(
+        config,
+        env_config,
+        otlp_config_ignore_missing_datadog_fields
+    );
+    merge_option!(
+        config,
+        env_config,
+        otlp_config_receiver_protocols_http_endpoint
+    );
+    merge_option!(
+        config,
+        env_config,
+        otlp_config_receiver_protocols_grpc_endpoint
+    );
+    merge_option!(
+        config,
+        env_config,
+        otlp_config_receiver_protocols_grpc_transport
+    );
+    merge_option!(
+        config,
+        env_config,
+        otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib
+    );
+    merge_option_to_value!(config, env_config, otlp_config_metrics_enabled);
+    merge_option_to_value!(
+        config,
+        env_config,
+        otlp_config_metrics_resource_attributes_as_tags
+    );
+    merge_option_to_value!(
+        config,
+        env_config,
+        otlp_config_metrics_instrumentation_scope_metadata_as_tags
+    );
+    merge_option!(config, env_config, otlp_config_metrics_tag_cardinality);
+    merge_option!(config, env_config, otlp_config_metrics_delta_ttl);
+    merge_option!(config, env_config, otlp_config_metrics_histograms_mode);
+    merge_option_to_value!(
+        config,
+        env_config,
+        otlp_config_metrics_histograms_send_count_sum_metrics
+    );
+    merge_option_to_value!(
+        config,
+        env_config,
+        otlp_config_metrics_histograms_send_aggregation_metrics
+    );
+    merge_option!(
+        config,
+        env_config,
+        otlp_config_metrics_sums_cumulative_monotonic_mode
+    );
+    merge_option!(
+        config,
+        env_config,
+        otlp_config_metrics_sums_initial_cumulativ_monotonic_value
+    );
+    merge_option!(config, env_config, otlp_config_metrics_summaries_mode);
+    merge_option!(
+        config,
+        env_config,
+        otlp_config_traces_probabilistic_sampler_sampling_percentage
+    );
+    merge_option_to_value!(config, env_config, otlp_config_logs_enabled);
 
     // AWS Lambda
-    if let Some(api_key_secret_arn) = &env_config.api_key_secret_arn {
-        config.api_key_secret_arn.clone_from(api_key_secret_arn);
-    }
-    if let Some(kms_api_key) = &env_config.kms_api_key {
-        config.kms_api_key.clone_from(kms_api_key);
-    }
-    if let Some(serverless_logs_enabled) = &env_config.serverless_logs_enabled {
-        config
-            .serverless_logs_enabled
-            .clone_from(serverless_logs_enabled);
-    }
-    if let Some(serverless_flush_strategy) = &env_config.serverless_flush_strategy {
-        config
-            .serverless_flush_strategy
-            .clone_from(serverless_flush_strategy);
-    }
-    if let Some(enhanced_metrics) = &env_config.enhanced_metrics {
-        config.enhanced_metrics.clone_from(enhanced_metrics);
-    }
-    if let Some(lambda_proc_enhanced_metrics) = &env_config.lambda_proc_enhanced_metrics {
-        config
-            .lambda_proc_enhanced_metrics
-            .clone_from(lambda_proc_enhanced_metrics);
-    }
-    if let Some(capture_lambda_payload) = &env_config.capture_lambda_payload {
-        config
-            .capture_lambda_payload
-            .clone_from(capture_lambda_payload);
-    }
-    if let Some(capture_lambda_payload_max_depth) = &env_config.capture_lambda_payload_max_depth {
-        config
-            .capture_lambda_payload_max_depth
-            .clone_from(capture_lambda_payload_max_depth);
-    }
-    if let Some(serverless_appsec_enabled) = &env_config.serverless_appsec_enabled {
-        config
-            .serverless_appsec_enabled
-            .clone_from(serverless_appsec_enabled);
-    }
-
-    if env_config.extension_version.is_some() {
-        config
-            .extension_version
-            .clone_from(&env_config.extension_version);
-    }
+    merge_string!(config, env_config, api_key_secret_arn);
+    merge_string!(config, env_config, kms_api_key);
+    merge_option_to_value!(config, env_config, serverless_logs_enabled);
+    merge_option_to_value!(config, env_config, serverless_flush_strategy);
+    merge_option_to_value!(config, env_config, enhanced_metrics);
+    merge_option_to_value!(config, env_config, lambda_proc_enhanced_metrics);
+    merge_option_to_value!(config, env_config, capture_lambda_payload);
+    merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
+    merge_option_to_value!(config, env_config, serverless_appsec_enabled);
+    merge_option!(config, env_config, extension_version);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
