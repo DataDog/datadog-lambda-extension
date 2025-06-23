@@ -1,4 +1,10 @@
 use crate::config;
+use axum::{
+    extract::{FromRequest, Request},
+    http::{self, StatusCode},
+    response::{IntoResponse, Response},
+};
+use bytes::Bytes;
 use core::time::Duration;
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use std::error::Error;
@@ -48,4 +54,17 @@ fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn 
     } else {
         Ok(client.build()?)
     }
+}
+
+pub async fn handler_not_found() -> Response {
+    (StatusCode::NOT_FOUND, "Not Found").into_response()
+}
+
+pub async fn extract_request_body(
+    request: Request,
+) -> Result<(http::request::Parts, Bytes), Box<dyn std::error::Error>> {
+    let (parts, body) = request.into_parts();
+    let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
+
+    Ok((parts, bytes))
 }

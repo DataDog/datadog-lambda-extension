@@ -1,10 +1,10 @@
 use crate::{
-    config::aws::AwsConfig, lifecycle::invocation::processor::Processor as InvocationProcessor,
-    lwa, EXTENSION_HOST,
+    config::aws::AwsConfig, http::extract_request_body,
+    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa, EXTENSION_HOST,
 };
 use axum::{
     body::{Body, Bytes},
-    extract::{FromRequest, Path, Request, State},
+    extract::{Path, Request, State},
     http::{self, Request as HttpRequest, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -310,15 +310,6 @@ fn build_forward_response(
     let forward_response = forward_response.body(Body::from(body_bytes))?;
 
     Ok(forward_response)
-}
-
-async fn extract_request_body(
-    request: Request,
-) -> Result<(hyper::http::request::Parts, Bytes), Box<dyn std::error::Error>> {
-    let (parts, body) = request.into_parts();
-    let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
-
-    Ok((parts, bytes))
 }
 
 fn build_proxy_request(
