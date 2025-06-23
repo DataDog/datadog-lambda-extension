@@ -29,6 +29,81 @@ use crate::config::{
     yaml::YamlConfigSource,
 };
 
+/// Helper macro to merge Option<String> fields to String fields
+#[macro_export]
+macro_rules! merge_string {
+    ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
+        if let Some(value) = &$source.$source_field {
+            $config.$config_field.clone_from(value);
+        }
+    };
+    ($config:expr, $source:expr, $field:ident) => {
+        if let Some(value) = &$source.$field {
+            $config.$field.clone_from(value);
+        }
+    };
+}
+
+/// Helper macro to merge Option<T> fields where T implements Clone
+#[macro_export]
+macro_rules! merge_option {
+    ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
+        if $source.$source_field.is_some() {
+            $config.$config_field.clone_from(&$source.$source_field);
+        }
+    };
+    ($config:expr, $source:expr, $field:ident) => {
+        if $source.$field.is_some() {
+            $config.$field.clone_from(&$source.$field);
+        }
+    };
+}
+
+/// Helper macro to merge Option<T> fields to T fields when Option<T> is Some
+#[macro_export]
+macro_rules! merge_option_to_value {
+    ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
+        if let Some(value) = &$source.$source_field {
+            $config.$config_field = value.clone();
+        }
+    };
+    ($config:expr, $source:expr, $field:ident) => {
+        if let Some(value) = &$source.$field {
+            $config.$field = value.clone();
+        }
+    };
+}
+
+/// Helper macro to merge `Vec` fields when `Vec` is not empty
+#[macro_export]
+macro_rules! merge_vec {
+    ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
+        if !$source.$source_field.is_empty() {
+            $config.$config_field.clone_from(&$source.$source_field);
+        }
+    };
+    ($config:expr, $source:expr, $field:ident) => {
+        if !$source.$field.is_empty() {
+            $config.$field.clone_from(&$source.$field);
+        }
+    };
+}
+
+/// Helper macro to merge `HashMap` fields when `HashMap` is not empty
+#[macro_export]
+macro_rules! merge_hashmap {
+    ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
+        if !$source.$source_field.is_empty() {
+            $config.$config_field.clone_from(&$source.$source_field);
+        }
+    };
+    ($config:expr, $source:expr, $field:ident) => {
+        if !$source.$field.is_empty() {
+            $config.$field.clone_from(&$source.$field);
+        }
+    };
+}
+
 #[derive(Debug, PartialEq)]
 #[allow(clippy::module_name_repetitions)]
 pub enum ConfigError {
