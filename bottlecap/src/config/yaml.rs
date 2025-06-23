@@ -1,15 +1,18 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use crate::config::{
-    additional_endpoints::deserialize_additional_endpoints,
-    deserialize_apm_replace_rules, deserialize_key_value_pairs,
-    deserialize_optional_bool_from_anything, deserialize_processing_rules,
-    deserialize_string_or_int,
-    flush_strategy::FlushStrategy,
-    log_level::LogLevel,
-    service_mapping::deserialize_service_mapping,
-    trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
-    Config, ConfigError, ConfigSource, ProcessingRule,
+use crate::{
+    config::{
+        additional_endpoints::deserialize_additional_endpoints,
+        deserialize_apm_replace_rules, deserialize_key_value_pairs,
+        deserialize_optional_bool_from_anything, deserialize_processing_rules,
+        deserialize_string_or_int,
+        flush_strategy::FlushStrategy,
+        log_level::LogLevel,
+        service_mapping::deserialize_service_mapping,
+        trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
+        Config, ConfigError, ConfigSource, ProcessingRule,
+    },
+    merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use figment::{
@@ -347,102 +350,65 @@ impl OtlpConfig {
 
 #[allow(clippy::too_many_lines)]
 fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
-    if let Some(site) = &yaml_config.site {
-        config.site.clone_from(site);
-    }
-    if let Some(api_key) = &yaml_config.api_key {
-        config.api_key.clone_from(api_key);
-    }
-    if let Some(log_level) = &yaml_config.log_level {
-        config.log_level.clone_from(log_level);
-    }
-
-    if let Some(flush_timeout) = &yaml_config.flush_timeout {
-        config.flush_timeout.clone_from(flush_timeout);
-    }
+    // Basic fields
+    merge_string!(config, yaml_config, site);
+    merge_string!(config, yaml_config, api_key);
+    merge_option_to_value!(config, yaml_config, log_level);
+    merge_option_to_value!(config, yaml_config, flush_timeout);
 
     // Unified Service Tagging
-    if yaml_config.env.is_some() {
-        config.env.clone_from(&yaml_config.env);
-    }
-    if yaml_config.service.is_some() {
-        config.service.clone_from(&yaml_config.service);
-    }
-    if yaml_config.version.is_some() {
-        config.version.clone_from(&yaml_config.version);
-    }
-    if !yaml_config.tags.is_empty() {
-        config.tags.clone_from(&yaml_config.tags);
-    }
+    merge_option!(config, yaml_config, env);
+    merge_option!(config, yaml_config, service);
+    merge_option!(config, yaml_config, version);
+    merge_hashmap!(config, yaml_config, tags);
 
     // Proxy
-    if yaml_config.proxy.https.is_some() {
-        config.proxy_https.clone_from(&yaml_config.proxy.https);
-    }
-    if let Some(no_proxy) = &yaml_config.proxy.no_proxy {
-        config.proxy_no_proxy.clone_from(no_proxy);
-    }
-    if yaml_config.http_protocol.is_some() {
-        config.http_protocol.clone_from(&yaml_config.http_protocol);
-    }
+    merge_option!(config, proxy_https, yaml_config.proxy, https);
+    merge_option_to_value!(config, proxy_no_proxy, yaml_config.proxy, no_proxy);
+    merge_option!(config, yaml_config, http_protocol);
 
     // Endpoints
-    if !yaml_config.additional_endpoints.is_empty() {
-        config
-            .additional_endpoints
-            .clone_from(&yaml_config.additional_endpoints);
-    }
-
-    // This is the equivalent of `DD_DD_URL` in environment variables.
-    // `DD_DD_URL` takes priority over `DD_URL` in environment variables.
-    if let Some(dd_url) = &yaml_config.dd_url {
-        config.dd_url.clone_from(dd_url);
-    }
+    merge_hashmap!(config, yaml_config, additional_endpoints);
+    merge_string!(config, yaml_config, dd_url);
 
     // Logs
-    if let Some(logs_dd_url) = &yaml_config.logs_config.logs_dd_url {
-        config.logs_config_logs_dd_url.clone_from(logs_dd_url);
-    }
-
-    if yaml_config.logs_config.processing_rules.is_some() {
-        config
-            .logs_config_processing_rules
-            .clone_from(&yaml_config.logs_config.processing_rules);
-    }
-
-    if let Some(use_compression) = &yaml_config.logs_config.use_compression {
-        config
-            .logs_config_use_compression
-            .clone_from(use_compression);
-    }
-
-    if let Some(compression_level) = &yaml_config.logs_config.compression_level {
-        config
-            .logs_config_compression_level
-            .clone_from(compression_level);
-    }
+    merge_string!(
+        config,
+        logs_config_logs_dd_url,
+        yaml_config.logs_config,
+        logs_dd_url
+    );
+    merge_option!(
+        config,
+        logs_config_processing_rules,
+        yaml_config.logs_config,
+        processing_rules
+    );
+    merge_option_to_value!(
+        config,
+        logs_config_use_compression,
+        yaml_config.logs_config,
+        use_compression
+    );
+    merge_option_to_value!(
+        config,
+        logs_config_compression_level,
+        yaml_config.logs_config,
+        compression_level
+    );
 
     // APM
-    if !yaml_config.service_mapping.is_empty() {
-        config
-            .service_mapping
-            .clone_from(&yaml_config.service_mapping);
-    }
+    merge_hashmap!(config, yaml_config, service_mapping);
+    merge_option_to_value!(config, yaml_config, appsec_enabled);
+    merge_string!(config, apm_dd_url, yaml_config.apm_config, apm_dd_url);
+    merge_option!(
+        config,
+        apm_replace_tags,
+        yaml_config.apm_config,
+        replace_tags
+    );
 
-    if let Some(appsec_enabled) = &yaml_config.appsec_enabled {
-        config.appsec_enabled.clone_from(appsec_enabled);
-    }
-
-    if let Some(apm_dd_url) = &yaml_config.apm_config.apm_dd_url {
-        config.apm_dd_url.clone_from(apm_dd_url);
-    }
-
-    if yaml_config.apm_config.replace_tags.is_some() {
-        config
-            .apm_replace_tags
-            .clone_from(&yaml_config.apm_config.replace_tags);
-    }
-
+    // Not using the macro here because we need to call a method on the struct
     if let Some(remove_query_string) = yaml_config
         .apm_config
         .obfuscation_http_remove_query_string()
@@ -451,7 +417,6 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
             .apm_config_obfuscation_http_remove_query_string
             .clone_from(&remove_query_string);
     }
-
     if let Some(remove_paths_with_digits) = yaml_config
         .apm_config
         .obfuscation_http_remove_paths_with_digits()
@@ -461,41 +426,19 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
             .clone_from(&remove_paths_with_digits);
     }
 
-    if !yaml_config.apm_config.features.is_empty() {
-        config
-            .apm_features
-            .clone_from(&yaml_config.apm_config.features);
-    }
+    merge_vec!(config, apm_features, yaml_config.apm_config, features);
 
-    if !yaml_config.trace_propagation_style.is_empty() {
-        config
-            .trace_propagation_style
-            .clone_from(&yaml_config.trace_propagation_style);
-    }
-
-    if !yaml_config.trace_propagation_style_extract.is_empty() {
-        config
-            .trace_propagation_style_extract
-            .clone_from(&yaml_config.trace_propagation_style_extract);
-    }
-
-    if let Some(trace_propagation_extract_first) = yaml_config.trace_propagation_extract_first {
-        config
-            .trace_propagation_extract_first
-            .clone_from(&trace_propagation_extract_first);
-    }
-
-    if let Some(trace_propagation_http_baggage_enabled) =
-        yaml_config.trace_propagation_http_baggage_enabled
-    {
-        config
-            .trace_propagation_http_baggage_enabled
-            .clone_from(&trace_propagation_http_baggage_enabled);
-    }
+    // Trace Propagation
+    merge_vec!(config, yaml_config, trace_propagation_style);
+    merge_vec!(config, yaml_config, trace_propagation_style_extract);
+    merge_option_to_value!(config, yaml_config, trace_propagation_extract_first);
+    merge_option_to_value!(config, yaml_config, trace_propagation_http_baggage_enabled);
 
     // OTLP
     if let Some(otlp_config) = &yaml_config.otlp_config {
         // Traces
+
+        // Not using macros in some cases because we need to call a method on the struct
         if let Some(traces_enabled) = otlp_config.traces_enabled() {
             config
                 .otlp_config_traces_enabled
@@ -524,11 +467,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         }
 
         if let Some(probabilistic_sampler) = otlp_config.traces_probabilistic_sampler() {
-            if probabilistic_sampler.sampling_percentage.is_some() {
-                config
-                    .otlp_config_traces_probabilistic_sampler_sampling_percentage
-                    .clone_from(&probabilistic_sampler.sampling_percentage);
-            }
+            merge_option!(
+                config,
+                otlp_config_traces_probabilistic_sampler_sampling_percentage,
+                probabilistic_sampler,
+                sampling_percentage
+            );
         }
 
         // Receiver
@@ -540,141 +484,104 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         }
 
         if let Some(receiver_protocols_grpc) = otlp_config.receiver_protocols_grpc() {
-            if receiver_protocols_grpc.endpoint.is_some() {
-                config
-                    .otlp_config_receiver_protocols_grpc_endpoint
-                    .clone_from(&receiver_protocols_grpc.endpoint);
-            }
-            if receiver_protocols_grpc.transport.is_some() {
-                config
-                    .otlp_config_receiver_protocols_grpc_transport
-                    .clone_from(&receiver_protocols_grpc.transport);
-            }
-            if receiver_protocols_grpc.max_recv_msg_size_mib.is_some() {
-                config
-                    .otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib
-                    .clone_from(&receiver_protocols_grpc.max_recv_msg_size_mib);
-            }
+            merge_option!(
+                config,
+                otlp_config_receiver_protocols_grpc_endpoint,
+                receiver_protocols_grpc,
+                endpoint
+            );
+            merge_option!(
+                config,
+                otlp_config_receiver_protocols_grpc_transport,
+                receiver_protocols_grpc,
+                transport
+            );
+            merge_option!(
+                config,
+                otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib,
+                receiver_protocols_grpc,
+                max_recv_msg_size_mib
+            );
         }
 
         // Metrics
         if let Some(metrics) = &otlp_config.metrics {
-            if let Some(enabled) = metrics.enabled {
-                config.otlp_config_metrics_enabled.clone_from(&enabled);
-            }
-            if let Some(resource_attributes_as_tags) = metrics.resource_attributes_as_tags {
-                config
-                    .otlp_config_metrics_resource_attributes_as_tags
-                    .clone_from(&resource_attributes_as_tags);
-            }
-            if let Some(instrumentation_scope_metadata_as_tags) =
-                metrics.instrumentation_scope_metadata_as_tags
-            {
-                config
-                    .otlp_config_metrics_instrumentation_scope_metadata_as_tags
-                    .clone_from(&instrumentation_scope_metadata_as_tags);
-            }
-            if metrics.tag_cardinality.is_some() {
-                config
-                    .otlp_config_metrics_tag_cardinality
-                    .clone_from(&metrics.tag_cardinality);
-            }
-            if metrics.delta_ttl.is_some() {
-                config
-                    .otlp_config_metrics_delta_ttl
-                    .clone_from(&metrics.delta_ttl);
-            }
+            merge_option_to_value!(config, otlp_config_metrics_enabled, metrics, enabled);
+            merge_option_to_value!(
+                config,
+                otlp_config_metrics_resource_attributes_as_tags,
+                metrics,
+                resource_attributes_as_tags
+            );
+            merge_option_to_value!(
+                config,
+                otlp_config_metrics_instrumentation_scope_metadata_as_tags,
+                metrics,
+                instrumentation_scope_metadata_as_tags
+            );
+            merge_option!(
+                config,
+                otlp_config_metrics_tag_cardinality,
+                metrics,
+                tag_cardinality
+            );
+            merge_option!(config, otlp_config_metrics_delta_ttl, metrics, delta_ttl);
             if let Some(histograms) = &metrics.histograms {
-                if histograms.mode.is_some() {
-                    config
-                        .otlp_config_metrics_histograms_mode
-                        .clone_from(&histograms.mode);
-                }
-                if let Some(send_count_sum_metrics) = histograms.send_count_sum_metrics {
-                    config
-                        .otlp_config_metrics_histograms_send_count_sum_metrics
-                        .clone_from(&send_count_sum_metrics);
-                }
-                if let Some(send_aggregation_metrics) = histograms.send_aggregation_metrics {
-                    config
-                        .otlp_config_metrics_histograms_send_aggregation_metrics
-                        .clone_from(&send_aggregation_metrics);
-                }
+                merge_option_to_value!(
+                    config,
+                    otlp_config_metrics_histograms_send_count_sum_metrics,
+                    histograms,
+                    send_count_sum_metrics
+                );
+                merge_option_to_value!(
+                    config,
+                    otlp_config_metrics_histograms_send_aggregation_metrics,
+                    histograms,
+                    send_aggregation_metrics
+                );
+                merge_option!(
+                    config,
+                    otlp_config_metrics_histograms_mode,
+                    histograms,
+                    mode
+                );
             }
             if let Some(sums) = &metrics.sums {
-                if sums.cumulative_monotonic_mode.is_some() {
-                    config
-                        .otlp_config_metrics_sums_cumulative_monotonic_mode
-                        .clone_from(&sums.cumulative_monotonic_mode);
-                }
-                if sums.initial_cumulative_monotonic_value.is_some() {
-                    config
-                        .otlp_config_metrics_sums_initial_cumulativ_monotonic_value
-                        .clone_from(&sums.initial_cumulative_monotonic_value);
-                }
+                merge_option!(
+                    config,
+                    otlp_config_metrics_sums_cumulative_monotonic_mode,
+                    sums,
+                    cumulative_monotonic_mode
+                );
+                merge_option!(
+                    config,
+                    otlp_config_metrics_sums_initial_cumulativ_monotonic_value,
+                    sums,
+                    initial_cumulative_monotonic_value
+                );
             }
             if let Some(summaries) = &metrics.summaries {
-                if summaries.mode.is_some() {
-                    config
-                        .otlp_config_metrics_summaries_mode
-                        .clone_from(&summaries.mode);
-                }
+                merge_option!(config, otlp_config_metrics_summaries_mode, summaries, mode);
             }
         }
 
         // Logs
         if let Some(logs) = &otlp_config.logs {
-            if let Some(enabled) = logs.enabled {
-                config.otlp_config_logs_enabled.clone_from(&enabled);
-            }
+            merge_option_to_value!(config, otlp_config_logs_enabled, logs, enabled);
         }
     }
 
     // AWS Lambda
-    if let Some(api_key_secret_arn) = &yaml_config.api_key_secret_arn {
-        config.api_key_secret_arn.clone_from(api_key_secret_arn);
-    }
-    if let Some(kms_api_key) = &yaml_config.kms_api_key {
-        config.kms_api_key.clone_from(kms_api_key);
-    }
-    if let Some(serverless_logs_enabled) = &yaml_config.serverless_logs_enabled {
-        config
-            .serverless_logs_enabled
-            .clone_from(serverless_logs_enabled);
-    }
-    if let Some(serverless_flush_strategy) = &yaml_config.serverless_flush_strategy {
-        config
-            .serverless_flush_strategy
-            .clone_from(serverless_flush_strategy);
-    }
-    if let Some(enhanced_metrics) = &yaml_config.enhanced_metrics {
-        config.enhanced_metrics.clone_from(enhanced_metrics);
-    }
-    if let Some(lambda_proc_enhanced_metrics) = &yaml_config.lambda_proc_enhanced_metrics {
-        config
-            .lambda_proc_enhanced_metrics
-            .clone_from(lambda_proc_enhanced_metrics);
-    }
-    if let Some(capture_lambda_payload) = &yaml_config.capture_lambda_payload {
-        config
-            .capture_lambda_payload
-            .clone_from(capture_lambda_payload);
-    }
-    if let Some(capture_lambda_payload_max_depth) = &yaml_config.capture_lambda_payload_max_depth {
-        config
-            .capture_lambda_payload_max_depth
-            .clone_from(capture_lambda_payload_max_depth);
-    }
-    if let Some(serverless_appsec_enabled) = &yaml_config.serverless_appsec_enabled {
-        config
-            .serverless_appsec_enabled
-            .clone_from(serverless_appsec_enabled);
-    }
-    if yaml_config.extension_version.is_some() {
-        config
-            .extension_version
-            .clone_from(&yaml_config.extension_version);
-    }
+    merge_string!(config, yaml_config, api_key_secret_arn);
+    merge_string!(config, yaml_config, kms_api_key);
+    merge_option_to_value!(config, yaml_config, serverless_logs_enabled);
+    merge_option_to_value!(config, yaml_config, serverless_flush_strategy);
+    merge_option_to_value!(config, yaml_config, enhanced_metrics);
+    merge_option_to_value!(config, yaml_config, lambda_proc_enhanced_metrics);
+    merge_option_to_value!(config, yaml_config, capture_lambda_payload);
+    merge_option_to_value!(config, yaml_config, capture_lambda_payload_max_depth);
+    merge_option_to_value!(config, yaml_config, serverless_appsec_enabled);
+    merge_option!(config, yaml_config, extension_version);
 }
 
 #[derive(Debug, PartialEq, Clone)]
