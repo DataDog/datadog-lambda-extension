@@ -30,6 +30,7 @@ use crate::traces::{
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
 use ddcommon::hyper_migration;
+use dogstatsd::flusher::ApiKeyFactory;
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -75,7 +76,7 @@ pub struct TraceAgent {
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
     http_client: reqwest::Client,
-    api_key: String,
+    api_key_factory: Arc<ApiKeyFactory>,
     tx: Sender<SendData>,
     shutdown_token: CancellationToken,
 }
@@ -97,7 +98,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
-        resolved_api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -124,7 +125,7 @@ impl TraceAgent {
             tags_provider,
             http_client: get_client(config),
             tx: trace_tx,
-            api_key: resolved_api_key,
+            api_key_factory,
             shutdown_token: CancellationToken::new(),
         }
     }
@@ -485,7 +486,7 @@ impl TraceAgent {
             traces,
             body_size,
             None,
-        );
+        ).await;
 
         // send trace payload to our trace flusher
         match trace_tx.send(send_data).await {
@@ -501,7 +502,7 @@ impl TraceAgent {
     async fn handle_proxy(
         config: Arc<config::Config>,
         client: reqwest::Client,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         tags_provider: Arc<provider::Provider>,
         request: Request,
         backend_domain: &str,
@@ -527,6 +528,7 @@ impl TraceAgent {
                 }
             }
         }
+        let api_key = api_key_factory.get_api_key().await;
         request_builder = request_builder.header("DD-API-KEY", api_key);
         request_builder = request_builder.header(
             DD_ADDITIONAL_TAGS_HEADER,

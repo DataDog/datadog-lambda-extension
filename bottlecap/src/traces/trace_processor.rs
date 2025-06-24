@@ -1,6 +1,7 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use async_trait::async_trait;
 use crate::config;
 use crate::tags::provider;
 use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
@@ -18,6 +19,7 @@ use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
+use dogstatsd::flusher::ApiKeyFactory;
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -27,7 +29,7 @@ use tracing::error;
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    pub resolved_api_key: String,
+    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 struct ChunkProcessor {
@@ -115,24 +117,26 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
 
 #[allow(clippy::module_name_repetitions)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait TraceProcessor {
-    fn process_traces(
+    async fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        header_tags: tracer_header_tags::TracerHeaderTags,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData;
 }
 
+#[async_trait]
 impl TraceProcessor for ServerlessTraceProcessor {
-    fn process_traces(
+    async fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        header_tags: tracer_header_tags::TracerHeaderTags,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
@@ -158,10 +162,11 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 tracer_payload.tags.extend(tags.clone());
             }
         }
+        let api_key = self.api_key_factory.get_api_key().await.to_string();
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_dd_url)
                 .expect("can't parse trace intake URL, exiting"),
-            api_key: Some(self.resolved_api_key.clone().into()),
+            api_key: Some(api_key.into()),
             timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
@@ -188,6 +193,7 @@ mod tests {
     };
 
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+    use dogstatsd::flusher::ApiKeyFactory;
 
     use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
 
@@ -292,7 +298,10 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            resolved_api_key: "foo".to_string(),
+            api_key_factory: Arc::new(ApiKeyFactory::new(Arc::new(move || {
+                let api_key = "test-api-key".to_string();
+                Box::pin(async move { api_key })
+            }))),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
@@ -326,7 +335,7 @@ mod tests {
         };
 
         let received_payload =
-            if let TracerPayloadCollection::V07(payload) = tracer_payload.get_payloads() {
+            if let TracerPayloadCollection::V07(payload) = tracer_payload.await.get_payloads() {
                 Some(payload[0].clone())
             } else {
                 None

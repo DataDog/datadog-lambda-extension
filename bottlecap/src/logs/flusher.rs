@@ -3,6 +3,7 @@ use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use crate::FLUSH_RETRY_COUNT;
 use futures::future::join_all;
+use dogstatsd::flusher::ApiKeyFactory;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
@@ -12,6 +13,7 @@ use std::{
 };
 use thiserror::Error as ThisError;
 use tokio::task::JoinSet;
+use tokio::sync::OnceCell;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -28,44 +30,26 @@ pub struct Flusher {
     endpoint: String,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
-    headers: HeaderMap,
+    api_key_factory: Arc<ApiKeyFactory>,
+    headers: OnceCell<HeaderMap>,
 }
 
 impl Flusher {
     pub fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         endpoint: String,
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(config.clone());
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "DD-API-KEY",
-            api_key.clone().parse().expect("failed to parse header"),
-        );
-        headers.insert(
-            "DD-PROTOCOL",
-            "agent-json".parse().expect("failed to parse header"),
-        );
-        headers.insert(
-            "Content-Type",
-            "application/json".parse().expect("failed to parse header"),
-        );
-
-        if config.logs_config_use_compression {
-            headers.insert(
-                "Content-Encoding",
-                "zstd".parse().expect("failed to parse header"),
-            );
-        }
 
         Flusher {
             client,
             endpoint,
             aggregator,
             config,
-            headers,
+            api_key_factory,
+            headers: OnceCell::new(),
         }
     }
 
@@ -77,7 +61,7 @@ impl Flusher {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch.clone());
+                let req = self.create_request(batch.clone()).await;
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -109,12 +93,14 @@ impl Flusher {
         failed_requests
     }
 
-    fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
+    async fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
         let url = format!("{}/api/v2/logs", self.endpoint);
+        let body = self.compress(data);
+        let headers = self.get_headers().await;
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
-            .headers(self.headers.clone())
+            .headers(headers.clone())
             .body(data)
     }
 
@@ -265,5 +251,32 @@ impl LogsFlusher {
         let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
         encoder.write_all(data)?;
         encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
+    }
+
+    async fn get_headers(&self) -> &HeaderMap {
+        self.headers.get_or_init( move ||  { async move {
+            let api_key = self.api_key_factory.get_api_key().await;
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "DD-API-KEY",
+                api_key.parse().expect("failed to parse header"),
+            );
+            headers.insert(
+                "DD-PROTOCOL",
+                "agent-json".parse().expect("failed to parse header"),
+            );
+            headers.insert(
+                "Content-Type",
+                "application/json".parse().expect("failed to parse header"),
+            );
+
+            if self.config.logs_config_use_compression {
+                headers.insert(
+                    "Content-Encoding",
+                    "zstd".parse().expect("failed to parse header"),
+                );
+            }
+            headers
+        }}).await
     }
 }
