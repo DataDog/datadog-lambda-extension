@@ -1,4 +1,4 @@
-use crate::config::{aws::AwsConfig, Config};
+use crate::config::{aws::{AwsConfig, AwsCredentials}, Config};
 use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
@@ -14,7 +14,7 @@ use std::time::Instant;
 use tracing::debug;
 use tracing::error;
 
-pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) -> Option<String> {
+pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig, aws_credentials: &mut AwsCredentials) -> Option<String> {
     let api_key_candidate =
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
@@ -35,37 +35,37 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &mut AwsConfig) ->
                 }
             };
 
-            if aws_config.aws_secret_access_key.is_empty()
-                && aws_config.aws_access_key_id.is_empty()
-                && !aws_config.aws_container_credentials_full_uri.is_empty()
-                && !aws_config.aws_container_authorization_token.is_empty()
+            if aws_credentials.aws_secret_access_key.is_empty()
+                && aws_credentials.aws_access_key_id.is_empty()
+                && !aws_credentials.aws_container_credentials_full_uri.is_empty()
+                && !aws_credentials.aws_container_authorization_token.is_empty()
             {
                 // We're in Snap Start
-                let credentials = match get_snapstart_credentials(aws_config, &client).await {
+                let credentials = match get_snapstart_credentials(aws_credentials, &client).await {
                     Ok(credentials) => credentials,
                     Err(err) => {
                         error!("Error getting Snap Start credentials: {}", err);
                         return None;
                     }
                 };
-                aws_config.aws_access_key_id = credentials["AccessKeyId"]
+                aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                aws_config.aws_secret_access_key = credentials["SecretAccessKey"]
+                aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                aws_config.aws_session_token = credentials["Token"]
+                aws_credentials.aws_session_token = credentials["Token"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config).await
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_credentials, aws_config.region.clone()).await
             } else {
-                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config).await
+                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_credentials, aws_config).await
             };
 
             debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
@@ -105,6 +105,7 @@ struct RequestArgs<'a> {
 async fn decrypt_aws_kms(
     client: &Client,
     kms_key: String,
+    aws_credentials: &AwsCredentials,
     aws_config: &AwsConfig,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // When the API key is encrypted using the AWS console, the function name is added as an
@@ -116,7 +117,7 @@ async fn decrypt_aws_kms(
     });
 
     let headers = build_get_secret_signed_headers(
-        aws_config,
+        aws_credentials,
         aws_config.region.clone(),
         RequestArgs {
             service: "kms".to_string(),
@@ -138,7 +139,7 @@ async fn decrypt_aws_kms(
         );
 
         let headers = build_get_secret_signed_headers(
-            aws_config,
+            aws_credentials,
             aws_config.region.clone(),
             RequestArgs {
                 service: "kms".to_string(),
@@ -162,17 +163,18 @@ async fn decrypt_aws_kms(
 async fn decrypt_aws_sm(
     client: &Client,
     secret_arn: String,
-    aws_config: &AwsConfig,
+    aws_credentials: &AwsCredentials,
+    region: String,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
     // Supports cross-region secrets
     let secret_region = secret_arn
         .split(':')
         .nth(3)
-        .unwrap_or(&aws_config.region)
+        .unwrap_or(&region)
         .to_string();
     let headers = build_get_secret_signed_headers(
-        aws_config,
+        aws_credentials,
         secret_region,
         RequestArgs {
             service: "secretsmanager".to_string(),
@@ -192,17 +194,17 @@ async fn decrypt_aws_sm(
 }
 
 async fn get_snapstart_credentials(
-    aws_config: &AwsConfig,
+    aws_credentials: &AwsCredentials,
     client: &Client,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let mut headers = HeaderMap::new();
     headers.insert(
         "Authorization",
-        HeaderValue::from_str(&aws_config.aws_container_authorization_token)?,
+        HeaderValue::from_str(&aws_credentials.aws_container_authorization_token)?,
     );
 
     let req = client
-        .get(&aws_config.aws_container_credentials_full_uri)
+        .get(&aws_credentials.aws_container_credentials_full_uri)
         .headers(headers);
     let body = req.send().await?.text().await?;
     let v: Value = serde_json::from_str(&body)?;
@@ -228,14 +230,14 @@ async fn request(
 }
 
 fn build_get_secret_signed_headers(
-    aws_config: &AwsConfig,
+    aws_credentials: &AwsCredentials,
     region: String,
     header_values: RequestArgs,
 ) -> Result<HeaderMap, Box<dyn std::error::Error>> {
     let amz_date = header_values.time.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = header_values.time.format("%Y%m%d").to_string();
 
-    let domain = if aws_config.region.starts_with("cn-") {
+    let domain = if region.starts_with("cn-") {
         "amazonaws.com.cn"
     } else {
         "amazonaws.com"
@@ -247,7 +249,7 @@ fn build_get_secret_signed_headers(
     let canonical_querystring = "";
     let canonical_headers = format!(
         "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:{}",
-        host, amz_date, aws_config.aws_session_token, header_values.x_amz_target);
+        host, amz_date, aws_credentials.aws_session_token, header_values.x_amz_target);
     let signed_headers = "content-type;host;x-amz-date;x-amz-security-token;x-amz-target";
 
     let payload_hash = Sha256::digest(header_values.body.to_string().as_bytes());
@@ -270,7 +272,7 @@ fn build_get_secret_signed_headers(
     );
 
     let signing_key = get_aws4_signature_key(
-        &aws_config.aws_secret_access_key,
+        &aws_credentials.aws_secret_access_key,
         &date_stamp,
         region.as_str(),
         header_values.service.as_str(),
@@ -280,7 +282,7 @@ fn build_get_secret_signed_headers(
 
     let authorization_header = format!(
         "{} Credential={}/{}, SignedHeaders={}, Signature={}",
-        algorithm, aws_config.aws_access_key_id, credential_scope, signed_headers, signature
+        algorithm, aws_credentials.aws_access_key_id, credential_scope, signed_headers, signature
     );
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -299,7 +301,7 @@ fn build_get_secret_signed_headers(
     );
     headers.insert(
         "x-amz-security-token",
-        HeaderValue::from_str(&aws_config.aws_session_token)?,
+        HeaderValue::from_str(&aws_credentials.aws_session_token)?,
     );
     Ok(headers)
 }
@@ -347,18 +349,12 @@ mod tests {
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         let headers = build_get_secret_signed_headers(
-            &AwsConfig{
-                region: "us-east-1".to_string(),
+            &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
                 aws_container_authorization_token: String::new(),
                 aws_container_credentials_full_uri: String::new(),
-                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
-                function_name: "arn:some-function".to_string(),
-                sandbox_init_time: Instant::now(),
-                runtime_api: String::new(),
-                exec_wrapper: None,
             },
             "us-east-1".to_string(),
             RequestArgs {
@@ -404,18 +400,12 @@ mod tests {
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         let headers = build_get_secret_signed_headers(
-            &AwsConfig{
-                region: "us-east-1".to_string(),
+            &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
                 aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
                 aws_container_authorization_token: String::new(),
                 aws_container_credentials_full_uri: String::new(),
-                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
-                function_name: "arn:some-function".to_string(),
-                sandbox_init_time: Instant::now(),
-                runtime_api: String::new(),
-                exec_wrapper: None,
             },
             "us-west-2".to_string(),
             RequestArgs {

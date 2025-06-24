@@ -13,7 +13,7 @@ use bottlecap::{
     base_url,
     config::{
         self,
-        aws::{build_lambda_function_arn, AwsConfig},
+        aws::{build_lambda_function_arn, AwsConfig, AwsCredentials},
         Config,
     },
     event_bus::bus::EventBus,
@@ -302,7 +302,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
-    let (mut aws_config, config) = load_configs(start_time);
+    let (aws_config, mut aws_credentials, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -329,7 +329,7 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &mut aws_config).await {
+    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config, &mut aws_credentials).await {
         match extension_loop_active(
             &aws_config,
             &config,
@@ -357,9 +357,10 @@ async fn main() -> Result<()> {
     }
 }
 
-fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
     // First load the AWS configuration
     let aws_config = AwsConfig::from_env(start_time);
+    let aws_credentials = AwsCredentials::from_env();
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = match config::get_config(Path::new(&lambda_directory)) {
@@ -370,7 +371,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
         }
     };
 
-    (aws_config, config)
+    (aws_config, aws_credentials, config)
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {

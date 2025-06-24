@@ -15,11 +15,6 @@ const AWS_LAMBDA_EXEC_WRAPPER: &str = "AWS_LAMBDA_EXEC_WRAPPER";
 #[derive(Debug, Clone)]
 pub struct AwsConfig {
     pub region: String,
-    pub aws_access_key_id: String,
-    pub aws_secret_access_key: String,
-    pub aws_session_token: String,
-    pub aws_container_credentials_full_uri: String,
-    pub aws_container_authorization_token: String,
     pub aws_lwa_proxy_lambda_runtime_api: Option<String>,
     pub function_name: String,
     pub runtime_api: String,
@@ -32,6 +27,28 @@ impl AwsConfig {
     pub fn from_env(start_time: Instant) -> Self {
         Self {
             region: env::var(AWS_DEFAULT_REGION).unwrap_or("us-east-1".to_string()),
+            aws_lwa_proxy_lambda_runtime_api: env::var(AWS_LWA_LAMBDA_RUNTIME_API_PROXY).ok(),
+            function_name: env::var(AWS_LAMBDA_FUNCTION_NAME).unwrap_or_default(),
+            runtime_api: env::var(AWS_LAMBDA_RUNTIME_API).unwrap_or_default(),
+            sandbox_init_time: start_time,
+            exec_wrapper: env::var(AWS_LAMBDA_EXEC_WRAPPER).ok(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AwsCredentials {
+    pub aws_access_key_id: String,
+    pub aws_secret_access_key: String,
+    pub aws_session_token: String,
+    pub aws_container_credentials_full_uri: String,
+    pub aws_container_authorization_token: String,
+}
+
+impl AwsCredentials {
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self {
             aws_access_key_id: env::var(AWS_ACCESS_KEY_ID).unwrap_or_default(),
             aws_secret_access_key: env::var(AWS_SECRET_ACCESS_KEY).unwrap_or_default(),
             aws_session_token: env::var(AWS_SESSION_TOKEN).unwrap_or_default(),
@@ -39,11 +56,6 @@ impl AwsConfig {
                 .unwrap_or_default(),
             aws_container_authorization_token: env::var(AWS_CONTAINER_AUTHORIZATION_TOKEN)
                 .unwrap_or_default(),
-            aws_lwa_proxy_lambda_runtime_api: env::var(AWS_LWA_LAMBDA_RUNTIME_API_PROXY).ok(),
-            function_name: env::var(AWS_LAMBDA_FUNCTION_NAME).unwrap_or_default(),
-            runtime_api: env::var(AWS_LAMBDA_RUNTIME_API).unwrap_or_default(),
-            sandbox_init_time: start_time,
-            exec_wrapper: env::var(AWS_LAMBDA_EXEC_WRAPPER).ok(),
         }
     }
 }
