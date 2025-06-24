@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use async_trait::async_trait;
+use tokio::sync::OnceCell;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::config;
 use crate::traces::stats_aggregator::StatsAggregator;
+use dogstatsd::flusher::ApiKeyFactory;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use ddcommon::Endpoint;
@@ -16,7 +18,7 @@ use tracing::{debug, error};
 #[async_trait]
 pub trait StatsFlusher {
     fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
     ) -> Self
@@ -34,29 +36,22 @@ pub struct ServerlessStatsFlusher {
     // pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
     aggregator: Arc<Mutex<StatsAggregator>>,
     config: Arc<config::Config>,
-    endpoint: Endpoint,
+    api_key_factory: Arc<ApiKeyFactory>,
+    endpoint: OnceCell<Endpoint>,
 }
 
 #[async_trait]
 impl StatsFlusher for ServerlessStatsFlusher {
     fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
-        let stats_url = trace_stats_url(&config.site);
-
-        let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
-            api_key: Some(api_key.clone().into()),
-            timeout_ms: config.flush_timeout * 1_000,
-            test_token: None,
-        };
-
         ServerlessStatsFlusher {
             aggregator,
             config,
-            endpoint,
+            api_key_factory,
+            endpoint: OnceCell::new(),
         }
     }
 
@@ -64,6 +59,20 @@ impl StatsFlusher for ServerlessStatsFlusher {
         if stats.is_empty() {
             return;
         }
+
+        let endpoint = self.endpoint.get_or_init({
+            move || async move {
+                let api_key = self.api_key_factory.get_api_key().await.to_string();
+                let stats_url = trace_stats_url(&self.config.site.to_string());
+                Endpoint {
+                    url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
+                    api_key: Some(api_key.clone().into()),
+                    timeout_ms: self.config.flush_timeout * 1_000,
+                    test_token: None,
+                }
+            }
+        }).await;
+
         debug!("Flushing {} stats", stats.len());
 
         let stats_payload = stats_utils::construct_stats_payload(stats);
@@ -84,8 +93,8 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let resp = stats_utils::send_stats_payload(
             serialized_stats_payload,
-            &self.endpoint,
-            &self.config.api_key,
+            endpoint,
+            self.api_key_factory.get_api_key().await,
         )
         .await;
         let elapsed = start.elapsed();
@@ -112,3 +121,25 @@ impl StatsFlusher for ServerlessStatsFlusher {
         }
     }
 }
+
+// impl ServerlessStatsFlusher {
+//     pub async fn init_endpoint(&self) {
+//         // Only build it once
+//         if self.endpoint.get().is_some() {
+//             return;
+//         }
+
+//         let stats_url = trace_stats_url(&self.config.site.to_string());
+
+//         // Now we can use the owned String directly
+//         let api_key: String = self.api_key_factory.get_api_key().await.to_string();
+//         let endpoint = Endpoint {
+//             url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url"),
+//             api_key: Some(Cow::Owned(api_key)),
+//             timeout_ms: self.config.flush_timeout * 1_000,
+//             test_token: None,
+//         };
+
+//         let _ = self.endpoint.set(endpoint);
+//     }
+// }
