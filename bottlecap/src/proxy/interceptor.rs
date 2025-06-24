@@ -27,14 +27,14 @@ use tracing::{debug, error};
 const INTERCEPTOR_DEFAULT_PORT: u16 = 9000;
 
 type InterceptorState = (
-    AwsConfig,
+    Arc<AwsConfig>,
     Arc<Client<HttpConnector, Body>>,
     Arc<Mutex<InvocationProcessor>>,
     Arc<Mutex<JoinSet<()>>>,
 );
 
 pub fn start(
-    aws_config: AwsConfig,
+    aws_config: Arc<AwsConfig>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
     let socket = get_proxy_socket_address(&aws_config.aws_lwa_proxy_lambda_runtime_api);
@@ -400,18 +400,18 @@ mod tests {
             MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
         ));
 
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "arn:some-function".to_string(),
             sandbox_init_time: Instant::now(),
             runtime_api: aws_lambda_runtime_api.to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
-        };
+        });
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
-            &aws_config,
+            Arc::clone(&aws_config),
             metrics_aggregator,
         )));
 

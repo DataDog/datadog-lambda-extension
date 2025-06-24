@@ -1,8 +1,11 @@
+use dogstatsd::api_key::ApiKeyFactory;
+use reqwest::header::HeaderMap;
 use std::{error::Error, sync::Arc};
 use thiserror::Error as ThisError;
-use tokio::{sync::Mutex, task::JoinSet};
-
-use reqwest::header::HeaderMap;
+use tokio::{
+    sync::{Mutex, OnceCell},
+    task::JoinSet,
+};
 use tracing::{debug, error};
 
 use crate::{
@@ -27,47 +30,61 @@ pub struct Flusher {
     client: reqwest::Client,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
-    headers: HeaderMap,
+    tags_provider: Arc<provider::Provider>,
+    api_key_factory: Arc<ApiKeyFactory>,
+    headers: OnceCell<HeaderMap>,
 }
 
 impl Flusher {
     pub fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<Aggregator>>,
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(&config);
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "DD-API-KEY",
-            api_key.parse().expect("Failed to parse API key header"),
-        );
-        let additional_tags = format!(
-            "_dd.origin:lambda;functionname:{}",
-            tags_provider
-                .get_canonical_resource_name()
-                .unwrap_or_default()
-        );
-        headers.insert(
-            DD_ADDITIONAL_TAGS_HEADER,
-            additional_tags
-                .parse()
-                .expect("Failed to parse additional tags header"),
-        );
 
         Flusher {
             client,
             aggregator,
             config,
-            headers,
+            tags_provider,
+            api_key_factory,
+            headers: OnceCell::new(),
         }
+    }
+
+    async fn get_headers(&self, api_key: &str) -> &HeaderMap {
+        self.headers
+            .get_or_init(move || async move {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "DD-API-KEY",
+                    api_key.parse().expect("Failed to parse API key header"),
+                );
+                let additional_tags = format!(
+                    "_dd.origin:lambda;functionname:{}",
+                    self.tags_provider
+                        .get_canonical_resource_name()
+                        .unwrap_or_default()
+                );
+                headers.insert(
+                    DD_ADDITIONAL_TAGS_HEADER,
+                    additional_tags
+                        .parse()
+                        .expect("Failed to parse additional tags header"),
+                );
+                headers
+            })
+            .await
     }
 
     pub async fn flush(
         &self,
         retry_requests: Option<Vec<reqwest::RequestBuilder>>,
     ) -> Option<Vec<reqwest::RequestBuilder>> {
+        let api_key = self.api_key_factory.get_api_key().await;
+
         let mut join_set = JoinSet::new();
         let mut requests = Vec::<reqwest::RequestBuilder>::new();
 
@@ -79,7 +96,7 @@ impl Flusher {
         } else {
             let mut aggregator = self.aggregator.lock().await;
             for pr in aggregator.get_batch() {
-                requests.push(self.create_request(pr));
+                requests.push(self.create_request(pr, api_key).await);
             }
         }
 
@@ -92,14 +109,18 @@ impl Flusher {
         Self::get_failed_requests(send_results)
     }
 
-    fn create_request(&self, request: ProxyRequest) -> reqwest::RequestBuilder {
+    async fn create_request(
+        &self,
+        request: ProxyRequest,
+        api_key: &str,
+    ) -> reqwest::RequestBuilder {
         let mut headers = request.headers.clone();
 
         // Remove headers that are not needed for the proxy request
         headers.remove("host");
         headers.remove("content-length");
 
-        headers.extend(self.headers.clone());
+        headers.extend(self.get_headers(api_key).await.clone());
 
         self.client
             .post(&request.target_url)
