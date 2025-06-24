@@ -137,6 +137,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendData {
+        println!("AJ BODY SIZE:{:?}", body_size);
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,

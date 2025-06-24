@@ -456,14 +456,31 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
     )));
 
-    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
-    let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) = start_trace_agent(
-        config,
-        resolved_api_key.clone(),
-        &tags_provider,
-        Arc::clone(&invocation_processor),
-        Arc::clone(&trace_aggregator),
-    );
+    // Create trace processor first for the aggregator
+    let obfuscation_config = obfuscation_config::ObfuscationConfig {
+        tag_replace_rules: config.apm_replace_tags.clone(),
+        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
+        obfuscate_memcached: false,
+        obfuscation_redis_enabled: false,
+        obfuscation_redis_remove_all_args: false,
+    };
+
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+        obfuscation_config: Arc::new(obfuscation_config),
+        resolved_api_key: resolved_api_key.clone(),
+    });
+
+    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::new()));
+    let (trace_agent_channel, trace_flusher, returned_trace_processor, stats_flusher) =
+        start_trace_agent(
+            config,
+            resolved_api_key.clone(),
+            &tags_provider,
+            Arc::clone(&invocation_processor),
+            Arc::clone(&trace_aggregator),
+            trace_processor.clone(),
+        );
 
     let api_runtime_proxy_shutdown_signal =
         start_api_runtime_proxy(config, aws_config, &invocation_processor);
@@ -487,7 +504,7 @@ async fn extension_loop_active(
     let otlp_shutdown_token = start_otlp_agent(
         config,
         tags_provider.clone(),
-        trace_processor.clone(),
+        returned_trace_processor.clone(),
         trace_agent_channel.clone(),
     );
 
@@ -638,16 +655,16 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr,
-                        )
-                        .await;
+                        // let mut locked_metrics = metrics_flushers.lock().await;
+                        // blocking_flush_all(
+                        //     &logs_flusher,
+                        //     &mut locked_metrics,
+                        //     &*trace_flusher,
+                        //     &*stats_flusher,
+                        //     &mut race_flush_interval,
+                        //     &metrics_aggr,
+                        // )
+                        // .await;
                     }
                 }
             }
@@ -738,7 +755,7 @@ async fn handle_event_bus_event(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
-    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
+    trace_agent_channel: Sender<trace_aggregator::RawTraceData>,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::Metric(event) => {
@@ -958,8 +975,9 @@ fn start_trace_agent(
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
+    trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
 ) -> (
-    Sender<datadog_trace_utils::send_data::SendData>,
+    Sender<trace_aggregator::RawTraceData>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
     Arc<stats_flusher::ServerlessStatsFlusher>,
@@ -977,21 +995,8 @@ fn start_trace_agent(
     // Traces
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         aggregator: trace_aggregator.clone(),
+        tags_provider: tags_provider.clone(),
         config: Arc::clone(config),
-    });
-
-    let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules: config.apm_replace_tags.clone(),
-        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
-        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
-        obfuscate_memcached: false,
-        obfuscation_redis_enabled: false,
-        obfuscation_redis_remove_all_args: false,
-    };
-
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(obfuscation_config),
-        resolved_api_key: resolved_api_key.clone(),
     });
 
     let trace_agent = Box::new(trace_agent::TraceAgent::new(
@@ -1068,7 +1073,7 @@ fn start_otlp_agent(
     config: &Arc<Config>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    trace_tx: Sender<SendData>,
+    trace_tx: Sender<trace_aggregator::RawTraceData>,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;

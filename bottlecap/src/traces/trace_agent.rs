@@ -21,6 +21,7 @@ use crate::http::get_client;
 use crate::lifecycle::invocation::context::ReparentingInfo;
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 use crate::tags::provider;
+use crate::traces::trace_aggregator::RawTraceData;
 use crate::traces::{
     stats_aggregator, stats_processor, trace_aggregator, trace_processor, INVOCATION_SPAN_RESOURCE,
 };
@@ -28,7 +29,7 @@ use datadog_trace_agent::http_utils::{
     self, log_and_create_http_response, log_and_create_traces_success_http_response,
 };
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::trace_utils::{self, SendData};
+use datadog_trace_utils::trace_utils::{self};
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -63,7 +64,7 @@ pub struct TraceAgent {
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
     http_client: reqwest::Client,
     api_key: String,
-    tx: Sender<SendData>,
+    tx: Sender<RawTraceData>,
 }
 
 #[derive(Clone, Copy)]
@@ -88,16 +89,16 @@ impl TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace flusher.
-        let (trace_tx, mut trace_rx): (Sender<SendData>, Receiver<SendData>) =
+        let (trace_tx, mut trace_rx): (Sender<RawTraceData>, Receiver<RawTraceData>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
 
         tokio::spawn(async move {
-            while let Some(tracer_payload) = trace_rx.recv().await {
+            while let Some(raw_data) = trace_rx.recv().await {
                 let mut aggregator = trace_aggregator.lock().await;
-                aggregator.add(tracer_payload);
+                aggregator.add(raw_data);
             }
         });
 
@@ -216,7 +217,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         req: hyper_migration::HttpRequest,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendData>,
+        trace_tx: Sender<RawTraceData>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         stats_tx: Sender<pb::ClientStatsPayload>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
@@ -226,7 +227,6 @@ impl TraceAgent {
     ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
-                config,
                 req,
                 trace_processor.clone(),
                 trace_tx,
@@ -243,7 +243,6 @@ impl TraceAgent {
                 ),
             },
             (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
-                config,
                 req,
                 trace_processor.clone(),
                 trace_tx,
@@ -360,10 +359,9 @@ impl TraceAgent {
     }
 
     async fn handle_traces(
-        config: Arc<config::Config>,
         req: hyper_migration::HttpRequest,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendData>,
+        trace_tx: Sender<RawTraceData>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -378,7 +376,8 @@ impl TraceAgent {
             return response;
         }
 
-        let tracer_header_tags = (&parts.headers).into();
+        // We'll use empty header tags since we can't store them with the raw data
+        // The real header tags will be reconstructed when processing
 
         let (body_size, mut traces) = match version {
             ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
@@ -437,17 +436,9 @@ impl TraceAgent {
             }
         }
 
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        );
-
-        // send trace payload to our trace flusher
-        match trace_tx.send(send_data).await {
+        // Send raw trace data to our trace aggregator
+        let raw_data = RawTraceData { traces, body_size };
+        match trace_tx.send(raw_data).await {
             Ok(()) => log_and_create_traces_success_http_response(
                 "Successfully buffered traces to be flushed.",
                 StatusCode::OK,
@@ -685,7 +676,7 @@ impl TraceAgent {
     }
 
     #[must_use]
-    pub fn get_sender_copy(&self) -> Sender<SendData> {
+    pub fn get_sender_copy(&self) -> Sender<RawTraceData> {
         self.tx.clone()
     }
 }

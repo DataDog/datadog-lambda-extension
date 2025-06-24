@@ -6,14 +6,21 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
+use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::trace_utils::{self, SendData};
 
 use crate::config::Config;
+use crate::tags::provider::Provider;
 use crate::traces::trace_aggregator::TraceAggregator;
+use crate::traces::trace_processor::ServerlessTraceProcessor;
 
 #[async_trait]
 pub trait TraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self
+    fn new(
+        aggregator: Arc<Mutex<TraceAggregator>>,
+        tags_provider: Arc<Provider>,
+        config: Arc<Config>,
+    ) -> Self
     where
         Self: Sized;
     /// Given a `Vec<SendData>`, a tracer payload, send it to the Datadog intake endpoint.
@@ -31,12 +38,21 @@ pub trait TraceFlusher {
 pub struct ServerlessTraceFlusher {
     pub aggregator: Arc<Mutex<TraceAggregator>>,
     pub config: Arc<Config>,
+    pub tags_provider: Arc<Provider>,
 }
 
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self {
-        ServerlessTraceFlusher { aggregator, config }
+    fn new(
+        aggregator: Arc<Mutex<TraceAggregator>>,
+        tags_provider: Arc<Provider>,
+        config: Arc<Config>,
+    ) -> Self {
+        ServerlessTraceFlusher {
+            aggregator,
+            tags_provider,
+            config,
+        }
     }
 
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
@@ -56,7 +72,12 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         // Process new traces from the aggregator
         let mut guard = self.aggregator.lock().await;
-        let mut traces = guard.get_batch();
+        // Pass the trace processor and config to get_batch
+        let trace_processor = ServerlessTraceProcessor {
+            obfuscation_config: Arc::new(obfuscation_config::ObfuscationConfig::new().unwrap()),
+            resolved_api_key: self.config.api_key.clone(),
+        };
+        let mut traces = guard.get_batch(&trace_processor, &self.config, &self.tags_provider);
 
         while !traces.is_empty() {
             if let Some(failed) = self.send(traces).await {
@@ -66,7 +87,8 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 break;
             }
 
-            traces = guard.get_batch();
+            traces = guard.get_batch(&trace_processor, &self.config, &self.tags_provider);
+            println!("AJ TRACES REMAINING ARE: {:?}", traces);
         }
 
         failed_batch

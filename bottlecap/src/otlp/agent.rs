@@ -5,8 +5,7 @@ use axum::{
     routing::post,
     Router,
 };
-use datadog_trace_utils::send_data::SendData;
-use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
+use crate::traces::trace_aggregator::RawTraceData;
 use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -29,7 +28,7 @@ type AgentState = (
     Arc<provider::Provider>,
     OtlpProcessor,
     Arc<dyn TraceProcessor + Send + Sync>,
-    Sender<SendData>,
+    Sender<RawTraceData>,
 );
 
 pub struct Agent {
@@ -37,7 +36,7 @@ pub struct Agent {
     tags_provider: Arc<provider::Provider>,
     processor: OtlpProcessor,
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-    trace_tx: Sender<SendData>,
+    trace_tx: Sender<RawTraceData>,
     port: u16,
     shutdown_token: CancellationToken,
 }
@@ -47,7 +46,7 @@ impl Agent {
         config: Arc<Config>,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendData>,
+        trace_tx: Sender<RawTraceData>,
     ) -> Self {
         let port = Self::parse_port(
             &config.otlp_config_receiver_protocols_http_endpoint,
@@ -127,10 +126,10 @@ impl Agent {
     }
 
     async fn v1_traces(
-        State((config, tags_provider, processor, trace_processor, trace_tx)): State<AgentState>,
+        State((_config, _tags_provider, processor, _trace_processor, trace_tx)): State<AgentState>,
         request: Request,
     ) -> Response {
-        let (parts, body) = match extract_request_body(request).await {
+        let (_parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
                 return (
@@ -153,27 +152,14 @@ impl Agent {
             }
         };
 
-        let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
         let body_size = size_of_val(&traces);
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
+
+        // Send raw trace data
+        let raw_data = RawTraceData {
             traces,
             body_size,
-            None,
-        );
-
-        if send_data.is_empty() {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({ "message": "Not sending traces, processor returned empty data" })
-                    .to_string(),
-            )
-                .into_response();
-        }
-
-        match trace_tx.send(send_data).await {
+        };
+        match trace_tx.send(raw_data).await {
             Ok(()) => {
                 debug!("OTLP | Successfully buffered traces to be flushed.");
                 (
