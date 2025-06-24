@@ -36,6 +36,7 @@ use crate::{
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
 use ddcommon::hyper_migration;
+use dogstatsd::flusher::ApiKeyFactory;
 
 const TRACE_AGENT_PORT: usize = 8126;
 
@@ -94,6 +95,8 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    http_client: reqwest::Client,
+    api_key_factory: Arc<ApiKeyFactory>,
     tx: Sender<SendData>,
     shutdown_token: CancellationToken,
 }
@@ -116,6 +119,7 @@ impl TraceAgent {
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
+        api_key_factory: Arc<ApiKeyFactory>,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -142,6 +146,7 @@ impl TraceAgent {
             invocation_processor,
             tags_provider,
             tx: trace_tx,
+            api_key_factory,
             shutdown_token: CancellationToken::new(),
         }
     }
@@ -492,7 +497,7 @@ impl TraceAgent {
             traces,
             body_size,
             None,
-        );
+        ).await;
 
         // send trace payload to our trace flusher
         match trace_tx.send(send_data).await {
@@ -508,6 +513,7 @@ impl TraceAgent {
     async fn handle_proxy(
         config: Arc<config::Config>,
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
+        api_key_factory: Arc<ApiKeyFactory>,
         request: Request,
         backend_domain: &str,
         backend_path: &str,

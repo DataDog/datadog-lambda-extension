@@ -162,7 +162,7 @@ impl Agent {
             traces,
             body_size,
             None,
-        );
+        ).await;
 
         if send_data.is_empty() {
             return (

@@ -7,6 +7,7 @@ use bottlecap::LAMBDA_RUNTIME_SLUG;
 use httpmock::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
+use dogstatsd::flusher::ApiKeyFactory;
 
 mod common;
 
@@ -56,8 +57,11 @@ async fn test_logs() {
     let bus = EventBus::run();
     let mut logs_agent =
         LogsAgent::new(tags_provider, Arc::clone(&arc_conf), bus.get_sender_copy());
+    let api_key_factory = Arc::new(ApiKeyFactory::new(Arc::new(move || {
+        Box::pin(async { dd_api_key.to_string() })
+    })));
     let logs_flusher = LogsFlusher::new(
-        dd_api_key.to_string(),
+        api_key_factory,
         Arc::clone(&logs_agent.aggregator),
         arc_conf.clone(),
     );
