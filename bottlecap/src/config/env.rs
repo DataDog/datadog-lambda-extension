@@ -12,6 +12,9 @@ use crate::{
         deserialize_optional_bool_from_anything, deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
+        logs_additional_endpoints::{
+            deserialize_logs_additional_endpoints, LogsAdditionalEndpoint,
+        },
         processing_rule::{deserialize_processing_rules, ProcessingRule},
         service_mapping::deserialize_service_mapping,
         trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},

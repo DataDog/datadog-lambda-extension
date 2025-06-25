@@ -8,6 +8,7 @@ use crate::{
         deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
+        logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
         trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
         Config, ConfigError, ConfigSource, ProcessingRule,
