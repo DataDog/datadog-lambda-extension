@@ -996,7 +996,6 @@ fn start_trace_agent(
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
-        // TODO: do not clone it
         api_key_factory.clone(),
         stats_aggregator.clone(),
         Arc::clone(config),
@@ -1021,7 +1020,6 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        // TODO: do not clone it
         api_key_factory: api_key_factory.clone(),
     });
 
