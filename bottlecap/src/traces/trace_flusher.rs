@@ -88,7 +88,6 @@ impl TraceFlusher for ServerlessTraceFlusher {
             }
 
             traces = guard.get_batch(&trace_processor, &self.config, &self.tags_provider);
-            println!("AJ TRACES REMAINING ARE: {:?}", traces);
         }
 
         failed_batch
