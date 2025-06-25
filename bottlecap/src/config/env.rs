@@ -75,7 +75,7 @@ pub struct EnvConfig {
     pub url: Option<String>,
     /// @env `DD_ADDITIONAL_ENDPOINTS`
     ///
-    /// Additional endpoints to send telemetry to.
+    /// Additional endpoints to send metrics to.
     /// <https://docs.datadoghq.com/agent/configuration/dual-shipping/?tab=helm#environment-variable-configuration>
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
     pub additional_endpoints: HashMap<String, Vec<String>>,
