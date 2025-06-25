@@ -456,31 +456,20 @@ async fn extension_loop_active(
         Arc::clone(&metrics_aggr),
     )));
 
-    // Create trace processor first for the aggregator
-    let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules: config.apm_replace_tags.clone(),
-        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
-        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
-        obfuscate_memcached: false,
-        obfuscation_redis_enabled: false,
-        obfuscation_redis_remove_all_args: false,
-    };
-
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(obfuscation_config),
-        resolved_api_key: resolved_api_key.clone(),
-    });
-
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::new()));
-    let (trace_agent_channel, trace_flusher, returned_trace_processor, stats_flusher) =
-        start_trace_agent(
-            config,
-            resolved_api_key.clone(),
-            &tags_provider,
-            Arc::clone(&invocation_processor),
-            Arc::clone(&trace_aggregator),
-            trace_processor.clone(),
-        );
+    let (
+        trace_agent_channel,
+        trace_flusher,
+        trace_processor,
+        stats_flusher,
+        trace_agent_shutdown_token,
+    ) = start_trace_agent(
+        config,
+        resolved_api_key.clone(),
+        &tags_provider,
+        Arc::clone(&invocation_processor),
+        Arc::clone(&trace_aggregator),
+    );
 
     let api_runtime_proxy_shutdown_signal =
         start_api_runtime_proxy(config, aws_config, &invocation_processor);
@@ -504,7 +493,7 @@ async fn extension_loop_active(
     let otlp_shutdown_token = start_otlp_agent(
         config,
         tags_provider.clone(),
-        returned_trace_processor.clone(),
+        trace_processor.clone(),
         trace_agent_channel.clone(),
     );
 
@@ -702,6 +691,7 @@ async fn extension_loop_active(
             if let Some(otlp_shutdown_token) = otlp_shutdown_token {
                 otlp_shutdown_token.cancel();
             }
+            trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
 
@@ -975,12 +965,12 @@ fn start_trace_agent(
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
-    trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
 ) -> (
     Sender<trace_aggregator::RawTraceData>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
     Arc<stats_flusher::ServerlessStatsFlusher>,
+    tokio_util::sync::CancellationToken,
 ) {
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
@@ -999,7 +989,21 @@ fn start_trace_agent(
         config: Arc::clone(config),
     });
 
-    let trace_agent = Box::new(trace_agent::TraceAgent::new(
+    let obfuscation_config = obfuscation_config::ObfuscationConfig {
+        tag_replace_rules: config.apm_replace_tags.clone(),
+        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
+        obfuscate_memcached: false,
+        obfuscation_redis_enabled: false,
+        obfuscation_redis_remove_all_args: false,
+    };
+
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+        obfuscation_config: Arc::new(obfuscation_config),
+        resolved_api_key: resolved_api_key.clone(),
+    });
+
+    let trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
@@ -1008,8 +1012,9 @@ fn start_trace_agent(
         invocation_processor,
         Arc::clone(tags_provider),
         resolved_api_key,
-    ));
+    );
     let trace_agent_channel = trace_agent.get_sender_copy();
+    let shutdown_token = trace_agent.shutdown_token();
 
     tokio::spawn(async move {
         let res = trace_agent.start().await;
@@ -1023,6 +1028,7 @@ fn start_trace_agent(
         trace_flusher,
         trace_processor,
         stats_flusher,
+        shutdown_token,
     )
 }
 

@@ -1,23 +1,26 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use ddcommon::hyper_migration;
-use http_body_util::BodyExt;
-use hyper::service::service_fn;
-use hyper::{http, Method, Response, StatusCode};
+use axum::{
+    extract::{Request, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::{any, post},
+    Router,
+};
 use reqwest;
 use serde_json::json;
 use std::collections::VecDeque;
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 use crate::config;
-use crate::http::get_client;
+use crate::http::{extract_request_body, get_client, handler_not_found};
 use crate::lifecycle::invocation::context::ReparentingInfo;
 use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
 use crate::tags::provider;
@@ -25,11 +28,9 @@ use crate::traces::trace_aggregator::RawTraceData;
 use crate::traces::{
     stats_aggregator, stats_processor, trace_aggregator, trace_processor, INVOCATION_SPAN_RESOURCE,
 };
-use datadog_trace_agent::http_utils::{
-    self, log_and_create_http_response, log_and_create_traces_success_http_response,
-};
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self};
+use ddcommon::hyper_migration;
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -55,6 +56,18 @@ const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 
+type AgentState = (
+    Arc<config::Config>,
+    Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+    Sender<RawTraceData>,
+    Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
+    Sender<pb::ClientStatsPayload>,
+    Arc<Mutex<InvocationProcessor>>,
+    Arc<provider::Provider>,
+    reqwest::Client,
+    String, // api_key
+);
+
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
@@ -65,6 +78,7 @@ pub struct TraceAgent {
     http_client: reqwest::Client,
     api_key: String,
     tx: Sender<RawTraceData>,
+    shutdown_token: CancellationToken,
 }
 
 #[derive(Clone, Copy)]
@@ -112,12 +126,12 @@ impl TraceAgent {
             http_client: get_client(config),
             tx: trace_tx,
             api_key: resolved_api_key,
+            shutdown_token: CancellationToken::new(),
         }
     }
 
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
-        let trace_tx = self.tx.clone();
 
         // channels to send processed stats to our stats flusher.
         let (stats_tx, mut stats_rx): (
@@ -134,271 +148,296 @@ impl TraceAgent {
             }
         });
 
-        // setup our hyper http server, where the endpoint_handler handles incoming requests
-        let trace_processor = self.trace_processor.clone();
-        let stats_processor = self.stats_processor.clone();
-        let endpoint_config = self.config.clone();
-        let tags_provider = self.tags_provider.clone();
-        let invocation_processor = self.invocation_processor.clone();
-        let client = self.http_client.clone();
-        let api_key = self.api_key.clone();
-
-        let service = service_fn(move |req| {
-            TraceAgent::trace_endpoint_handler(
-                endpoint_config.clone(),
-                req.map(hyper_migration::Body::incoming),
-                trace_processor.clone(),
-                trace_tx.clone(),
-                stats_processor.clone(),
-                stats_tx.clone(),
-                invocation_processor.clone(),
-                tags_provider.clone(),
-                client.clone(),
-                api_key.clone(),
-            )
-        });
+        let router = self.make_router(stats_tx);
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
-        let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        let socket = SocketAddr::from(([127, 0, 0, 1], port));
+        let listener = tokio::net::TcpListener::bind(&socket).await?;
 
         debug!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
         debug!(
             "Time taken start the Trace Agent: {} ms",
             now.elapsed().as_millis()
         );
-        let server = hyper::server::conn::http1::Builder::new();
-        let mut joinset = tokio::task::JoinSet::new();
-        loop {
-            let conn = tokio::select! {
-                con_res = listener.accept() => match con_res {
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            io::ErrorKind::ConnectionAborted
-                                | io::ErrorKind::ConnectionReset
-                                | io::ErrorKind::ConnectionRefused
-                        ) =>
-                    {
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("Server error: {e}");
-                        return Err(e.into());
-                    }
-                    Ok((conn, _)) => conn,
-                },
-                finished = async {
-                    match joinset.join_next().await {
-                        Some(finished) => finished,
-                        None => std::future::pending().await,
-                    }
-                } => match finished {
-                    Err(e) if e.is_panic() => {
-                        std::panic::resume_unwind(e.into_panic());
-                    },
-                    Ok(()) | Err(_) => continue,
-                },
-            };
-            let conn = hyper_util::rt::TokioIo::new(conn);
-            let server = server.clone();
-            let service = service.clone();
-            joinset.spawn(async move {
-                if let Err(e) = server.serve_connection(conn, service).await {
-                    debug!("Trace agent connection error: {e}");
-                }
-            });
+
+        let shutdown_token_clone = self.shutdown_token.clone();
+        axum::serve(listener, router)
+            .with_graceful_shutdown(Self::graceful_shutdown(shutdown_token_clone))
+            .await?;
+
+        Ok(())
+    }
+
+    fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
+        let state: AgentState = (
+            Arc::clone(&self.config),
+            Arc::clone(&self.trace_processor),
+            self.tx.clone(),
+            Arc::clone(&self.stats_processor),
+            stats_tx,
+            Arc::clone(&self.invocation_processor),
+            Arc::clone(&self.tags_provider),
+            self.http_client.clone(),
+            self.api_key.clone(),
+        );
+
+        Router::new()
+            .route(
+                V4_TRACE_ENDPOINT_PATH,
+                post(Self::v04_traces).put(Self::v04_traces),
+            )
+            .route(
+                V5_TRACE_ENDPOINT_PATH,
+                post(Self::v05_traces).put(Self::v05_traces),
+            )
+            .route(STATS_ENDPOINT_PATH, post(Self::stats).put(Self::stats))
+            .route(DSM_AGENT_PATH, post(Self::dsm_proxy))
+            .route(PROFILING_ENDPOINT_PATH, post(Self::profiling_proxy))
+            .route(
+                LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
+                post(Self::llm_obs_eval_metric_proxy),
+            )
+            .route(
+                LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
+                post(Self::llm_obs_eval_metric_proxy_v2),
+            )
+            .route(LLM_OBS_SPANS_ENDPOINT_PATH, post(Self::llm_obs_spans_proxy))
+            .route(DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
+            .route(INFO_ENDPOINT_PATH, any(Self::info))
+            .fallback(handler_not_found)
+            .with_state(state)
+    }
+
+    async fn graceful_shutdown(shutdown_token: CancellationToken) {
+        shutdown_token.cancelled().await;
+        debug!("Trace Agent | Shutdown signal received, shutting down");
+    }
+
+    async fn v04_traces(
+        State((_, trace_processor, trace_tx, _, _, invocation_processor, tags_provider, _, _)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_traces(
+            request,
+            trace_processor,
+            trace_tx,
+            invocation_processor,
+            tags_provider,
+            ApiVersion::V04,
+        )
+        .await
+    }
+
+    async fn v05_traces(
+        State((_, trace_processor, trace_tx, _, _, invocation_processor, tags_provider, _, _)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_traces(
+            request,
+            trace_processor,
+            trace_tx,
+            invocation_processor,
+            tags_provider,
+            ApiVersion::V05,
+        )
+        .await
+    }
+
+    async fn stats(
+        State((_, _, _, stats_processor, stats_tx, _, _, _, _)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        match stats_processor.process_stats(request, stats_tx).await {
+            Ok(result) => result.into_response(),
+            Err(err) => error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error processing trace stats: {err}"),
+            ),
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::pedantic)]
-    async fn trace_endpoint_handler(
-        config: Arc<config::Config>,
-        req: hyper_migration::HttpRequest,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_tx: Sender<RawTraceData>,
-        stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
-        stats_tx: Sender<pb::ClientStatsPayload>,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
-        tags_provider: Arc<provider::Provider>,
-        client: reqwest::Client,
-        api_key: String,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        match (req.method(), req.uri().path()) {
-            (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
-                req,
-                trace_processor.clone(),
-                trace_tx,
-                invocation_processor.clone(),
-                tags_provider,
-                ApiVersion::V04,
-            )
-            .await
+    async fn dsm_proxy(
+        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            request,
+            "trace.agent",
+            DSM_ENDPOINT_PATH,
+            "DSM",
+        )
+        .await
+    }
+
+    async fn profiling_proxy(
+        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            request,
+            "intake.profile",
+            PROFILING_BACKEND_PATH,
+            "profiling",
+        )
+        .await
+    }
+
+    async fn llm_obs_eval_metric_proxy(
+        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            request,
+            "api",
+            LLM_OBS_EVAL_METRIC_INTAKE_PATH,
+            "llm_obs_eval_metric",
+        )
+        .await
+    }
+
+    async fn llm_obs_eval_metric_proxy_v2(
+        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            request,
+            "api",
+            LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2,
+            "llm_obs_eval_metric",
+        )
+        .await
+    }
+
+    async fn llm_obs_spans_proxy(
+        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            request,
+            "llmobs-intake",
+            LLM_OBS_SPANS_INTAKE_PATH,
+            "llm_obs_spans",
+        )
+        .await
+    }
+
+    async fn debugger_logs_proxy(
+        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        request: Request,
+    ) -> Response {
+        Self::handle_proxy(
+            config,
+            client,
+            api_key,
+            tags_provider,
+            request,
+            "http-intake.logs",
+            DEBUGGER_LOGS_INTAKE_PATH,
+            "debugger_logs",
+        )
+        .await
+    }
+
+    #[allow(clippy::unused_async)]
+    async fn info() -> Response {
+        let response_json = json!(
             {
-                Ok(result) => Ok(result),
-                Err(err) => log_and_create_http_response(
-                    &format!("Error processing traces: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ),
-            },
-            (&Method::PUT | &Method::POST, V5_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
-                req,
-                trace_processor.clone(),
-                trace_tx,
-                invocation_processor.clone(),
-                tags_provider,
-                ApiVersion::V05,
-            )
-            .await
-            {
-                Ok(result) => Ok(result),
-                Err(err) => log_and_create_http_response(
-                    &format!("Error processing traces: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ),
-            },
-            (&Method::PUT | &Method::POST, STATS_ENDPOINT_PATH) => {
-                match stats_processor.process_stats(req, stats_tx).await {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("Error processing trace stats: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
+                "endpoints": [
+                    V4_TRACE_ENDPOINT_PATH,
+                    V5_TRACE_ENDPOINT_PATH,
+                    STATS_ENDPOINT_PATH,
+                    DSM_AGENT_PATH,
+                    PROFILING_ENDPOINT_PATH,
+                    INFO_ENDPOINT_PATH,
+                    LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
+                    LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
+                    LLM_OBS_SPANS_ENDPOINT_PATH,
+                    DEBUGGER_ENDPOINT_PATH,
+                ],
+                "client_drop_p0s": true,
             }
-            (&Method::POST, DSM_AGENT_PATH) => {
-                match Self::handle_dsm_proxy(config, tags_provider, api_key, client, req).await {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("DSM endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
-            (&Method::POST, PROFILING_ENDPOINT_PATH) => {
-                match Self::handle_profiling_proxy(config, tags_provider, api_key, client, req)
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("Profiling endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
-            (&Method::POST, LLM_OBS_EVAL_METRIC_ENDPOINT_PATH) => {
-                match Self::handle_llm_obs_eval_metric_proxy(
-                    config,
-                    tags_provider,
-                    api_key,
-                    client,
-                    req,
-                )
-                .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("LLM OBS Eval Metric endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
-            (&Method::POST, LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2) => {
-                match Self::handle_llm_obs_eval_metric_proxy_v2(
-                    config,
-                    tags_provider,
-                    api_key,
-                    client,
-                    req,
-                )
-                .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("LLM OBS Eval Metric endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
-            (&Method::POST, LLM_OBS_SPANS_ENDPOINT_PATH) => {
-                match Self::handle_llm_obs_spans_proxy(config, tags_provider, api_key, client, req)
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("LLM OBS Spans endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
-            (_, INFO_ENDPOINT_PATH) => match Self::info_handler() {
-                Ok(result) => Ok(result),
-                Err(err) => log_and_create_http_response(
-                    &format!("Info endpoint error: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                ),
-            },
-            (&Method::POST, DEBUGGER_ENDPOINT_PATH) => {
-                match Self::handle_debugger_logs_proxy(config, tags_provider, api_key, client, req)
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("Debugger logs endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
-            _ => {
-                let mut not_found = Response::default();
-                *not_found.status_mut() = StatusCode::NOT_FOUND;
-                Ok(not_found)
-            }
-        }
+        );
+        (StatusCode::OK, response_json.to_string()).into_response()
     }
 
     async fn handle_traces(
-        req: hyper_migration::HttpRequest,
+        request: Request,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_tx: Sender<RawTraceData>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        let (parts, body) = req.into_parts();
+    ) -> Response {
+        let (parts, body) = match extract_request_body(request).await {
+            Ok(r) => r,
+            Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+        };
 
-        if let Some(response) = http_utils::verify_request_content_length(
-            &parts.headers,
-            MAX_CONTENT_LENGTH,
-            "Error processing traces",
-        ) {
-            return response;
+        if let Some(content_length) = parts.headers.get("content-length") {
+            if let Ok(length_str) = content_length.to_str() {
+                if let Ok(length) = length_str.parse::<usize>() {
+                    if length > MAX_CONTENT_LENGTH {
+                        return error_response(
+                            StatusCode::PAYLOAD_TOO_LARGE,
+                            format!("Content-Length {length} exceeds maximum allowed size {MAX_CONTENT_LENGTH}"),
+                        );
+                    }
+                }
+            }
         }
 
         // We'll use empty header tags since we can't store them with the raw data
         // The real header tags will be reconstructed when processing
 
         let (body_size, mut traces) = match version {
-            ApiVersion::V04 => match trace_utils::get_traces_from_request_body(body).await {
+            ApiVersion::V04 => match trace_utils::get_traces_from_request_body(
+                hyper_migration::Body::from_bytes(body),
+            )
+            .await
+            {
                 Ok(result) => result,
                 Err(err) => {
-                    return log_and_create_http_response(
-                        &format!("Error deserializing trace from request body: {err}"),
+                    return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Error deserializing trace from request body: {err}"),
                     );
                 }
             },
-            ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(body).await {
+            ApiVersion::V05 => match trace_utils::get_v05_traces_from_request_body(
+                hyper_migration::Body::from_bytes(body),
+            )
+            .await
+            {
                 Ok(result) => result,
                 Err(err) => {
-                    return log_and_create_http_response(
-                        &format!("Error deserializing trace from request body: {err}"),
+                    return error_response(
                         StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Error deserializing trace from request body: {err}"),
                     );
                 }
             },
         };
+
         let mut reparenting_info = {
             let invocation_processor = invocation_processor.lock().await;
             invocation_processor.get_reparenting_info()
@@ -439,52 +478,29 @@ impl TraceAgent {
         // Send raw trace data to our trace aggregator
         let raw_data = RawTraceData { traces, body_size };
         match trace_tx.send(raw_data).await {
-            Ok(()) => log_and_create_traces_success_http_response(
-                "Successfully buffered traces to be flushed.",
-                StatusCode::OK,
-            ),
-            Err(err) => log_and_create_http_response(
-                &format!("Error sending traces to the trace flusher: {err}"),
+            Ok(()) => success_response("Successfully buffered traces to be flushed."),
+            Err(err) => error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error sending traces to the trace flusher: {err}"),
             ),
         }
     }
 
-    fn info_handler() -> http::Result<hyper_migration::HttpResponse> {
-        let response_json = json!(
-            {
-                "endpoints": [
-                    V4_TRACE_ENDPOINT_PATH,
-                    STATS_ENDPOINT_PATH,
-                    DSM_AGENT_PATH,
-                    PROFILING_ENDPOINT_PATH,
-                    INFO_ENDPOINT_PATH,
-                    LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
-                    LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
-                    LLM_OBS_SPANS_ENDPOINT_PATH,
-                    DEBUGGER_ENDPOINT_PATH,
-                ],
-                "client_drop_p0s": true,
-            }
-        );
-        Response::builder()
-            .status(200)
-            .body(hyper_migration::Body::from(response_json.to_string()))
-    }
-
-    /// Generic proxy handler for forwarding requests to Datadog backends
     #[allow(clippy::too_many_arguments)]
     async fn handle_proxy(
         config: Arc<config::Config>,
         client: reqwest::Client,
         api_key: String,
         tags_provider: Arc<provider::Provider>,
-        req: hyper_migration::HttpRequest,
+        request: Request,
         backend_domain: &str,
         backend_path: &str,
         error_context: &str,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        let (parts, body) = req.into_parts();
+    ) -> Response {
+        let (parts, body) = match extract_request_body(request).await {
+            Ok(r) => r,
+            Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+        };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
         let mut request_builder = client.post(&target_url);
@@ -510,21 +526,13 @@ impl TraceAgent {
                     .unwrap_or_default()
             ),
         );
-        let body_bytes = match body.collect().await {
-            Ok(b) => b.to_bytes(),
-            Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error collecting request body: {err}"),
-                    StatusCode::BAD_REQUEST,
-                );
-            }
-        };
-        let response = match request_builder.body(body_bytes).send().await {
+
+        let response = match request_builder.body(body).send().await {
             Ok(resp) => resp,
             Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error sending request to {error_context} backend: {err}"),
+                return error_response(
                     StatusCode::BAD_GATEWAY,
+                    format!("Error sending request to {error_context} backend: {err}"),
                 );
             }
         };
@@ -532,11 +540,11 @@ impl TraceAgent {
         let status = StatusCode::from_u16(response.status().as_u16())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
-        let mut builder = Response::builder().status(status);
+        let mut builder = axum::response::Response::builder().status(status);
 
         for (name, value) in response.headers() {
             if let Ok(header_value) =
-                http::header::HeaderValue::from_str(value.to_str().unwrap_or_default())
+                axum::http::HeaderValue::from_str(value.to_str().unwrap_or_default())
             {
                 builder = builder.header(name.as_str(), header_value);
             }
@@ -545,139 +553,30 @@ impl TraceAgent {
         let response_body = match response.bytes().await {
             Ok(bytes) => bytes,
             Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error reading response from {error_context} backend: {err}"),
+                return error_response(
                     StatusCode::BAD_GATEWAY,
+                    format!("Error reading response from {error_context} backend: {err}"),
                 );
             }
         };
 
-        builder.body(hyper_migration::Body::from_bytes(response_body))
-    }
-
-    async fn handle_dsm_proxy(
-        config: Arc<config::Config>,
-        tags_provider: Arc<provider::Provider>,
-        api_key: String,
-        client: reqwest::Client,
-        req: hyper_migration::HttpRequest,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
-            req,
-            "trace.agent",
-            DSM_ENDPOINT_PATH,
-            "DSM",
-        )
-        .await
-    }
-
-    async fn handle_profiling_proxy(
-        config: Arc<config::Config>,
-        tags_provider: Arc<provider::Provider>,
-        api_key: String,
-        client: reqwest::Client,
-        req: hyper_migration::HttpRequest,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
-            req,
-            "intake.profile",
-            PROFILING_BACKEND_PATH,
-            "profiling",
-        )
-        .await
-    }
-
-    async fn handle_llm_obs_eval_metric_proxy(
-        config: Arc<config::Config>,
-        tags_provider: Arc<provider::Provider>,
-        api_key: String,
-        client: reqwest::Client,
-        req: hyper_migration::HttpRequest,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
-            req,
-            "api",
-            LLM_OBS_EVAL_METRIC_INTAKE_PATH,
-            "llm_obs_eval_metric",
-        )
-        .await
-    }
-
-    async fn handle_llm_obs_eval_metric_proxy_v2(
-        config: Arc<config::Config>,
-        tags_provider: Arc<provider::Provider>,
-        api_key: String,
-        client: reqwest::Client,
-        req: hyper_migration::HttpRequest,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
-            req,
-            "api",
-            LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2,
-            "llm_obs_eval_metric",
-        )
-        .await
-    }
-
-    async fn handle_llm_obs_spans_proxy(
-        config: Arc<config::Config>,
-        tags_provider: Arc<provider::Provider>,
-        api_key: String,
-        client: reqwest::Client,
-        req: hyper_migration::HttpRequest,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
-            req,
-            "llmobs-intake",
-            LLM_OBS_SPANS_INTAKE_PATH,
-            "llm_obs_spans",
-        )
-        .await
-    }
-
-    async fn handle_debugger_logs_proxy(
-        config: Arc<config::Config>,
-        tags_provider: Arc<provider::Provider>,
-        api_key: String,
-        client: reqwest::Client,
-        req: hyper_migration::HttpRequest,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
-            req,
-            "http-intake.logs",
-            DEBUGGER_LOGS_INTAKE_PATH,
-            "debugger_logs",
-        )
-        .await
+        match builder.body(axum::body::Body::from(response_body)) {
+            Ok(response) => response.into_response(),
+            Err(err) => error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error building response: {err}"),
+            ),
+        }
     }
 
     #[must_use]
     pub fn get_sender_copy(&self) -> Sender<RawTraceData> {
         self.tx.clone()
+    }
+
+    #[must_use]
+    pub fn shutdown_token(&self) -> CancellationToken {
+        self.shutdown_token.clone()
     }
 }
 
@@ -701,4 +600,14 @@ fn handle_reparenting(reparenting_info: &mut VecDeque<ReparentingInfo>, span: &m
             span.parent_id = rep_info.invocation_span_id;
         }
     }
+}
+
+fn error_response<E: std::fmt::Display>(status: StatusCode, error: E) -> Response {
+    error!("{}", error);
+    (status, error.to_string()).into_response()
+}
+
+fn success_response(message: &str) -> Response {
+    debug!("{}", message);
+    (StatusCode::OK, json!({"rate_by_service": {}}).to_string()).into_response()
 }
