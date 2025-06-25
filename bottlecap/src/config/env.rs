@@ -125,6 +125,12 @@ pub struct EnvConfig {
     /// to 9 (maximum compression but higher resource usage). Only takes effect if
     /// `use_compression` is set to `true`.
     pub logs_config_compression_level: Option<i32>,
+    /// @env `DD_LOGS_CONFIG_ADDITIONAL_ENDPOINTS`
+    ///
+    /// Additional endpoints to send logs to.
+    /// <https://docs.datadoghq.com/agent/configuration/dual-shipping/?tab=helm#environment-variable-configuration-6>
+    #[serde(deserialize_with = "deserialize_logs_additional_endpoints")]
+    pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
 
     // APM
     //
@@ -322,6 +328,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, logs_config_processing_rules);
     merge_option_to_value!(config, env_config, logs_config_use_compression);
     merge_option_to_value!(config, env_config, logs_config_compression_level);
+    merge_vec!(config, env_config, logs_config_additional_endpoints);
 
     // APM
     merge_hashmap!(config, env_config, service_mapping);
