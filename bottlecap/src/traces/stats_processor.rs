@@ -17,7 +17,7 @@ use datadog_trace_utils::stats_utils;
 use ddcommon::hyper_migration;
 
 use super::trace_agent::MAX_CONTENT_LENGTH;
-use datadog_trace_agent::http_utils::{self, log_and_create_http_response};
+use crate::http::extract_request_body;
 
 #[async_trait]
 pub trait StatsProcessor {
