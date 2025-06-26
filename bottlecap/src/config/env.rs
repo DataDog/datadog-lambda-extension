@@ -65,6 +65,8 @@ pub struct EnvConfig {
     // Metrics
     /// @env `DD_DD_URL`
     ///
+    /// @default `https://app.datadoghq.com`
+    ///
     /// The host of the Datadog intake server to send **metrics** to, only set this option
     /// if you need the Agent to send **metrics** to a custom URL, it overrides the site
     /// setting defined in "site". It does not affect APM, Logs, Remote Configuration,
@@ -73,6 +75,8 @@ pub struct EnvConfig {
     /// If `DD_DD_URL` and `DD_URL` are both set, `DD_DD_URL` is used in priority.
     pub dd_url: Option<String>,
     /// @env `DD_URL`
+    ///
+    /// @default `https://app.datadoghq.com`
     pub url: Option<String>,
     /// @env `DD_ADDITIONAL_ENDPOINTS`
     ///
