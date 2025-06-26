@@ -274,6 +274,7 @@ pub struct Config {
     pub apm_config_obfuscation_http_remove_query_string: bool,
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
     pub apm_features: Vec<String>,
+    pub apm_additional_endpoints: HashMap<String, Vec<String>>,
     //
     // Trace Propagation
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -366,6 +367,7 @@ impl Default for Config {
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
             apm_features: vec![],
+            apm_additional_endpoints: HashMap::new(),
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
