@@ -8,6 +8,7 @@ use crate::{
         deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
+        logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
         trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
         Config, ConfigError, ConfigSource, ProcessingRule,
@@ -121,6 +122,7 @@ pub struct LogsConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub use_compression: Option<bool>,
     pub compression_level: Option<i32>,
+    pub additional_endpoints: Vec<LogsAdditionalEndpoint>,
 }
 
 /// APM Config
@@ -395,6 +397,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         logs_config_compression_level,
         yaml_config.logs_config,
         compression_level
+    );
+    merge_vec!(
+        config,
+        logs_config_additional_endpoints,
+        yaml_config.logs_config,
+        additional_endpoints
     );
 
     // APM

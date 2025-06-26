@@ -4,6 +4,7 @@ pub mod aws;
 pub mod env;
 pub mod flush_strategy;
 pub mod log_level;
+pub mod logs_additional_endpoints;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
@@ -19,6 +20,7 @@ use std::path::Path;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
+use crate::config::logs_additional_endpoints::LogsAdditionalEndpoint;
 use crate::config::{
     apm_replace_rule::deserialize_apm_replace_rules,
     env::EnvConfigSource,
@@ -229,6 +231,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
+    pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
 
     // APM
     //
@@ -324,6 +327,7 @@ impl Default for Config {
             logs_config_processing_rules: None,
             logs_config_use_compression: true,
             logs_config_compression_level: 6,
+            logs_config_additional_endpoints: Vec::new(),
 
             // APM
             service_mapping: HashMap::new(),
