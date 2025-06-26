@@ -4,26 +4,30 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use ddcommon::hyper_migration;
-use hyper::{http, StatusCode};
+use axum::{
+    extract::Request,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use tokio::sync::mpsc::Sender;
-use tracing::debug;
+use tracing::{debug, error};
 
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::stats_utils;
+use ddcommon::hyper_migration;
 
 use super::trace_agent::MAX_CONTENT_LENGTH;
-use datadog_trace_agent::http_utils::{self, log_and_create_http_response};
+use crate::http::extract_request_body;
 
 #[async_trait]
 pub trait StatsProcessor {
-    /// Deserializes trace stats from a hyper request body and sends them through
+    /// Deserializes trace stats from a request body and sends them through
     /// the provided tokio mpsc Sender.
     async fn process_stats(
         &self,
-        req: hyper_migration::HttpRequest,
+        req: Request,
         tx: Sender<pb::ClientStatsPayload>,
-    ) -> http::Result<hyper_migration::HttpResponse>;
+    ) -> Result<Response, Box<dyn std::error::Error + Send + Sync>>;
 }
 
 #[derive(Clone, Copy)]
@@ -34,30 +38,43 @@ pub struct ServerlessStatsProcessor {}
 impl StatsProcessor for ServerlessStatsProcessor {
     async fn process_stats(
         &self,
-        req: hyper_migration::HttpRequest,
+        req: Request,
         tx: Sender<pb::ClientStatsPayload>,
-    ) -> http::Result<hyper_migration::HttpResponse> {
+    ) -> Result<Response, Box<dyn std::error::Error + Send + Sync>> {
         debug!("Received trace stats to process");
-        let (parts, body) = req.into_parts();
+        let (parts, body) = match extract_request_body(req).await {
+            Ok(r) => r,
+            Err(e) => {
+                let error_msg = format!("Error extracting request body: {e}");
+                error!("{}", error_msg);
+                return Ok((StatusCode::BAD_REQUEST, error_msg).into_response());
+            }
+        };
 
-        if let Some(response) = http_utils::verify_request_content_length(
-            &parts.headers,
-            MAX_CONTENT_LENGTH,
-            "Error processing trace stats",
-        ) {
-            return response;
+        if let Some(content_length) = parts.headers.get("content-length") {
+            if let Ok(length_str) = content_length.to_str() {
+                if let Ok(length) = length_str.parse::<usize>() {
+                    if length > MAX_CONTENT_LENGTH {
+                        let error_msg = format!("Content-Length {length} exceeds maximum allowed size {MAX_CONTENT_LENGTH}");
+                        error!("{}", error_msg);
+                        return Ok((StatusCode::PAYLOAD_TOO_LARGE, error_msg).into_response());
+                    }
+                }
+            }
         }
 
         // deserialize trace stats from the request body, convert to protobuf structs (see
         // trace-protobuf crate)
         let mut stats: pb::ClientStatsPayload =
-            match stats_utils::get_stats_from_request_body(body).await {
+            match stats_utils::get_stats_from_request_body(hyper_migration::Body::from_bytes(body))
+                .await
+            {
                 Ok(result) => result,
                 Err(err) => {
-                    return log_and_create_http_response(
-                        &format!("Error deserializing trace stats from request body: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    );
+                    let error_msg =
+                        format!("Error deserializing trace stats from request body: {err}");
+                    error!("{}", error_msg);
+                    return Ok((StatusCode::INTERNAL_SERVER_ERROR, error_msg).into_response());
                 }
             };
 
@@ -66,29 +83,28 @@ impl StatsProcessor for ServerlessStatsProcessor {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos();
-        stats.stats[0].start = match u64::try_from(timestamp) {
-            Ok(result) => result,
-            Err(_) => {
-                return log_and_create_http_response(
-                    "Error converting timestamp to u64",
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
+        stats.stats[0].start = if let Ok(result) = u64::try_from(timestamp) {
+            result
+        } else {
+            let error_msg = "Error converting timestamp to u64";
+            error!("{}", error_msg);
+            return Ok((StatusCode::INTERNAL_SERVER_ERROR, error_msg).into_response());
         };
 
         // send trace payload to our trace flusher
         match tx.send(stats).await {
             Ok(()) => {
-                return log_and_create_http_response(
-                    "Successfully buffered stats to be flushed.",
+                debug!("Successfully buffered stats to be flushed.");
+                Ok((
                     StatusCode::ACCEPTED,
-                );
+                    "Successfully buffered stats to be flushed.",
+                )
+                    .into_response())
             }
             Err(err) => {
-                return log_and_create_http_response(
-                    &format!("Error sending stats to the stats flusher: {err}"),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
+                let error_msg = format!("Error sending stats to the stats flusher: {err}");
+                error!("{}", error_msg);
+                Ok((StatusCode::INTERNAL_SERVER_ERROR, error_msg).into_response())
             }
         }
     }
