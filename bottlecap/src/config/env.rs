@@ -166,6 +166,12 @@ pub struct EnvConfig {
     /// @env `DD_APM_FEATURES`
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
     pub apm_features: Vec<String>,
+    /// @env `DD_APM_ADDITIONAL_ENDPOINTS`
+    ///
+    /// Additional endpoints to send traces to.
+    /// <https://docs.datadoghq.com/agent/configuration/dual-shipping/?tab=helm#environment-variable-configuration-1>
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    pub apm_additional_endpoints: HashMap<String, Vec<String>>,
     //
     // Trace Propagation
     /// @env `DD_TRACE_PROPAGATION_STYLE`
@@ -348,6 +354,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         apm_config_obfuscation_http_remove_paths_with_digits
     );
     merge_vec!(config, env_config, apm_features);
+    merge_hashmap!(config, env_config, apm_additional_endpoints);
 
     // Trace Propagation
     merge_vec!(config, env_config, trace_propagation_style);

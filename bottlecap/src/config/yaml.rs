@@ -133,6 +133,8 @@ pub struct ApmConfig {
     pub replace_tags: Option<Vec<ReplaceRule>>,
     pub obfuscation: Option<ApmObfuscation>,
     pub features: Vec<String>,
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    pub additional_endpoints: HashMap<String, Vec<String>>,
 }
 
 impl ApmConfig {
@@ -409,6 +411,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         apm_replace_tags,
         yaml_config.apm_config,
         replace_tags
+    );
+    merge_hashmap!(
+        config,
+        apm_additional_endpoints,
+        yaml_config.apm_config,
+        additional_endpoints
     );
 
     // Not using the macro here because we need to call a method on the struct
