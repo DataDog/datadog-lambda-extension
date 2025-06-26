@@ -633,8 +633,8 @@ http_protocol: "http1"
 # Endpoints
 additional_endpoints:
   "https://app.datadoghq.com":
-    - apikey2
-    - apikey3
+    - "apikey2"
+    - "apikey3"
   "https://app.datadoghq.eu":
     - apikey4
 
