@@ -1,9 +1,5 @@
 use figment::{providers::Env, Figment};
-use crate::config::{
-    additional_endpoints::deserialize_additional_endpoints,
-    logs_additional_endpoints::{deserialize_logs_additional_endpoints, LogsAdditionalEndpoint},
-};
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::collections::HashMap;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
