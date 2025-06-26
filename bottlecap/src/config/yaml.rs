@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf};
 use crate::{
     config::{
         additional_endpoints::deserialize_additional_endpoints,
-        deserialize_apm_replace_rules, deserialize_key_value_pairs,
+        deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
         deserialize_optional_bool_from_anything, deserialize_processing_rules,
         deserialize_string_or_int,
         flush_strategy::FlushStrategy,
@@ -52,7 +52,7 @@ pub struct YamlConfig {
     pub service: Option<String>,
     #[serde(deserialize_with = "deserialize_string_or_int")]
     pub version: Option<String>,
-    #[serde(deserialize_with = "deserialize_key_value_pairs")]
+    #[serde(deserialize_with = "deserialize_key_value_pair_array_to_hashmap")]
     pub tags: HashMap<String, String>,
 
     // Logs
@@ -609,64 +609,308 @@ impl ConfigSource for YamlConfigSource {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
     use std::path::Path;
 
-    use crate::config::get_config;
+    use crate::config::flush_strategy::PeriodicStrategy;
+
+    use super::*;
 
     #[test]
-    fn test_otlp_config_receiver_protocols_http_endpoint() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                otlp_config:
-                  receiver:
-                    protocols:
-                      http:
-                        endpoint: 0.0.0.0:4318
-            ",
-            )?;
-
-            let config = get_config(Path::new("")).expect("should parse config");
-
-            assert_eq!(
-                config.otlp_config_receiver_protocols_http_endpoint,
-                Some("0.0.0.0:4318".to_string())
-            );
-
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_parse_additional_endpoints_from_yaml() {
+    fn test_merge_config_overrides_with_yaml_file() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.create_file(
                 "datadog.yaml",
                 r#"
+# Basic fields
+site: "test-site"
+api_key: "test-api-key"
+log_level: "debug"
+flush_timeout: 30
+
+# Proxy
+proxy:
+  https: "https://proxy.example.com"
+  no_proxy: ["localhost", "127.0.0.1"]
+dd_url: "https://metrics.datadoghq.com"
+http_protocol: "http1"
+
+# Endpoints
 additional_endpoints:
   "https://app.datadoghq.com":
-    - apikey2
-    - apikey3
+    - "apikey2"
+    - "apikey3"
   "https://app.datadoghq.eu":
-    - apikey4
+    - "apikey4"
+
+# Unified Service Tagging
+env: "test-env"
+service: "test-service"
+version: "1.0.0"
+tags:
+  - "team:test-team"
+  - "project:test-project"
+
+# Logs
+logs_config:
+  logs_dd_url: "https://logs.datadoghq.com"
+  processing_rules:
+    - name: "test-exclude"
+      type: "exclude_at_match"
+      pattern: "test-pattern"
+  use_compression: true
+  compression_level: 6
+
+# APM
+apm_config:
+  apm_dd_url: "https://apm.datadoghq.com"
+  replace_tags:
+    - name: "test-tag"
+      pattern: "test-pattern"
+      repl: "replacement"
+  obfuscation:
+    http:
+      remove_query_string: true
+      remove_paths_with_digits: true
+  features:
+    - "enable_otlp_compute_top_level_by_span_kind"
+    - "enable_stats_by_span_kind"
+
+service_mapping: old-service:new-service
+
+appsec_enabled: true
+
+# Trace Propagation
+trace_propagation_style: "datadog"
+trace_propagation_style_extract: "b3"
+trace_propagation_extract_first: true
+trace_propagation_http_baggage_enabled: true
+
+# OTLP
+otlp_config:
+  receiver:
+    protocols:
+      http:
+        endpoint: "http://localhost:4318"
+      grpc:
+        endpoint: "http://localhost:4317"
+        transport: "tcp"
+        max_recv_msg_size_mib: 4
+  traces:
+    enabled: true
+    span_name_as_resource_name: true
+    span_name_remappings:
+      "old-span": "new-span"
+    ignore_missing_datadog_fields: true
+    probabilistic_sampler:
+      sampling_percentage: 50
+  metrics:
+    enabled: true
+    resource_attributes_as_tags: true
+    instrumentation_scope_metadata_as_tags: true
+    tag_cardinality: "low"
+    delta_ttl: 3600
+    histograms:
+      mode: "counters"
+      send_count_sum_metrics: true
+      send_aggregation_metrics: true
+    sums:
+      cumulative_monotonic_mode: "to_delta"
+      initial_cumulative_monotonic_value: "auto"
+    summaries:
+      mode: "quantiles"
+  logs:
+    enabled: true
+
+# AWS Lambda
+api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
+kms_api_key: "test-kms-key"
+serverless_logs_enabled: true
+serverless_flush_strategy: "periodically,60000"
+enhanced_metrics: true
+lambda_proc_enhanced_metrics: true
+capture_lambda_payload: true
+capture_lambda_payload_max_depth: 5
+serverless_appsec_enabled: true
+extension_version: "compatibility"
 "#,
             )?;
 
-            let config = get_config(Path::new("")).expect("should parse config");
-            let mut expected = HashMap::new();
-            expected.insert(
-                "https://app.datadoghq.com".to_string(),
-                vec!["apikey2".to_string(), "apikey3".to_string()],
+            let mut config = Config::default();
+            let yaml_config_source = YamlConfigSource {
+                path: Path::new("datadog.yaml").to_path_buf(),
+            };
+            yaml_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            // Assert whole configuration is not default
+            assert_ne!(config, Config::default());
+
+            // Assert that all values are overridden and not the defaults
+            assert_eq!(config.site, "test-site".to_string());
+            assert_eq!(config.api_key, "test-api-key".to_string());
+            assert_eq!(config.log_level, LogLevel::Debug);
+            assert_eq!(config.flush_timeout, 30);
+
+            // Proxy
+            assert_eq!(
+                config.proxy_https,
+                Some("https://proxy.example.com".to_string())
             );
-            expected.insert(
-                "https://app.datadoghq.eu".to_string(),
-                vec!["apikey4".to_string()],
+            assert_eq!(
+                config.proxy_no_proxy,
+                vec!["localhost".to_string(), "127.0.0.1".to_string()]
             );
-            assert_eq!(config.additional_endpoints, expected);
+            assert_eq!(config.http_protocol, Some("http1".to_string()));
+
+            // Metrics
+            assert_eq!(config.dd_url, "https://metrics.datadoghq.com".to_string());
+            assert_eq!(
+                config.additional_endpoints.get("https://app.datadoghq.com"),
+                Some(&vec!["apikey2".to_string(), "apikey3".to_string()])
+            );
+
+            // Unified Service Tagging
+            assert_eq!(config.env, Some("test-env".to_string()));
+            assert_eq!(config.service, Some("test-service".to_string()));
+            assert_eq!(config.version, Some("1.0.0".to_string()));
+            assert_eq!(config.tags.get("team"), Some(&"test-team".to_string()));
+            assert_eq!(
+                config.tags.get("project"),
+                Some(&"test-project".to_string())
+            );
+
+            // Logs
+            assert_eq!(
+                config.logs_config_logs_dd_url,
+                "https://logs.datadoghq.com".to_string()
+            );
+            assert_eq!(
+                config.logs_config_processing_rules.as_ref().unwrap().len(),
+                1
+            );
+            assert_eq!(config.logs_config_use_compression, true);
+            assert_eq!(config.logs_config_compression_level, 6);
+
+            // APM
+            assert_eq!(
+                config.service_mapping.get("old-service"),
+                Some(&"new-service".to_string())
+            );
+            assert_eq!(config.appsec_enabled, true);
+            assert_eq!(config.apm_dd_url, "https://apm.datadoghq.com".to_string());
+            assert_eq!(config.apm_replace_tags.as_ref().unwrap().len(), 1);
+            assert_eq!(config.apm_config_obfuscation_http_remove_query_string, true);
+            assert_eq!(
+                config.apm_config_obfuscation_http_remove_paths_with_digits,
+                true
+            );
+            assert_eq!(
+                config.apm_features,
+                vec![
+                    "enable_otlp_compute_top_level_by_span_kind".to_string(),
+                    "enable_stats_by_span_kind".to_string()
+                ]
+            );
+
+            // Trace Propagation
+            assert_eq!(
+                config.trace_propagation_style,
+                vec![TracePropagationStyle::Datadog]
+            );
+            assert_eq!(
+                config.trace_propagation_style_extract,
+                vec![TracePropagationStyle::B3]
+            );
+            assert_eq!(config.trace_propagation_extract_first, true);
+            assert_eq!(config.trace_propagation_http_baggage_enabled, true);
+
+            // OTLP
+            assert_eq!(config.otlp_config_traces_enabled, true);
+            assert_eq!(config.otlp_config_traces_span_name_as_resource_name, true);
+            assert_eq!(
+                config
+                    .otlp_config_traces_span_name_remappings
+                    .get("old-span"),
+                Some(&"new-span".to_string())
+            );
+            assert_eq!(config.otlp_config_ignore_missing_datadog_fields, true);
+            assert_eq!(
+                config.otlp_config_receiver_protocols_http_endpoint,
+                Some("http://localhost:4318".to_string())
+            );
+            assert_eq!(
+                config.otlp_config_receiver_protocols_grpc_endpoint,
+                Some("http://localhost:4317".to_string())
+            );
+            assert_eq!(
+                config.otlp_config_receiver_protocols_grpc_transport,
+                Some("tcp".to_string())
+            );
+            assert_eq!(
+                config.otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib,
+                Some(4)
+            );
+            assert_eq!(config.otlp_config_metrics_enabled, true);
+            assert_eq!(config.otlp_config_metrics_resource_attributes_as_tags, true);
+            assert_eq!(
+                config.otlp_config_metrics_instrumentation_scope_metadata_as_tags,
+                true
+            );
+            assert_eq!(
+                config.otlp_config_metrics_tag_cardinality,
+                Some("low".to_string())
+            );
+            assert_eq!(config.otlp_config_metrics_delta_ttl, Some(3600));
+            assert_eq!(
+                config.otlp_config_metrics_histograms_mode,
+                Some("counters".to_string())
+            );
+            assert_eq!(
+                config.otlp_config_metrics_histograms_send_count_sum_metrics,
+                true
+            );
+            assert_eq!(
+                config.otlp_config_metrics_histograms_send_aggregation_metrics,
+                true
+            );
+            assert_eq!(
+                config.otlp_config_metrics_sums_cumulative_monotonic_mode,
+                Some("to_delta".to_string())
+            );
+            assert_eq!(
+                config.otlp_config_metrics_sums_initial_cumulativ_monotonic_value,
+                Some("auto".to_string())
+            );
+            assert_eq!(
+                config.otlp_config_metrics_summaries_mode,
+                Some("quantiles".to_string())
+            );
+            assert_eq!(
+                config.otlp_config_traces_probabilistic_sampler_sampling_percentage,
+                Some(50)
+            );
+            assert_eq!(config.otlp_config_logs_enabled, true);
+
+            // AWS Lambda
+            assert_eq!(
+                config.api_key_secret_arn,
+                "arn:aws:secretsmanager:region:account:secret:datadog-api-key".to_string()
+            );
+            assert_eq!(config.kms_api_key, "test-kms-key".to_string());
+            assert_eq!(config.serverless_logs_enabled, true);
+            assert_eq!(
+                config.serverless_flush_strategy,
+                FlushStrategy::Periodically(PeriodicStrategy { interval: 60000 })
+            );
+            assert_eq!(config.enhanced_metrics, true);
+            assert_eq!(config.lambda_proc_enhanced_metrics, true);
+            assert_eq!(config.capture_lambda_payload, true);
+            assert_eq!(config.capture_lambda_payload_max_depth, 5);
+            assert_eq!(config.serverless_appsec_enabled, true);
+            assert_eq!(config.extension_version, Some("compatibility".to_string()));
+
             Ok(())
         });
     }

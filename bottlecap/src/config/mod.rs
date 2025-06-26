@@ -535,6 +535,36 @@ where
     deserializer.deserialize_str(KeyValueVisitor)
 }
 
+pub fn deserialize_array_from_comma_separated_string<'de, D>(
+    deserializer: D,
+) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: String = String::deserialize(deserializer)?;
+    Ok(s.split(',')
+        .map(|feature| feature.trim().to_string())
+        .filter(|feature| !feature.is_empty())
+        .collect())
+}
+
+pub fn deserialize_key_value_pair_array_to_hashmap<'de, D>(
+    deserializer: D,
+) -> Result<HashMap<String, String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let array: Vec<String> = Vec::deserialize(deserializer)?;
+    let mut map = HashMap::new();
+    for s in array {
+        let parts = s.split(':').collect::<Vec<&str>>();
+        if parts.len() == 2 {
+            map.insert(parts[0].to_string(), parts[1].to_string());
+        }
+    }
+    Ok(map)
+}
+
 #[cfg(test)]
 pub mod tests {
     use datadog_trace_obfuscation::replacer::parse_rules_from_string;
@@ -1119,6 +1149,31 @@ pub mod tests {
             assert_eq!(config.enhanced_metrics, true);
             assert_eq!(config.logs_config_use_compression, true);
             assert_eq!(config.capture_lambda_payload, false);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_overrides_config_based_on_priority() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.create_file(
+                "datadog.yaml",
+                r#"
+                site: us3.datadoghq.com
+                api_key: "yaml-api-key"
+                log_level: "debug"
+            "#,
+            )?;
+            jail.set_env("DD_SITE", "us5.datadoghq.com");
+            jail.set_env("DD_API_KEY", "env-api-key");
+            jail.set_env("DD_FLUSH_TIMEOUT", "10");
+            let config = get_config(Path::new("")).expect("should parse config");
+
+            assert_eq!(config.site, "us5.datadoghq.com");
+            assert_eq!(config.api_key, "env-api-key");
+            assert_eq!(config.log_level, LogLevel::Debug);
+            assert_eq!(config.flush_timeout, 10);
             Ok(())
         });
     }
