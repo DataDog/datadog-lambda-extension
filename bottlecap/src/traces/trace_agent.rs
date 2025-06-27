@@ -29,7 +29,7 @@ use datadog_trace_agent::http_utils::{
 };
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
-use dogstatsd::flusher::ApiKeyFactory;
+use dogstatsd::api_key::ApiKeyFactory;
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";

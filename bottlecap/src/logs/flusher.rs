@@ -2,7 +2,7 @@ use crate::config;
 use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use crate::FLUSH_RETRY_COUNT;
-use dogstatsd::flusher::ApiKeyFactory;
+use dogstatsd::api_key::ApiKeyFactory;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
