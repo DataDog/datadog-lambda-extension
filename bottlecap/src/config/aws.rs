@@ -36,6 +36,7 @@ impl AwsConfig {
     }
 }
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone)]
 pub struct AwsCredentials {
     pub aws_access_key_id: String,
