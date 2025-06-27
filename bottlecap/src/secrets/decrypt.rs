@@ -65,7 +65,7 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig, aws_cr
             let decrypted_key = if config.kms_api_key.is_empty() {
                 decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config, aws_credentials).await
             } else {
-                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_credentials, aws_config).await
+                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config, aws_credentials).await
             };
 
             debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
@@ -105,8 +105,8 @@ struct RequestArgs<'a> {
 async fn decrypt_aws_kms(
     client: &Client,
     kms_key: String,
-    aws_credentials: &AwsCredentials,
     aws_config: &AwsConfig,
+    aws_credentials: &AwsCredentials,
 ) -> Result<String, Box<dyn std::error::Error>> {
     // When the API key is encrypted using the AWS console, the function name is added as an
     // encryption context. When the API key is encrypted using the AWS CLI, no encryption context
