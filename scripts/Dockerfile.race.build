@@ -1,6 +1,12 @@
 # syntax = docker/dockerfile:experimental
 
+# NOTE: the version of go specifed here is used to get the base go tooling for
+# our builds. The actual version that we use for building the agent is the one
+# listed in the agen't go.work files. The go we install here will download the
+# appropriate version  specified in the go.work file before running go commands
+# for the agent.
 FROM golang:1.24.4 as builder
+
 ARG EXTENSION_VERSION
 ARG ENABLE_RACE_DETECTION
 ARG AGENT_VERSION
