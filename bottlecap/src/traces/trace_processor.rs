@@ -19,7 +19,7 @@ use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
-use dogstatsd::flusher::ApiKeyFactory;
+use dogstatsd::api_key::ApiKeyFactory;
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -193,7 +193,7 @@ mod tests {
     };
 
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-    use dogstatsd::flusher::ApiKeyFactory;
+    use dogstatsd::api_key::ApiKeyFactory;
 
     use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
 
@@ -298,10 +298,7 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            api_key_factory: Arc::new(ApiKeyFactory::new(Arc::new(move || {
-                let api_key = "test-api-key".to_string();
-                Box::pin(async move { api_key })
-            }))),
+            api_key_factory: Arc::new(ApiKeyFactory::new_from_static_key("test-api-key")),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
