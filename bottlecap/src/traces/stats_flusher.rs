@@ -9,7 +9,7 @@ use tokio::sync::Mutex;
 
 use crate::config;
 use crate::traces::stats_aggregator::StatsAggregator;
-use dogstatsd::flusher::ApiKeyFactory;
+use dogstatsd::api_key::ApiKeyFactory;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use ddcommon::Endpoint;

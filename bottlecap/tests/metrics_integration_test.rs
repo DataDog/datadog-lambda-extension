@@ -1,7 +1,7 @@
 use bottlecap::config::Config;
 use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
-use dogstatsd::flusher::ApiKeyFactory;
+use dogstatsd::api_key::ApiKeyFactory;
 use dogstatsd::datadog::{DdDdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride};
 use dogstatsd::flusher::Flusher as MetricsFlusher;
 use dogstatsd::flusher::FlusherConfig as MetricsFlusherConfig;
@@ -45,9 +45,7 @@ async fn test_enhanced_metrics() {
     )
     .expect("failed to create metrics override");
     let flusher_config = MetricsFlusherConfig {
-        api_key_factory: Arc::new(ApiKeyFactory::new(Arc::new(move || {
-            Box::pin(async { dd_api_key.to_string() })
-        }))),
+        api_key_factory: Arc::new(ApiKeyFactory::new_from_static_key(dd_api_key)),
         aggregator: metrics_aggr.clone(),
         metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(None, Some(metrics_site_override))
             .expect("can't parse metrics intake URL from site"),

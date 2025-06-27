@@ -55,15 +55,10 @@ use datadog_trace_utils::send_data::SendData;
 use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
 use dogstatsd::{
-    aggregator::Aggregator as MetricsAggregator,
-    constants::CONTEXTS,
-    datadog::{
+    aggregator::Aggregator as MetricsAggregator, api_key::ApiKeyFactory, constants::CONTEXTS, datadog::{
         DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
         RetryStrategy as DsdRetryStrategy, Series, Site as MetricsSite,
-    },
-    dogstatsd::{DogStatsD, DogStatsDConfig},
-    flusher::{ApiKeyFactory, Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
-    metric::{SortedTags, EMPTY_TAGS},
+    }, dogstatsd::{DogStatsD, DogStatsDConfig}, flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig}, metric::{SortedTags, EMPTY_TAGS}
 };
 use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
@@ -333,7 +328,7 @@ async fn main() -> Result<()> {
     let aws_config = Arc::new(aws_config);
     let aws_config_clone = Arc::clone(&aws_config);
     let aws_credentials_clone = Arc::new(RwLock::new(aws_credentials));
-    let api_key_factory = Arc::new(ApiKeyFactory::new(Arc::new(move || {
+    let api_key_factory = Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
         let config_clone = Arc::clone(&config_clone);
         let aws_config_clone = Arc::clone(&aws_config_clone);
         let aws_credentials_clone = Arc::clone(&aws_credentials_clone);
@@ -959,13 +954,7 @@ fn start_metrics_flushers(
 
         // Create a flusher for each endpoint URL and API key pair
         for api_key in api_keys {
-            let api_key_clone = api_key.clone();
-            let additional_api_key_factory = Arc::new(ApiKeyFactory::new(Arc::new(move || {
-                let api_key = api_key_clone.clone();
-                Box::pin(async move {
-                    api_key
-                })
-            })));
+            let additional_api_key_factory = Arc::new(ApiKeyFactory::new_from_static_key(api_key));
             let additional_flusher_config = MetricsFlusherConfig {
                 api_key_factory: additional_api_key_factory,
                 aggregator: metrics_aggr.clone(),
