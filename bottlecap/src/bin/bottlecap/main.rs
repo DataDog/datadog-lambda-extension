@@ -329,7 +329,9 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config, &mut aws_credentials).await {
+    if let Some(resolved_api_key) =
+        resolve_secrets(Arc::clone(&config), &aws_config, &mut aws_credentials).await
+    {
         match extension_loop_active(
             &aws_config,
             &config,

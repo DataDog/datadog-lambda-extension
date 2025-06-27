@@ -1,4 +1,7 @@
-use crate::config::{aws::{AwsConfig, AwsCredentials}, Config};
+use crate::config::{
+    aws::{AwsConfig, AwsCredentials},
+    Config,
+};
 use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
@@ -14,7 +17,11 @@ use std::time::Instant;
 use tracing::debug;
 use tracing::error;
 
-pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig, aws_credentials: &mut AwsCredentials) -> Option<String> {
+pub async fn resolve_secrets(
+    config: Arc<Config>,
+    aws_config: &AwsConfig,
+    aws_credentials: &mut AwsCredentials,
+) -> Option<String> {
     let api_key_candidate =
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
@@ -37,7 +44,9 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig, aws_cr
 
             if aws_credentials.aws_secret_access_key.is_empty()
                 && aws_credentials.aws_access_key_id.is_empty()
-                && !aws_credentials.aws_container_credentials_full_uri.is_empty()
+                && !aws_credentials
+                    .aws_container_credentials_full_uri
+                    .is_empty()
                 && !aws_credentials.aws_container_authorization_token.is_empty()
             {
                 // We're in Snap Start
@@ -63,9 +72,21 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig, aws_cr
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config, aws_credentials).await
+                decrypt_aws_sm(
+                    &client,
+                    config.api_key_secret_arn.clone(),
+                    aws_config,
+                    aws_credentials,
+                )
+                .await
             } else {
-                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config, aws_credentials).await
+                decrypt_aws_kms(
+                    &client,
+                    config.kms_api_key.clone(),
+                    aws_config,
+                    aws_credentials,
+                )
+                .await
             };
 
             debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
