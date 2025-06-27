@@ -7,6 +7,12 @@ ARG CMD_PATH
 ARG BUILD_TAGS
 
 RUN apk add --no-cache git make musl-dev gcc
+
+# NOTE: the version of go specifed here is used to get the base go tooling for
+# our builds. The actual version that we use for building the agent is the one
+# listed in the agen't go.work files. The go we install here will download the
+# appropriate version  specified in the go.work file before running go commands
+# for the agent.
 COPY --from=golang:1.24.4-alpine /usr/local/go/ /usr/lib/go
 
 ENV GOROOT /usr/lib/go

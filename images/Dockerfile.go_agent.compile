@@ -8,6 +8,12 @@ RUN mkdir -p /tmp/dd/datadog-agent
 
 # Install dependencies
 RUN yum install -y wget tar gzip gcc
+
+# NOTE: the version of go specifed here is used to get the base go tooling for
+# our builds. The actual version that we use for building the agent is the one
+# listed in the agen't go.work files. The go we install here will download the
+# appropriate version  specified in the go.work file before running go commands
+# for the agent.
 RUN arch="$(uname -m)"; \
     if [ "${arch}" = 'aarch64' ]; then \
     arch='arm64'; \
