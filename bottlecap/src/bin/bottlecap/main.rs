@@ -51,19 +51,14 @@ use bottlecap::{
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
-use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::send_data::SendData;
+use datadog_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
 use dogstatsd::{
-    aggregator::Aggregator as MetricsAggregator,
-    constants::CONTEXTS,
-    datadog::{
+    aggregator::Aggregator as MetricsAggregator, api_key::ApiKeyFactory, constants::CONTEXTS, datadog::{
         DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
         RetryStrategy as DsdRetryStrategy, Series, Site as MetricsSite,
-    },
-    dogstatsd::{DogStatsD, DogStatsDConfig},
-    flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
-    metric::{SortedTags, EMPTY_TAGS},
+    }, dogstatsd::{DogStatsD, DogStatsDConfig}, flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig}, metric::{SortedTags, EMPTY_TAGS}
 };
 use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
@@ -78,7 +73,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, task::JoinHandle};
+use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, task::JoinHandle, sync::RwLock};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -302,7 +297,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
-    let (aws_config, mut aws_credentials, config) = load_configs(start_time);
+    let (aws_config, aws_credentials, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -329,31 +324,44 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    if let Some(resolved_api_key) = resolve_secrets(Arc::clone(&config), &aws_config, &mut aws_credentials).await {
-        match extension_loop_active(
-            &aws_config,
-            &config,
-            &client,
-            &r,
-            resolved_api_key,
-            start_time,
-        )
-        .await
-        {
-            Ok(()) => {
-                debug!("Extension loop completed successfully");
-                Ok(())
-            }
-            Err(e) => {
-                error!(
-                    "Extension loop failed: {e:?}, Calling /next without Datadog instrumentation"
-                );
-                extension_loop_idle(&client, &r).await
-            }
+    let config_clone = Arc::clone(&config);
+    let aws_config = Arc::new(aws_config);
+    let aws_config_clone = Arc::clone(&aws_config);
+    let aws_credentials_clone = Arc::new(RwLock::new(aws_credentials));
+    let api_key_factory = Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
+        let config_clone = Arc::clone(&config_clone);
+        let aws_config_clone = Arc::clone(&aws_config_clone);
+        let aws_credentials_clone = Arc::clone(&aws_credentials_clone);
+        Box::pin(async {
+            resolve_secrets(config_clone, aws_config_clone, aws_credentials_clone)
+                .await
+                .unwrap_or_else(|| {
+                    error!("Failed to resolve API key");
+                    "".to_string()
+                })
+        })
+    })));
+
+    match extension_loop_active(
+        aws_config,
+        &config,
+        &client,
+        &r,
+        Arc::clone(&api_key_factory),
+        start_time,
+    )
+    .await
+    {
+        Ok(()) => {
+            debug!("Extension loop completed successfully");
+            Ok(())
         }
-    } else {
-        error!("Failed to resolve secrets, Datadog extension will be idle");
-        extension_loop_idle(&client, &r).await
+        Err(e) => {
+            error!(
+                "Extension loop failed: {e:?}, Calling /next without Datadog instrumentation"
+            );
+            extension_loop_idle(&client, &r).await
+        }
     }
 }
 
@@ -413,11 +421,11 @@ async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()
 
 #[allow(clippy::too_many_lines)]
 async fn extension_loop_active(
-    aws_config: &AwsConfig,
+    aws_config: Arc<AwsConfig>,
     config: &Arc<Config>,
     client: &Client,
     r: &RegisterResponse,
-    resolved_api_key: String,
+    api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
@@ -427,11 +435,11 @@ async fn extension_loop_active(
         .as_ref()
         .unwrap_or(&"none".to_string())
         .to_string();
-    let tags_provider = setup_tag_provider(aws_config, config, &account_id);
+    let tags_provider = setup_tag_provider(Arc::clone(&aws_config), config, &account_id);
 
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
-        resolved_api_key.clone(),
+        Arc::clone(&api_key_factory),
         &tags_provider,
         event_bus.get_sender_copy(),
     );
@@ -445,7 +453,7 @@ async fn extension_loop_active(
     ));
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
-        resolved_api_key.clone(),
+        Arc::clone(&api_key_factory),
         &metrics_aggr,
         config,
     )));
@@ -453,14 +461,14 @@ async fn extension_loop_active(
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
         Arc::clone(config),
-        aws_config,
+        Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
     )));
 
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) = start_trace_agent(
         config,
-        resolved_api_key.clone(),
+        Arc::clone(&api_key_factory),
         &tags_provider,
         Arc::clone(&invocation_processor),
         Arc::clone(&trace_aggregator),
@@ -855,7 +863,7 @@ async fn handle_next_invocation(
 }
 
 fn setup_tag_provider(
-    aws_config: &AwsConfig,
+    aws_config: Arc<AwsConfig>,
     config: &Arc<Config>,
     account_id: &str,
 ) -> Arc<TagProvider> {
@@ -874,14 +882,14 @@ fn setup_tag_provider(
 
 fn start_logs_agent(
     config: &Arc<Config>,
-    resolved_api_key: String,
+    api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
 ) -> (Sender<TelemetryEvent>, LogsFlusher) {
     let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
-        resolved_api_key,
+        api_key_factory,
         Arc::clone(&logs_agent.aggregator),
         config.clone(),
     );
@@ -892,7 +900,7 @@ fn start_logs_agent(
 }
 
 fn start_metrics_flushers(
-    resolved_api_key: String,
+    api_key_factory: Arc<ApiKeyFactory>,
     metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
     config: &Arc<Config>,
 ) -> Vec<MetricsFlusher> {
@@ -915,7 +923,7 @@ fn start_metrics_flushers(
     };
 
     let flusher_config = MetricsFlusherConfig {
-        api_key: resolved_api_key,
+        api_key_factory,
         aggregator: Arc::clone(metrics_aggr),
         metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
         https_proxy: config.https_proxy.clone(),
@@ -939,8 +947,9 @@ fn start_metrics_flushers(
 
         // Create a flusher for each endpoint URL and API key pair
         for api_key in api_keys {
+            let additional_api_key_factory = Arc::new(ApiKeyFactory::new_from_static_key(api_key));
             let additional_flusher_config = MetricsFlusherConfig {
-                api_key: api_key.clone(),
+                api_key_factory: additional_api_key_factory,
                 aggregator: metrics_aggr.clone(),
                 metrics_intake_url_prefix: metrics_intake_url.clone(),
                 https_proxy: config.https_proxy.clone(),
@@ -955,7 +964,7 @@ fn start_metrics_flushers(
 
 fn start_trace_agent(
     config: &Arc<Config>,
-    resolved_api_key: String,
+    api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
@@ -968,7 +977,7 @@ fn start_trace_agent(
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
-        resolved_api_key.clone(),
+        api_key_factory.clone(),
         stats_aggregator.clone(),
         Arc::clone(config),
     ));
@@ -992,7 +1001,7 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        resolved_api_key: resolved_api_key.clone(),
+        api_key_factory: api_key_factory.clone(),
     });
 
     let trace_agent = Box::new(trace_agent::TraceAgent::new(
@@ -1003,7 +1012,7 @@ fn start_trace_agent(
         stats_processor,
         invocation_processor,
         Arc::clone(tags_provider),
-        resolved_api_key,
+        api_key_factory,
     ));
     let trace_agent_channel = trace_agent.get_sender_copy();
 
@@ -1088,15 +1097,14 @@ fn start_otlp_agent(
 
 fn start_api_runtime_proxy(
     config: &Arc<Config>,
-    aws_config: &AwsConfig,
+    aws_config: Arc<AwsConfig>,
     invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
 ) -> Option<CancellationToken> {
-    if !should_start_proxy(config, aws_config) {
+    if !should_start_proxy(config, Arc::clone(&aws_config)) {
         debug!("Skipping API runtime proxy, no LWA proxy or datadog wrapper found");
         return None;
     }
 
-    let aws_config = aws_config.clone();
     let invocation_processor = invocation_processor.clone();
     interceptor::start(aws_config, invocation_processor).ok()
 }
