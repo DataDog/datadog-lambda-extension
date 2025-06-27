@@ -63,7 +63,7 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: &AwsConfig, aws_cr
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_credentials, aws_config.region.clone()).await
+                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config, aws_credentials).await
             } else {
                 decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_credentials, aws_config).await
             };
@@ -117,6 +117,7 @@ async fn decrypt_aws_kms(
     });
 
     let headers = build_get_secret_signed_headers(
+        aws_config,
         aws_credentials,
         aws_config.region.clone(),
         RequestArgs {
@@ -139,6 +140,7 @@ async fn decrypt_aws_kms(
         );
 
         let headers = build_get_secret_signed_headers(
+            aws_config,
             aws_credentials,
             aws_config.region.clone(),
             RequestArgs {
@@ -163,17 +165,18 @@ async fn decrypt_aws_kms(
 async fn decrypt_aws_sm(
     client: &Client,
     secret_arn: String,
+    aws_config: &AwsConfig,
     aws_credentials: &AwsCredentials,
-    region: String,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
     // Supports cross-region secrets
     let secret_region = secret_arn
         .split(':')
         .nth(3)
-        .unwrap_or(&region)
+        .unwrap_or(&aws_config.region)
         .to_string();
     let headers = build_get_secret_signed_headers(
+        aws_config,
         aws_credentials,
         secret_region,
         RequestArgs {
@@ -230,6 +233,7 @@ async fn request(
 }
 
 fn build_get_secret_signed_headers(
+    aws_config: &AwsConfig,
     aws_credentials: &AwsCredentials,
     region: String,
     header_values: RequestArgs,
@@ -237,7 +241,7 @@ fn build_get_secret_signed_headers(
     let amz_date = header_values.time.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = header_values.time.format("%Y%m%d").to_string();
 
-    let domain = if region.starts_with("cn-") {
+    let domain = if aws_config.region.starts_with("cn-") {
         "amazonaws.com.cn"
     } else {
         "amazonaws.com"
@@ -349,6 +353,14 @@ mod tests {
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         let headers = build_get_secret_signed_headers(
+            &AwsConfig {
+                region: "us-east-1".to_string(),
+                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+                function_name: "arn:some-function".to_string(),
+                sandbox_init_time: Instant::now(),
+                runtime_api: String::new(),
+                exec_wrapper: None,
+            },
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
@@ -400,6 +412,14 @@ mod tests {
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         let headers = build_get_secret_signed_headers(
+            &AwsConfig {
+                region: "us-east-1".to_string(),
+                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+                function_name: "arn:some-function".to_string(),
+                sandbox_init_time: Instant::now(),
+                runtime_api: String::new(),
+                exec_wrapper: None,
+            },
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),

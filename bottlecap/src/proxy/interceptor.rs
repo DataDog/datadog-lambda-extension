@@ -400,13 +400,8 @@ mod tests {
 
         let aws_config = AwsConfig {
             region: "us-east-1".to_string(),
-            aws_access_key_id: "AKIDEXAMPLE".to_string(),
-            aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
-            aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
             function_name: "arn:some-function".to_string(),
             sandbox_init_time: Instant::now(),
-            aws_container_credentials_full_uri: String::new(),
-            aws_container_authorization_token: String::new(),
             runtime_api: aws_lambda_runtime_api.to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
