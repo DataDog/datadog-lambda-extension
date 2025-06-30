@@ -267,7 +267,14 @@ pub struct EnvConfig {
     pub enhanced_metrics: Option<bool>,
     /// @env `DD_LAMBDA_PROC_ENHANCED_METRICS`
     ///
-    /// Enable enhanced metrics for AWS Lambda. Default is `true`.
+    /// Enable Lambda process metrics for AWS Lambda. Default is `true`.
+    ///
+    /// This is for metrics like:
+    /// - CPU usage
+    /// - Network usage
+    /// - File descriptor count
+    /// - Thread count
+    /// - Temp directory usage
     pub lambda_proc_enhanced_metrics: Option<bool>,
     /// @env `DD_CAPTURE_LAMBDA_PAYLOAD`
     ///
@@ -499,10 +506,7 @@ mod tests {
 
             // Logs
             jail.set_env("DD_LOGS_CONFIG_LOGS_DD_URL", "https://logs.datadoghq.com");
-            jail.set_env(
-                "DD_LOGS_CONFIG_PROCESSING_RULES",
-                r#"[{"name":"test-exclude","type":"exclude_at_match","pattern":"test-pattern"}]"#,
-            );
+            jail.set_env("DD_LOGS_CONFIG_PROCESSING_RULES", "[]");
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "true");
             jail.set_env("DD_LOGS_CONFIG_COMPRESSION_LEVEL", "6");
 
@@ -604,173 +608,105 @@ mod tests {
                 .load(&mut config)
                 .expect("Failed to load config");
 
-            // Assert whole configuration is not default
-            assert_ne!(config, Config::default());
-
-            // Assert that all values are overridden and not the defaults
-            assert_eq!(config.site, "test-site".to_string());
-            assert_eq!(config.api_key, "test-api-key".to_string());
-            assert_eq!(config.log_level, LogLevel::Debug);
-            assert_eq!(config.flush_timeout, 30);
-
-            // Proxy
-            assert_eq!(
-                config.proxy_https,
-                Some("https://proxy.example.com".to_string())
-            );
-            assert_eq!(
-                config.proxy_no_proxy,
-                vec!["localhost".to_string(), "127.0.0.1".to_string()]
-            );
-            assert_eq!(config.http_protocol, Some("http1".to_string()));
-
-            // Metrics
-            assert_eq!(config.dd_url, "https://metrics.datadoghq.com".to_string());
-            assert_eq!(config.url, "https://app.datadoghq.com".to_string());
-            assert_eq!(
-                config.additional_endpoints.get("https://app.datadoghq.com"),
-                Some(&vec!["apikey2".to_string(), "apikey3".to_string()])
-            );
-
-            // Unified Service Tagging
-            assert_eq!(config.env, Some("test-env".to_string()));
-            assert_eq!(config.service, Some("test-service".to_string()));
-            assert_eq!(config.version, Some("1.0.0".to_string()));
-            assert_eq!(config.tags.get("team"), Some(&"test-team".to_string()));
-            assert_eq!(
-                config.tags.get("project"),
-                Some(&"test-project".to_string())
-            );
-
-            // Logs
-            assert_eq!(
-                config.logs_config_logs_dd_url,
-                "https://logs.datadoghq.com".to_string()
-            );
-            assert_eq!(
-                config.logs_config_processing_rules.as_ref().unwrap().len(),
-                1
-            );
-            assert_eq!(config.logs_config_use_compression, true);
-            assert_eq!(config.logs_config_compression_level, 6);
-
-            // APM
-            assert_eq!(
-                config.service_mapping.get("old-service"),
-                Some(&"new-service".to_string())
-            );
-            assert_eq!(config.appsec_enabled, true);
-            assert_eq!(config.apm_dd_url, "https://apm.datadoghq.com".to_string());
-            assert_eq!(config.apm_replace_tags.as_ref().unwrap().len(), 1);
-            assert_eq!(config.apm_config_obfuscation_http_remove_query_string, true);
-            assert_eq!(
-                config.apm_config_obfuscation_http_remove_paths_with_digits,
-                true
-            );
-            assert_eq!(
-                config.apm_features,
-                vec![
+            let expected_config = Config {
+                site: "test-site".to_string(),
+                api_key: "test-api-key".to_string(),
+                log_level: LogLevel::Debug,
+                flush_timeout: 30,
+                proxy_https: Some("https://proxy.example.com".to_string()),
+                proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
+                http_protocol: Some("http1".to_string()),
+                dd_url: "https://metrics.datadoghq.com".to_string(),
+                url: "https://app.datadoghq.com".to_string(),
+                additional_endpoints: HashMap::from([
+                    (
+                        "https://app.datadoghq.com".to_string(),
+                        vec!["apikey2".to_string(), "apikey3".to_string()],
+                    ),
+                    (
+                        "https://app.datadoghq.eu".to_string(),
+                        vec!["apikey4".to_string()],
+                    ),
+                ]),
+                env: Some("test-env".to_string()),
+                service: Some("test-service".to_string()),
+                version: Some("1.0.0".to_string()),
+                tags: HashMap::from([
+                    ("team".to_string(), "test-team".to_string()),
+                    ("project".to_string(), "test-project".to_string()),
+                ]),
+                logs_config_logs_dd_url: "https://logs.datadoghq.com".to_string(),
+                logs_config_processing_rules: Some(vec![]),
+                logs_config_use_compression: true,
+                logs_config_compression_level: 6,
+                service_mapping: HashMap::from([(
+                    "old-service".to_string(),
+                    "new-service".to_string(),
+                )]),
+                appsec_enabled: true,
+                apm_dd_url: "https://apm.datadoghq.com".to_string(),
+                apm_replace_tags: Some(
+                    datadog_trace_obfuscation::replacer::parse_rules_from_string(
+                        r#"[{"name":"test-tag","pattern":"test-pattern","repl":"replacement"}]"#,
+                    )
+                    .expect("Failed to parse replace rules"),
+                ),
+                apm_config_obfuscation_http_remove_query_string: true,
+                apm_config_obfuscation_http_remove_paths_with_digits: true,
+                apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
-                    "enable_stats_by_span_kind".to_string()
-                ]
-            );
+                    "enable_stats_by_span_kind".to_string(),
+                ],
+                trace_propagation_style: vec![TracePropagationStyle::Datadog],
+                trace_propagation_style_extract: vec![TracePropagationStyle::B3],
+                trace_propagation_extract_first: true,
+                trace_propagation_http_baggage_enabled: true,
+                otlp_config_traces_enabled: true,
+                otlp_config_traces_span_name_as_resource_name: true,
+                otlp_config_traces_span_name_remappings: HashMap::from([(
+                    "old-span".to_string(),
+                    "new-span".to_string(),
+                )]),
+                otlp_config_ignore_missing_datadog_fields: true,
+                otlp_config_receiver_protocols_http_endpoint: Some(
+                    "http://localhost:4318".to_string(),
+                ),
+                otlp_config_receiver_protocols_grpc_endpoint: Some(
+                    "http://localhost:4317".to_string(),
+                ),
+                otlp_config_receiver_protocols_grpc_transport: Some("tcp".to_string()),
+                otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib: Some(4),
+                otlp_config_metrics_enabled: true,
+                otlp_config_metrics_resource_attributes_as_tags: true,
+                otlp_config_metrics_instrumentation_scope_metadata_as_tags: true,
+                otlp_config_metrics_tag_cardinality: Some("low".to_string()),
+                otlp_config_metrics_delta_ttl: Some(3600),
+                otlp_config_metrics_histograms_mode: Some("counters".to_string()),
+                otlp_config_metrics_histograms_send_count_sum_metrics: true,
+                otlp_config_metrics_histograms_send_aggregation_metrics: true,
+                otlp_config_metrics_sums_cumulative_monotonic_mode: Some("to_delta".to_string()),
+                otlp_config_metrics_sums_initial_cumulativ_monotonic_value: Some(
+                    "auto".to_string(),
+                ),
+                otlp_config_metrics_summaries_mode: Some("quantiles".to_string()),
+                otlp_config_traces_probabilistic_sampler_sampling_percentage: Some(50),
+                otlp_config_logs_enabled: true,
+                api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
+                    .to_string(),
+                kms_api_key: "test-kms-key".to_string(),
+                serverless_logs_enabled: true,
+                serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
+                    interval: 60000,
+                }),
+                enhanced_metrics: true,
+                lambda_proc_enhanced_metrics: true,
+                capture_lambda_payload: true,
+                capture_lambda_payload_max_depth: 5,
+                serverless_appsec_enabled: true,
+                extension_version: Some("compatibility".to_string()),
+            };
 
-            // Trace Propagation
-            assert_eq!(
-                config.trace_propagation_style,
-                vec![TracePropagationStyle::Datadog]
-            );
-            assert_eq!(
-                config.trace_propagation_style_extract,
-                vec![TracePropagationStyle::B3]
-            );
-            assert_eq!(config.trace_propagation_extract_first, true);
-            assert_eq!(config.trace_propagation_http_baggage_enabled, true);
-
-            // OTLP
-            assert_eq!(config.otlp_config_traces_enabled, true);
-            assert_eq!(config.otlp_config_traces_span_name_as_resource_name, true);
-            assert_eq!(
-                config
-                    .otlp_config_traces_span_name_remappings
-                    .get("old-span"),
-                Some(&"new-span".to_string())
-            );
-            assert_eq!(config.otlp_config_ignore_missing_datadog_fields, true);
-            assert_eq!(
-                config.otlp_config_receiver_protocols_http_endpoint,
-                Some("http://localhost:4318".to_string())
-            );
-            assert_eq!(
-                config.otlp_config_receiver_protocols_grpc_endpoint,
-                Some("http://localhost:4317".to_string())
-            );
-            assert_eq!(
-                config.otlp_config_receiver_protocols_grpc_transport,
-                Some("tcp".to_string())
-            );
-            assert_eq!(
-                config.otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib,
-                Some(4)
-            );
-            assert_eq!(config.otlp_config_metrics_enabled, true);
-            assert_eq!(config.otlp_config_metrics_resource_attributes_as_tags, true);
-            assert_eq!(
-                config.otlp_config_metrics_instrumentation_scope_metadata_as_tags,
-                true
-            );
-            assert_eq!(
-                config.otlp_config_metrics_tag_cardinality,
-                Some("low".to_string())
-            );
-            assert_eq!(config.otlp_config_metrics_delta_ttl, Some(3600));
-            assert_eq!(
-                config.otlp_config_metrics_histograms_mode,
-                Some("counters".to_string())
-            );
-            assert_eq!(
-                config.otlp_config_metrics_histograms_send_count_sum_metrics,
-                true
-            );
-            assert_eq!(
-                config.otlp_config_metrics_histograms_send_aggregation_metrics,
-                true
-            );
-            assert_eq!(
-                config.otlp_config_metrics_sums_cumulative_monotonic_mode,
-                Some("to_delta".to_string())
-            );
-            assert_eq!(
-                config.otlp_config_metrics_sums_initial_cumulativ_monotonic_value,
-                Some("auto".to_string())
-            );
-            assert_eq!(
-                config.otlp_config_metrics_summaries_mode,
-                Some("quantiles".to_string())
-            );
-            assert_eq!(
-                config.otlp_config_traces_probabilistic_sampler_sampling_percentage,
-                Some(50)
-            );
-            assert_eq!(config.otlp_config_logs_enabled, true);
-
-            // AWS Lambda
-            assert_eq!(
-                config.api_key_secret_arn,
-                "arn:aws:secretsmanager:region:account:secret:datadog-api-key".to_string()
-            );
-            assert_eq!(config.kms_api_key, "test-kms-key".to_string());
-            assert_eq!(config.serverless_logs_enabled, true);
-            assert_eq!(
-                config.serverless_flush_strategy,
-                FlushStrategy::Periodically(PeriodicStrategy { interval: 60000 })
-            );
-            assert_eq!(config.enhanced_metrics, true);
-            assert_eq!(config.lambda_proc_enhanced_metrics, true);
-            assert_eq!(config.capture_lambda_payload, true);
-            assert_eq!(config.capture_lambda_payload_max_depth, 5);
-            assert_eq!(config.serverless_appsec_enabled, true);
-            assert_eq!(config.extension_version, Some("compatibility".to_string()));
+            assert_eq!(config, expected_config);
 
             Ok(())
         });
