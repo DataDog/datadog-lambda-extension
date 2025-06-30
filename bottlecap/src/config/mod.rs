@@ -89,6 +89,7 @@ macro_rules! merge_vec {
     };
 }
 
+// nit: these will replace one map with the other, not merge the maps togehter, right?
 /// Helper macro to merge `HashMap` fields when `HashMap` is not empty
 #[macro_export]
 macro_rules! merge_hashmap {
@@ -275,6 +276,7 @@ pub struct Config {
     pub otlp_config_metrics_histograms_send_count_sum_metrics: bool,
     pub otlp_config_metrics_histograms_send_aggregation_metrics: bool,
     pub otlp_config_metrics_sums_cumulative_monotonic_mode: Option<String>,
+    // nit: is the e in cumulative missing intentionally?
     pub otlp_config_metrics_sums_initial_cumulativ_monotonic_value: Option<String>,
     pub otlp_config_metrics_summaries_mode: Option<String>,
     // - Traces
@@ -744,6 +746,7 @@ pub mod tests {
     fn test_parse_config_file() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
+            // nit: does parsing an empty file actually test "parse config file"?
             jail.create_file(
                 "datadog.yaml",
                 r"

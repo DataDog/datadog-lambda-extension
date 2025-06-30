@@ -608,15 +608,22 @@ mod tests {
                 .load(&mut config)
                 .expect("Failed to load config");
 
+            // it would be nice if there was a way to say: for each field of a struct, make sure
+            // that the value is *different* than the value returened by the default config and the
+            // config built without any sources.
+
             let expected_config = Config {
                 site: "test-site".to_string(),
                 api_key: "test-api-key".to_string(),
                 log_level: LogLevel::Debug,
+                // nit: this is the default value, we should check something else
                 flush_timeout: 30,
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
+                // nit: can we confirm that this is not the default value?
                 dd_url: "https://metrics.datadoghq.com".to_string(),
+                // nit: can we confirm that this is not the default value?
                 url: "https://app.datadoghq.com".to_string(),
                 additional_endpoints: HashMap::from([
                     (
@@ -635,15 +642,20 @@ mod tests {
                     ("team".to_string(), "test-team".to_string()),
                     ("project".to_string(), "test-project".to_string()),
                 ]),
+                //nit: can we confirm that this is not the default value?
                 logs_config_logs_dd_url: "https://logs.datadoghq.com".to_string(),
+                // nit: we should probably put something here?
                 logs_config_processing_rules: Some(vec![]),
+                // nit: we should use false since true is the default
                 logs_config_use_compression: true,
+                //nit: we should use something other than 6 here
                 logs_config_compression_level: 6,
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),
                 )]),
                 appsec_enabled: true,
+                //nit: can we confirm that this is not the default value?
                 apm_dd_url: "https://apm.datadoghq.com".to_string(),
                 apm_replace_tags: Some(
                     datadog_trace_obfuscation::replacer::parse_rules_from_string(
@@ -661,6 +673,7 @@ mod tests {
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
+                //nit: we should check false here
                 otlp_config_traces_enabled: true,
                 otlp_config_traces_span_name_as_resource_name: true,
                 otlp_config_traces_span_name_remappings: HashMap::from([(
@@ -694,11 +707,14 @@ mod tests {
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
+                //nit: we should test this with false
                 serverless_logs_enabled: true,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,
                 }),
+                // nit: we should test this with false
                 enhanced_metrics: true,
+                // nit: we should test this with false
                 lambda_proc_enhanced_metrics: true,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
