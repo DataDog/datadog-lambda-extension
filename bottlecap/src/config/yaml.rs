@@ -627,7 +627,7 @@ mod tests {
 site: "test-site"
 api_key: "test-api-key"
 log_level: "debug"
-flush_timeout: 30
+flush_timeout: 42
 
 # Proxy
 proxy:
@@ -659,8 +659,8 @@ logs_config:
     - name: "test-exclude"
       type: "exclude_at_match"
       pattern: "test-pattern"
-  use_compression: true
-  compression_level: 6
+  use_compression: false
+  compression_level: 3
 
 # APM
 apm_config:
@@ -695,7 +695,7 @@ otlp_config:
         transport: "tcp"
         max_recv_msg_size_mib: 4
   traces:
-    enabled: true
+    enabled: false
     span_name_as_resource_name: true
     span_name_remappings:
       "old-span": "new-span"
@@ -723,10 +723,10 @@ otlp_config:
 # AWS Lambda
 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
 kms_api_key: "test-kms-key"
-serverless_logs_enabled: true
+serverless_logs_enabled: false
 serverless_flush_strategy: "periodically,60000"
-enhanced_metrics: true
-lambda_proc_enhanced_metrics: true
+enhanced_metrics: false
+lambda_proc_enhanced_metrics: false
 capture_lambda_payload: true
 capture_lambda_payload_max_depth: 5
 serverless_appsec_enabled: true
@@ -746,14 +746,11 @@ extension_version: "compatibility"
                 site: "test-site".to_string(),
                 api_key: "test-api-key".to_string(),
                 log_level: LogLevel::Debug,
-                // nit: this is the default value, we should check something else
-                flush_timeout: 30,
+                flush_timeout: 42,
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
-                // nit: can we confirm that this is not the default value?
                 dd_url: "https://metrics.datadoghq.com".to_string(),
-                // nit: can we confirm that this is not the default value?
                 url: "".to_string(), // doesnt exist in yaml
                 additional_endpoints: HashMap::from([
                     (
@@ -772,7 +769,6 @@ extension_version: "compatibility"
                     ("team".to_string(), "test-team".to_string()),
                     ("project".to_string(), "test-project".to_string()),
                 ]),
-                //nit: can we confirm that this is not the default value?
                 logs_config_logs_dd_url: "https://logs.datadoghq.com".to_string(),
                 logs_config_processing_rules: Some(vec![ProcessingRule {
                     name: "test-exclude".to_string(),
@@ -780,18 +776,14 @@ extension_version: "compatibility"
                     kind: Kind::ExcludeAtMatch,
                     replace_placeholder: None,
                 }]),
-                // nit: we should use false since true is the default
-                logs_config_use_compression: true,
-                //nit: we should use something other than 6 here
-                logs_config_compression_level: 6,
+                logs_config_use_compression: false,
+                logs_config_compression_level: 3,
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),
                 )]),
                 appsec_enabled: true,
-                //nit: can we confirm that this is not the default value?
                 apm_dd_url: "https://apm.datadoghq.com".to_string(),
-                //nit: we should probably check something here
                 apm_replace_tags: Some(vec![]),
                 apm_config_obfuscation_http_remove_query_string: true,
                 apm_config_obfuscation_http_remove_paths_with_digits: true,
@@ -803,8 +795,7 @@ extension_version: "compatibility"
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
-                //nit: we should check false here
-                otlp_config_traces_enabled: true,
+                otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,
                 otlp_config_traces_span_name_remappings: HashMap::from([(
                     "old-span".to_string(),
@@ -837,15 +828,12 @@ extension_version: "compatibility"
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
-                //nit: we should test this with false
-                serverless_logs_enabled: true,
+                serverless_logs_enabled: false,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,
                 }),
-                // nit: we should test this with false
-                enhanced_metrics: true,
-                // nit: we should test this with false
-                lambda_proc_enhanced_metrics: true,
+                enhanced_metrics: false,
+                lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 serverless_appsec_enabled: true,

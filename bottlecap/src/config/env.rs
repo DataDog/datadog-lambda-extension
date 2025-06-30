@@ -470,6 +470,7 @@ mod tests {
     use crate::config::{
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
+        processing_rule::{Kind, ProcessingRule},
         trace_propagation_style::TracePropagationStyle,
         Config,
     };
@@ -483,7 +484,7 @@ mod tests {
             jail.set_env("DD_SITE", "test-site");
             jail.set_env("DD_API_KEY", "test-api-key");
             jail.set_env("DD_LOG_LEVEL", "debug");
-            jail.set_env("DD_FLUSH_TIMEOUT", "30");
+            jail.set_env("DD_FLUSH_TIMEOUT", "42");
 
             // Proxy
             jail.set_env("DD_PROXY_HTTPS", "https://proxy.example.com");
@@ -506,9 +507,12 @@ mod tests {
 
             // Logs
             jail.set_env("DD_LOGS_CONFIG_LOGS_DD_URL", "https://logs.datadoghq.com");
-            jail.set_env("DD_LOGS_CONFIG_PROCESSING_RULES", "[]");
-            jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "true");
-            jail.set_env("DD_LOGS_CONFIG_COMPRESSION_LEVEL", "6");
+            jail.set_env(
+                "DD_LOGS_CONFIG_PROCESSING_RULES",
+                r#"[{"type":"exclude_at_match","name":"exclude","pattern":"exclude"}]"#,
+            );
+            jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "false");
+            jail.set_env("DD_LOGS_CONFIG_COMPRESSION_LEVEL", "3");
 
             // APM
             jail.set_env("DD_SERVICE_MAPPING", "old-service:new-service");
@@ -535,7 +539,7 @@ mod tests {
             jail.set_env("DD_TRACE_PROPAGATION_HTTP_BAGGAGE_ENABLED", "true");
 
             // OTLP
-            jail.set_env("DD_OTLP_CONFIG_TRACES_ENABLED", "true");
+            jail.set_env("DD_OTLP_CONFIG_TRACES_ENABLED", "false");
             jail.set_env("DD_OTLP_CONFIG_TRACES_SPAN_NAME_AS_RESOURCE_NAME", "true");
             jail.set_env(
                 "DD_OTLP_CONFIG_TRACES_SPAN_NAME_REMAPPINGS",
@@ -593,10 +597,10 @@ mod tests {
                 "arn:aws:secretsmanager:region:account:secret:datadog-api-key",
             );
             jail.set_env("DD_KMS_API_KEY", "test-kms-key");
-            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "true");
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "false");
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,60000");
-            jail.set_env("DD_ENHANCED_METRICS", "true");
-            jail.set_env("DD_LAMBDA_PROC_ENHANCED_METRICS", "true");
+            jail.set_env("DD_ENHANCED_METRICS", "false");
+            jail.set_env("DD_LAMBDA_PROC_ENHANCED_METRICS", "false");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "true");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD_MAX_DEPTH", "5");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
@@ -616,14 +620,11 @@ mod tests {
                 site: "test-site".to_string(),
                 api_key: "test-api-key".to_string(),
                 log_level: LogLevel::Debug,
-                // nit: this is the default value, we should check something else
-                flush_timeout: 30,
+                flush_timeout: 42,
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
-                // nit: can we confirm that this is not the default value?
                 dd_url: "https://metrics.datadoghq.com".to_string(),
-                // nit: can we confirm that this is not the default value?
                 url: "https://app.datadoghq.com".to_string(),
                 additional_endpoints: HashMap::from([
                     (
@@ -642,20 +643,20 @@ mod tests {
                     ("team".to_string(), "test-team".to_string()),
                     ("project".to_string(), "test-project".to_string()),
                 ]),
-                //nit: can we confirm that this is not the default value?
                 logs_config_logs_dd_url: "https://logs.datadoghq.com".to_string(),
-                // nit: we should probably put something here?
-                logs_config_processing_rules: Some(vec![]),
-                // nit: we should use false since true is the default
-                logs_config_use_compression: true,
-                //nit: we should use something other than 6 here
-                logs_config_compression_level: 6,
+                logs_config_processing_rules: Some(vec![ProcessingRule {
+                    kind: Kind::ExcludeAtMatch,
+                    name: "exclude".to_string(),
+                    pattern: "exclude".to_string(),
+                    replace_placeholder: None,
+                }]),
+                logs_config_use_compression: false,
+                logs_config_compression_level: 3,
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),
                 )]),
                 appsec_enabled: true,
-                //nit: can we confirm that this is not the default value?
                 apm_dd_url: "https://apm.datadoghq.com".to_string(),
                 apm_replace_tags: Some(
                     datadog_trace_obfuscation::replacer::parse_rules_from_string(
@@ -673,8 +674,7 @@ mod tests {
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
-                //nit: we should check false here
-                otlp_config_traces_enabled: true,
+                otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,
                 otlp_config_traces_span_name_remappings: HashMap::from([(
                     "old-span".to_string(),
@@ -707,15 +707,12 @@ mod tests {
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
-                //nit: we should test this with false
-                serverless_logs_enabled: true,
+                serverless_logs_enabled: false,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,
                 }),
-                // nit: we should test this with false
-                enhanced_metrics: true,
-                // nit: we should test this with false
-                lambda_proc_enhanced_metrics: true,
+                enhanced_metrics: false,
+                lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 serverless_appsec_enabled: true,
