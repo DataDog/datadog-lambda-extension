@@ -143,7 +143,7 @@ impl ConfigBuilder {
             }
         }
 
-        if failed_sources == self.sources.len() {
+        if !self.sources.is_empty() && failed_sources == self.sources.len() {
             debug!("All sources failed to load config, using default config.");
         }
 
