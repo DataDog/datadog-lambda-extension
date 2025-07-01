@@ -132,13 +132,6 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_service_mapping")]
     pub service_mapping: HashMap<String, String>,
     //
-    // Appsec
-    /// @env `DD_APPSEC_ENABLED`
-    ///
-    /// Enable Application and API Protection (AAP), previously known as AppSec/ASM.
-    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
-    pub appsec_enabled: Option<bool>,
-    //
     /// @env `DD_APM_DD_URL`
     ///
     /// Define the endpoint and port to hit when using a proxy for APM.
@@ -332,7 +325,6 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
 
     // APM
     merge_hashmap!(config, env_config, service_mapping);
-    merge_option_to_value!(config, env_config, appsec_enabled);
     merge_string!(config, env_config, apm_dd_url);
     merge_option!(config, env_config, apm_replace_tags);
     merge_option_to_value!(
@@ -652,7 +644,6 @@ mod tests {
                     "old-service".to_string(),
                     "new-service".to_string(),
                 )]),
-                appsec_enabled: true,
                 apm_dd_url: "https://apm.datadoghq.com".to_string(),
                 apm_replace_tags: Some(
                     datadog_trace_obfuscation::replacer::parse_rules_from_string(

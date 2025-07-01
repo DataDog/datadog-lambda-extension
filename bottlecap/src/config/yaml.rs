@@ -63,11 +63,6 @@ pub struct YamlConfig {
     pub apm_config: ApmConfig,
     #[serde(deserialize_with = "deserialize_service_mapping")]
     pub service_mapping: HashMap<String, String>,
-    //
-    // Appsec
-    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
-    pub appsec_enabled: Option<bool>,
-    //
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -400,7 +395,6 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
 
     // APM
     merge_hashmap!(config, yaml_config, service_mapping);
-    merge_option_to_value!(config, yaml_config, appsec_enabled);
     merge_string!(config, apm_dd_url, yaml_config.apm_config, apm_dd_url);
     merge_option!(
         config,
@@ -676,8 +670,6 @@ apm_config:
 
 service_mapping: old-service:new-service
 
-appsec_enabled: true
-
 # Trace Propagation
 trace_propagation_style: "datadog"
 trace_propagation_style_extract: "b3"
@@ -782,7 +774,6 @@ extension_version: "compatibility"
                     "old-service".to_string(),
                     "new-service".to_string(),
                 )]),
-                appsec_enabled: true,
                 apm_dd_url: "https://apm.datadoghq.com".to_string(),
                 apm_replace_tags: Some(vec![]),
                 apm_config_obfuscation_http_remove_query_string: true,

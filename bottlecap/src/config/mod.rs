@@ -265,9 +265,6 @@ pub struct Config {
     //
     pub service_mapping: HashMap<String, String>,
     //
-    // AppSec
-    pub appsec_enabled: bool,
-    //
     pub apm_dd_url: String,
     pub apm_replace_tags: Option<Vec<ReplaceRule>>,
     pub apm_config_obfuscation_http_remove_query_string: bool,
@@ -359,7 +356,6 @@ impl Default for Config {
 
             // APM
             service_mapping: HashMap::new(),
-            appsec_enabled: false,
             apm_dd_url: String::default(),
             apm_replace_tags: None,
             apm_config_obfuscation_http_remove_query_string: false,
@@ -430,9 +426,11 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
         ));
     }
 
-    if config.serverless_appsec_enabled || config.appsec_enabled {
-        log_fallback_reason("appsec_enabled");
-        return Err(ConfigError::UnsupportedField("appsec_enabled".to_string()));
+    if config.serverless_appsec_enabled {
+        log_fallback_reason("serverless_appsec_enabled");
+        return Err(ConfigError::UnsupportedField(
+            "serverless_appsec_enabled".to_string(),
+        ));
     }
 
     // OTLP
@@ -749,7 +747,7 @@ pub mod tests {
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
             assert_eq!(
                 config,
-                ConfigError::UnsupportedField("appsec_enabled".to_string())
+                ConfigError::UnsupportedField("serverless_appsec_enabled".to_string())
             );
             Ok(())
         });
