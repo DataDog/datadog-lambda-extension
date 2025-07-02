@@ -13,11 +13,12 @@ use opentelemetry_proto::tonic::trace::v1::{
     Span as OtelSpan,
 };
 use opentelemetry_semantic_conventions::attribute::{
-    DB_QUERY_TEXT, DB_STATEMENT, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT, FAAS_INVOKED_NAME,
-    FAAS_INVOKED_PROVIDER, FAAS_TRIGGER, GRAPHQL_OPERATION_NAME, GRAPHQL_OPERATION_TYPE,
-    HTTP_ROUTE, HTTP_STATUS_CODE, MESSAGING_DESTINATION_NAME, MESSAGING_OPERATION,
-    MESSAGING_SYSTEM, OTEL_LIBRARY_NAME, OTEL_LIBRARY_VERSION, OTEL_STATUS_CODE,
-    OTEL_STATUS_DESCRIPTION, RPC_METHOD, RPC_SERVICE, RPC_SYSTEM,
+    DB_QUERY_TEXT, DB_STATEMENT, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT,
+    DEPLOYMENT_ENVIRONMENT_NAME, FAAS_INVOKED_NAME, FAAS_INVOKED_PROVIDER, FAAS_TRIGGER,
+    GRAPHQL_OPERATION_NAME, GRAPHQL_OPERATION_TYPE, HTTP_ROUTE, HTTP_STATUS_CODE,
+    MESSAGING_DESTINATION_NAME, MESSAGING_OPERATION, MESSAGING_SYSTEM, OTEL_LIBRARY_NAME,
+    OTEL_LIBRARY_VERSION, OTEL_STATUS_CODE, OTEL_STATUS_DESCRIPTION, RPC_METHOD, RPC_SERVICE,
+    RPC_SYSTEM,
 };
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION}; // CONTAINER_ID, SERVICE_VERSION, TELEMETRY_SDK_LANGUAGE, TELEMETRY_SDK_VERSION,
 use opentelemetry_semantic_conventions::trace::{
@@ -873,13 +874,24 @@ pub fn otel_span_to_dd_span(
                 .insert("http.status_code".to_string(), f64::from(http_status_code));
         }
 
-        // Map OTEL deployment.environment to Datadog env field
+        // Map OTEL deployment.environment to Datadog env field with fallback
         if !dd_span.meta.contains_key("env") {
-            let env = get_otel_attribute_value_as_string(
+            // Try new standard first: deployment.environment.name
+            let mut env = get_otel_attribute_value_as_string(
                 &otel_res.attributes,
-                DEPLOYMENT_ENVIRONMENT,
+                DEPLOYMENT_ENVIRONMENT_NAME,
                 true,
             );
+
+            // Fallback to deprecated deployment.environment if new standard not found
+            if env.is_empty() {
+                env = get_otel_attribute_value_as_string(
+                    &otel_res.attributes,
+                    DEPLOYMENT_ENVIRONMENT,
+                    true,
+                );
+            }
+
             if !env.is_empty() {
                 dd_span.meta.insert("env".to_string(), env);
             }
