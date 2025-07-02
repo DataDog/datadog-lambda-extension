@@ -516,14 +516,16 @@ impl Processor {
             dropped_p0_spans: 0,
         };
 
-        let send_data: SendData = trace_processor.process_traces(
-            self.config.clone(),
-            tags_provider.clone(),
-            header_tags,
-            vec![traces],
-            body_size,
-            self.inferrer.span_pointers.clone(),
-        ).await;
+        let send_data: SendData = trace_processor
+            .process_traces(
+                self.config.clone(),
+                tags_provider.clone(),
+                header_tags,
+                vec![traces],
+                body_size,
+                self.inferrer.span_pointers.clone(),
+            )
+            .await;
 
         if let Err(e) = trace_agent_tx.send(send_data).await {
             debug!("Failed to send context spans to agent: {e}");
