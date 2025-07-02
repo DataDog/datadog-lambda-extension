@@ -298,7 +298,7 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            api_key_factory: Arc::new(ApiKeyFactory::new_from_static_key("test-api-key")),
+            api_key_factory: Arc::new(ApiKeyFactory::new("test-api-key")),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
