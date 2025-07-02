@@ -154,8 +154,7 @@ impl TraceAgent {
                 invocation_processor.clone(),
                 tags_provider.clone(),
                 client.clone(),
-                // Cloning it may not be ideal. Is there a better way?
-                api_key_factory.clone(),
+                Arc::clone(&api_key_factory),
             )
         });
 
