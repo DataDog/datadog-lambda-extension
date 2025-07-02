@@ -480,11 +480,6 @@ mod tests {
 
         let aws_config = AwsConfig {
             region: "us-east-1".to_string(),
-            aws_access_key_id: "".to_string(),
-            aws_secret_access_key: "".to_string(),
-            aws_session_token: "".to_string(),
-            aws_container_credentials_full_uri: "".to_string(),
-            aws_container_authorization_token: "".to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some("".to_string()),
             runtime_api: "".to_string(),
             function_name: "".to_string(),
