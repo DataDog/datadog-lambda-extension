@@ -155,14 +155,16 @@ impl Agent {
 
         let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
         let body_size = size_of_val(&traces);
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        ).await;
+        let send_data = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
 
         if send_data.is_empty() {
             return (

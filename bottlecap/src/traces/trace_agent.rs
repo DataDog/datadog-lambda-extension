@@ -271,7 +271,9 @@ impl TraceAgent {
                 }
             }
             (&Method::POST, DSM_AGENT_PATH) => {
-                match Self::handle_dsm_proxy(config, tags_provider, api_key_factory, client, req).await {
+                match Self::handle_dsm_proxy(config, tags_provider, api_key_factory, client, req)
+                    .await
+                {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("DSM endpoint error: {err}"),
@@ -280,8 +282,14 @@ impl TraceAgent {
                 }
             }
             (&Method::POST, PROFILING_ENDPOINT_PATH) => {
-                match Self::handle_profiling_proxy(config, tags_provider, api_key_factory, client, req)
-                    .await
+                match Self::handle_profiling_proxy(
+                    config,
+                    tags_provider,
+                    api_key_factory,
+                    client,
+                    req,
+                )
+                .await
                 {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
@@ -324,17 +332,21 @@ impl TraceAgent {
                     ),
                 }
             }
-            (&Method::POST, LLM_OBS_SPANS_ENDPOINT_PATH) => {
-                match Self::handle_llm_obs_spans_proxy(config, tags_provider, api_key_factory, client, req)
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("LLM OBS Spans endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
+            (&Method::POST, LLM_OBS_SPANS_ENDPOINT_PATH) => match Self::handle_llm_obs_spans_proxy(
+                config,
+                tags_provider,
+                api_key_factory,
+                client,
+                req,
+            )
+            .await
+            {
+                Ok(result) => Ok(result),
+                Err(err) => log_and_create_http_response(
+                    &format!("LLM OBS Spans endpoint error: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ),
+            },
             (_, INFO_ENDPOINT_PATH) => match Self::info_handler() {
                 Ok(result) => Ok(result),
                 Err(err) => log_and_create_http_response(
@@ -343,8 +355,14 @@ impl TraceAgent {
                 ),
             },
             (&Method::POST, DEBUGGER_ENDPOINT_PATH) => {
-                match Self::handle_debugger_logs_proxy(config, tags_provider, api_key_factory, client, req)
-                    .await
+                match Self::handle_debugger_logs_proxy(
+                    config,
+                    tags_provider,
+                    api_key_factory,
+                    client,
+                    req,
+                )
+                .await
                 {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
@@ -439,14 +457,16 @@ impl TraceAgent {
             }
         }
 
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        ).await;
+        let send_data = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
 
         // send trace payload to our trace flusher
         match trace_tx.send(send_data).await {

@@ -51,14 +51,20 @@ use bottlecap::{
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
-use datadog_trace_utils::send_data::SendData;
 use datadog_trace_obfuscation::obfuscation_config;
+use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
 use dogstatsd::{
-    aggregator::Aggregator as MetricsAggregator, api_key::ApiKeyFactory, constants::CONTEXTS, datadog::{
+    aggregator::Aggregator as MetricsAggregator,
+    api_key::ApiKeyFactory,
+    constants::CONTEXTS,
+    datadog::{
         DdDdUrl, DdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride,
         RetryStrategy as DsdRetryStrategy, Series, Site as MetricsSite,
-    }, dogstatsd::{DogStatsD, DogStatsDConfig}, flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig}, metric::{SortedTags, EMPTY_TAGS}
+    },
+    dogstatsd::{DogStatsD, DogStatsDConfig},
+    flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
+    metric::{SortedTags, EMPTY_TAGS},
 };
 use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
@@ -73,7 +79,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, task::JoinHandle, sync::RwLock};
+use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, sync::RwLock, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -357,9 +363,7 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Err(e) => {
-            error!(
-                "Extension loop failed: {e:?}, Calling /next without Datadog instrumentation"
-            );
+            error!("Extension loop failed: {e:?}, Calling /next without Datadog instrumentation");
             extension_loop_idle(&client, &r).await
         }
     }
