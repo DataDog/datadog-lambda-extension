@@ -45,7 +45,7 @@ async fn test_enhanced_metrics() {
     )
     .expect("failed to create metrics override");
     let flusher_config = MetricsFlusherConfig {
-        api_key_factory: Arc::new(ApiKeyFactory::new_from_static_key(dd_api_key)),
+        api_key_factory: Arc::new(ApiKeyFactory::new(dd_api_key)),
         aggregator: metrics_aggr.clone(),
         metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(None, Some(metrics_site_override))
             .expect("can't parse metrics intake URL from site"),
