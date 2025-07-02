@@ -4,10 +4,10 @@ use bottlecap::logs::{agent::LogsAgent, flusher::LogsFlusher};
 use bottlecap::tags::provider::Provider;
 use bottlecap::telemetry::events::TelemetryEvent;
 use bottlecap::LAMBDA_RUNTIME_SLUG;
+use dogstatsd::api_key::ApiKeyFactory;
 use httpmock::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use dogstatsd::api_key::ApiKeyFactory;
 
 mod common;
 

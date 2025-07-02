@@ -12,8 +12,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 use thiserror::Error as ThisError;
-use tokio::task::JoinSet;
 use tokio::sync::OnceCell;
+use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -254,29 +254,31 @@ impl LogsFlusher {
     }
 
     async fn get_headers(&self) -> &HeaderMap {
-        self.headers.get_or_init( move ||  { async move {
-            let api_key = self.api_key_factory.get_api_key().await;
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "DD-API-KEY",
-                api_key.parse().expect("failed to parse header"),
-            );
-            headers.insert(
-                "DD-PROTOCOL",
-                "agent-json".parse().expect("failed to parse header"),
-            );
-            headers.insert(
-                "Content-Type",
-                "application/json".parse().expect("failed to parse header"),
-            );
-
-            if self.config.logs_config_use_compression {
+        self.headers
+            .get_or_init(move || async move {
+                let api_key = self.api_key_factory.get_api_key().await;
+                let mut headers = HeaderMap::new();
                 headers.insert(
-                    "Content-Encoding",
-                    "zstd".parse().expect("failed to parse header"),
+                    "DD-API-KEY",
+                    api_key.parse().expect("failed to parse header"),
                 );
-            }
-            headers
-        }}).await
+                headers.insert(
+                    "DD-PROTOCOL",
+                    "agent-json".parse().expect("failed to parse header"),
+                );
+                headers.insert(
+                    "Content-Type",
+                    "application/json".parse().expect("failed to parse header"),
+                );
+
+                if self.config.logs_config_use_compression {
+                    headers.insert(
+                        "Content-Encoding",
+                        "zstd".parse().expect("failed to parse header"),
+                    );
+                }
+                headers
+            })
+            .await
     }
 }

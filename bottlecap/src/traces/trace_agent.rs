@@ -30,7 +30,7 @@ use crate::traces::{
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
 use ddcommon::hyper_migration;
-use dogstatsd::flusher::ApiKeyFactory;
+use dogstatsd::api_key::ApiKeyFactory;
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -479,14 +479,16 @@ impl TraceAgent {
             }
         }
 
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        ).await;
+        let send_data = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
 
         // send trace payload to our trace flusher
         match trace_tx.send(send_data).await {

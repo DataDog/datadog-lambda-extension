@@ -1,7 +1,6 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use async_trait::async_trait;
 use crate::config;
 use crate::tags::provider;
 use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
@@ -10,6 +9,7 @@ use crate::traces::{
     DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
     LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
 };
+use async_trait::async_trait;
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
@@ -19,8 +19,8 @@ use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
-use dogstatsd::api_key::ApiKeyFactory;
 use ddcommon::Endpoint;
+use dogstatsd::api_key::ApiKeyFactory;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;

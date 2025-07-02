@@ -11,14 +11,18 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::{io::Error};
-use std::sync::{Arc};
+use std::io::Error;
+use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::{RwLock};
+use tokio::sync::RwLock;
 use tracing::debug;
 use tracing::error;
 
-pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>, aws_credentials: Arc<RwLock<AwsCredentials>>) -> Option<String> {
+pub async fn resolve_secrets(
+    config: Arc<Config>,
+    aws_config: Arc<AwsConfig>,
+    aws_credentials: Arc<RwLock<AwsCredentials>>,
+) -> Option<String> {
     let api_key_candidate =
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
@@ -43,17 +47,22 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>, aw
 
             if aws_credentials_read.aws_secret_access_key.is_empty()
                 && aws_credentials_read.aws_access_key_id.is_empty()
-                && !aws_credentials_read.aws_container_credentials_full_uri.is_empty()
-                && !aws_credentials_read.aws_container_authorization_token.is_empty()
+                && !aws_credentials_read
+                    .aws_container_credentials_full_uri
+                    .is_empty()
+                && !aws_credentials_read
+                    .aws_container_authorization_token
+                    .is_empty()
             {
                 // We're in Snap Start
-                let credentials = match get_snapstart_credentials(&aws_credentials_read, &client).await {
-                    Ok(credentials) => credentials,
-                    Err(err) => {
-                        error!("Error getting Snap Start credentials: {}", err);
-                        return None;
-                    }
-                };
+                let credentials =
+                    match get_snapstart_credentials(&aws_credentials_read, &client).await {
+                        Ok(credentials) => credentials,
+                        Err(err) => {
+                            error!("Error getting Snap Start credentials: {}", err);
+                            return None;
+                        }
+                    };
                 let mut aws_credentials_write = aws_credentials.write().await;
                 aws_credentials_write.aws_access_key_id = credentials["AccessKeyId"]
                     .as_str()
@@ -70,9 +79,21 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>, aw
             }
 
             let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(&client, config.api_key_secret_arn.clone(), aws_config, &aws_credentials_read).await
+                decrypt_aws_sm(
+                    &client,
+                    config.api_key_secret_arn.clone(),
+                    aws_config,
+                    &aws_credentials_read,
+                )
+                .await
             } else {
-                decrypt_aws_kms(&client, config.kms_api_key.clone(), aws_config, &aws_credentials_read).await
+                decrypt_aws_kms(
+                    &client,
+                    config.kms_api_key.clone(),
+                    aws_config,
+                    &aws_credentials_read,
+                )
+                .await
             };
 
             debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
