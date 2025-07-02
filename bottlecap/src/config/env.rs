@@ -612,10 +612,6 @@ mod tests {
                 .load(&mut config)
                 .expect("Failed to load config");
 
-            // it would be nice if there was a way to say: for each field of a struct, make sure
-            // that the value is *different* than the value returened by the default config and the
-            // config built without any sources.
-
             let expected_config = Config {
                 site: "test-site".to_string(),
                 api_key: "test-api-key".to_string(),

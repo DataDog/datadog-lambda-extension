@@ -30,6 +30,12 @@ use crate::config::{
 };
 
 /// Helper macro to merge Option<String> fields to String fields
+///
+/// Providing one field argument will merge the value from the source config field into the config
+/// field.
+///
+/// Providing two field arguments will merge the value from the source config field into the config
+/// field if the value is not empty.
 #[macro_export]
 macro_rules! merge_string {
     ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
@@ -45,6 +51,12 @@ macro_rules! merge_string {
 }
 
 /// Helper macro to merge Option<T> fields where T implements Clone
+///
+/// Providing one field argument will merge the value from the source config field into the config
+/// field.
+///
+/// Providing two field arguments will merge the value from the source config field into the config
+/// field if the value is not empty.
 #[macro_export]
 macro_rules! merge_option {
     ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
@@ -60,6 +72,12 @@ macro_rules! merge_option {
 }
 
 /// Helper macro to merge Option<T> fields to T fields when Option<T> is Some
+///
+/// Providing one field argument will merge the value from the source config field into the config
+/// field.
+///
+/// Providing two field arguments will merge the value from the source config field into the config
+/// field if the value is not empty.
 #[macro_export]
 macro_rules! merge_option_to_value {
     ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
@@ -75,6 +93,12 @@ macro_rules! merge_option_to_value {
 }
 
 /// Helper macro to merge `Vec` fields when `Vec` is not empty
+///
+/// Providing one field argument will merge the value from the source config field into the config
+/// field.
+///
+/// Providing two field arguments will merge the value from the source config field into the config
+/// field if the value is not empty.
 #[macro_export]
 macro_rules! merge_vec {
     ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
@@ -91,6 +115,12 @@ macro_rules! merge_vec {
 
 // nit: these will replace one map with the other, not merge the maps togehter, right?
 /// Helper macro to merge `HashMap` fields when `HashMap` is not empty
+///
+/// Providing one field argument will merge the value from the source config field into the config
+/// field.
+///
+/// Providing two field arguments will merge the value from the source config field into the config
+/// field if the value is not empty.
 #[macro_export]
 macro_rules! merge_hashmap {
     ($config:expr, $config_field:ident, $source:expr, $source_field:ident) => {
