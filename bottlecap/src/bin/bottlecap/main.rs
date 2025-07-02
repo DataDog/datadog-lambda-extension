@@ -999,10 +999,10 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
-        aggregator: trace_aggregator.clone(),
-        config: Arc::clone(config),
-    });
+    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
+        trace_aggregator.clone(),
+        Arc::clone(config),
+    ));
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
         tag_replace_rules: config.apm_replace_tags.clone(),
