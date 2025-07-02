@@ -57,7 +57,7 @@ async fn test_logs() {
     let bus = EventBus::run();
     let mut logs_agent =
         LogsAgent::new(tags_provider, Arc::clone(&arc_conf), bus.get_sender_copy());
-    let api_key_factory = Arc::new(ApiKeyFactory::new_from_static_key(dd_api_key));
+    let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
     let logs_flusher = LogsFlusher::new(
         api_key_factory,
         Arc::clone(&logs_agent.aggregator),

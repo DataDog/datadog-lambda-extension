@@ -330,23 +330,28 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
-    let config_clone = Arc::clone(&config);
     let aws_config = Arc::new(aws_config);
-    let aws_config_clone = Arc::clone(&aws_config);
-    let aws_credentials_clone = Arc::new(RwLock::new(aws_credentials));
-    let api_key_factory = Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
-        let config_clone = Arc::clone(&config_clone);
-        let aws_config_clone = Arc::clone(&aws_config_clone);
-        let aws_credentials_clone = Arc::clone(&aws_credentials_clone);
-        Box::pin(async {
-            resolve_secrets(config_clone, aws_config_clone, aws_credentials_clone)
-                .await
-                .unwrap_or_else(|| {
-                    error!("Failed to resolve API key");
-                    "".to_string()
-                })
-        })
-    })));
+    let aws_credentials = Arc::new(RwLock::new(aws_credentials));
+    let api_key_factory = {
+        let config = Arc::clone(&config);
+        let aws_config = Arc::clone(&aws_config);
+        let aws_credentials = Arc::clone(&aws_credentials);
+        
+        Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
+            let config = Arc::clone(&config);
+            let aws_config = Arc::clone(&aws_config);
+            let aws_credentials = Arc::clone(&aws_credentials);
+            
+            Box::pin(async move {
+                resolve_secrets(config, aws_config, aws_credentials)
+                    .await
+                    .unwrap_or_else(|| {
+                        error!("Failed to resolve API key");
+                        "".to_string()
+                    })
+            })
+        })))
+    };
 
     match extension_loop_active(
         aws_config,
@@ -958,7 +963,7 @@ fn start_metrics_flushers(
 
         // Create a flusher for each endpoint URL and API key pair
         for api_key in api_keys {
-            let additional_api_key_factory = Arc::new(ApiKeyFactory::new_from_static_key(api_key));
+            let additional_api_key_factory = Arc::new(ApiKeyFactory::new(api_key));
             let additional_flusher_config = MetricsFlusherConfig {
                 api_key_factory: additional_api_key_factory,
                 aggregator: metrics_aggr.clone(),
