@@ -663,6 +663,11 @@ logs_config:
       pattern: "test-pattern"
   use_compression: false
   compression_level: 3
+  additional_endpoints:
+    - api_key: "apikey2"
+      Host: "agent-http-intake.logs.datadoghq.com"
+      Port: 443
+      is_reliable: true
 
 # APM
 apm_config:
@@ -778,6 +783,12 @@ extension_version: "compatibility"
                 }]),
                 logs_config_use_compression: false,
                 logs_config_compression_level: 3,
+                logs_config_additional_endpoints: vec![LogsAdditionalEndpoint {
+                    api_key: "apikey2".to_string(),
+                    host: "agent-http-intake.logs.datadoghq.com".to_string(),
+                    port: 443,
+                    is_reliable: true,
+                }],
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),

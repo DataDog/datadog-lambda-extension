@@ -515,6 +515,10 @@ mod tests {
             );
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "false");
             jail.set_env("DD_LOGS_CONFIG_COMPRESSION_LEVEL", "3");
+            jail.set_env(
+                "DD_LOGS_CONFIG_ADDITIONAL_ENDPOINTS",
+                "[{\"api_key\": \"apikey2\", \"Host\": \"agent-http-intake.logs.datadoghq.com\", \"Port\": 443, \"is_reliable\": true}]",
+            );
 
             // APM
             jail.set_env("DD_SERVICE_MAPPING", "old-service:new-service");
@@ -650,6 +654,12 @@ mod tests {
                 }]),
                 logs_config_use_compression: false,
                 logs_config_compression_level: 3,
+                logs_config_additional_endpoints: vec![LogsAdditionalEndpoint {
+                    api_key: "apikey2".to_string(),
+                    host: "agent-http-intake.logs.datadoghq.com".to_string(),
+                    port: 443,
+                    is_reliable: true,
+                }],
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),

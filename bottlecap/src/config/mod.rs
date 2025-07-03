@@ -22,11 +22,11 @@ use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
 use crate::config::{
-    logs_additional_endpoints::LogsAdditionalEndpoint,
     apm_replace_rule::deserialize_apm_replace_rules,
     env::EnvConfigSource,
     flush_strategy::FlushStrategy,
     log_level::LogLevel,
+    logs_additional_endpoints::LogsAdditionalEndpoint,
     processing_rule::{deserialize_processing_rules, ProcessingRule},
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
