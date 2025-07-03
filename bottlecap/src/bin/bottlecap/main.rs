@@ -690,12 +690,15 @@ async fn extension_loop_active(
             debug!("Shutdown event received: {:?}", shutdown_reason);
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
+            debug!("Awaiting flush handles");
             pending_flush_handles
                 .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flushers)
                 .await;
+            debug!("Awaited flush handles");
             // The Shutdown event we get during a timeout will
             // never include a report log
             if shutdown_reason != "timeout" {
+                debug!("Waiting for report event");
                 'shutdown: loop {
                     tokio::select! {
                         Some(event) = event_bus.rx.recv() => {
@@ -710,19 +713,25 @@ async fn extension_loop_active(
                 }
             }
 
+            debug!("Shutting down");
             if let Some(api_runtime_proxy_cancel_token) = api_runtime_proxy_shutdown_signal {
+                debug!("Cancelling api_runtime_proxy_shutdown_signal");
                 api_runtime_proxy_cancel_token.cancel();
             }
             if let Some(otlp_shutdown_token) = otlp_shutdown_token {
+                debug!("Cancelling otlp_shutdown_token");
                 otlp_shutdown_token.cancel();
             }
             trace_agent_shutdown_token.cancel();
+            debug!("Cancelling dogstatsd_cancel_token");
             dogstatsd_cancel_token.cancel();
+            debug!("Cancelling telemetry_listener_cancel_token");
             telemetry_listener_cancel_token.cancel();
 
             // gotta lock here
-            debug!("Final blocking_flush_all()");
+            debug!("Locking metrics_flushers");
             let mut locked_metrics = metrics_flushers.lock().await;
+            debug!("Final blocking_flush_all()");
             blocking_flush_all(
                 &logs_flusher,
                 &mut locked_metrics,
@@ -854,6 +863,7 @@ async fn handle_next_invocation(
     next_response: Result<NextEventResponse>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
 ) -> NextEventResponse {
+    debug!("Entered handle_next_invocation()");
     match next_response {
         Ok(NextEventResponse::Invoke {
             ref request_id,
@@ -883,6 +893,7 @@ async fn handle_next_invocation(
             println!("Exiting");
         }
     }
+    debug!("Leaving handle_next_invocation()");
     next_response.unwrap_or(NextEventResponse::Shutdown {
         shutdown_reason: "panic".into(),
         deadline_ms: 0,
