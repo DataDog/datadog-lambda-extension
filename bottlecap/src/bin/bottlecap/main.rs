@@ -227,6 +227,7 @@ enum NextEventResponse {
 }
 
 async fn next_event(client: &Client, ext_id: &str) -> Result<NextEventResponse> {
+    debug!("Entered next_event()");
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
@@ -412,6 +413,7 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
 }
 
 async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
+    debug!("Entered extension_loop_idle()");
     loop {
         match next_event(client, &r.extension_id).await {
             Ok(_) => {
@@ -527,11 +529,15 @@ async fn extension_loop_active(
     let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+    debug!("Entering loop");
     loop {
         let maybe_shutdown_event;
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
+        debug!("Current flush decision: {:?}", current_flush_decision);
+        debug!("Last continuous flush error: {:?}", last_continuous_flush_error);
         if current_flush_decision == FlushDecision::End {
+            debug!("End flush scenario");
             // break loop after runtime done
             // flush everything
             // call next
@@ -577,6 +583,7 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
+                debug!("Continuous flush scenario");
                 let tf = trace_flusher.clone();
                 // Await any previous flush handles. This
                 last_continuous_flush_error = pending_flush_handles
@@ -620,6 +627,7 @@ async fn extension_loop_active(
                 }
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
+                debug!("Periodic flush scenario");
                 let mut locked_metrics = metrics_flushers.lock().await;
                 blocking_flush_all(
                     &logs_flusher,
@@ -637,6 +645,7 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
+            debug!("No flush scenario");
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
@@ -678,6 +687,7 @@ async fn extension_loop_active(
             shutdown_reason, ..
         } = maybe_shutdown_event
         {
+            debug!("Shutdown event received: {:?}", shutdown_reason);
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
@@ -711,6 +721,7 @@ async fn extension_loop_active(
             telemetry_listener_cancel_token.cancel();
 
             // gotta lock here
+            debug!("Final blocking_flush_all()");
             let mut locked_metrics = metrics_flushers.lock().await;
             blocking_flush_all(
                 &logs_flusher,
@@ -723,6 +734,7 @@ async fn extension_loop_active(
             .await;
             return Ok(());
         }
+        debug!("Leaving loop");
     }
 }
 
@@ -734,6 +746,7 @@ async fn blocking_flush_all(
     race_flush_interval: &mut tokio::time::Interval,
     metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
 ) {
+    debug!("Entered blocking_flush_all()");
     let (series, sketches) = {
         let mut aggregator = metrics_aggr.lock().expect("lock poisoned");
         (
@@ -753,6 +766,7 @@ async fn blocking_flush_all(
         stats_flusher.flush()
     );
     race_flush_interval.reset();
+    debug!("Leaving blocking_flush_all()");
 }
 
 async fn handle_event_bus_event(

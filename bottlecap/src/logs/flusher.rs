@@ -54,6 +54,7 @@ impl Flusher {
     }
 
     pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
+        debug!("Entered Flusher.flush()");
         let mut set = JoinSet::new();
 
         if let Some(logs_batches) = batches {
@@ -90,6 +91,7 @@ impl Flusher {
                 }
             }
         }
+        debug!("Leaving Flusher.flush()");
         failed_requests
     }
 

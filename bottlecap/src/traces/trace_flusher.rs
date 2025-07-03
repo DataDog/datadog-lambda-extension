@@ -40,6 +40,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
     }
 
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
+        debug!("Entered TraceFlusher.flush()");
         let mut failed_batch: Option<Vec<SendData>> = None;
 
         if let Some(traces) = failed_traces {
@@ -68,6 +69,8 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
             traces = guard.get_batch();
         }
+
+        debug!("Leaving TraceFlusher.flush()");
 
         failed_batch
     }
