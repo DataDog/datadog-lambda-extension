@@ -8,6 +8,7 @@ use crate::{
         deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
+        logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
         trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
         Config, ConfigError, ConfigSource, ProcessingRule,
@@ -117,6 +118,7 @@ pub struct LogsConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub use_compression: Option<bool>,
     pub compression_level: Option<i32>,
+    pub additional_endpoints: Vec<LogsAdditionalEndpoint>,
 }
 
 /// APM Config
@@ -392,6 +394,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         yaml_config.logs_config,
         compression_level
     );
+    merge_vec!(
+        config,
+        logs_config_additional_endpoints,
+        yaml_config.logs_config,
+        additional_endpoints
+    );
 
     // APM
     merge_hashmap!(config, yaml_config, service_mapping);
@@ -633,8 +641,8 @@ http_protocol: "http1"
 # Endpoints
 additional_endpoints:
   "https://app.datadoghq.com":
-    - apikey2
-    - apikey3
+    - "apikey2"
+    - "apikey3"
   "https://app.datadoghq.eu":
     - apikey4
 
@@ -655,6 +663,11 @@ logs_config:
       pattern: "test-pattern"
   use_compression: false
   compression_level: 3
+  additional_endpoints:
+    - api_key: "apikey2"
+      Host: "agent-http-intake.logs.datadoghq.com"
+      Port: 443
+      is_reliable: true
 
 # APM
 apm_config:
@@ -770,6 +783,12 @@ extension_version: "compatibility"
                 }]),
                 logs_config_use_compression: false,
                 logs_config_compression_level: 3,
+                logs_config_additional_endpoints: vec![LogsAdditionalEndpoint {
+                    api_key: "apikey2".to_string(),
+                    host: "agent-http-intake.logs.datadoghq.com".to_string(),
+                    port: 443,
+                    is_reliable: true,
+                }],
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),
