@@ -345,10 +345,7 @@ async fn main() -> Result<()> {
             Box::pin(async move {
                 resolve_secrets(config, aws_config, aws_credentials)
                     .await
-                    .unwrap_or_else(|| {
-                        error!("Failed to resolve API key");
-                        String::new()
-                    })
+                    .expect("Failed to resolve API key")
             })
         })))
     };
