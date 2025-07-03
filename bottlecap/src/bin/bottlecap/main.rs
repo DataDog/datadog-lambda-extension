@@ -347,7 +347,7 @@ async fn main() -> Result<()> {
                     .await
                     .unwrap_or_else(|| {
                         error!("Failed to resolve API key");
-                        "".to_string()
+                        String::new()
                     })
             })
         })))
@@ -444,7 +444,7 @@ async fn extension_loop_active(
         .as_ref()
         .unwrap_or(&"none".to_string())
         .to_string();
-    let tags_provider = setup_tag_provider(Arc::clone(&aws_config), config, &account_id);
+    let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
@@ -879,7 +879,7 @@ async fn handle_next_invocation(
 }
 
 fn setup_tag_provider(
-    aws_config: Arc<AwsConfig>,
+    aws_config: &Arc<AwsConfig>,
     config: &Arc<Config>,
     account_id: &str,
 ) -> Arc<TagProvider> {
