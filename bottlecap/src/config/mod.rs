@@ -427,7 +427,7 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
     }
 
     if config.serverless_appsec_enabled {
-        log_fallback_reason("serverless_appsec_enabled");
+        log_fallback_reason("appsec_enabled");
         return Err(ConfigError::UnsupportedField(
             "serverless_appsec_enabled".to_string(),
         ));
