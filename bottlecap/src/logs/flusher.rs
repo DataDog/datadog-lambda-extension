@@ -69,15 +69,15 @@ impl Flusher {
         }
     }
 
-    pub async fn flush(&self, batches: Option<Vec<Vec<u8>>>) -> Vec<reqwest::RequestBuilder> {
+    pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
         let mut set = JoinSet::new();
 
         if let Some(logs_batches) = batches {
-            for batch in logs_batches {
+            for batch in logs_batches.iter() {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch);
+                let req = self.create_request(batch.clone());
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -111,12 +111,11 @@ impl Flusher {
 
     fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
         let url = format!("{}/api/v2/logs", self.endpoint);
-        let body = self.compress(data);
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
             .headers(self.headers.clone())
-            .body(body)
+            .body(data)
     }
 
     async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
@@ -161,31 +160,12 @@ impl Flusher {
             }
         }
     }
-
-    fn compress(&self, data: Vec<u8>) -> Vec<u8> {
-        if !self.config.logs_config_use_compression {
-            return data;
-        }
-
-        match self.encode(&data) {
-            Ok(compressed_data) => compressed_data,
-            Err(e) => {
-                debug!("Failed to compress data: {}", e);
-                data
-            }
-        }
-    }
-
-    fn encode(&self, data: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
-        let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
-        encoder.write_all(data)?;
-        encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
-    }
 }
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Clone)]
 pub struct LogsFlusher {
+    config: Arc<config::Config>,
     pub flushers: Vec<Flusher>,
 }
 
@@ -216,7 +196,7 @@ impl LogsFlusher {
             ));
         }
 
-        LogsFlusher { flushers }
+        LogsFlusher { config, flushers }
     }
 
     pub async fn flush(
@@ -241,20 +221,20 @@ impl LogsFlusher {
             }
         } else {
             // Get batches from primary flusher's aggregator
-            let logs_batches = {
+            let logs_batches = Arc::new({
                 let mut guard = self.flushers[0].aggregator.lock().expect("lock poisoned");
                 let mut batches = Vec::new();
                 let mut current_batch = guard.get_batch();
                 while !current_batch.is_empty() {
-                    batches.push(current_batch);
+                    batches.push(self.compress(current_batch));
                     current_batch = guard.get_batch();
                 }
                 batches
-            };
+            });
 
             // Send batches to each flusher
             let futures = self.flushers.iter().map(|flusher| {
-                let batches = logs_batches.clone();
+                let batches = Arc::clone(&logs_batches);
                 let flusher = flusher.clone();
                 async move { flusher.flush(Some(batches)).await }
             });
@@ -265,5 +245,25 @@ impl LogsFlusher {
             }
         }
         failed_requests
+    }
+
+    fn compress(&self, data: Vec<u8>) -> Vec<u8> {
+        if !self.config.logs_config_use_compression {
+            return data;
+        }
+
+        match self.encode(&data) {
+            Ok(compressed_data) => compressed_data,
+            Err(e) => {
+                debug!("Failed to compress data: {}", e);
+                data
+            }
+        }
+    }
+
+    fn encode(&self, data: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
+        encoder.write_all(data)?;
+        encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
     }
 }
