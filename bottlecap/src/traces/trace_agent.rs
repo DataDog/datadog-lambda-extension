@@ -29,6 +29,7 @@ use datadog_trace_agent::http_utils::{
 };
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
+use dogstatsd::api_key::ApiKeyFactory;
 
 const TRACE_AGENT_PORT: usize = 8126;
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
@@ -62,7 +63,7 @@ pub struct TraceAgent {
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
     http_client: reqwest::Client,
-    api_key: String,
+    api_key_factory: Arc<ApiKeyFactory>,
     tx: Sender<SendData>,
 }
 
@@ -83,7 +84,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
-        resolved_api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -110,7 +111,7 @@ impl TraceAgent {
             tags_provider,
             http_client: get_client(config),
             tx: trace_tx,
-            api_key: resolved_api_key,
+            api_key_factory,
         }
     }
 
@@ -140,7 +141,7 @@ impl TraceAgent {
         let tags_provider = self.tags_provider.clone();
         let invocation_processor = self.invocation_processor.clone();
         let client = self.http_client.clone();
-        let api_key = self.api_key.clone();
+        let api_key_factory = self.api_key_factory.clone();
 
         let service = service_fn(move |req| {
             TraceAgent::trace_endpoint_handler(
@@ -153,7 +154,7 @@ impl TraceAgent {
                 invocation_processor.clone(),
                 tags_provider.clone(),
                 client.clone(),
-                api_key.clone(),
+                Arc::clone(&api_key_factory),
             )
         });
 
@@ -222,7 +223,7 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         client: reqwest::Client,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
     ) -> http::Result<hyper_migration::HttpResponse> {
         match (req.method(), req.uri().path()) {
             (&Method::PUT | &Method::POST, V4_TRACE_ENDPOINT_PATH) => match Self::handle_traces(
@@ -269,7 +270,9 @@ impl TraceAgent {
                 }
             }
             (&Method::POST, DSM_AGENT_PATH) => {
-                match Self::handle_dsm_proxy(config, tags_provider, api_key, client, req).await {
+                match Self::handle_dsm_proxy(config, tags_provider, api_key_factory, client, req)
+                    .await
+                {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
                         &format!("DSM endpoint error: {err}"),
@@ -278,8 +281,14 @@ impl TraceAgent {
                 }
             }
             (&Method::POST, PROFILING_ENDPOINT_PATH) => {
-                match Self::handle_profiling_proxy(config, tags_provider, api_key, client, req)
-                    .await
+                match Self::handle_profiling_proxy(
+                    config,
+                    tags_provider,
+                    api_key_factory,
+                    client,
+                    req,
+                )
+                .await
                 {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
@@ -292,7 +301,7 @@ impl TraceAgent {
                 match Self::handle_llm_obs_eval_metric_proxy(
                     config,
                     tags_provider,
-                    api_key,
+                    api_key_factory,
                     client,
                     req,
                 )
@@ -309,7 +318,7 @@ impl TraceAgent {
                 match Self::handle_llm_obs_eval_metric_proxy_v2(
                     config,
                     tags_provider,
-                    api_key,
+                    api_key_factory,
                     client,
                     req,
                 )
@@ -322,17 +331,21 @@ impl TraceAgent {
                     ),
                 }
             }
-            (&Method::POST, LLM_OBS_SPANS_ENDPOINT_PATH) => {
-                match Self::handle_llm_obs_spans_proxy(config, tags_provider, api_key, client, req)
-                    .await
-                {
-                    Ok(result) => Ok(result),
-                    Err(err) => log_and_create_http_response(
-                        &format!("LLM OBS Spans endpoint error: {err}"),
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                    ),
-                }
-            }
+            (&Method::POST, LLM_OBS_SPANS_ENDPOINT_PATH) => match Self::handle_llm_obs_spans_proxy(
+                config,
+                tags_provider,
+                api_key_factory,
+                client,
+                req,
+            )
+            .await
+            {
+                Ok(result) => Ok(result),
+                Err(err) => log_and_create_http_response(
+                    &format!("LLM OBS Spans endpoint error: {err}"),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ),
+            },
             (_, INFO_ENDPOINT_PATH) => match Self::info_handler() {
                 Ok(result) => Ok(result),
                 Err(err) => log_and_create_http_response(
@@ -341,8 +354,14 @@ impl TraceAgent {
                 ),
             },
             (&Method::POST, DEBUGGER_ENDPOINT_PATH) => {
-                match Self::handle_debugger_logs_proxy(config, tags_provider, api_key, client, req)
-                    .await
+                match Self::handle_debugger_logs_proxy(
+                    config,
+                    tags_provider,
+                    api_key_factory,
+                    client,
+                    req,
+                )
+                .await
                 {
                     Ok(result) => Ok(result),
                     Err(err) => log_and_create_http_response(
@@ -437,14 +456,16 @@ impl TraceAgent {
             }
         }
 
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        );
+        let send_data = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
 
         // send trace payload to our trace flusher
         match trace_tx.send(send_data).await {
@@ -486,7 +507,7 @@ impl TraceAgent {
     async fn handle_proxy(
         config: Arc<config::Config>,
         client: reqwest::Client,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         tags_provider: Arc<provider::Provider>,
         req: hyper_migration::HttpRequest,
         backend_domain: &str,
@@ -509,6 +530,7 @@ impl TraceAgent {
                 }
             }
         }
+        let api_key = api_key_factory.get_api_key().await;
         request_builder = request_builder.header("DD-API-KEY", api_key);
         request_builder = request_builder.header(
             DD_ADDITIONAL_TAGS_HEADER,
@@ -567,14 +589,14 @@ impl TraceAgent {
     async fn handle_dsm_proxy(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
         req: hyper_migration::HttpRequest,
     ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             req,
             "trace.agent",
@@ -587,14 +609,14 @@ impl TraceAgent {
     async fn handle_profiling_proxy(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
         req: hyper_migration::HttpRequest,
     ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             req,
             "intake.profile",
@@ -607,14 +629,14 @@ impl TraceAgent {
     async fn handle_llm_obs_eval_metric_proxy(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
         req: hyper_migration::HttpRequest,
     ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             req,
             "api",
@@ -627,14 +649,14 @@ impl TraceAgent {
     async fn handle_llm_obs_eval_metric_proxy_v2(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
         req: hyper_migration::HttpRequest,
     ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             req,
             "api",
@@ -647,14 +669,14 @@ impl TraceAgent {
     async fn handle_llm_obs_spans_proxy(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
         req: hyper_migration::HttpRequest,
     ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             req,
             "llmobs-intake",
@@ -667,14 +689,14 @@ impl TraceAgent {
     async fn handle_debugger_logs_proxy(
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         client: reqwest::Client,
         req: hyper_migration::HttpRequest,
     ) -> http::Result<hyper_migration::HttpResponse> {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             req,
             "http-intake.logs",

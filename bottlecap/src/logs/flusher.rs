@@ -2,6 +2,7 @@ use crate::config;
 use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use crate::FLUSH_RETRY_COUNT;
+use dogstatsd::api_key::ApiKeyFactory;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
@@ -10,6 +11,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use thiserror::Error as ThisError;
+use tokio::sync::OnceCell;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
@@ -26,42 +28,24 @@ pub struct Flusher {
     client: reqwest::Client,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
-    headers: HeaderMap,
+    api_key_factory: Arc<ApiKeyFactory>,
+    headers: OnceCell<HeaderMap>,
 }
 
 impl Flusher {
     pub fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(config.clone());
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "DD-API-KEY",
-            api_key.clone().parse().expect("failed to parse header"),
-        );
-        headers.insert(
-            "DD-PROTOCOL",
-            "agent-json".parse().expect("failed to parse header"),
-        );
-        headers.insert(
-            "Content-Type",
-            "application/json".parse().expect("failed to parse header"),
-        );
-
-        if config.logs_config_use_compression {
-            headers.insert(
-                "Content-Encoding",
-                "zstd".parse().expect("failed to parse header"),
-            );
-        }
 
         Flusher {
             client,
             aggregator,
             config,
-            headers,
+            api_key_factory,
+            headers: OnceCell::new(),
         }
     }
     pub async fn flush(
@@ -91,7 +75,7 @@ impl Flusher {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch);
+                let req = self.create_request(batch).await;
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -123,13 +107,14 @@ impl Flusher {
         failed_requests
     }
 
-    fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
+    async fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
         let url = format!("{}/api/v2/logs", self.config.logs_config_logs_dd_url);
         let body = self.compress(data);
+        let headers = self.get_headers().await;
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
-            .headers(self.headers.clone())
+            .headers(headers.clone())
             .body(body)
     }
 
@@ -194,5 +179,34 @@ impl Flusher {
         let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
         encoder.write_all(data)?;
         encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
+    }
+
+    async fn get_headers(&self) -> &HeaderMap {
+        self.headers
+            .get_or_init(move || async move {
+                let api_key = self.api_key_factory.get_api_key().await;
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "DD-API-KEY",
+                    api_key.parse().expect("failed to parse header"),
+                );
+                headers.insert(
+                    "DD-PROTOCOL",
+                    "agent-json".parse().expect("failed to parse header"),
+                );
+                headers.insert(
+                    "Content-Type",
+                    "application/json".parse().expect("failed to parse header"),
+                );
+
+                if self.config.logs_config_use_compression {
+                    headers.insert(
+                        "Content-Encoding",
+                        "zstd".parse().expect("failed to parse header"),
+                    );
+                }
+                headers
+            })
+            .await
     }
 }
