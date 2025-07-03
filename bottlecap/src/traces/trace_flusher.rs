@@ -86,9 +86,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let mut tasks = Vec::with_capacity(coalesced_traces.len());
 
         for traces in coalesced_traces {
-            let https_proxy = self.config.https_proxy.clone();
+            let proxy_https = self.config.proxy_https.clone();
             tasks.push(tokio::spawn(async move {
-                traces.send_proxy(https_proxy.as_deref()).await.last_result
+                traces.send_proxy(proxy_https.as_deref()).await.last_result
             }));
         }
 

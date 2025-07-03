@@ -17,9 +17,8 @@ pub fn should_start_proxy(config: &Arc<Config>, aws_config: &AwsConfig) -> bool 
         .exec_wrapper
         .as_ref()
         .is_some_and(|s| s.eq("/opt/datadog_wrapper"));
-    let appsec_enabled = config.appsec_enabled || config.serverless_appsec_enabled;
 
-    lwa_proxy_set || (datadog_wrapper_set && appsec_enabled)
+    lwa_proxy_set || (datadog_wrapper_set && config.serverless_appsec_enabled)
 }
 
 #[cfg(test)]
@@ -32,7 +31,7 @@ mod tests {
     fn test_should_start_proxy_everything_set() {
         let config = Arc::new(Config {
             // Appsec is enabled, so we should start the proxy
-            appsec_enabled: true,
+            serverless_appsec_enabled: true,
             ..Default::default()
         });
         let aws_config = AwsConfig {
@@ -64,7 +63,7 @@ mod tests {
     fn test_should_start_proxy_appsec_enabled_and_datadog_wrapper_set() {
         let config = Arc::new(Config {
             // Appsec is enabled, so we should start the proxy
-            appsec_enabled: true,
+            serverless_appsec_enabled: true,
             ..Default::default()
         });
         let aws_config = AwsConfig {
@@ -82,7 +81,7 @@ mod tests {
     fn test_should_start_proxy_appsec_disabled_and_datadog_wrapper_set() {
         let config = Arc::new(Config {
             // Appsec is disabled, so we should not start the proxy
-            appsec_enabled: false,
+            serverless_appsec_enabled: false,
             ..Default::default()
         });
         let aws_config = AwsConfig {
@@ -100,7 +99,7 @@ mod tests {
     fn test_should_start_proxy_appsec_enabled_datadog_wrapper_not_set() {
         let config = Arc::new(Config {
             // Appsec is enabled, so we should not start the proxy
-            appsec_enabled: true,
+            serverless_appsec_enabled: true,
             ..Default::default()
         });
         let aws_config = AwsConfig {

@@ -920,7 +920,7 @@ fn start_metrics_flushers(
         api_key: resolved_api_key,
         aggregator: Arc::clone(metrics_aggr),
         metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
-        https_proxy: config.https_proxy.clone(),
+        https_proxy: config.proxy_https.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
         retry_strategy: DsdRetryStrategy::Immediate(3),
     };
@@ -945,7 +945,7 @@ fn start_metrics_flushers(
                 api_key: api_key.clone(),
                 aggregator: metrics_aggr.clone(),
                 metrics_intake_url_prefix: metrics_intake_url.clone(),
-                https_proxy: config.https_proxy.clone(),
+                https_proxy: config.proxy_https.clone(),
                 timeout: Duration::from_secs(config.flush_timeout),
                 retry_strategy: DsdRetryStrategy::Immediate(3),
             };
