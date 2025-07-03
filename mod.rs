@@ -4,6 +4,7 @@ pub mod aws;
 pub mod env;
 pub mod flush_strategy;
 pub mod log_level;
+pub mod logs_additional_endpoints;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
@@ -11,6 +12,7 @@ pub mod yaml;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
+
 use serde::{Deserialize, Deserializer};
 use serde_aux::prelude::deserialize_bool_from_anything;
 use serde_json::Value;
@@ -24,6 +26,7 @@ use crate::config::{
     env::EnvConfigSource,
     flush_strategy::FlushStrategy,
     log_level::LogLevel,
+    logs_additional_endpoints::LogsAdditionalEndpoint,
     processing_rule::{deserialize_processing_rules, ProcessingRule},
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
@@ -260,6 +263,7 @@ pub struct Config {
     pub logs_config_processing_rules: Option<Vec<ProcessingRule>>,
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
+    pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
 
     // APM
     //
@@ -353,6 +357,7 @@ impl Default for Config {
             logs_config_processing_rules: None,
             logs_config_use_compression: true,
             logs_config_compression_level: 6,
+            logs_config_additional_endpoints: Vec::new(),
 
             // APM
             service_mapping: HashMap::new(),

@@ -12,6 +12,9 @@ use crate::{
         deserialize_optional_bool_from_anything, deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
+        logs_additional_endpoints::{
+            deserialize_logs_additional_endpoints, LogsAdditionalEndpoint,
+        },
         processing_rule::{deserialize_processing_rules, ProcessingRule},
         service_mapping::deserialize_service_mapping,
         trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
@@ -125,6 +128,12 @@ pub struct EnvConfig {
     /// to 9 (maximum compression but higher resource usage). Only takes effect if
     /// `use_compression` is set to `true`.
     pub logs_config_compression_level: Option<i32>,
+    /// @env `DD_LOGS_CONFIG_ADDITIONAL_ENDPOINTS`
+    ///
+    /// Additional endpoints to send logs to.
+    /// <https://docs.datadoghq.com/agent/configuration/dual-shipping/?tab=helm#environment-variable-configuration-6>
+    #[serde(deserialize_with = "deserialize_logs_additional_endpoints")]
+    pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
 
     // APM
     //
@@ -322,6 +331,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, logs_config_processing_rules);
     merge_option_to_value!(config, env_config, logs_config_use_compression);
     merge_option_to_value!(config, env_config, logs_config_compression_level);
+    merge_vec!(config, env_config, logs_config_additional_endpoints);
 
     // APM
     merge_hashmap!(config, env_config, service_mapping);
@@ -505,6 +515,10 @@ mod tests {
             );
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "false");
             jail.set_env("DD_LOGS_CONFIG_COMPRESSION_LEVEL", "3");
+            jail.set_env(
+                "DD_LOGS_CONFIG_ADDITIONAL_ENDPOINTS",
+                "[{\"api_key\": \"apikey2\", \"Host\": \"agent-http-intake.logs.datadoghq.com\", \"Port\": 443, \"is_reliable\": true}]",
+            );
 
             // APM
             jail.set_env("DD_SERVICE_MAPPING", "old-service:new-service");
@@ -640,6 +654,12 @@ mod tests {
                 }]),
                 logs_config_use_compression: false,
                 logs_config_compression_level: 3,
+                logs_config_additional_endpoints: vec![LogsAdditionalEndpoint {
+                    api_key: "apikey2".to_string(),
+                    host: "agent-http-intake.logs.datadoghq.com".to_string(),
+                    port: 443,
+                    is_reliable: true,
+                }],
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),
