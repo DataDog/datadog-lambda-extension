@@ -336,12 +336,12 @@ async fn main() -> Result<()> {
         let config = Arc::clone(&config);
         let aws_config = Arc::clone(&aws_config);
         let aws_credentials = Arc::clone(&aws_credentials);
-        
+
         Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
             let config = Arc::clone(&config);
             let aws_config = Arc::clone(&aws_config);
             let aws_credentials = Arc::clone(&aws_credentials);
-            
+
             Box::pin(async move {
                 resolve_secrets(config, aws_config, aws_credentials)
                     .await
