@@ -395,17 +395,19 @@ impl TraceAgent {
             Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
         };
 
-        if let Some(content_length) = parts.headers.get("content-length") {
-            if let Ok(length_str) = content_length.to_str() {
-                if let Ok(length) = length_str.parse::<usize>() {
-                    if length > MAX_CONTENT_LENGTH {
-                        return error_response(
-                            StatusCode::PAYLOAD_TOO_LARGE,
-                            format!("Content-Length {length} exceeds maximum allowed size {MAX_CONTENT_LENGTH}"),
-                        );
-                    }
-                }
-            }
+        if let Some(content_length) = parts
+            .headers
+            .get("content-length")
+            .and_then(|h| h.to_str().ok())
+            .and_then(|h| h.parse::<usize>().ok())
+            .filter(|l| *l > MAX_CONTENT_LENGTH)
+        {
+            return error_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                format!(
+                    "Content-Length {content_length} exceeds maximum allowed size {MAX_CONTENT_LENGTH}"
+                ),
+            );
         }
 
         let tracer_header_tags = (&parts.headers).into();
