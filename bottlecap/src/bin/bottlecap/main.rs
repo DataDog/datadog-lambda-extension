@@ -460,7 +460,13 @@ async fn extension_loop_active(
     )));
 
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
-    let (trace_agent_channel, trace_flusher, trace_processor, stats_flusher) = start_trace_agent(
+    let (
+        trace_agent_channel,
+        trace_flusher,
+        trace_processor,
+        stats_flusher,
+        trace_agent_shutdown_token,
+    ) = start_trace_agent(
         config,
         resolved_api_key.clone(),
         &tags_provider,
@@ -688,6 +694,7 @@ async fn extension_loop_active(
             if let Some(otlp_shutdown_token) = otlp_shutdown_token {
                 otlp_shutdown_token.cancel();
             }
+            trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
 
@@ -966,6 +973,7 @@ fn start_trace_agent(
     Arc<trace_flusher::ServerlessTraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
     Arc<stats_flusher::ServerlessStatsFlusher>,
+    tokio_util::sync::CancellationToken,
 ) {
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
@@ -997,7 +1005,7 @@ fn start_trace_agent(
         resolved_api_key: resolved_api_key.clone(),
     });
 
-    let trace_agent = Box::new(trace_agent::TraceAgent::new(
+    let trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
@@ -1006,8 +1014,9 @@ fn start_trace_agent(
         invocation_processor,
         Arc::clone(tags_provider),
         resolved_api_key,
-    ));
+    );
     let trace_agent_channel = trace_agent.get_sender_copy();
+    let shutdown_token = trace_agent.shutdown_token();
 
     tokio::spawn(async move {
         let res = trace_agent.start().await;
@@ -1021,6 +1030,7 @@ fn start_trace_agent(
         trace_flusher,
         trace_processor,
         stats_flusher,
+        shutdown_token,
     )
 }
 
