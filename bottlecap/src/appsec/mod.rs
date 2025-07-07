@@ -26,17 +26,3 @@ pub fn is_standalone() -> bool {
 
     is_set && enabled
 }
-
-pub fn get_rules(config: &Config) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
-    // Default on recommended rules
-    match &config.appsec_rules {
-        None => {
-            let default_rules = include_bytes!("rules.json");
-            Ok(default_rules.to_vec())
-        }
-        Some(path) => {
-            let rules = std::fs::read(path)?;
-            Ok(rules)
-        }
-    }
-}

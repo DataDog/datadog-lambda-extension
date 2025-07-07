@@ -51,7 +51,6 @@ rustls-native-certs = { version = "0.8.1", optional = true }
 # method in favor of our
 # datadog_fips::reqwest_adapter::create_reqwest_client_builder. An example can
 # be found in the clippy.toml file adjacent to this Cargo.toml.
-libddwaf = { version = "1.24.1", default-features = false, git = "https://github.com/DataDog/libddwaf-rust", features = ["default"] }
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "c89b58e5784b985819baf11f13f7d35876741222" }
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
 ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae" }
@@ -62,6 +61,7 @@ datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78", default-features = false }
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78", default-features = false }
+libddwaf = { version = "1.25.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "1353c5cf1c2ff6b8474b950bd96bccd5d89cf4f3", default-features = false, features = ["default"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }

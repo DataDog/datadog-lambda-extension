@@ -10,8 +10,8 @@ use crate::{
         additional_endpoints::deserialize_additional_endpoints,
         apm_replace_rule::deserialize_apm_replace_rules,
         deserialize_array_from_comma_separated_string, deserialize_key_value_pairs,
-        deserialize_optional_bool_from_anything, deserialize_string_or_int,
-        deserialize_optional_duration_from_optional_microseconds,
+        deserialize_optional_bool_from_anything,
+        deserialize_optional_duration_from_optional_microseconds, deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
         logs_additional_endpoints::{
