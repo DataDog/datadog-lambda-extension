@@ -16,34 +16,53 @@ use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 #[allow(clippy::module_name_repetitions)]
-#[derive(Debug, Clone, Copy)]
-pub struct TelemetryListener {}
-
-pub struct TelemetryListenerConfig {
-    pub host: String,
-    pub port: u16,
+#[derive(Debug, Clone)]
+pub struct TelemetryListener {
+    host: [u8; 4],
+    port: u16,
+    cancel_token: CancellationToken,
+    event_bus: Sender<TelemetryEvent>,
 }
 
 impl TelemetryListener {
-    pub async fn spin(
-        config: &TelemetryListenerConfig,
-        event_bus: Sender<TelemetryEvent>,
-        cancel_token: CancellationToken,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
-        let router = Self::make_router(event_bus);
+    #[must_use]
+    pub fn new(host: [u8; 4], port: u16, event_bus: Sender<TelemetryEvent>) -> Self {
+        let cancel_token = CancellationToken::new();
+        Self {
+            host,
+            port,
+            cancel_token,
+            event_bus,
+        }
+    }
 
-        debug!("Telemetry API | Starting listener on {}", addr);
-        let listener = TcpListener::bind(&addr).await?;
+    #[must_use]
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
+    }
 
-        axum::serve(listener, router)
-            .with_graceful_shutdown(Self::graceful_shutdown(cancel_token))
-            .await?;
+    pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let socket = SocketAddr::from((self.host, self.port));
+        let router = self.make_router();
+
+        let cancel_token_clone = self.cancel_token();
+        tokio::spawn(async move {
+            let listener = TcpListener::bind(&socket)
+                .await
+                .expect("Failed to bind socket");
+            debug!("Telemetry API | Starting listener on {}", socket);
+            axum::serve(listener, router)
+                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
+                .await
+                .expect("Failed to start telemetry listener");
+        });
 
         Ok(())
     }
 
-    fn make_router(event_bus: Sender<TelemetryEvent>) -> Router {
+    fn make_router(&self) -> Router {
+        let event_bus = self.event_bus.clone();
+
         Router::new()
             .route("/", post(Self::handle))
             .fallback(handler_not_found)

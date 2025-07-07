@@ -36,7 +36,7 @@ use bottlecap::{
     telemetry::{
         client::TelemetryApiClient,
         events::{TelemetryEvent, TelemetryRecord},
-        listener::{TelemetryListener, TelemetryListenerConfig},
+        listener::TelemetryListener,
     },
     traces::{
         stats_aggregator::StatsAggregator,
@@ -46,7 +46,7 @@ use bottlecap::{
         trace_processor,
     },
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
-    EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
+    EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -1058,15 +1058,14 @@ async fn setup_telemetry_client(
     extension_id: &str,
     logs_agent_channel: Sender<TelemetryEvent>,
 ) -> Result<CancellationToken> {
-    let telemetry_listener_config = TelemetryListenerConfig {
-        host: EXTENSION_HOST.to_string(),
-        port: TELEMETRY_PORT,
-    };
-    let cancel_token = tokio_util::sync::CancellationToken::new();
-    let ct_clone = cancel_token.clone();
+    let telemetry_listener =
+        TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
+
+    let cancel_token = telemetry_listener.cancel_token();
     tokio::spawn(async move {
-        let _ =
-            TelemetryListener::spin(&telemetry_listener_config, logs_agent_channel, ct_clone).await;
+        if let Err(e) = telemetry_listener.start() {
+            error!("Error starting telemetry listener: {e:?}");
+        }
     });
 
     let telemetry_client = TelemetryApiClient::new(extension_id.to_string(), TELEMETRY_PORT);
