@@ -38,6 +38,7 @@ pub mod traces;
 use std::{env, io};
 
 pub const EXTENSION_HOST: &str = "0.0.0.0";
+pub const EXTENSION_HOST_IP: [u8; 4] = [0, 0, 0, 0];
 pub const EXTENSION_NAME: &str = "datadog-agent";
 pub const EXTENSION_FEATURES: &str = "accountId";
 pub const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
