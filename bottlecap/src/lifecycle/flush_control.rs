@@ -1,6 +1,6 @@
 use crate::config::flush_strategy::FlushStrategy;
 use std::time;
-use tokio::time::Interval;
+use tokio::time::{Interval, MissedTickBehavior::Skip};
 
 use crate::lifecycle::invocation_times::InvocationTimes;
 
@@ -44,12 +44,18 @@ impl FlushControl {
     pub fn get_flush_interval(&self) -> Interval {
         match &self.flush_strategy {
             FlushStrategy::Default => {
-                tokio::time::interval(tokio::time::Duration::from_millis(DEFAULT_FLUSH_INTERVAL))
+                let mut i = tokio::time::interval(tokio::time::Duration::from_millis(
+                    DEFAULT_FLUSH_INTERVAL,
+                ));
+                i.set_missed_tick_behavior(Skip);
+                i
             }
             FlushStrategy::Periodically(p)
             | FlushStrategy::EndPeriodically(p)
             | FlushStrategy::Continuously(p) => {
-                tokio::time::interval(tokio::time::Duration::from_millis(p.interval))
+                let mut i = tokio::time::interval(tokio::time::Duration::from_millis(p.interval));
+                i.set_missed_tick_behavior(Skip);
+                i
             }
             FlushStrategy::End => {
                 tokio::time::interval(tokio::time::Duration::from_millis(FIFTEEN_MINUTES))

@@ -1,6 +1,6 @@
 use bottlecap::config::Config;
 use bottlecap::event_bus::bus::EventBus;
-use bottlecap::logs::{agent::LogsAgent, flusher::Flusher as LogsFlusher};
+use bottlecap::logs::{agent::LogsAgent, flusher::LogsFlusher};
 use bottlecap::tags::provider::Provider;
 use bottlecap::telemetry::events::TelemetryEvent;
 use bottlecap::LAMBDA_RUNTIME_SLUG;
@@ -42,6 +42,7 @@ async fn test_logs() {
     });
 
     let arc_conf = Arc::new(Config {
+        http_protocol: Some("http1".to_string()),
         logs_config_use_compression: false,
         logs_config_logs_dd_url: server.url(""),
         ..Config::default()

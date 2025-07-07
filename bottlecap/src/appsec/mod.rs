@@ -5,8 +5,8 @@ use crate::config::Config;
 pub mod processor;
 
 #[must_use]
-pub fn is_enabled(config: &Config) -> bool {
-    config.appsec_enabled || config.serverless_appsec_enabled
+pub const fn is_enabled(config: &Config) -> bool {
+    config.serverless_appsec_enabled
 }
 
 /// Reads the `DD_APM_TRACING_ENABLED` environment variable to determine whether ASM runs in

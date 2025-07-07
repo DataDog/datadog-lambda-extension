@@ -45,7 +45,7 @@ const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-pub const EXTENSION_VERSION: &str = "81-next";
+pub const EXTENSION_VERSION: &str = "82-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -118,13 +118,8 @@ fn tags_from_env(
         EXTENSION_VERSION.to_string(),
     );
 
-    if let Some(tags) = &config.tags {
-        for tag in tags.split(',') {
-            let parts = tag.split(':').collect::<Vec<&str>>();
-            if parts.len() == 2 {
-                tags_map.insert(parts[0].to_string(), parts[1].to_string());
-            }
-        }
+    if !config.tags.is_empty() {
+        tags_map.extend(config.tags.clone());
     }
 
     tags_map.insert(
@@ -313,7 +308,10 @@ mod tests {
         );
         let config = Arc::new(Config {
             service: Some("my-service".to_string()),
-            tags: Some("test:tag,env:test".to_string()),
+            tags: HashMap::from([
+                ("test".to_string(), "tag".to_string()),
+                ("env".to_string(), "test".to_string()),
+            ]),
             env: Some("test".to_string()),
             version: Some("1.0.0".to_string()),
             ..Config::default()
@@ -383,7 +381,10 @@ mod tests {
         );
         let config = Arc::new(Config {
             service: Some("my-service".to_string()),
-            tags: Some("key1:value1,key2:value2".to_string()),
+            tags: HashMap::from([
+                ("key1".to_string(), "value1".to_string()),
+                ("key2".to_string(), "value2".to_string()),
+            ]),
             env: Some("test".to_string()),
             version: Some("1.0.0".to_string()),
             ..Config::default()

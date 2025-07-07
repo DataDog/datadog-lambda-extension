@@ -1,7 +1,8 @@
 use crate::config;
-use crate::http_client;
+use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use crate::FLUSH_RETRY_COUNT;
+use futures::future::join_all;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
@@ -24,6 +25,7 @@ pub struct FailedRequestError {
 #[derive(Debug, Clone)]
 pub struct Flusher {
     client: reqwest::Client,
+    endpoint: String,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
     headers: HeaderMap,
@@ -32,10 +34,11 @@ pub struct Flusher {
 impl Flusher {
     pub fn new(
         api_key: String,
+        endpoint: String,
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
-        let client = http_client::get_client(config.clone());
+        let client = get_client(config.clone());
         let mut headers = HeaderMap::new();
         headers.insert(
             "DD-API-KEY",
@@ -59,39 +62,22 @@ impl Flusher {
 
         Flusher {
             client,
+            endpoint,
             aggregator,
             config,
             headers,
         }
     }
-    pub async fn flush(
-        &self,
-        retry_request: Option<reqwest::RequestBuilder>,
-    ) -> Vec<reqwest::RequestBuilder> {
+
+    pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
         let mut set = JoinSet::new();
 
-        // If retry_request is provided, only process that request
-        if let Some(req) = retry_request {
-            set.spawn(async move { Self::send(req).await });
-        } else {
-            // Process log batches only if no retry_request is provided
-            let logs_batches = {
-                let mut guard = self.aggregator.lock().expect("lock poisoned");
-                let mut batches = Vec::new();
-                let mut current_batch = guard.get_batch();
-                while !current_batch.is_empty() {
-                    batches.push(current_batch);
-                    current_batch = guard.get_batch();
-                }
-
-                batches
-            };
-
-            for batch in logs_batches {
+        if let Some(logs_batches) = batches {
+            for batch in logs_batches.iter() {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch);
+                let req = self.create_request(batch.clone());
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -124,13 +110,12 @@ impl Flusher {
     }
 
     fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
-        let url = format!("{}/api/v2/logs", self.config.logs_config_logs_dd_url);
-        let body = self.compress(data);
+        let url = format!("{}/api/v2/logs", self.endpoint);
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
             .headers(self.headers.clone())
-            .body(body)
+            .body(data)
     }
 
     async fn send(req: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
@@ -174,6 +159,92 @@ impl Flusher {
                 }
             }
         }
+    }
+}
+
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone)]
+pub struct LogsFlusher {
+    config: Arc<config::Config>,
+    pub flushers: Vec<Flusher>,
+}
+
+impl LogsFlusher {
+    pub fn new(
+        api_key: String,
+        aggregator: Arc<Mutex<Aggregator>>,
+        config: Arc<config::Config>,
+    ) -> Self {
+        let mut flushers = Vec::new();
+
+        // Create primary flusher
+        flushers.push(Flusher::new(
+            api_key.clone(),
+            config.logs_config_logs_dd_url.clone(),
+            aggregator.clone(),
+            config.clone(),
+        ));
+
+        // Create flushers for additional endpoints
+        for endpoint in &config.logs_config_additional_endpoints {
+            let endpoint_url = format!("https://{}:{}", endpoint.host, endpoint.port);
+            flushers.push(Flusher::new(
+                endpoint.api_key.clone(),
+                endpoint_url,
+                aggregator.clone(),
+                config.clone(),
+            ));
+        }
+
+        LogsFlusher { config, flushers }
+    }
+
+    pub async fn flush(
+        &self,
+        retry_request: Option<reqwest::RequestBuilder>,
+    ) -> Vec<reqwest::RequestBuilder> {
+        let mut failed_requests = Vec::new();
+
+        // If retry_request is provided, only process that request
+        if let Some(req) = retry_request {
+            if let Some(req_clone) = req.try_clone() {
+                if let Err(e) = Flusher::send(req_clone).await {
+                    if let Some(failed_req_err) = e.downcast_ref::<FailedRequestError>() {
+                        failed_requests.push(
+                            failed_req_err
+                                .request
+                                .try_clone()
+                                .expect("should be able to clone request"),
+                        );
+                    }
+                }
+            }
+        } else {
+            // Get batches from primary flusher's aggregator
+            let logs_batches = Arc::new({
+                let mut guard = self.flushers[0].aggregator.lock().expect("lock poisoned");
+                let mut batches = Vec::new();
+                let mut current_batch = guard.get_batch();
+                while !current_batch.is_empty() {
+                    batches.push(self.compress(current_batch));
+                    current_batch = guard.get_batch();
+                }
+                batches
+            });
+
+            // Send batches to each flusher
+            let futures = self.flushers.iter().map(|flusher| {
+                let batches = Arc::clone(&logs_batches);
+                let flusher = flusher.clone();
+                async move { flusher.flush(Some(batches)).await }
+            });
+
+            let results = join_all(futures).await;
+            for failed in results {
+                failed_requests.extend(failed);
+            }
+        }
+        failed_requests
     }
 
     fn compress(&self, data: Vec<u8>) -> Vec<u8> {

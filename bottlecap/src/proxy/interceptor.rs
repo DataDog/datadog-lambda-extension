@@ -1,12 +1,13 @@
 use crate::{
     appsec,
     config::{aws::AwsConfig, Config},
+    http::extract_request_body,
     lifecycle::invocation::processor::Processor as InvocationProcessor,
     lwa, EXTENSION_HOST,
 };
 use axum::{
     body::{Body, Bytes},
-    extract::{FromRequest, Path, Request, State},
+    extract::{Path, Request, State},
     http::{self, Request as HttpRequest, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
@@ -328,15 +329,6 @@ fn build_forward_response(
     Ok(forward_response)
 }
 
-async fn extract_request_body(
-    request: Request,
-) -> Result<(hyper::http::request::Parts, Bytes), Box<dyn std::error::Error>> {
-    let (parts, body) = request.into_parts();
-    let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
-
-    Ok((parts, bytes))
-}
-
 fn build_proxy_request(
     aws_config: &AwsConfig,
     parts: http::request::Parts,
@@ -425,13 +417,8 @@ mod tests {
 
         let aws_config = AwsConfig {
             region: "us-east-1".to_string(),
-            aws_access_key_id: "AKIDEXAMPLE".to_string(),
-            aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
-            aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
             function_name: "arn:some-function".to_string(),
             sandbox_init_time: Instant::now(),
-            aws_container_credentials_full_uri: String::new(),
-            aws_container_authorization_token: String::new(),
             runtime_api: aws_lambda_runtime_api.to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,

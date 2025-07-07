@@ -966,11 +966,6 @@ mod tests {
     fn setup() -> Processor {
         let aws_config = AwsConfig {
             region: "us-east-1".into(),
-            aws_access_key_id: "***".into(),
-            aws_secret_access_key: "***".into(),
-            aws_session_token: "***".into(),
-            aws_container_credentials_full_uri: "***".into(),
-            aws_container_authorization_token: "***".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
             function_name: "test-function".into(),
             sandbox_init_time: Instant::now(),
@@ -980,7 +975,7 @@ mod tests {
 
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
-            tags: Some("test:tags".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 

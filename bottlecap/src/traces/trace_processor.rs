@@ -159,7 +159,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             }
         }
         let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&config.apm_config_apm_dd_url)
+            url: hyper::Uri::from_str(&config.apm_dd_url)
                 .expect("can't parse trace intake URL, exiting"),
             api_key: Some(self.resolved_api_key.clone().into()),
             timeout_ms: config.flush_timeout * 1_000,
@@ -205,9 +205,12 @@ mod tests {
 
     fn create_test_config() -> Arc<Config> {
         Arc::new(Config {
-            apm_config_apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
+            apm_dd_url: "https://trace.agent.datadoghq.com".to_string(),
             service: Some("test-service".to_string()),
-            tags: Some("test:tag,env:test-env".to_string()),
+            tags: HashMap::from([
+                ("test".to_string(), "tag".to_string()),
+                ("env".to_string(), "test-env".to_string()),
+            ]),
             ..Config::default()
         })
     }
