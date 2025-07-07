@@ -493,7 +493,7 @@ async fn extension_loop_active(
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
 
-    let otlp_shutdown_token = start_otlp_agent(
+    let otlp_cancel_token = start_otlp_agent(
         config,
         tags_provider.clone(),
         trace_processor.clone(),
@@ -691,8 +691,8 @@ async fn extension_loop_active(
             if let Some(api_runtime_proxy_cancel_token) = api_runtime_proxy_shutdown_signal {
                 api_runtime_proxy_cancel_token.cancel();
             }
-            if let Some(otlp_shutdown_token) = otlp_shutdown_token {
-                otlp_shutdown_token.cancel();
+            if let Some(otlp_cancel_token) = otlp_cancel_token {
+                otlp_cancel_token.cancel();
             }
             trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
@@ -1062,8 +1062,8 @@ async fn setup_telemetry_client(
         host: EXTENSION_HOST.to_string(),
         port: TELEMETRY_PORT,
     };
-    let telemetry_listener_cancel_token = tokio_util::sync::CancellationToken::new();
-    let ct_clone = telemetry_listener_cancel_token.clone();
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    let ct_clone = cancel_token.clone();
     tokio::spawn(async move {
         let _ =
             TelemetryListener::spin(&telemetry_listener_config, logs_agent_channel, ct_clone).await;
@@ -1074,7 +1074,7 @@ async fn setup_telemetry_client(
         .subscribe()
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    Ok(telemetry_listener_cancel_token)
+    Ok(cancel_token)
 }
 
 fn start_otlp_agent(
@@ -1088,14 +1088,14 @@ fn start_otlp_agent(
     }
 
     let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
-    let shutdown_token = agent.shutdown_token();
+    let cancel_token = agent.cancel_token();
     tokio::spawn(async move {
         if let Err(e) = agent.start() {
             error!("Error starting OTLP agent: {e:?}");
         }
     });
 
-    Some(shutdown_token)
+    Some(cancel_token)
 }
 
 fn start_api_runtime_proxy(
