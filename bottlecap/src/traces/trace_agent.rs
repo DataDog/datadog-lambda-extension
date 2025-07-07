@@ -85,6 +85,7 @@ pub struct StatsState {
 pub struct ProxyState {
     pub config: Arc<config::Config>,
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
+    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 pub struct TraceAgent {
@@ -206,6 +207,7 @@ impl TraceAgent {
         let proxy_state = ProxyState {
             config: Arc::clone(&self.config),
             proxy_aggregator: Arc::clone(&self.proxy_aggregator),
+            api_key_factory: Arc::clone(&self.api_key_factory),
         };
 
         let trace_router = Router::new()
@@ -297,6 +299,7 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
+            state.api_key_factory,
             request,
             "trace.agent",
             DSM_INTAKE_PATH,
@@ -309,6 +312,7 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
+            state.api_key_factory,
             request,
             "intake.profile",
             PROFILING_INTAKE_PATH,
@@ -324,6 +328,7 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
+            state.api_key_factory,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH,
@@ -339,6 +344,7 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
+            state.api_key_factory,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2,
@@ -351,6 +357,7 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
+            state.api_key_factory,
             request,
             "llmobs-intake",
             LLM_OBS_SPANS_INTAKE_PATH,
@@ -363,6 +370,7 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
+            state.api_key_factory,
             request,
             "http-intake.logs",
             DEBUGGER_LOGS_INTAKE_PATH,
