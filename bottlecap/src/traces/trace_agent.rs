@@ -65,7 +65,7 @@ type AgentState = (
     Arc<Mutex<InvocationProcessor>>,
     Arc<provider::Provider>,
     reqwest::Client,
-    String, // api_key
+    Arc<ApiKeyFactory>,
 );
 
 pub struct TraceAgent {
@@ -178,7 +178,7 @@ impl TraceAgent {
             Arc::clone(&self.invocation_processor),
             Arc::clone(&self.tags_provider),
             self.http_client.clone(),
-            self.api_key.clone(),
+            Arc::clone(&self.api_key_factory),
         );
 
         Router::new()
@@ -259,13 +259,13 @@ impl TraceAgent {
     }
 
     async fn dsm_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State((config, _, _, _, _, _, tags_provider, client, api_key_factory)): State<AgentState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             request,
             "trace.agent",
@@ -276,13 +276,13 @@ impl TraceAgent {
     }
 
     async fn profiling_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State((config, _, _, _, _, _, tags_provider, client, api_key_factory)): State<AgentState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             request,
             "intake.profile",
@@ -293,13 +293,13 @@ impl TraceAgent {
     }
 
     async fn llm_obs_eval_metric_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State((config, _, _, _, _, _, tags_provider, client, api_key_factory)): State<AgentState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             request,
             "api",
@@ -310,13 +310,13 @@ impl TraceAgent {
     }
 
     async fn llm_obs_eval_metric_proxy_v2(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State((config, _, _, _, _, _, tags_provider, client, api_key_factory)): State<AgentState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             request,
             "api",
@@ -327,13 +327,13 @@ impl TraceAgent {
     }
 
     async fn llm_obs_spans_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State((config, _, _, _, _, _, tags_provider, client, api_key_factory)): State<AgentState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             request,
             "llmobs-intake",
@@ -344,13 +344,13 @@ impl TraceAgent {
     }
 
     async fn debugger_logs_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State((config, _, _, _, _, _, tags_provider, client, api_key_factory)): State<AgentState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
             config,
             client,
-            api_key,
+            api_key_factory,
             tags_provider,
             request,
             "http-intake.logs",
