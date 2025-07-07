@@ -115,6 +115,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
         };
     }
     async fn flush(&self) {
+        debug!("Entered StatsFlusher.flush()");
         let mut guard = self.aggregator.lock().await;
 
         let mut stats = guard.get_batch();
@@ -123,5 +124,6 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
             stats = guard.get_batch();
         }
+        debug!("Leaving StatsFlusher.flush()");
     }
 }

@@ -546,6 +546,7 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
+                        debug!("Calling handle_event_bus_event() in end flush scenario");
                         if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                 break 'flush_end;
@@ -665,6 +666,7 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
+                        debug!("Calling handle_event_bus_event() in no flush scenario");
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
@@ -700,11 +702,25 @@ async fn extension_loop_active(
             if shutdown_reason != "timeout" {
                 debug!("Waiting for report event");
                 'shutdown: loop {
+                    debug!("Waiting for report event (in the loop)");
                     tokio::select! {
-                        Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                                if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
-                                    // Wait for the report event before shutting down
+                        event = event_bus.rx.recv() => {
+                            debug!("Event bus event received: {:?}", event);
+                            match event {
+                                Some(event) => {
+                                    debug!("Calling handle_event_bus_event() in shutdown scenario");
+                                    if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                                        debug!("Telemetry event received: {:?}", telemetry_event);
+                                        if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
+                                            debug!("Platform report event received");
+                                            // Wait for the report event before shutting down
+                                            break 'shutdown;
+                                        }
+                                        debug!("Telemetry event not a report event");
+                                    }
+                                }
+                                None => {
+                                    debug!("Event bus closed, breaking shutdown loop");
                                     break 'shutdown;
                                 }
                             }
@@ -785,6 +801,7 @@ async fn handle_event_bus_event(
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
 ) -> Option<TelemetryEvent> {
+    debug!("Entered handle_event_bus_event(). Event: {:?}", event);
     match event {
         Event::Metric(event) => {
             debug!("Metric event: {:?}", event);
