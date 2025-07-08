@@ -273,6 +273,7 @@ pub struct Config {
     pub apm_replace_tags: Option<Vec<ReplaceRule>>,
     pub apm_config_obfuscation_http_remove_query_string: bool,
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
+    pub apm_config_compression_level: i32,
     pub apm_features: Vec<String>,
     pub apm_additional_endpoints: HashMap<String, Vec<String>>,
     //
@@ -366,6 +367,7 @@ impl Default for Config {
             apm_replace_tags: None,
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
+            apm_config_compression_level: 6,
             apm_features: vec![],
             apm_additional_endpoints: HashMap::new(),
             trace_propagation_style: vec![

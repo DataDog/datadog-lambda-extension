@@ -115,18 +115,18 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 failed_batch.append(&mut failed);
             }
 
+            // Send to additional endpoints
             let tasks = self.additional_endpoints.iter().map(|endpoint| {
                 let traces = traces.clone();
                 let endpoint = endpoint.clone();
                 async move { self.send(traces, Some(endpoint)).await }
             });
-
             for mut failed in join_all(tasks).await.into_iter().flatten() {
                 failed_batch.append(&mut failed);
             }
 
+            // Stop processing more batches if we have a failure
             if !failed_batch.is_empty() {
-                // Stop processing more batches if we have a failure
                 break;
             }
 

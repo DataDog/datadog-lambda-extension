@@ -163,6 +163,12 @@ pub struct EnvConfig {
     /// @env `DD_APM_CONFIG_OBFUSCATION_HTTP_REMOVE_PATHS_WITH_DIGITS`
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub apm_config_obfuscation_http_remove_paths_with_digits: Option<bool>,
+    /// @env `DD_APM_CONFIG_COMPRESSION_LEVEL`
+    ///
+    /// The Agent compresses traces before sending them. The `compression_level` parameter
+    /// accepts values from 0 (no compression) to 9 (maximum compression but
+    /// higher resource usage).
+    pub apm_config_compression_level: Option<i32>,
     /// @env `DD_APM_FEATURES`
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
     pub apm_features: Vec<String>,
@@ -353,6 +359,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         env_config,
         apm_config_obfuscation_http_remove_paths_with_digits
     );
+    merge_option_to_value!(config, env_config, apm_config_compression_level);
     merge_vec!(config, env_config, apm_features);
     merge_hashmap!(config, env_config, apm_additional_endpoints);
 
@@ -540,6 +547,7 @@ mod tests {
                 "DD_APM_CONFIG_OBFUSCATION_HTTP_REMOVE_PATHS_WITH_DIGITS",
                 "true",
             );
+            jail.set_env("DD_APM_CONFIG_COMPRESSION_LEVEL", "3");
             jail.set_env(
                 "DD_APM_FEATURES",
                 "enable_otlp_compute_top_level_by_span_kind,enable_stats_by_span_kind",
@@ -681,6 +689,7 @@ mod tests {
                 ),
                 apm_config_obfuscation_http_remove_query_string: true,
                 apm_config_obfuscation_http_remove_paths_with_digits: true,
+                apm_config_compression_level: 3,
                 apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
