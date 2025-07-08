@@ -58,8 +58,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         for (endpoint_url, api_keys) in config.apm_additional_endpoints.clone() {
             for api_key in api_keys {
+                let trace_intake_url = trace_intake_url_prefixed(&endpoint_url);
                 let endpoint = Endpoint {
-                    url: hyper::Uri::from_str(&endpoint_url)
+                    url: hyper::Uri::from_str(&trace_intake_url)
                         .expect("can't parse additional trace intake URL, exiting"),
                     api_key: Some(api_key.clone().into()),
                     timeout_ms: config.flush_timeout * 1_000,
@@ -152,10 +153,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
         let mut tasks = Vec::with_capacity(coalesced_traces.len());
 
-        for traces in coalesced_traces {
-            // TODO: update the SendData object's endpoint
-            //
-            // if there is an endpoint specified, update the SendData object to use that endpoint
+        for mut traces in coalesced_traces {
+            if let Some(additional_endpoint) = endpoint.clone() {
+                traces.set_target(additional_endpoint);
+            }
             let proxy = self.config.proxy_https.clone();
             tasks.push(tokio::spawn(async move {
                 traces.send_proxy(proxy.as_deref()).await.last_result

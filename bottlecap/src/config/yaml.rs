@@ -649,8 +649,8 @@ http_protocol: "http1"
 # Endpoints
 additional_endpoints:
   "https://app.datadoghq.com":
-    - "apikey2"
-    - "apikey3"
+    - apikey2
+    - apikey3
   "https://app.datadoghq.eu":
     - apikey4
 
@@ -688,6 +688,12 @@ apm_config:
   features:
     - "enable_otlp_compute_top_level_by_span_kind"
     - "enable_stats_by_span_kind"
+  additional_endpoints:
+    "https://trace.agent.datadoghq.com":
+        - apikey2
+        - apikey3
+    "https://trace.agent.datadoghq.eu":
+        - apikey4
 
 service_mapping: old-service:new-service
 
@@ -809,6 +815,16 @@ extension_version: "compatibility"
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
                 ],
+                apm_additional_endpoints: HashMap::from([
+                    (
+                        "https://trace.agent.datadoghq.com".to_string(),
+                        vec!["apikey2".to_string(), "apikey3".to_string()],
+                    ),
+                    (
+                        "https://trace.agent.datadoghq.eu".to_string(),
+                        vec!["apikey4".to_string()],
+                    ),
+                ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,
