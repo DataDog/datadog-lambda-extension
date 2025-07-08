@@ -59,7 +59,7 @@ impl Trigger for LambdaFunctionUrlEvent {
             .get("requestContext")
             .and_then(|rc| rc.get("domainName"))
             .and_then(Value::as_str)
-            .map_or(false, |dn| dn.contains("lambda-url"))
+            .is_some_and(|dn| dn.contains("lambda-url"))
     }
 
     #[allow(clippy::cast_possible_truncation)]

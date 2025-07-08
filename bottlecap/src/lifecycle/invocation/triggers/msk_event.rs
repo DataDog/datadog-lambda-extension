@@ -55,7 +55,7 @@ impl Trigger for MSKEvent {
             .and_then(|map| map.values().next())
             .and_then(Value::as_array)
             .and_then(|arr| arr.first())
-            .map_or(false, |rec| rec.get("topic").is_some())
+            .is_some_and(|rec| rec.get("topic").is_some())
     }
 
     #[allow(clippy::cast_possible_truncation)]
