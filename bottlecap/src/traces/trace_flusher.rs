@@ -133,7 +133,11 @@ impl TraceFlusher for ServerlessTraceFlusher {
             trace_builders = guard.get_batch();
         }
 
-        Some(failed_batch)
+        if failed_batch.is_empty() {
+            None
+        } else {
+            Some(failed_batch)
+        }
     }
 
     async fn send(
