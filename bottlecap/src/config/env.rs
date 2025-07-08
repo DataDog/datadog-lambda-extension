@@ -544,6 +544,7 @@ mod tests {
                 "DD_APM_FEATURES",
                 "enable_otlp_compute_top_level_by_span_kind,enable_stats_by_span_kind",
             );
+            jail.set_env("DD_APM_ADDITIONAL_ENDPOINTS", "{\"https://trace.agent.datadoghq.com\": [\"apikey2\", \"apikey3\"], \"https://trace.agent.datadoghq.eu\": [\"apikey4\"]}");
 
             // Trace Propagation
             jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog");
@@ -684,6 +685,16 @@ mod tests {
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
                 ],
+                apm_additional_endpoints: HashMap::from([
+                    (
+                        "https://trace.agent.datadoghq.com".to_string(),
+                        vec!["apikey2".to_string(), "apikey3".to_string()],
+                    ),
+                    (
+                        "https://trace.agent.datadoghq.eu".to_string(),
+                        vec!["apikey4".to_string()],
+                    ),
+                ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,

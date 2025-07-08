@@ -492,7 +492,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes 1.10.1",
  "chrono",
- "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=c3d8ed4f90591c6958921145d485463860307f78)",
+ "datadog-fips",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "datadog-trace-agent",
  "datadog-trace-normalization",
@@ -723,18 +723,7 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=b29bba8b4178fc2089943fe28e853d529826888b#b29bba8b4178fc2089943fe28e853d529826888b"
-dependencies = [
- "reqwest",
- "rustls",
- "rustls-native-certs",
- "tracing",
-]
-
-[[package]]
-name = "datadog-fips"
-version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=c3d8ed4f90591c6958921145d485463860307f78#c3d8ed4f90591c6958921145d485463860307f78"
+source = "git+https://github.com/DataDog/serverless-components?rev=dc14a4cbd8c1b1020afed8cb02eb2dd698884af4#dc14a4cbd8c1b1020afed8cb02eb2dd698884af4"
 dependencies = [
  "reqwest",
  "rustls",
@@ -771,7 +760,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=c3d8ed4f90591c6958921145d485463860307f78#c3d8ed4f90591c6958921145d485463860307f78"
+source = "git+https://github.com/DataDog/serverless-components?rev=dc14a4cbd8c1b1020afed8cb02eb2dd698884af4#dc14a4cbd8c1b1020afed8cb02eb2dd698884af4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -792,8 +781,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-normalization"
-version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae#d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"
+version = "19.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=57fbbcfc1eb7f6a2ebc21748508ef17327461180#57fbbcfc1eb7f6a2ebc21748508ef17327461180"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -801,8 +790,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-obfuscation"
-version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae#d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"
+version = "19.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=57fbbcfc1eb7f6a2ebc21748508ef17327461180#57fbbcfc1eb7f6a2ebc21748508ef17327461180"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -818,8 +807,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-protobuf"
-version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae#d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"
+version = "19.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=57fbbcfc1eb7f6a2ebc21748508ef17327461180#57fbbcfc1eb7f6a2ebc21748508ef17327461180"
 dependencies = [
  "prost",
  "serde",
@@ -828,8 +817,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-utils"
-version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae#d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"
+version = "19.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=57fbbcfc1eb7f6a2ebc21748508ef17327461180#57fbbcfc1eb7f6a2ebc21748508ef17327461180"
 dependencies = [
  "anyhow",
  "bytes 1.10.1",
@@ -841,7 +830,6 @@ dependencies = [
  "http-body-util",
  "hyper 1.6.0",
  "hyper-http-proxy",
- "log",
  "prost",
  "rand 0.8.5",
  "rmp",
@@ -851,13 +839,14 @@ dependencies = [
  "serde_json",
  "tinybytes",
  "tokio",
+ "tracing",
  "zstd",
 ]
 
 [[package]]
 name = "ddcommon"
-version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae#d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"
+version = "19.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=57fbbcfc1eb7f6a2ebc21748508ef17327461180#57fbbcfc1eb7f6a2ebc21748508ef17327461180"
 dependencies = [
  "anyhow",
  "cc",
@@ -873,18 +862,14 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "libc",
- "log",
- "memfd",
  "nix 0.29.0",
  "pin-project",
- "rand 0.8.5",
  "regex",
- "rmp",
- "rmp-serde",
  "rustls",
  "rustls-native-certs",
  "serde",
  "static_assertions",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-rustls",
  "tower-service",
@@ -980,9 +965,9 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=b29bba8b4178fc2089943fe28e853d529826888b#b29bba8b4178fc2089943fe28e853d529826888b"
+source = "git+https://github.com/DataDog/serverless-components?rev=dc14a4cbd8c1b1020afed8cb02eb2dd698884af4#dc14a4cbd8c1b1020afed8cb02eb2dd698884af4"
 dependencies = [
- "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=b29bba8b4178fc2089943fe28e853d529826888b)",
+ "datadog-fips",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "derive_more",
@@ -1990,15 +1975,6 @@ name = "memchr"
 version = "2.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
-
-[[package]]
-name = "memfd"
-version = "0.6.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2cffa4ad52c6f791f4f8b15f0c05f9824b2ced1160e88cc393d64fff9a8ac64"
-dependencies = [
- "rustix 0.38.44",
-]
 
 [[package]]
 name = "mime"
@@ -3359,8 +3335,8 @@ dependencies = [
 
 [[package]]
 name = "tinybytes"
-version = "17.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae#d6a2da32c6b92d6865a7e7987c8a1df2203fb1ae"
+version = "19.0.1"
+source = "git+https://github.com/DataDog/libdatadog?rev=57fbbcfc1eb7f6a2ebc21748508ef17327461180#57fbbcfc1eb7f6a2ebc21748508ef17327461180"
 dependencies = [
  "serde",
 ]
