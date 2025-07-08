@@ -551,7 +551,7 @@ where
 {
     struct KeyValueVisitor;
 
-    impl<'de> serde::de::Visitor<'de> for KeyValueVisitor {
+    impl serde::de::Visitor<'_> for KeyValueVisitor {
         type Value = HashMap<String, String>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

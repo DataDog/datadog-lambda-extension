@@ -2,6 +2,7 @@ use std::env;
 
 use crate::config::Config;
 
+mod payload;
 pub mod processor;
 
 #[must_use]

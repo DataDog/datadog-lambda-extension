@@ -1,5 +1,6 @@
+use crate::appsec;
 use crate::{
-    appsec,
+    appsec::processor::Processor as AppSecProcessor,
     config::{aws::AwsConfig, Config},
     http::extract_request_body,
     lifecycle::invocation::processor::Processor as InvocationProcessor,
@@ -30,10 +31,10 @@ use tracing::{debug, error};
 const INTERCEPTOR_DEFAULT_PORT: u16 = 9000;
 
 type InterceptorState = (
-    Arc<Config>,
     AwsConfig,
     Arc<Client<HttpConnector, Body>>,
     Arc<Mutex<InvocationProcessor>>,
+    Option<Arc<AppSecProcessor>>,
     Arc<Mutex<JoinSet<()>>>,
 );
 
@@ -53,12 +54,18 @@ pub fn start(
         .pool_max_idle_per_host(8)
         .build(connector);
 
+    let appsec_processor = if appsec::is_enabled(&config) {
+        Some(Arc::new(AppSecProcessor::new(config.as_ref())?))
+    } else {
+        None
+    };
+
     let tasks = Arc::new(Mutex::new(JoinSet::new()));
     let state: InterceptorState = (
-        config,
         aws_config,
         Arc::new(client),
         invocation_processor,
+        appsec_processor,
         Arc::clone(&tasks),
     );
 
@@ -131,7 +138,9 @@ fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -
 
 async fn invocation_next_proxy(
     Path(api_version): Path<String>,
-    State((config, aws_config, client, invocation_processor, tasks)): State<InterceptorState>,
+    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+        InterceptorState,
+    >,
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_next_proxy | api_version: {api_version}");
@@ -177,8 +186,8 @@ async fn invocation_next_proxy(
     }
 
     // K9 / ASM
-    if appsec::is_enabled(&config) {
-        // TODO: do something here
+    if let Some(appsec_processor) = appsec_processor {
+        appsec_processor.process_invocation_next(&intercepted_bytes);
     }
 
     match build_forward_response(intercepted_parts, intercepted_bytes) {
@@ -196,7 +205,9 @@ async fn invocation_next_proxy(
 
 async fn invocation_response_proxy(
     Path((api_version, request_id)): Path<(String, String)>,
-    State((config, aws_config, client, invocation_processor, tasks)): State<InterceptorState>,
+    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+        InterceptorState,
+    >,
     request: Request,
 ) -> Response {
     debug!(
@@ -225,8 +236,8 @@ async fn invocation_response_proxy(
     }
 
     // K9 / ASM
-    if appsec::is_enabled(&config) {
-        // TODO: do something here
+    if let Some(appsec_processor) = appsec_processor {
+        appsec_processor.process_invocation_response(None, &body_bytes);
     }
 
     let (intercepted_parts, intercepted_bytes) =
@@ -256,7 +267,7 @@ async fn invocation_response_proxy(
 }
 
 async fn passthrough_proxy(
-    State((_, aws_config, client, _, _)): State<InterceptorState>,
+    State((aws_config, client, _, _, _)): State<InterceptorState>,
     request: Request,
 ) -> Response {
     let (parts, body_bytes) = match extract_request_body(request).await {
