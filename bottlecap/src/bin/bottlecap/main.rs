@@ -535,7 +535,10 @@ async fn extension_loop_active(
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
         debug!("Current flush decision: {:?}", current_flush_decision);
-        debug!("Last continuous flush error: {:?}", last_continuous_flush_error);
+        debug!(
+            "Last continuous flush error: {:?}",
+            last_continuous_flush_error
+        );
         if current_flush_decision == FlushDecision::End {
             debug!("End flush scenario");
             // break loop after runtime done
