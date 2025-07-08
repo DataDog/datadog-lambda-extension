@@ -173,7 +173,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
 
         let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
         let mut send_data = send_data_builder
-            .with_compression(Compression::Zstd(6))
+            .with_compression(Compression::Zstd(config.apm_config_compression_level))
             .build();
         send_data.set_retry_strategy(RetryStrategy::new(
             1,

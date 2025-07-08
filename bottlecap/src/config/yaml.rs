@@ -132,6 +132,7 @@ pub struct ApmConfig {
     #[serde(deserialize_with = "deserialize_apm_replace_rules")]
     pub replace_tags: Option<Vec<ReplaceRule>>,
     pub obfuscation: Option<ApmObfuscation>,
+    pub compression_level: Option<i32>,
     pub features: Vec<String>,
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
     pub additional_endpoints: HashMap<String, Vec<String>>,
@@ -412,6 +413,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         yaml_config.apm_config,
         replace_tags
     );
+    merge_option_to_value!(
+        config,
+        apm_config_compression_level,
+        yaml_config.apm_config,
+        compression_level
+    );
     merge_hashmap!(
         config,
         apm_additional_endpoints,
@@ -685,6 +692,7 @@ apm_config:
     http:
       remove_query_string: true
       remove_paths_with_digits: true
+  compression_level: 3
   features:
     - "enable_otlp_compute_top_level_by_span_kind"
     - "enable_stats_by_span_kind"
@@ -811,6 +819,7 @@ extension_version: "compatibility"
                 apm_replace_tags: Some(vec![]),
                 apm_config_obfuscation_http_remove_query_string: true,
                 apm_config_obfuscation_http_remove_paths_with_digits: true,
+                apm_config_compression_level: 3,
                 apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
