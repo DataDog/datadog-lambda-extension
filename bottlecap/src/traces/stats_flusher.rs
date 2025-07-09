@@ -60,11 +60,15 @@ impl StatsFlusher for ServerlessStatsFlusher {
             return;
         }
 
+        let Some(api_key) = self.api_key_factory.get_api_key().await else {
+            error!("Skipping flushing stats: Failed to resolve API key");
+            return;
+        };
+
         let endpoint = self
             .endpoint
             .get_or_init({
                 move || async move {
-                    let api_key = self.api_key_factory.get_api_key().await.to_string();
                     let stats_url = trace_stats_url(&self.config.site);
                     Endpoint {
                         url: hyper::Uri::from_str(&stats_url)
@@ -95,12 +99,8 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let start = std::time::Instant::now();
 
-        let resp = stats_utils::send_stats_payload(
-            serialized_stats_payload,
-            endpoint,
-            self.api_key_factory.get_api_key().await,
-        )
-        .await;
+        let resp =
+            stats_utils::send_stats_payload(serialized_stats_payload, endpoint, api_key).await;
         let elapsed = start.elapsed();
         debug!(
             "Stats request to {} took {}ms",

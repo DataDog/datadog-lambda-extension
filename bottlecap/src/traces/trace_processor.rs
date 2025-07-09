@@ -155,6 +155,10 @@ impl TraceProcessor for ServerlessTraceProcessor {
             error!("Error processing traces: {:?}", e);
             TracerPayloadCollection::V07(vec![])
         });
+        let Some(api_key) = self.api_key_factory.get_api_key().await else {
+            error!("Error processing traces: failed to resolve API key");
+            return None;
+        };
         if let TracerPayloadCollection::V07(ref mut collection) = payload {
             // add function tags to all payloads in this TracerPayloadCollection
             let tags = tags_provider.get_function_tags_map();
@@ -162,7 +166,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 tracer_payload.tags.extend(tags.clone());
             }
         }
-        let api_key = self.api_key_factory.get_api_key().await.to_string();
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_dd_url)
                 .expect("can't parse trace intake URL, exiting"),
