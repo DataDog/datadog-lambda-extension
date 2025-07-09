@@ -18,6 +18,7 @@ use serde_aux::prelude::deserialize_bool_from_anything;
 use serde_json::Value;
 
 use std::path::Path;
+use std::time::Duration;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
@@ -325,6 +326,8 @@ pub struct Config {
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
     pub serverless_appsec_enabled: bool,
+    pub appsec_rules: Option<String>,
+    pub appsec_waf_timeout: Duration,
     pub extension_version: Option<String>,
 }
 
@@ -407,6 +410,8 @@ impl Default for Config {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             serverless_appsec_enabled: false,
+            appsec_rules: None,
+            appsec_waf_timeout: Duration::from_millis(1),
             extension_version: None,
         }
     }
@@ -428,13 +433,6 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
         log_fallback_reason("extension_version");
         return Err(ConfigError::UnsupportedField(
             "extension_version".to_string(),
-        ));
-    }
-
-    if config.serverless_appsec_enabled {
-        log_fallback_reason("appsec_enabled");
-        return Err(ConfigError::UnsupportedField(
-            "serverless_appsec_enabled".to_string(),
         ));
     }
 
@@ -514,6 +512,16 @@ where
     }
 }
 
+pub fn deserialize_optional_duration_from_optional_microseconds<'de, D>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let micros: Option<u64> = Option::deserialize(deserializer)?;
+    Ok(micros.map(Duration::from_micros))
+}
+
 pub fn deserialize_optional_bool_from_anything<'de, D>(
     deserializer: D,
 ) -> Result<Option<bool>, D::Error>
@@ -543,7 +551,7 @@ where
 {
     struct KeyValueVisitor;
 
-    impl<'de> serde::de::Visitor<'de> for KeyValueVisitor {
+    impl serde::de::Visitor<'_> for KeyValueVisitor {
         type Value = HashMap<String, String>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -606,10 +614,11 @@ pub mod tests {
 
     use super::*;
 
-    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
-    use crate::config::log_level::LogLevel;
-    use crate::config::processing_rule;
-    use crate::config::trace_propagation_style::TracePropagationStyle;
+    use crate::config::{
+        flush_strategy::{FlushStrategy, PeriodicStrategy},
+        log_level::LogLevel,
+        trace_propagation_style::TracePropagationStyle,
+    };
 
     #[test]
     fn test_reject_on_opted_out() {
@@ -739,21 +748,6 @@ pub mod tests {
 
             let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.dd_url, String::new());
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_allowed_but_disabled() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
-
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("serverless_appsec_enabled".to_string())
-            );
             Ok(())
         });
     }

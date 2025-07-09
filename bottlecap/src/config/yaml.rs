@@ -613,6 +613,7 @@ impl ConfigSource for YamlConfigSource {
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::Duration;
 
     use crate::config::{flush_strategy::PeriodicStrategy, processing_rule::Kind};
 
@@ -847,6 +848,8 @@ extension_version: "compatibility"
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 serverless_appsec_enabled: true,
+                appsec_rules: None,
+                appsec_waf_timeout: Duration::from_millis(1),
                 extension_version: Some("compatibility".to_string()),
             };
 

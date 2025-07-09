@@ -1,6 +1,10 @@
+use crate::appsec;
 use crate::{
-    config::aws::AwsConfig, http::extract_request_body,
-    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa, EXTENSION_HOST,
+    appsec::processor::Processor as AppSecProcessor,
+    config::{aws::AwsConfig, Config},
+    http::extract_request_body,
+    lifecycle::invocation::processor::Processor as InvocationProcessor,
+    lwa, EXTENSION_HOST,
 };
 use axum::{
     body::{Body, Bytes},
@@ -30,10 +34,12 @@ type InterceptorState = (
     AwsConfig,
     Arc<Client<HttpConnector, Body>>,
     Arc<Mutex<InvocationProcessor>>,
+    Option<Arc<AppSecProcessor>>,
     Arc<Mutex<JoinSet<()>>>,
 );
 
 pub fn start(
+    config: Arc<Config>,
     aws_config: AwsConfig,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
@@ -48,15 +54,21 @@ pub fn start(
         .pool_max_idle_per_host(8)
         .build(connector);
 
+    let appsec_processor = if appsec::is_enabled(&config) {
+        Some(Arc::new(AppSecProcessor::new(config.as_ref())?))
+    } else {
+        None
+    };
+
     let tasks = Arc::new(Mutex::new(JoinSet::new()));
     let state: InterceptorState = (
         aws_config,
         Arc::new(client),
         invocation_processor,
-        tasks.clone(),
+        appsec_processor,
+        Arc::clone(&tasks),
     );
 
-    let tasks_clone = tasks.clone();
     let shutdown_token_clone = shutdown_token.clone();
     tokio::spawn(async move {
         let server = TcpListener::bind(&socket)
@@ -65,7 +77,7 @@ pub fn start(
         let router = make_router(state);
         debug!("PROXY | Starting API runtime proxy on {socket}");
         axum::serve(server, router)
-            .with_graceful_shutdown(graceful_shutdown(tasks_clone, shutdown_token_clone))
+            .with_graceful_shutdown(graceful_shutdown(tasks, shutdown_token_clone))
             .await
             .expect("Failed to start API runtime proxy");
     });
@@ -126,7 +138,9 @@ fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -
 
 async fn invocation_next_proxy(
     Path(api_version): Path<String>,
-    State((aws_config, client, invocation_processor, tasks)): State<InterceptorState>,
+    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+        InterceptorState,
+    >,
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_next_proxy | api_version: {api_version}");
@@ -148,12 +162,13 @@ async fn invocation_next_proxy(
                 error!("PROXY | passthrough_proxy | error proxying request: {e}");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to proxy request: {e}"),
+                    format!("Failed to build forward response: {e}"),
                 )
                     .into_response();
             }
         };
 
+    // LWA
     if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
         let mut tasks = tasks.lock().await;
 
@@ -168,6 +183,13 @@ async fn invocation_next_proxy(
             )
             .await;
         });
+    }
+
+    // K9 / ASM
+    if let Some(appsec_processor) = appsec_processor {
+        let _ = appsec_processor
+            .process_invocation_next(&intercepted_bytes)
+            .await;
     }
 
     match build_forward_response(intercepted_parts, intercepted_bytes) {
@@ -185,7 +207,9 @@ async fn invocation_next_proxy(
 
 async fn invocation_response_proxy(
     Path((api_version, request_id)): Path<(String, String)>,
-    State((aws_config, client, invocation_processor, tasks)): State<InterceptorState>,
+    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+        InterceptorState,
+    >,
     request: Request,
 ) -> Response {
     debug!(
@@ -202,6 +226,7 @@ async fn invocation_response_proxy(
         }
     };
 
+    // LWA
     if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
         let mut tasks = tasks.lock().await;
 
@@ -210,6 +235,11 @@ async fn invocation_response_proxy(
         tasks.spawn(async move {
             lwa::process_invocation_response(&invocation_processor, &body_bytes).await;
         });
+    }
+
+    // K9 / ASM
+    if let Some(appsec_processor) = appsec_processor {
+        appsec_processor.process_invocation_response(None, &body_bytes);
     }
 
     let (intercepted_parts, intercepted_bytes) =
@@ -239,7 +269,7 @@ async fn invocation_response_proxy(
 }
 
 async fn passthrough_proxy(
-    State((aws_config, client, _, _)): State<InterceptorState>,
+    State((aws_config, client, _, _, _)): State<InterceptorState>,
     request: Request,
 ) -> Response {
     let (parts, body_bytes) = match extract_request_body(request).await {
@@ -413,8 +443,8 @@ mod tests {
             metrics_aggregator,
         )));
 
-        let proxy_handle =
-            start(aws_config, invocation_processor).expect("Failed to start API runtime proxy");
+        let proxy_handle = start(config.clone(), aws_config, invocation_processor)
+            .expect("Failed to start API runtime proxy");
         let https = HttpConnector::new();
         let client = Client::builder(hyper_util::rt::TokioExecutor::new())
             .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https);
