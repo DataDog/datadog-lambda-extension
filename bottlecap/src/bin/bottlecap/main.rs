@@ -354,27 +354,10 @@ async fn main() -> Result<()> {
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
     let aws_config = Arc::new(aws_config);
-    let aws_credentials = Arc::new(RwLock::new(aws_credentials));
-    let api_key_factory = {
-        let config = Arc::clone(&config);
-        let aws_config = Arc::clone(&aws_config);
-        let aws_credentials = Arc::clone(&aws_credentials);
-
-        Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
-            let config = Arc::clone(&config);
-            let aws_config = Arc::clone(&aws_config);
-            let aws_credentials = Arc::clone(&aws_credentials);
-
-            Box::pin(async move {
-                resolve_secrets(config, aws_config, aws_credentials)
-                    .await
-                    .expect("Failed to resolve API key")
-            })
-        })))
-    };
+    let api_key_factory = create_api_key_factory(&config, &aws_config, aws_credentials);
 
     match extension_loop_active(
-        aws_config,
+        Arc::clone(&aws_config),
         &config,
         &client,
         &r,
@@ -432,6 +415,28 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     debug!("Logging subsystem enabled");
+}
+
+fn create_api_key_factory(
+    config: &Arc<Config>,
+    aws_config: &Arc<AwsConfig>,
+    aws_credentials: AwsCredentials,
+) -> Arc<ApiKeyFactory> {
+    let config = Arc::clone(config);
+    let aws_config = Arc::clone(aws_config);
+    let aws_credentials = Arc::new(RwLock::new(aws_credentials));
+
+    Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
+        let config = Arc::clone(&config);
+        let aws_config = Arc::clone(&aws_config);
+        let aws_credentials = Arc::clone(&aws_credentials);
+
+        Box::pin(async move {
+            resolve_secrets(config, aws_config, aws_credentials)
+                .await
+                .expect("Failed to resolve API key")
+        })
+    })))
 }
 
 async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
