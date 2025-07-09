@@ -431,11 +431,7 @@ fn create_api_key_factory(
         let aws_config = Arc::clone(&aws_config);
         let aws_credentials = Arc::clone(&aws_credentials);
 
-        Box::pin(async move {
-            resolve_secrets(config, aws_config, aws_credentials)
-                .await
-                .expect("Failed to resolve API key")
-        })
+        Box::pin(async move { resolve_secrets(config, aws_config, aws_credentials).await })
     })))
 }
 

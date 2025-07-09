@@ -57,6 +57,11 @@ impl Flusher {
         let api_key = self.api_key_factory.get_api_key().await;
 
         let mut set = JoinSet::new();
+        let api_key = self.api_key_factory.get_api_key().await;
+        let Some(api_key) = api_key else {
+            error!("Skipping flush: Failed to resolve API key");
+            return vec![];
+        };
 
         if let Some(logs_batches) = batches {
             for batch in logs_batches.iter() {
