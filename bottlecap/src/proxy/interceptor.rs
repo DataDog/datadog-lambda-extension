@@ -399,7 +399,6 @@ mod tests {
         let metrics_aggregator = Arc::new(Mutex::new(
             MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
         ));
-
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "arn:some-function".to_string(),

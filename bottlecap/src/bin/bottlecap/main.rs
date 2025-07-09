@@ -439,11 +439,7 @@ fn create_api_key_factory(
         let aws_config = Arc::clone(&aws_config);
         let aws_credentials = Arc::clone(&aws_credentials);
 
-        Box::pin(async move {
-            resolve_secrets(config, aws_config, aws_credentials)
-                .await
-                .expect("Failed to resolve API key")
-        })
+        Box::pin(async move { resolve_secrets(config, aws_config, aws_credentials).await })
     })))
 }
 
@@ -517,7 +513,7 @@ async fn extension_loop_active(
         trace_agent_shutdown_token,
     ) = start_trace_agent(
         config,
-        Arc::clone(&api_key_factory),
+        &api_key_factory,
         &tags_provider,
         Arc::clone(&invocation_processor),
         Arc::clone(&trace_aggregator),
@@ -1038,7 +1034,7 @@ fn start_metrics_flushers(
 #[allow(clippy::type_complexity)]
 fn start_trace_agent(
     config: &Arc<Config>,
-    api_key_factory: Arc<ApiKeyFactory>,
+    api_key_factory: &Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
@@ -1064,6 +1060,7 @@ fn start_trace_agent(
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         aggregator: trace_aggregator.clone(),
         config: Arc::clone(config),
+        api_key_factory: Arc::clone(api_key_factory),
     });
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
@@ -1077,7 +1074,6 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        api_key_factory: api_key_factory.clone(),
     });
 
     // Proxy
@@ -1098,7 +1094,6 @@ fn start_trace_agent(
         proxy_aggregator,
         invocation_processor,
         Arc::clone(tags_provider),
-        api_key_factory,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();

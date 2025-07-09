@@ -10,13 +10,18 @@ use datadog_trace_utils::{
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
+use dogstatsd::api_key::ApiKeyFactory;
 
 use crate::config::Config;
 use crate::traces::trace_aggregator::TraceAggregator;
 
 #[async_trait]
 pub trait TraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self
+    fn new(
+        aggregator: Arc<Mutex<TraceAggregator>>,
+        config: Arc<Config>,
+        api_key_factory: Arc<ApiKeyFactory>,
+    ) -> Self
     where
         Self: Sized;
     /// Given a `Vec<SendData>`, a tracer payload, send it to the Datadog intake endpoint.
@@ -34,15 +39,29 @@ pub trait TraceFlusher {
 pub struct ServerlessTraceFlusher {
     pub aggregator: Arc<Mutex<TraceAggregator>>,
     pub config: Arc<Config>,
+    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self {
-        ServerlessTraceFlusher { aggregator, config }
+    fn new(
+        aggregator: Arc<Mutex<TraceAggregator>>,
+        config: Arc<Config>,
+        api_key_factory: Arc<ApiKeyFactory>,
+    ) -> Self {
+        ServerlessTraceFlusher {
+            aggregator,
+            config,
+            api_key_factory,
+        }
     }
 
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
+        let Some(api_key) = self.api_key_factory.get_api_key().await else {
+            error!("Skipping flushing traces: Failed to resolve API key");
+            return None;
+        };
+
         let mut failed_batch: Option<Vec<SendData>> = None;
 
         if let Some(traces) = failed_traces {
@@ -64,6 +83,8 @@ impl TraceFlusher for ServerlessTraceFlusher {
         while !trace_builders.is_empty() {
             let traces: Vec<_> = trace_builders
                 .into_iter()
+                // Lazily set the API key
+                .map(|builder| builder.with_api_key(&api_key))
                 .map(SendDataBuilder::build)
                 .collect();
             if let Some(failed) = self.send(traces).await {

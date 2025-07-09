@@ -42,7 +42,6 @@ impl Flusher {
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(&config);
-
         Flusher {
             client,
             endpoint,
@@ -54,7 +53,10 @@ impl Flusher {
     }
 
     pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
-        let api_key = self.api_key_factory.get_api_key().await;
+        let Some(api_key) = self.api_key_factory.get_api_key().await else {
+            error!("Skipping flushing logs: Failed to resolve API key");
+            return vec![];
+        };
 
         let mut set = JoinSet::new();
 
