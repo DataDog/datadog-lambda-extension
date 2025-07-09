@@ -52,14 +52,14 @@ rustls-native-certs = { version = "0.8.1", optional = true }
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "c89b58e5784b985819baf11f13f7d35876741222"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "57fbbcfc1eb7f6a2ebc21748508ef17327461180" }
-datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "57fbbcfc1eb7f6a2ebc21748508ef17327461180"  }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "57fbbcfc1eb7f6a2ebc21748508ef17327461180" , features = ["compression"] }
-datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "57fbbcfc1eb7f6a2ebc21748508ef17327461180" }
-datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "57fbbcfc1eb7f6a2ebc21748508ef17327461180"  }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "dc14a4cbd8c1b1020afed8cb02eb2dd698884af4", default-features = false }
-datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "dc14a4cbd8c1b1020afed8cb02eb2dd698884af4" }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "dc14a4cbd8c1b1020afed8cb02eb2dd698884af4", default-features = false }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "b708db75c1f21addcd43cf607d0ebf2ff4cfb17f" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "b708db75c1f21addcd43cf607d0ebf2ff4cfb17f"  }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "b708db75c1f21addcd43cf607d0ebf2ff4cfb17f" , features = ["compression"] }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "b708db75c1f21addcd43cf607d0ebf2ff4cfb17f" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "b708db75c1f21addcd43cf607d0ebf2ff4cfb17f"  }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "2643867ebc240bd356a5f974c3aab9e973fba721", default-features = false }
+datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "2643867ebc240bd356a5f974c3aab9e973fba721" }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "2643867ebc240bd356a5f974c3aab9e973fba721", default-features = false }
 axum = { version = "0.8.4", default-features = false, features = ["default"] }
 
 [dev-dependencies]
