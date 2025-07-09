@@ -20,7 +20,6 @@ use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
 use ddcommon::Endpoint;
-use dogstatsd::api_key::ApiKeyFactory;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
@@ -29,7 +28,6 @@ use tracing::error;
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 struct ChunkProcessor {
@@ -127,6 +125,7 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
+        api_key: &str,
     ) -> SendData;
 }
 
@@ -140,6 +139,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
+        api_key: &str,
     ) -> SendData {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
@@ -155,10 +155,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
             error!("Error processing traces: {:?}", e);
             TracerPayloadCollection::V07(vec![])
         });
-        let Some(api_key) = self.api_key_factory.get_api_key().await else {
-            error!("Error processing traces: failed to resolve API key");
-            return None;
-        };
         if let TracerPayloadCollection::V07(ref mut collection) = payload {
             // add function tags to all payloads in this TracerPayloadCollection
             let tags = tags_provider.get_function_tags_map();
@@ -196,7 +192,6 @@ mod tests {
     };
 
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-    use dogstatsd::api_key::ApiKeyFactory;
 
     use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
 
@@ -301,7 +296,6 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            api_key_factory: Arc::new(ApiKeyFactory::new("test-api-key")),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
@@ -313,6 +307,7 @@ mod tests {
             traces,
             100,
             None,
+            "test-api-key",
         );
 
         let expected_tracer_payload = pb::TracerPayload {

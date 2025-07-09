@@ -493,6 +493,7 @@ async fn extension_loop_active(
         Arc::clone(config),
         Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
+        Arc::clone(&api_key_factory),
     )));
 
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
@@ -535,6 +536,7 @@ async fn extension_loop_active(
         tags_provider.clone(),
         trace_processor.clone(),
         trace_agent_channel.clone(),
+        Arc::clone(&api_key_factory),
     );
 
     let mut flush_control =
@@ -1067,7 +1069,6 @@ fn start_trace_agent(
 
     let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
         obfuscation_config: Arc::new(obfuscation_config),
-        api_key_factory: api_key_factory.clone(),
     });
 
     // Proxy
@@ -1157,12 +1158,19 @@ fn start_otlp_agent(
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendData>,
+    api_key_factory: Arc<ApiKeyFactory>,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;
     }
 
-    let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
+    let agent = OtlpAgent::new(
+        config.clone(),
+        tags_provider,
+        trace_processor,
+        trace_tx,
+        api_key_factory,
+    );
     let cancel_token = agent.cancel_token();
     tokio::spawn(async move {
         if let Err(e) = agent.start() {

@@ -73,6 +73,7 @@ pub struct TraceState {
     pub trace_tx: Sender<SendData>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
+    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 #[derive(Clone)]
@@ -196,6 +197,7 @@ impl TraceAgent {
             trace_tx: self.tx.clone(),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
+            api_key_factory: Arc::clone(&self.api_key_factory),
         };
 
         let stats_state = StatsState {
@@ -263,6 +265,7 @@ impl TraceAgent {
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V04,
+            state.api_key_factory,
         )
         .await
     }
@@ -276,6 +279,7 @@ impl TraceAgent {
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V05,
+            state.api_key_factory,
         )
         .await
     }
@@ -394,6 +398,8 @@ impl TraceAgent {
         (StatusCode::OK, response_json.to_string()).into_response()
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     async fn handle_traces(
         config: Arc<config::Config>,
         request: Request,
@@ -402,7 +408,15 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
+        api_key_factory: Arc<ApiKeyFactory>,
     ) -> Response {
+        let Some(api_key) = api_key_factory.get_api_key().await else {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve API key",
+            );
+        };
+
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
@@ -499,6 +513,7 @@ impl TraceAgent {
                 traces,
                 body_size,
                 None,
+                api_key,
             )
             .await;
 

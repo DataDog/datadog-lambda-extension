@@ -350,7 +350,9 @@ mod tests {
     };
     use tokio::sync::Mutex as TokioMutex;
 
-    use dogstatsd::{aggregator::Aggregator as MetricsAggregator, metric::EMPTY_TAGS};
+    use dogstatsd::{
+        aggregator::Aggregator as MetricsAggregator, api_key::ApiKeyFactory, metric::EMPTY_TAGS,
+    };
     use http_body_util::Full;
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
@@ -397,7 +399,6 @@ mod tests {
         let metrics_aggregator = Arc::new(Mutex::new(
             MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
         ));
-
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "arn:some-function".to_string(),
@@ -406,11 +407,13 @@ mod tests {
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
         });
+        let api_key_factory = Arc::new(ApiKeyFactory::new("test-api-key"));
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             Arc::clone(&aws_config),
             metrics_aggregator,
+            api_key_factory,
         )));
 
         let proxy_handle =
