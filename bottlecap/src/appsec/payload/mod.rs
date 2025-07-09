@@ -10,7 +10,6 @@ use tracing::warn;
 
 mod request;
 
-
 trait IsValid {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool;
 }
@@ -131,13 +130,12 @@ enum RequestType {
     LambdaFunctionUrl,
 }
 
-
 trait Extractor {
     const TYPE: RequestType;
-    fn extract(self) -> HttpRequestData;
+    async fn extract(self) -> HttpRequestData;
 }
 
-pub(super) fn extract_request_address_data(body: &Bytes) -> Option<WafMap> {
+pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<WafMap> {
     let reader = body.clone().reader();
     let data: serde_json::Map<String, serde_json::Value> = match serde_json::from_reader(reader) {
         Ok(data) => data,
@@ -158,7 +156,7 @@ pub(super) fn extract_request_address_data(body: &Bytes) -> Option<WafMap> {
                 let Ok(val) = serde_json::from_value::<$ty>(serde_json::Value::Object(data)) else {
                     return None;
                 };
-                return Some(val.extract().to_waf_map());
+                return Some(val.extract().await.to_waf_map());
             }
         };
     }

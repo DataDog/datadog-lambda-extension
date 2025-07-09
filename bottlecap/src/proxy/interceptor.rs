@@ -187,7 +187,9 @@ async fn invocation_next_proxy(
 
     // K9 / ASM
     if let Some(appsec_processor) = appsec_processor {
-        appsec_processor.process_invocation_next(&intercepted_bytes);
+        let _ = appsec_processor
+            .process_invocation_next(&intercepted_bytes)
+            .await;
     }
 
     match build_forward_response(intercepted_parts, intercepted_bytes) {

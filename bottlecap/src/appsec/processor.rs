@@ -61,8 +61,8 @@ impl Processor {
     /// Process the `/runtime/invocation/next` payload, which is sent to Lambda to request an
     /// invocation event.
     #[must_use]
-    pub fn process_invocation_next(&self, body: &Bytes) -> Option<ProcessorContext> {
-        let address_data = payload::extract_request_address_data(body)?;
+    pub async fn process_invocation_next(&self, body: &Bytes) -> Option<ProcessorContext> {
+        let address_data = payload::extract_request_address_data(body).await?;
 
         let mut context = ProcessorContext {
             waf_context: self.handle.new_context(),
