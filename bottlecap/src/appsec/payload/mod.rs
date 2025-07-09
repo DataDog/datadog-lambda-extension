@@ -5,16 +5,17 @@ use aws_lambda_events::{
     lambda_function_urls, s3, sns, sqs,
 };
 use bytes::{Buf, Bytes};
-use libddwaf::object::{WAFArray, WAFMap, WAFObject};
+use libddwaf::object::{WafArray, WafMap, WafObject};
 use tracing::warn;
 
 mod request;
+
 
 trait IsValid {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool;
 }
 
-struct HTTPRequestData {
+struct HttpRequestData {
     source_ip: Option<String>,
     route: Option<String>,
     client_ip: Option<String>,
@@ -23,16 +24,16 @@ struct HTTPRequestData {
     cookies: Option<HashMap<String, Vec<String>>>,
     query: Option<HashMap<String, Vec<String>>>,
     path_params: Option<HashMap<String, String>>,
-    body: Option<WAFObject>,
-    response_body: Option<WAFObject>,
+    body: Option<WafObject>,
+    response_body: Option<WafObject>,
     response_status: Option<u32>,
 }
 
-trait ToWAFMap {
-    fn to_waf_map(self) -> WAFMap;
+trait ToWafMap {
+    fn to_waf_map(self) -> WafMap;
 }
-impl ToWAFMap for HTTPRequestData {
-    fn to_waf_map(self) -> WAFMap {
+impl ToWafMap for HttpRequestData {
+    fn to_waf_map(self) -> WafMap {
         let count = [
             self.client_ip.is_some(),
             self.raw_uri.is_some(),
@@ -47,7 +48,7 @@ impl ToWAFMap for HTTPRequestData {
         .into_iter()
         .filter(|b| *b)
         .count();
-        let mut map = WAFMap::new(count as u64);
+        let mut map = WafMap::new(count as u64);
         let mut i = 0;
 
         if let Some(client_ip) = self.client_ip {
@@ -92,12 +93,12 @@ impl ToWAFMap for HTTPRequestData {
         map
     }
 }
-impl ToWAFMap for HashMap<String, Vec<String>> {
-    fn to_waf_map(self) -> WAFMap {
-        let mut map = WAFMap::new(self.len() as u64);
+impl ToWafMap for HashMap<String, Vec<String>> {
+    fn to_waf_map(self) -> WafMap {
+        let mut map = WafMap::new(self.len() as u64);
 
         for (i, (k, v)) in self.into_iter().enumerate() {
-            let mut arr = WAFArray::new(v.len() as u64);
+            let mut arr = WafArray::new(v.len() as u64);
             for (j, v) in v.into_iter().enumerate() {
                 arr[j] = v.as_str().into();
             }
@@ -108,9 +109,9 @@ impl ToWAFMap for HashMap<String, Vec<String>> {
         map
     }
 }
-impl ToWAFMap for HashMap<String, String> {
-    fn to_waf_map(self) -> WAFMap {
-        let mut map = WAFMap::new(self.len() as u64);
+impl ToWafMap for HashMap<String, String> {
+    fn to_waf_map(self) -> WafMap {
+        let mut map = WafMap::new(self.len() as u64);
 
         for (i, (k, v)) in self.into_iter().enumerate() {
             map[i] = (k.as_str(), v.as_str()).into();
@@ -120,11 +121,23 @@ impl ToWAFMap for HashMap<String, String> {
     }
 }
 
-trait Extractor<'d>: serde::de::Deserialize<'d> + IsValid {
-    fn extract(self) -> HTTPRequestData;
+enum RequestType {
+    APIGatewayV1, // Or Kong
+    APIGatewayV2Http,
+    APIGatewayV2Websocket,
+    APIGatewayLambdaAuthorizerToken,
+    APIGatewayLambdaAuthorizerRequest,
+    Alb,
+    LambdaFunctionUrl,
 }
 
-pub(super) fn extract_request_address_data(body: &Bytes) -> Option<WAFMap> {
+
+trait Extractor {
+    const TYPE: RequestType;
+    fn extract(self) -> HttpRequestData;
+}
+
+pub(super) fn extract_request_address_data(body: &Bytes) -> Option<WafMap> {
     let reader = body.clone().reader();
     let data: serde_json::Map<String, serde_json::Value> = match serde_json::from_reader(reader) {
         Ok(data) => data,
@@ -185,7 +198,7 @@ pub(super) fn extract_request_address_data(body: &Bytes) -> Option<WAFMap> {
     None
 }
 
-pub(super) fn extract_response_address_data(body: &Bytes) -> Option<WAFMap> {
+pub(super) fn extract_response_address_data(body: &Bytes) -> Option<WafMap> {
     let reader = body.clone().reader();
     let data: serde_json::Map<String, serde_json::Value> = match serde_json::from_reader(reader) {
         Ok(data) => data,

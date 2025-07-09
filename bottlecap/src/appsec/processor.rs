@@ -4,7 +4,7 @@ use crate::appsec::{is_enabled, is_standalone, payload};
 use crate::config::Config;
 
 use bytes::Bytes;
-use libddwaf::object::{WAFMap, WAFOwned};
+use libddwaf::object::{WafMap, WafOwned};
 use libddwaf::{Builder, Config as WAFConfig, Context, Handle};
 use tracing::{debug, info, warn};
 /// The App & API Protection processor.
@@ -13,7 +13,7 @@ use tracing::{debug, info, warn};
 /// the request payload, and evaluate in-app WAF rules against that data.
 pub struct Processor {
     handle: Handle,
-    diagnostics: WAFOwned<WAFMap>,
+    diagnostics: WafOwned<WafMap>,
     waf_timeout: Duration,
 }
 
@@ -42,7 +42,7 @@ impl Processor {
         };
 
         let rules = Self::get_rules(config)?;
-        let mut diagnostics = WAFOwned::<WAFMap>::default();
+        let mut diagnostics = WafOwned::<WafMap>::default();
         if !builder.add_or_update_config("rules", &rules, Some(&mut diagnostics)) {
             return Err("Failed to add ruleset to the WAF builder".into());
         }
@@ -93,7 +93,7 @@ impl Processor {
 
     /// Parses the App & API Protection ruleset from the provided [Config], falling back to the
     /// default built-in ruleset if the [Config] has [None].
-    fn get_rules(config: &Config) -> Result<WAFMap, Box<dyn std::error::Error>> {
+    fn get_rules(config: &Config) -> Result<WafMap, Box<dyn std::error::Error>> {
         // Default on recommended rules
         match &config.appsec_rules {
             None => {
@@ -117,7 +117,7 @@ pub struct ProcessorContext {
 }
 impl ProcessorContext {
     /// Evaluates the in-app WAF rules against the provided address data.
-    fn run(&mut self, address_data: WAFMap) {
+    fn run(&mut self, address_data: WafMap) {
         let result = match self
             .waf_context
             .run(Some(address_data), None, self.waf_timeout)
