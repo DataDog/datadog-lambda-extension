@@ -55,17 +55,28 @@ const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 
-type AgentState = (
-    Arc<config::Config>,
-    Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    Sender<SendData>,
-    Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
-    Sender<pb::ClientStatsPayload>,
-    Arc<Mutex<InvocationProcessor>>,
-    Arc<provider::Provider>,
-    reqwest::Client,
-    String, // api_key
-);
+#[derive(Clone)]
+pub struct TraceState {
+    pub config: Arc<config::Config>,
+    pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
+    pub trace_tx: Sender<SendData>,
+    pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    pub tags_provider: Arc<provider::Provider>,
+}
+
+#[derive(Clone)]
+pub struct StatsState {
+    pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
+    pub stats_tx: Sender<pb::ClientStatsPayload>,
+}
+
+#[derive(Clone)]
+pub struct ProxyState {
+    pub config: Arc<config::Config>,
+    pub tags_provider: Arc<provider::Provider>,
+    pub http_client: reqwest::Client,
+    pub api_key: String,
+}
 
 pub struct TraceAgent {
     pub config: Arc<config::Config>,
@@ -168,19 +179,27 @@ impl TraceAgent {
     }
 
     fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
-        let state: AgentState = (
-            Arc::clone(&self.config),
-            Arc::clone(&self.trace_processor),
-            self.tx.clone(),
-            Arc::clone(&self.stats_processor),
-            stats_tx,
-            Arc::clone(&self.invocation_processor),
-            Arc::clone(&self.tags_provider),
-            self.http_client.clone(),
-            self.api_key.clone(),
-        );
+        let trace_state = TraceState {
+            config: Arc::clone(&self.config),
+            trace_processor: Arc::clone(&self.trace_processor),
+            trace_tx: self.tx.clone(),
+            invocation_processor: Arc::clone(&self.invocation_processor),
+            tags_provider: Arc::clone(&self.tags_provider),
+        };
 
-        Router::new()
+        let stats_state = StatsState {
+            stats_processor: Arc::clone(&self.stats_processor),
+            stats_tx,
+        };
+
+        let proxy_state = ProxyState {
+            config: Arc::clone(&self.config),
+            tags_provider: Arc::clone(&self.tags_provider),
+            http_client: self.http_client.clone(),
+            api_key: self.api_key.clone(),
+        };
+
+        let trace_router = Router::new()
             .route(
                 V4_TRACE_ENDPOINT_PATH,
                 post(Self::v04_traces).put(Self::v04_traces),
@@ -189,7 +208,13 @@ impl TraceAgent {
                 V5_TRACE_ENDPOINT_PATH,
                 post(Self::v05_traces).put(Self::v05_traces),
             )
+            .with_state(trace_state);
+
+        let stats_router = Router::new()
             .route(STATS_ENDPOINT_PATH, post(Self::stats).put(Self::stats))
+            .with_state(stats_state);
+
+        let proxy_router = Router::new()
             .route(DSM_AGENT_PATH, post(Self::dsm_proxy))
             .route(PROFILING_ENDPOINT_PATH, post(Self::profiling_proxy))
             .route(
@@ -202,9 +227,16 @@ impl TraceAgent {
             )
             .route(LLM_OBS_SPANS_ENDPOINT_PATH, post(Self::llm_obs_spans_proxy))
             .route(DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
-            .route(INFO_ENDPOINT_PATH, any(Self::info))
+            .with_state(proxy_state);
+
+        let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
+
+        Router::new()
+            .merge(trace_router)
+            .merge(stats_router)
+            .merge(proxy_router)
+            .merge(info_router)
             .fallback(handler_not_found)
-            .with_state(state)
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
@@ -212,43 +244,38 @@ impl TraceAgent {
         debug!("Trace Agent | Shutdown signal received, shutting down");
     }
 
-    async fn v04_traces(
-        State((config, trace_processor, trace_tx, _, _, invocation_processor, tags_provider, _, _)): State<AgentState>,
-        request: Request,
-    ) -> Response {
+    async fn v04_traces(State(state): State<TraceState>, request: Request) -> Response {
         Self::handle_traces(
-            config,
+            state.config,
             request,
-            trace_processor,
-            trace_tx,
-            invocation_processor,
-            tags_provider,
+            state.trace_processor,
+            state.trace_tx,
+            state.invocation_processor,
+            state.tags_provider,
             ApiVersion::V04,
         )
         .await
     }
 
-    async fn v05_traces(
-        State((config, trace_processor, trace_tx, _, _, invocation_processor, tags_provider, _, _)): State<AgentState>,
-        request: Request,
-    ) -> Response {
+    async fn v05_traces(State(state): State<TraceState>, request: Request) -> Response {
         Self::handle_traces(
-            config,
+            state.config,
             request,
-            trace_processor,
-            trace_tx,
-            invocation_processor,
-            tags_provider,
+            state.trace_processor,
+            state.trace_tx,
+            state.invocation_processor,
+            state.tags_provider,
             ApiVersion::V05,
         )
         .await
     }
 
-    async fn stats(
-        State((_, _, _, stats_processor, stats_tx, _, _, _, _)): State<AgentState>,
-        request: Request,
-    ) -> Response {
-        match stats_processor.process_stats(request, stats_tx).await {
+    async fn stats(State(state): State<StatsState>, request: Request) -> Response {
+        match state
+            .stats_processor
+            .process_stats(request, state.stats_tx)
+            .await
+        {
             Ok(result) => result.into_response(),
             Err(err) => error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -257,15 +284,12 @@ impl TraceAgent {
         }
     }
 
-    async fn dsm_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
-        request: Request,
-    ) -> Response {
+    async fn dsm_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
+            state.config,
+            state.http_client,
+            state.api_key,
+            state.tags_provider,
             request,
             "trace.agent",
             DSM_ENDPOINT_PATH,
@@ -274,15 +298,12 @@ impl TraceAgent {
         .await
     }
 
-    async fn profiling_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
-        request: Request,
-    ) -> Response {
+    async fn profiling_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
+            state.config,
+            state.http_client,
+            state.api_key,
+            state.tags_provider,
             request,
             "intake.profile",
             PROFILING_BACKEND_PATH,
@@ -292,14 +313,14 @@ impl TraceAgent {
     }
 
     async fn llm_obs_eval_metric_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State(state): State<ProxyState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
+            state.config,
+            state.http_client,
+            state.api_key,
+            state.tags_provider,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH,
@@ -309,14 +330,14 @@ impl TraceAgent {
     }
 
     async fn llm_obs_eval_metric_proxy_v2(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
+        State(state): State<ProxyState>,
         request: Request,
     ) -> Response {
         Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
+            state.config,
+            state.http_client,
+            state.api_key,
+            state.tags_provider,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2,
@@ -325,15 +346,12 @@ impl TraceAgent {
         .await
     }
 
-    async fn llm_obs_spans_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
-        request: Request,
-    ) -> Response {
+    async fn llm_obs_spans_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
+            state.config,
+            state.http_client,
+            state.api_key,
+            state.tags_provider,
             request,
             "llmobs-intake",
             LLM_OBS_SPANS_INTAKE_PATH,
@@ -342,15 +360,12 @@ impl TraceAgent {
         .await
     }
 
-    async fn debugger_logs_proxy(
-        State((config, _, _, _, _, _, tags_provider, client, api_key)): State<AgentState>,
-        request: Request,
-    ) -> Response {
+    async fn debugger_logs_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
-            config,
-            client,
-            api_key,
-            tags_provider,
+            state.config,
+            state.http_client,
+            state.api_key,
+            state.tags_provider,
             request,
             "http-intake.logs",
             DEBUGGER_LOGS_INTAKE_PATH,

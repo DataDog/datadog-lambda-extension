@@ -1,97 +1,91 @@
-use crate::telemetry::events::TelemetryEvent;
+use crate::{
+    http::{extract_request_body, handler_not_found},
+    telemetry::events::TelemetryEvent,
+};
 
-use ddcommon::hyper_migration;
+use axum::{
+    extract::{Request, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::post,
+    Router,
+};
 use std::net::SocketAddr;
-use tokio::sync::mpsc::Sender;
-
-use http_body_util::BodyExt;
-use hyper::service::service_fn;
-use hyper::Response;
-use std::io;
-use tracing::{debug, error};
+use tokio::{net::TcpListener, sync::mpsc::Sender};
+use tokio_util::sync::CancellationToken;
+use tracing::debug;
 
 #[allow(clippy::module_name_repetitions)]
-#[derive(Debug, Clone, Copy)]
-pub struct TelemetryListener {}
-
-pub struct TelemetryListenerConfig {
-    pub host: String,
-    pub port: u16,
+#[derive(Debug, Clone)]
+pub struct TelemetryListener {
+    host: [u8; 4],
+    port: u16,
+    cancel_token: CancellationToken,
+    event_bus: Sender<TelemetryEvent>,
 }
 
 impl TelemetryListener {
-    pub async fn spin(
-        config: &TelemetryListenerConfig,
-        event_bus: Sender<TelemetryEvent>,
-        _cancel_token: tokio_util::sync::CancellationToken, // todo cancel token
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
-
-        let service = service_fn(move |req| {
-            let event_bus = event_bus.clone();
-            Self::handle(req.map(hyper_migration::Body::incoming), event_bus.clone())
-        });
-
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
-
-        let server = hyper::server::conn::http1::Builder::new();
-        let mut joinset = tokio::task::JoinSet::new();
-        loop {
-            let conn = tokio::select! {
-                con_res = listener.accept() => match con_res {
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            io::ErrorKind::ConnectionAborted
-                                | io::ErrorKind::ConnectionReset
-                                | io::ErrorKind::ConnectionRefused
-                        ) =>
-                    {
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("Server error: {e}");
-                        return Err(e.into());
-                    }
-                    Ok((conn, _)) => conn,
-                },
-                finished = async {
-                    match joinset.join_next().await {
-                        Some(finished) => finished,
-                        None => std::future::pending().await,
-                    }
-                } => match finished {
-                    Err(e) if e.is_panic() => {
-                        std::panic::resume_unwind(e.into_panic());
-                    },
-                    Ok(()) | Err(_) => continue,
-                },
-            };
-            let conn = hyper_util::rt::TokioIo::new(conn);
-            let server = server.clone();
-            let service = service.clone();
-            joinset.spawn(async move {
-                if let Err(e) = server.serve_connection(conn, service).await {
-                    debug!("Telemetry Connection error: {e}");
-                }
-            });
+    #[must_use]
+    pub fn new(host: [u8; 4], port: u16, event_bus: Sender<TelemetryEvent>) -> Self {
+        let cancel_token = CancellationToken::new();
+        Self {
+            host,
+            port,
+            cancel_token,
+            event_bus,
         }
     }
 
-    pub async fn handle(
-        req: hyper_migration::HttpRequest,
-        event_bus: Sender<TelemetryEvent>,
-    ) -> Result<hyper_migration::HttpResponse, hyper::Error> {
-        let body = match req.collect().await {
-            Ok(body_bytes_collected) => body_bytes_collected.to_bytes().to_vec(),
+    #[must_use]
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
+    }
+
+    pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let socket = SocketAddr::from((self.host, self.port));
+        let router = self.make_router();
+
+        let cancel_token_clone = self.cancel_token();
+        tokio::spawn(async move {
+            let listener = TcpListener::bind(&socket)
+                .await
+                .expect("Failed to bind socket");
+            debug!("Telemetry API | Starting listener on {}", socket);
+            axum::serve(listener, router)
+                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
+                .await
+                .expect("Failed to start telemetry listener");
+        });
+
+        Ok(())
+    }
+
+    fn make_router(&self) -> Router {
+        let event_bus = self.event_bus.clone();
+
+        Router::new()
+            .route("/", post(Self::handle))
+            .fallback(handler_not_found)
+            .with_state(event_bus)
+    }
+
+    async fn graceful_shutdown(cancel_token: CancellationToken) {
+        cancel_token.cancelled().await;
+        debug!("Telemetry API | Shutdown signal received, shutting down");
+    }
+
+    async fn handle(State(event_bus): State<Sender<TelemetryEvent>>, request: Request) -> Response {
+        let (_, body) = match extract_request_body(request).await {
+            Ok(r) => r,
             Err(e) => {
-                error!("Failed to collect body: {:?}", e);
-                return Ok(Response::builder()
-                    .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
-                    .body(hyper_migration::Body::from("Failed to collect body"))
-                    .expect("infallible"));
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to extract request body: {e}"),
+                )
+                    .into_response();
             }
         };
+
         let body = std::str::from_utf8(&body).expect("infallible");
 
         let mut telemetry_events: Vec<TelemetryEvent> = match serde_json::from_str(body) {
@@ -103,43 +97,49 @@ impl TelemetryListener {
                 // This will result in a dropped payload, but may be from
                 // events we haven't added support for yet
                 debug!("Failed to parse telemetry events: {:?}", e);
-                return Ok(Response::builder()
-                    .status(hyper::StatusCode::OK)
-                    .body(hyper_migration::Body::from(
-                        "Failed to parse telemetry events",
-                    ))
-                    .expect("infallible"));
+                return (StatusCode::OK, "Failed to parse telemetry events").into_response();
             }
         };
+
         for event in telemetry_events.drain(..) {
             event_bus.send(event).await.expect("infallible");
         }
 
-        Ok(Response::new(hyper_migration::Body::from("OK")))
+        (StatusCode::OK, "OK").into_response()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
     use chrono::DateTime;
-    use ddcommon::hyper_migration;
 
     use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
 
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
     async fn test_handle() {
-        let event_body = hyper_migration::Body::from(
+        let event_body = Body::from(
             r#"[{"time":"2024-04-25T17:35:59.944Z","type":"platform.initStart","record":{"initializationType":"on-demand","phase":"init","runtimeVersion":"nodejs:20.v22","runtimeVersionArn":"arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72","functionName":"hello-world","functionVersion":"$LATEST"}}]"#,
         );
-        let req = hyper::Request::builder()
+        let req = Request::builder()
             .method("POST")
             .uri("http://localhost:8080")
             .body(event_body)
             .unwrap();
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        let _ = super::TelemetryListener::handle(req, tx).await;
+
+        // Create a new request with the body for testing
+        let (parts, body) = req.into_parts();
+        let req = Request::from_parts(parts, body);
+
+        let response = TelemetryListener::handle(axum::extract::State(tx), req).await;
+
+        // Check that the response is OK
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
 
         let telemetry_event = rx.recv().await.unwrap();
         let expected_time =

@@ -39,7 +39,7 @@ pub struct Agent {
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendData>,
     port: u16,
-    shutdown_token: CancellationToken,
+    cancel_token: CancellationToken,
 }
 
 impl Agent {
@@ -53,7 +53,7 @@ impl Agent {
             &config.otlp_config_receiver_protocols_http_endpoint,
             OTLP_AGENT_HTTP_PORT,
         );
-        let shutdown_token = CancellationToken::new();
+        let cancel_token = CancellationToken::new();
 
         Self {
             config: Arc::clone(&config),
@@ -62,13 +62,13 @@ impl Agent {
             trace_processor,
             trace_tx,
             port,
-            shutdown_token,
+            cancel_token,
         }
     }
 
     #[must_use]
-    pub fn shutdown_token(&self) -> CancellationToken {
-        self.shutdown_token.clone()
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
     }
 
     fn parse_port(endpoint: &Option<String>, default_port: u16) -> u16 {
@@ -91,14 +91,14 @@ impl Agent {
         let socket = SocketAddr::from(([127, 0, 0, 1], self.port));
         let router = self.make_router();
 
-        let shutdown_token_clone = self.shutdown_token.clone();
+        let cancel_token_clone = self.cancel_token.clone();
         tokio::spawn(async move {
             let listener = TcpListener::bind(&socket)
                 .await
                 .expect("Failed to bind socket");
             debug!("OTLP | Starting collector on {}", socket);
             axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(shutdown_token_clone))
+                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
                 .await
                 .expect("Failed to start OTLP agent");
         });
@@ -121,8 +121,8 @@ impl Agent {
             .with_state(state)
     }
 
-    async fn graceful_shutdown(shutdown_token: CancellationToken) {
-        shutdown_token.cancelled().await;
+    async fn graceful_shutdown(cancel_token: CancellationToken) {
+        cancel_token.cancelled().await;
         debug!("OTLP | Shutdown signal received, shutting down");
     }
 
