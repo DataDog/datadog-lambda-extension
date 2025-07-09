@@ -539,11 +539,7 @@ impl Processor {
             .await;
 
         if let Err(e) = trace_agent_tx.send(send_data).await {
-<<<<<<< HEAD
             debug!("Failed to send context spans to agent: {e}");
-=======
-            error!("Failed to send context spans to agent: {e}");
->>>>>>> 79beef5 (Move api_key_factory out of TraceProcessor)
         }
     }
 

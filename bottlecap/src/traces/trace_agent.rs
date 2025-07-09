@@ -542,6 +542,14 @@ impl TraceAgent {
             Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
         };
 
+        let Some(api_key) = api_key_factory.get_api_key().await else {
+            error!("Failed to resolve API key");
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to resolve API key",
+            );
+        };
+
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
         let proxy_request = ProxyRequest {
             headers: parts.headers,
