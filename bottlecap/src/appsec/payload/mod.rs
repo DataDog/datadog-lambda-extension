@@ -15,8 +15,8 @@ trait IsValid {
 }
 
 struct HttpRequestData {
-    source_ip: Option<String>,
-    route: Option<String>,
+    _source_ip: Option<String>,
+    _route: Option<String>,
     client_ip: Option<String>,
     raw_uri: Option<String>,
     headers: Option<HashMap<String, Vec<String>>>,

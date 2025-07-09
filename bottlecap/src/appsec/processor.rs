@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::appsec::{is_enabled, is_standalone, payload};
@@ -5,7 +6,7 @@ use crate::config::Config;
 
 use bytes::Bytes;
 use libddwaf::object::{WafMap, WafOwned};
-use libddwaf::{Builder, Config as WAFConfig, Context, Handle};
+use libddwaf::{Builder, Config as WAFConfig, Context, Handle, RunResult};
 use tracing::{debug, info, warn};
 /// The App & API Protection processor.
 ///
@@ -13,7 +14,7 @@ use tracing::{debug, info, warn};
 /// the request payload, and evaluate in-app WAF rules against that data.
 pub struct Processor {
     handle: Handle,
-    diagnostics: WafOwned<WafMap>,
+    _diagnostics: WafOwned<WafMap>,
     waf_timeout: Duration,
 }
 
@@ -53,7 +54,7 @@ impl Processor {
 
         Ok(Self {
             handle,
-            diagnostics,
+            _diagnostics: diagnostics,
             waf_timeout: config.appsec_waf_timeout,
         })
     }
@@ -67,6 +68,11 @@ impl Processor {
         let mut context = ProcessorContext {
             waf_context: self.handle.new_context(),
             waf_timeout: self.waf_timeout,
+            duration: Duration::ZERO,
+            timeouts: 0,
+            keep: false,
+            attributes: HashMap::new(),
+            events: Vec::new(),
         };
 
         context.run(address_data);
@@ -114,22 +120,72 @@ impl Processor {
 pub struct ProcessorContext {
     waf_context: Context,
     waf_timeout: Duration,
+    duration: Duration,
+    timeouts: u32,
+    keep: bool,
+    attributes: HashMap<String, String>,
+    events: Vec<String>,
 }
 impl ProcessorContext {
     /// Evaluates the in-app WAF rules against the provided address data.
     fn run(&mut self, address_data: WafMap) {
-        let result = match self
-            .waf_context
-            .run(Some(address_data), None, self.waf_timeout)
-        {
-            Ok(result) => result,
+        let timeout = self.waf_timeout.saturating_sub(self.duration);
+        if timeout == Duration::ZERO {
+            warn!(
+                "appsec: WAF timeout already reached, not evaluating request with {address_data:?}"
+            );
+            return;
+        }
+
+        let result = match self.waf_context.run(Some(address_data), None, timeout) {
+            Ok(RunResult::Match(result) | RunResult::NoMatch(result)) => result,
             Err(e) => {
                 warn!("Failed to evalute in-app WAF rules against request: {e}");
                 return;
             }
         };
 
-        todo!("Process {result:?}")
+        self.duration += result.duration();
+        if result.timeout() {
+            self.timeouts += 1;
+        }
+        if result.keep() {
+            self.keep = true;
+        }
+        if let Some(attributes) = result.attributes() {
+            self.attributes.reserve(attributes.len());
+            for attr in attributes.iter() {
+                let Ok(key) = attr.key_str() else { continue };
+                let value = if let Some(value) = attr.to_str() {
+                    value.to_string()
+                } else if let Some(value) = attr.to_u64() {
+                    value.to_string()
+                } else if let Some(value) = attr.to_i64() {
+                    value.to_string()
+                } else if let Some(value) = attr.to_f64() {
+                    value.to_string()
+                } else if let Some(value) = attr.to_bool() {
+                    value.to_string()
+                } else {
+                    debug!("appsec: unsupported attribute produced by the WAF: {attr:?}");
+                    continue;
+                };
+                self.attributes.insert(key.to_string(), value);
+            }
+        }
+        if let Some(events) = result.events() {
+            self.events.reserve(events.len());
+            for event in events.iter() {
+                let enc = match serde_json::to_string(event) {
+                    Ok(enc) => enc,
+                    Err(e) => {
+                        warn!("appsec: unable to encode WAF event: {e}\n{event:?}");
+                        continue;
+                    }
+                };
+                self.events.push(enc);
+            }
+        }
     }
 }
 
@@ -146,7 +202,7 @@ mod tests {
             ..Config::default()
         };
         let proc = Processor::new(&config).expect("Should not fail");
-        match proc.diagnostics.get(b"ruleset_version") {
+        match proc._diagnostics.get(b"ruleset_version") {
             None => panic!("Ruleset version should be present in diagnostics"),
             Some(version) => assert_ne!(version.to_str().expect("Should be a valid string"), ""),
         }

@@ -68,8 +68,8 @@ impl Extractor for apigw::ApiGatewayProxyRequest {
         };
 
         HttpRequestData {
-            source_ip: self.request_context.identity.source_ip.clone(),
-            route: self.resource,
+            _source_ip: self.request_context.identity.source_ip.clone(),
+            _route: self.resource,
             client_ip: self.request_context.identity.source_ip, // API Gateway exposes the Client IP as the Source IP
             raw_uri: self.path,
             headers: Some(headers),
@@ -125,8 +125,8 @@ impl Extractor for apigw::ApiGatewayV2httpRequest {
         };
 
         HttpRequestData {
-            source_ip: self.request_context.http.source_ip.clone(),
-            route: self.route_key,
+            _source_ip: self.request_context.http.source_ip.clone(),
+            _route: self.route_key,
             client_ip: self.request_context.http.source_ip, // API Gateway exposes the Client IP as the Source IP
             raw_uri: self.raw_path,
             headers: Some(headers),
@@ -183,8 +183,8 @@ impl Extractor for apigw::ApiGatewayWebsocketProxyRequest {
         };
 
         HttpRequestData {
-            source_ip: self.request_context.identity.source_ip.clone(),
-            route: self.resource,
+            _source_ip: self.request_context.identity.source_ip.clone(),
+            _route: self.resource,
             client_ip: self.request_context.identity.source_ip, // API Gateway exposes the Client IP as the Source IP
             raw_uri: self.path,
             headers: Some(headers),
@@ -217,8 +217,8 @@ impl Extractor for apigw::ApiGatewayCustomAuthorizerRequest {
 
     async fn extract(self) -> HttpRequestData {
         HttpRequestData {
-            source_ip: None,
-            route: None,
+            _source_ip: None,
+            _route: None,
             client_ip: None,
             raw_uri: None,
             headers: self.authorization_token.map(|token| {
@@ -267,8 +267,8 @@ impl Extractor for apigw::ApiGatewayCustomAuthorizerRequestTypeRequest {
         let (headers, cookies) = filter_headers(self.headers);
 
         HttpRequestData {
-            source_ip: source_ip.clone(),
-            route: self.resource,
+            _source_ip: source_ip.clone(),
+            _route: self.resource,
             client_ip: source_ip,
             raw_uri: self.path,
             headers: Some(headers),
@@ -322,8 +322,8 @@ impl Extractor for alb::AlbTargetGroupRequest {
         };
 
         HttpRequestData {
-            source_ip: None,
-            route: None,
+            _source_ip: None,
+            _route: None,
             client_ip: None,
             raw_uri: self.path,
             headers: Some(headers),
@@ -419,8 +419,8 @@ impl Extractor for lambda_function_urls::LambdaFunctionUrlRequest {
         };
 
         HttpRequestData {
-            source_ip: self.request_context.http.source_ip.clone(),
-            route: None,
+            _source_ip: self.request_context.http.source_ip.clone(),
+            _route: None,
             client_ip: self.request_context.http.source_ip,
             raw_uri: self.raw_path,
             headers: Some(headers),
