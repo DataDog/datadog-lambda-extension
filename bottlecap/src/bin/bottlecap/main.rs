@@ -39,6 +39,8 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
+        proxy_aggregator,
+        proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent, trace_aggregator,
@@ -88,6 +90,7 @@ struct PendingFlushHandles {
     trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
     log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
     metric_flush_handles: FuturesOrdered<JoinHandle<MetricsRetryBatch>>,
+    proxy_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
 }
 
 struct MetricsRetryBatch {
@@ -102,6 +105,7 @@ impl PendingFlushHandles {
             trace_flush_handles: FuturesOrdered::new(),
             log_flush_handles: FuturesOrdered::new(),
             metric_flush_handles: FuturesOrdered::new(),
+            proxy_flush_handles: FuturesOrdered::new(),
         }
     }
 
@@ -110,6 +114,7 @@ impl PendingFlushHandles {
         logs_flusher: &LogsFlusher,
         trace_flusher: &ServerlessTraceFlusher,
         metrics_flushers: &Arc<TokioMutex<Vec<MetricsFlusher>>>,
+        proxy_flusher: &Arc<ProxyFlusher>,
     ) -> bool {
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
@@ -179,6 +184,24 @@ impl PendingFlushHandles {
                 }
                 Err(e) => {
                     error!("redrive metrics error {e:?}");
+                }
+            }
+        }
+
+        while let Some(retries) = self.proxy_flush_handles.next().await {
+            match retries {
+                Ok(batch) => {
+                    if !batch.is_empty() {
+                        debug!("Redriving {:?} APM proxy payloads", batch.len());
+                    }
+
+                    let pf = proxy_flusher.clone();
+                    joinset.spawn(async move {
+                        pf.flush(Some(batch)).await;
+                    });
+                }
+                Err(e) => {
+                    error!("Redrive error in APM proxy: {e:?}");
                 }
             }
         }
@@ -465,6 +488,7 @@ async fn extension_loop_active(
         trace_flusher,
         trace_processor,
         stats_flusher,
+        proxy_flusher,
         trace_agent_shutdown_token,
     ) = start_trace_agent(
         config,
@@ -541,6 +565,7 @@ async fn extension_loop_active(
                             &mut locked_metrics,
                             &*trace_flusher,
                             &*stats_flusher,
+                            &proxy_flusher,
                             &mut race_flush_interval,
                             &metrics_aggr,
                         )
@@ -555,6 +580,7 @@ async fn extension_loop_active(
                 &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
+                &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr,
             )
@@ -568,18 +594,23 @@ async fn extension_loop_active(
                 let tf = trace_flusher.clone();
                 // Await any previous flush handles. This
                 last_continuous_flush_error = pending_flush_handles
-                    .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flushers)
+                    .await_flush_handles(
+                        &logs_flusher.clone(),
+                        &tf,
+                        &metrics_flushers,
+                        &proxy_flusher,
+                    )
                     .await;
 
-                let val = logs_flusher.clone();
+                let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
-                    .push_back(tokio::spawn(async move { val.flush(None).await }));
-                let traces_val = trace_flusher.clone();
+                    .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                let tf = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
                     .push_back(tokio::spawn(async move {
-                        traces_val.flush(None).await.unwrap_or_default()
+                        tf.flush(None).await.unwrap_or_default()
                     }));
                 let (metrics_flushers_copy, series, sketches) = {
                     let locked_metrics = metrics_flushers.lock().await;
@@ -606,6 +637,14 @@ async fn extension_loop_active(
                     });
                     pending_flush_handles.metric_flush_handles.push_back(handle);
                 }
+
+                let pf = proxy_flusher.clone();
+                pending_flush_handles
+                    .proxy_flush_handles
+                    .push_back(tokio::spawn(async move {
+                        pf.flush(None).await.unwrap_or_default()
+                    }));
+
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
@@ -614,6 +653,7 @@ async fn extension_loop_active(
                     &mut locked_metrics,
                     &*trace_flusher,
                     &*stats_flusher,
+                    &proxy_flusher,
                     &mut race_flush_interval,
                     &metrics_aggr,
                 )
@@ -653,6 +693,7 @@ async fn extension_loop_active(
                             &mut locked_metrics,
                             &*trace_flusher,
                             &*stats_flusher,
+                            &proxy_flusher,
                             &mut race_flush_interval,
                             &metrics_aggr,
                         )
@@ -669,7 +710,12 @@ async fn extension_loop_active(
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
-                .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flushers)
+                .await_flush_handles(
+                    &logs_flusher.clone(),
+                    &tf,
+                    &metrics_flushers,
+                    &proxy_flusher,
+                )
                 .await;
             // The Shutdown event we get during a timeout will
             // never include a report log
@@ -705,6 +751,7 @@ async fn extension_loop_active(
                 &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
+                &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr,
             )
@@ -719,6 +766,7 @@ async fn blocking_flush_all(
     metrics_flushers: &mut [MetricsFlusher],
     trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
+    proxy_flusher: &ProxyFlusher,
     race_flush_interval: &mut tokio::time::Interval,
     metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
 ) {
@@ -738,7 +786,8 @@ async fn blocking_flush_all(
         logs_flusher.flush(None),
         futures::future::join_all(metrics_futures),
         trace_flusher.flush(None),
-        stats_flusher.flush()
+        stats_flusher.flush(),
+        proxy_flusher.flush(None),
     );
     race_flush_interval.reset();
 }
@@ -962,6 +1011,7 @@ fn start_metrics_flushers(
     flushers
 }
 
+#[allow(clippy::type_complexity)]
 fn start_trace_agent(
     config: &Arc<Config>,
     resolved_api_key: String,
@@ -973,6 +1023,7 @@ fn start_trace_agent(
     Arc<trace_flusher::ServerlessTraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
     Arc<stats_flusher::ServerlessStatsFlusher>,
+    Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
 ) {
     // Stats
@@ -1005,15 +1056,24 @@ fn start_trace_agent(
         resolved_api_key: resolved_api_key.clone(),
     });
 
+    // Proxy
+    let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
+    let proxy_flusher = Arc::new(ProxyFlusher::new(
+        resolved_api_key,
+        Arc::clone(&proxy_aggregator),
+        Arc::clone(tags_provider),
+        Arc::clone(config),
+    ));
+
     let trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
         stats_aggregator,
         stats_processor,
+        proxy_aggregator,
         invocation_processor,
         Arc::clone(tags_provider),
-        resolved_api_key,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
@@ -1030,6 +1090,7 @@ fn start_trace_agent(
         trace_flusher,
         trace_processor,
         stats_flusher,
+        proxy_flusher,
         shutdown_token,
     )
 }
