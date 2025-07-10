@@ -78,13 +78,15 @@ name = "bottlecap"
 opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
-strip = true
 
 [profile.release-alpine-arm64-fips]
 inherits = "release"
 # Unfortunately opt-level "z" does not work for building aws-lc-fips-sys on
 # Alpine for ARM with FIPS enabled.
 opt-level = 3
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
 
 [features]
 default = ["reqwest/rustls-tls", "dogstatsd/default", "datadog-fips/default" ]
