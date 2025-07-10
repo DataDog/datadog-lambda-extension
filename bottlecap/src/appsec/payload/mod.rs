@@ -8,12 +8,15 @@ use bytes::{Buf, Bytes};
 use libddwaf::object::{WafArray, WafMap, WafObject};
 use tracing::warn;
 
+mod body;
 mod request;
+mod response;
 
 trait IsValid {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool;
 }
 
+#[derive(Default)]
 struct HttpRequestData {
     _source_ip: Option<String>,
     _route: Option<String>,
@@ -25,7 +28,7 @@ struct HttpRequestData {
     path_params: Option<HashMap<String, String>>,
     body: Option<WafObject>,
     response_body: Option<WafObject>,
-    response_status: Option<u32>,
+    response_status: Option<i64>,
 }
 
 trait ToWafMap {
@@ -120,7 +123,8 @@ impl ToWafMap for HashMap<String, String> {
     }
 }
 
-enum RequestType {
+#[derive(Debug, Clone, Copy)]
+pub(super) enum RequestType {
     APIGatewayV1, // Or Kong
     APIGatewayV2Http,
     APIGatewayV2Websocket,
@@ -130,12 +134,15 @@ enum RequestType {
     LambdaFunctionUrl,
 }
 
-trait Extractor {
+trait ExtractRequest {
     const TYPE: RequestType;
     async fn extract(self) -> HttpRequestData;
 }
+trait ExtractResponse {
+    async fn extract(self) -> HttpRequestData;
+}
 
-pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<WafMap> {
+pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<(WafMap, RequestType)> {
     let reader = body.clone().reader();
     let data: serde_json::Map<String, serde_json::Value> = match serde_json::from_reader(reader) {
         Ok(data) => data,
@@ -156,7 +163,7 @@ pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<WafMap>
                 let Ok(val) = serde_json::from_value::<$ty>(serde_json::Value::Object(data)) else {
                     return None;
                 };
-                return Some(val.extract().await.to_waf_map());
+                return Some((val.extract().await.to_waf_map(), <$ty>::TYPE));
             }
         };
     }
@@ -196,15 +203,43 @@ pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<WafMap>
     None
 }
 
-pub(super) fn extract_response_address_data(body: &Bytes) -> Option<WafMap> {
-    let reader = body.clone().reader();
-    let data: serde_json::Map<String, serde_json::Value> = match serde_json::from_reader(reader) {
-        Ok(data) => data,
-        Err(e) => {
-            warn!("Failed to parse request body as JSON: {e}");
-            return None;
+pub(super) async fn extract_response_address_data(
+    request_type: RequestType,
+    body: &Bytes,
+) -> Option<WafMap> {
+    request_type.extract_response_address_data(body).await
+}
+impl RequestType {
+    async fn extract_response_address_data(self, body: &Bytes) -> Option<WafMap> {
+        macro_rules! match_types {
+            ($($name:ident => $ty:ty),+) => {
+                match self {$(
+                    RequestType::$name => {
+                        let body: $ty =
+                            match serde_json::from_reader(body.clone().reader()) {
+                                Ok(body) => body,
+                                Err(e) => {
+                                    warn!(concat!("appsec: failed to parse response payload from JSON as ", stringify!($ty),": {}"), e);
+                                    return None;
+                                }
+                            };
+                        body.extract().await
+                    }
+                ),+}
+            }
         }
-    };
 
-    todo!("{data:?}")
+        Some(
+            match_types! {
+                APIGatewayV1 => apigw::ApiGatewayProxyResponse,
+                APIGatewayV2Http => apigw::ApiGatewayV2httpResponse,
+                APIGatewayV2Websocket => response::Opaque,
+                APIGatewayLambdaAuthorizerToken => response::Opaque,
+                APIGatewayLambdaAuthorizerRequest => response::Opaque,
+                Alb => alb::AlbTargetGroupResponse,
+                LambdaFunctionUrl => lambda_function_urls::LambdaFunctionUrlResponse
+            }
+            .to_waf_map(),
+        )
+    }
 }

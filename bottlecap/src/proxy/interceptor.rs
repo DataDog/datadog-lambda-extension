@@ -239,7 +239,9 @@ async fn invocation_response_proxy(
 
     // K9 / ASM
     if let Some(appsec_processor) = appsec_processor {
-        appsec_processor.process_invocation_response(None, &body_bytes);
+        appsec_processor
+            .process_invocation_response(None, &body_bytes)
+            .await;
     }
 
     let (intercepted_parts, intercepted_bytes) =

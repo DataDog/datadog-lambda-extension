@@ -1,4 +1,4 @@
-use super::{Extractor, HttpRequestData, IsValid, RequestType};
+use super::{body::parse_body, ExtractRequest, HttpRequestData, IsValid, RequestType};
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -7,11 +7,6 @@ use aws_lambda_events::{
     alb, apigw, cloudwatch_events, cloudwatch_logs, dynamodb, eventbridge, kinesis,
     lambda_function_urls, s3, sns, sqs,
 };
-use base64::Engine;
-use bytes::Buf;
-use libddwaf::object::{WafMap, WafObject, WafString};
-use mime::Mime;
-use tracing::{debug, warn};
 
 /// Kong API Gateway events are a subset of [`apigw::ApiGatewayProxyRequest`].
 #[derive(serde::Deserialize)]
@@ -50,9 +45,8 @@ impl IsValid for apigw::ApiGatewayProxyRequest {
             && !apigw::ApiGatewayCustomAuthorizerRequestTypeRequest::is_valid(map)
     }
 }
-impl Extractor for apigw::ApiGatewayProxyRequest {
+impl ExtractRequest for apigw::ApiGatewayProxyRequest {
     const TYPE: RequestType = RequestType::APIGatewayV1;
-
     async fn extract(self) -> HttpRequestData {
         let (headers, cookies) = filter_headers(self.multi_value_headers);
 
@@ -108,9 +102,8 @@ impl IsValid for apigw::ApiGatewayV2httpRequest {
         }
     }
 }
-impl Extractor for apigw::ApiGatewayV2httpRequest {
+impl ExtractRequest for apigw::ApiGatewayV2httpRequest {
     const TYPE: RequestType = RequestType::APIGatewayV2Http;
-
     async fn extract(self) -> HttpRequestData {
         let (headers, cookies) = filter_headers(self.headers);
 
@@ -146,9 +139,8 @@ impl IsValid for KongAPIGatewayEvent {
             && matches!(map.get("resource"), Some(serde_json::Value::String(_)))
     }
 }
-impl Extractor for KongAPIGatewayEvent {
+impl ExtractRequest for KongAPIGatewayEvent {
     const TYPE: RequestType = RequestType::APIGatewayV1;
-
     async fn extract(self) -> HttpRequestData {
         self.0.extract().await
     }
@@ -166,9 +158,8 @@ impl IsValid for apigw::ApiGatewayWebsocketProxyRequest {
         }
     }
 }
-impl Extractor for apigw::ApiGatewayWebsocketProxyRequest {
+impl ExtractRequest for apigw::ApiGatewayWebsocketProxyRequest {
     const TYPE: RequestType = RequestType::APIGatewayV2Websocket;
-
     async fn extract(self) -> HttpRequestData {
         let (headers, cookies) = filter_headers(self.multi_value_headers);
 
@@ -212,9 +203,8 @@ impl IsValid for apigw::ApiGatewayCustomAuthorizerRequest {
         }
     }
 }
-impl Extractor for apigw::ApiGatewayCustomAuthorizerRequest {
+impl ExtractRequest for apigw::ApiGatewayCustomAuthorizerRequest {
     const TYPE: RequestType = RequestType::APIGatewayLambdaAuthorizerToken;
-
     async fn extract(self) -> HttpRequestData {
         HttpRequestData {
             _source_ip: None,
@@ -258,9 +248,8 @@ impl IsValid for apigw::ApiGatewayCustomAuthorizerRequestTypeRequest {
         }
     }
 }
-impl Extractor for apigw::ApiGatewayCustomAuthorizerRequestTypeRequest {
+impl ExtractRequest for apigw::ApiGatewayCustomAuthorizerRequestTypeRequest {
     const TYPE: RequestType = RequestType::APIGatewayLambdaAuthorizerRequest;
-
     async fn extract(self) -> HttpRequestData {
         let source_ip = self.request_context.identity.and_then(|i| i.source_ip);
 
@@ -294,9 +283,8 @@ impl IsValid for alb::AlbTargetGroupRequest {
         }
     }
 }
-impl Extractor for alb::AlbTargetGroupRequest {
+impl ExtractRequest for alb::AlbTargetGroupRequest {
     const TYPE: RequestType = RequestType::Alb;
-
     async fn extract(self) -> HttpRequestData {
         // Based on configuration, ALB provides headers EITHER in multi-value form OR in single-value form, never both.
         let (headers, cookies) = filter_headers(if self.multi_value_headers.is_empty() {
@@ -402,9 +390,8 @@ impl IsValid for lambda_function_urls::LambdaFunctionUrlRequest {
         }
     }
 }
-impl Extractor for lambda_function_urls::LambdaFunctionUrlRequest {
+impl ExtractRequest for lambda_function_urls::LambdaFunctionUrlRequest {
     const TYPE: RequestType = RequestType::LambdaFunctionUrl;
-
     async fn extract(self) -> HttpRequestData {
         let (headers, cookies) = filter_headers(self.headers);
 
@@ -484,77 +471,6 @@ fn filter_headers(
             Some(parsed_cookies)
         },
     )
-}
-
-async fn parse_body(
-    body: impl AsRef<[u8]>,
-    is_base64_encoded: bool,
-    content_type: Option<&str>,
-) -> Result<Option<WafObject>, Box<dyn std::error::Error>> {
-    if is_base64_encoded {
-        let body = base64::engine::general_purpose::STANDARD.decode(body)?;
-        return Box::pin(parse_body(body, false, content_type)).await;
-    }
-
-    let body = body.as_ref();
-    let mime_type = match content_type
-        .unwrap_or("application/json")
-        .parse::<mime::Mime>()
-    {
-        Ok(mime) => mime,
-        Err(e) => return Err(e.into()),
-    };
-
-    Ok(match (mime_type.type_(), mime_type.subtype()) {
-        // text/json | application/json | application/vnd.api+json
-        (mime::APPLICATION, sub) if sub == mime::JSON || sub == "vnd.api+json" => {
-            Some(serde_json::from_slice(body)?)
-        }
-        (mime::APPLICATION, mime::WWW_FORM_URLENCODED) => Some(serde_html_form::from_bytes(body)?),
-        (mime::APPLICATION | mime::TEXT, mime::XML) => {
-            Some(serde_xml_rs::from_reader(body.reader())?)
-        }
-        (mime::MULTIPART, mime::FORM_DATA) => {
-            let Some(boundary) = mime_type.get_param("boundary") else {
-                warn!("appsec: cannot attempt parsing multipart/form-data without boundary");
-                return Ok(None);
-            };
-            // We have to go through this dance because [`multer::Multipart`] requires an async stream.
-            let body = body.to_vec();
-            let reader = futures::stream::iter([Result::<Vec<u8>, std::io::Error>::Ok(body)]);
-            let mut multipart = multer::Multipart::new(reader, boundary.as_str());
-
-            let mut fields = Vec::new();
-            while let Some(field) = multipart.next_field().await? {
-                let Some(name) = field.name().map(str::to_string) else {
-                    continue;
-                };
-                let Some(content_type) = field.content_type().map(Mime::to_string) else {
-                    continue;
-                };
-                let Some(value) = Box::pin(parse_body(
-                    field.bytes().await?,
-                    false,
-                    Some(content_type.as_ref()),
-                ))
-                .await?
-                else {
-                    continue;
-                };
-                fields.push((name, value));
-            }
-            let mut res = WafMap::new(fields.len() as u64);
-            for (i, (name, value)) in fields.into_iter().enumerate() {
-                res[i] = (name.as_str(), value).into();
-            }
-            Some(res.into())
-        }
-        (mime::TEXT, mime::PLAIN) => Some(WafString::new(body).into()),
-        _ => {
-            debug!("appsec: unsupported content type: {mime_type}");
-            None
-        }
-    })
 }
 
 fn query_to_optional_map(

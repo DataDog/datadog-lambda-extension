@@ -63,9 +63,10 @@ impl Processor {
     /// invocation event.
     #[must_use]
     pub async fn process_invocation_next(&self, body: &Bytes) -> Option<ProcessorContext> {
-        let address_data = payload::extract_request_address_data(body).await?;
+        let (address_data, request_type) = payload::extract_request_address_data(body).await?;
 
         let mut context = ProcessorContext {
+            request_type,
             waf_context: self.handle.new_context(),
             waf_timeout: self.waf_timeout,
             duration: Duration::ZERO,
@@ -81,7 +82,7 @@ impl Processor {
 
     /// Process the `/runtime/invocation/<request_id>/response>` payload, which is sent to Lambda
     /// after the invocation has run to completion, to provide the result of the invocation.
-    pub fn process_invocation_response(
+    pub async fn process_invocation_response(
         &self,
         context: Option<&mut ProcessorContext>,
         body: &Bytes,
@@ -90,7 +91,9 @@ impl Processor {
             return;
         };
 
-        let Some(address_data) = payload::extract_response_address_data(body) else {
+        let Some(address_data) =
+            payload::extract_response_address_data(context.request_type, body).await
+        else {
             return;
         };
 
@@ -118,6 +121,7 @@ impl Processor {
 ///
 /// This is used to process both the request & response of a given invocation.
 pub struct ProcessorContext {
+    request_type: payload::RequestType,
     waf_context: Context,
     waf_timeout: Duration,
     duration: Duration,
