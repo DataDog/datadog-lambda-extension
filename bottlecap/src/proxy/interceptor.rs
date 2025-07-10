@@ -110,6 +110,8 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
 /// If the LWA proxy lambda runtime API is not provided, the default Extension
 /// host and port will be used.
 ///
+// TODO (Yiming): Fix this lint
+#[allow(clippy::ref_option)]
 fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -> SocketAddr {
     if let Some(socket_addr) = aws_lwa_proxy_lambda_runtime_api
         .as_ref()
@@ -350,9 +352,7 @@ mod tests {
     };
     use tokio::sync::Mutex as TokioMutex;
 
-    use dogstatsd::{
-        aggregator::Aggregator as MetricsAggregator, api_key::ApiKeyFactory, metric::EMPTY_TAGS,
-    };
+    use dogstatsd::{aggregator::Aggregator as MetricsAggregator, metric::EMPTY_TAGS};
     use http_body_util::Full;
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
@@ -407,13 +407,11 @@ mod tests {
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
         });
-        let api_key_factory = Arc::new(ApiKeyFactory::new("test-api-key"));
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             Arc::clone(&aws_config),
             metrics_aggregator,
-            api_key_factory,
         )));
 
         let proxy_handle =

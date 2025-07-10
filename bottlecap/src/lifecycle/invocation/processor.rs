@@ -900,7 +900,7 @@ impl Processor {
 
         let is_error = headers
             .get(DATADOG_INVOCATION_ERROR_KEY)
-            .map_or(false, |v| v.to_lowercase() == "true")
+            .is_some_and(|v| v.to_lowercase() == "true")
             || message.is_some()
             || stack.is_some()
             || r#type.is_some()
@@ -991,14 +991,11 @@ mod tests {
             Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
         ));
 
-        let api_key_factory = Arc::new(ApiKeyFactory::new("test-api-key"));
-
         Processor::new(
             tags_provider,
             config,
             aws_config,
             metrics_aggregator,
-            api_key_factory,
         )
     }
 

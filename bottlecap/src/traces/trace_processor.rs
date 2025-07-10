@@ -306,7 +306,6 @@ mod tests {
             traces,
             100,
             None,
-            "test-api-key",
         );
 
         let expected_tracer_payload = pb::TracerPayload {

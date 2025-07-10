@@ -65,7 +65,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let mut guard = self.aggregator.lock().await;
         let mut traces = guard.get_batch();
         // Lazily set the API key
-        for trace in traces.iter_mut() {
+        for trace in &mut traces {
             trace.get_target_mut().api_key = Some(api_key.to_string().into());
         }
 

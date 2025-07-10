@@ -60,7 +60,7 @@ fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
         let line = line?;
         let mut values = line.split_whitespace();
 
-        if values.next().map_or(false, |interface_name| {
+        if values.next().is_some_and(|interface_name| {
             interface_name.starts_with(LAMBDA_NETWORK_INTERFACE)
                 || interface_name.starts_with(LAMBDA_RUNTIME_NETWORK_INTERFACE)
         }) {
