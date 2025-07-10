@@ -2,6 +2,7 @@ use crate::config;
 use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use crate::FLUSH_RETRY_COUNT;
+use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
 use reqwest::header::HeaderMap;
 use std::error::Error;
@@ -11,6 +12,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use thiserror::Error as ThisError;
+use tokio::sync::OnceCell;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
@@ -28,48 +30,32 @@ pub struct Flusher {
     endpoint: String,
     aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
-    headers: HeaderMap,
+    api_key_factory: Arc<ApiKeyFactory>,
+    headers: OnceCell<HeaderMap>,
 }
 
 impl Flusher {
     pub fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         endpoint: String,
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(&config);
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "DD-API-KEY",
-            api_key.clone().parse().expect("failed to parse header"),
-        );
-        headers.insert(
-            "DD-PROTOCOL",
-            "agent-json".parse().expect("failed to parse header"),
-        );
-        headers.insert(
-            "Content-Type",
-            "application/json".parse().expect("failed to parse header"),
-        );
-
-        if config.logs_config_use_compression {
-            headers.insert(
-                "Content-Encoding",
-                "zstd".parse().expect("failed to parse header"),
-            );
-        }
 
         Flusher {
             client,
             endpoint,
             aggregator,
             config,
-            headers,
+            api_key_factory,
+            headers: OnceCell::new(),
         }
     }
 
     pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
+        let api_key = self.api_key_factory.get_api_key().await;
+
         let mut set = JoinSet::new();
 
         if let Some(logs_batches) = batches {
@@ -77,7 +63,7 @@ impl Flusher {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch.clone());
+                let req = self.create_request(batch.clone(), api_key).await;
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -109,12 +95,13 @@ impl Flusher {
         failed_requests
     }
 
-    fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
+    async fn create_request(&self, data: Vec<u8>, api_key: &str) -> reqwest::RequestBuilder {
         let url = format!("{}/api/v2/logs", self.endpoint);
+        let headers = self.get_headers(api_key).await;
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
-            .headers(self.headers.clone())
+            .headers(headers.clone())
             .body(data)
     }
 
@@ -160,6 +147,34 @@ impl Flusher {
             }
         }
     }
+
+    async fn get_headers(&self, api_key: &str) -> &HeaderMap {
+        self.headers
+            .get_or_init(move || async move {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "DD-API-KEY",
+                    api_key.parse().expect("failed to parse header"),
+                );
+                headers.insert(
+                    "DD-PROTOCOL",
+                    "agent-json".parse().expect("failed to parse header"),
+                );
+                headers.insert(
+                    "Content-Type",
+                    "application/json".parse().expect("failed to parse header"),
+                );
+
+                if self.config.logs_config_use_compression {
+                    headers.insert(
+                        "Content-Encoding",
+                        "zstd".parse().expect("failed to parse header"),
+                    );
+                }
+                headers
+            })
+            .await
+    }
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -171,7 +186,7 @@ pub struct LogsFlusher {
 
 impl LogsFlusher {
     pub fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
@@ -179,7 +194,7 @@ impl LogsFlusher {
 
         // Create primary flusher
         flushers.push(Flusher::new(
-            api_key.clone(),
+            Arc::clone(&api_key_factory),
             config.logs_config_logs_dd_url.clone(),
             aggregator.clone(),
             config.clone(),
@@ -189,7 +204,7 @@ impl LogsFlusher {
         for endpoint in &config.logs_config_additional_endpoints {
             let endpoint_url = format!("https://{}:{}", endpoint.host, endpoint.port);
             flushers.push(Flusher::new(
-                endpoint.api_key.clone(),
+                Arc::clone(&api_key_factory),
                 endpoint_url,
                 aggregator.clone(),
                 config.clone(),

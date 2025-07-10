@@ -4,6 +4,7 @@ use bottlecap::logs::{agent::LogsAgent, flusher::LogsFlusher};
 use bottlecap::tags::provider::Provider;
 use bottlecap::telemetry::events::TelemetryEvent;
 use bottlecap::LAMBDA_RUNTIME_SLUG;
+use dogstatsd::api_key::ApiKeyFactory;
 use httpmock::prelude::*;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,8 +57,9 @@ async fn test_logs() {
     let bus = EventBus::run();
     let mut logs_agent =
         LogsAgent::new(tags_provider, Arc::clone(&arc_conf), bus.get_sender_copy());
+    let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
     let logs_flusher = LogsFlusher::new(
-        dd_api_key.to_string(),
+        api_key_factory,
         Arc::clone(&logs_agent.aggregator),
         arc_conf.clone(),
     );
