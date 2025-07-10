@@ -71,6 +71,8 @@ impl Agent {
         self.cancel_token.clone()
     }
 
+    // TODO (Yiming): Fix this lint
+    #[allow(clippy::ref_option)]
     fn parse_port(endpoint: &Option<String>, default_port: u16) -> u16 {
         if let Some(endpoint) = endpoint {
             let port = endpoint.split(':').nth(1);
