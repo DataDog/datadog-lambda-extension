@@ -96,7 +96,6 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    http_client: reqwest::Client,
     api_key_factory: Arc<ApiKeyFactory>,
     tx: Sender<SendData>,
     shutdown_token: CancellationToken,
@@ -299,7 +298,6 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
-            state.api_key_factory,
             request,
             "trace.agent",
             DSM_INTAKE_PATH,
@@ -312,7 +310,6 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
-            state.api_key_factory,
             request,
             "intake.profile",
             PROFILING_INTAKE_PATH,
@@ -328,7 +325,6 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
-            state.api_key_factory,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH,
@@ -344,7 +340,6 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
-            state.api_key_factory,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2,
@@ -357,7 +352,6 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
-            state.api_key_factory,
             request,
             "llmobs-intake",
             LLM_OBS_SPANS_INTAKE_PATH,
@@ -370,7 +364,6 @@ impl TraceAgent {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
-            state.api_key_factory,
             request,
             "http-intake.logs",
             DEBUGGER_LOGS_INTAKE_PATH,
@@ -523,7 +516,6 @@ impl TraceAgent {
     async fn handle_proxy(
         config: Arc<config::Config>,
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
-        api_key_factory: Arc<ApiKeyFactory>,
         request: Request,
         backend_domain: &str,
         backend_path: &str,

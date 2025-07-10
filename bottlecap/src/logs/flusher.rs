@@ -41,7 +41,7 @@ impl Flusher {
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
-        let client = get_client(config.clone());
+        let client = get_client(&config);
 
         Flusher {
             client,
@@ -54,6 +54,8 @@ impl Flusher {
     }
 
     pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
+        let api_key = self.api_key_factory.get_api_key().await;
+
         let mut set = JoinSet::new();
 
         if let Some(logs_batches) = batches {
@@ -61,7 +63,7 @@ impl Flusher {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch.clone()).await;
+                let req = self.create_request(batch.clone(), api_key).await;
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -93,9 +95,9 @@ impl Flusher {
         failed_requests
     }
 
-    async fn create_request(&self, data: Vec<u8>) -> reqwest::RequestBuilder {
+    async fn create_request(&self, data: Vec<u8>, api_key: &str) -> reqwest::RequestBuilder {
         let url = format!("{}/api/v2/logs", self.endpoint);
-        let headers = self.get_headers().await;
+        let headers = self.get_headers(api_key).await;
         self.client
             .post(&url)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
@@ -146,10 +148,9 @@ impl Flusher {
         }
     }
 
-    async fn get_headers(&self) -> &HeaderMap {
+    async fn get_headers(&self, api_key: &str) -> &HeaderMap {
         self.headers
             .get_or_init(move || async move {
-                let api_key = self.api_key_factory.get_api_key().await;
                 let mut headers = HeaderMap::new();
                 headers.insert(
                     "DD-API-KEY",

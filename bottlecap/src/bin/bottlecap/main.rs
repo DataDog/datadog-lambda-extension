@@ -1077,7 +1077,7 @@ fn start_trace_agent(
     // Proxy
     let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
     let proxy_flusher = Arc::new(ProxyFlusher::new(
-        resolved_api_key,
+        api_key_factory.clone(),
         Arc::clone(&proxy_aggregator),
         Arc::clone(tags_provider),
         Arc::clone(config),
