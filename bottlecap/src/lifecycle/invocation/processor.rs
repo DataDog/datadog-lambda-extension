@@ -38,7 +38,6 @@ use crate::{
         trace_processor::{self, TraceProcessor},
     },
 };
-use dogstatsd::api_key::ApiKeyFactory;
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
@@ -79,8 +78,6 @@ pub struct Processor {
     ///
     /// These tags are used to capture runtime and initialization.
     dynamic_tags: HashMap<String, String>,
-    /// Function to resolve Datadog API key.
-    api_key_factory: Arc<ApiKeyFactory>,
 }
 
 impl Processor {
@@ -90,7 +87,6 @@ impl Processor {
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
-        api_key_factory: Arc<ApiKeyFactory>,
     ) -> Self {
         let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
@@ -111,7 +107,6 @@ impl Processor {
             service,
             resource,
             dynamic_tags: HashMap::new(),
-            api_key_factory,
         }
     }
 
@@ -507,11 +502,6 @@ impl Processor {
         trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
         trace_agent_tx: &Sender<SendData>,
     ) {
-        let Some(api_key) = self.api_key_factory.get_api_key().await else {
-            error!("Skipping sending spans: failed to resolve API key");
-            return;
-        };
-
         // todo: figure out what to do here
         let header_tags = tracer_header_tags::TracerHeaderTags {
             lang: "",
@@ -534,7 +524,6 @@ impl Processor {
                 vec![traces],
                 body_size,
                 self.inferrer.span_pointers.clone(),
-                api_key,
             )
             .await;
 

@@ -22,8 +22,6 @@ use crate::{
     traces::trace_processor::TraceProcessor,
 };
 
-use dogstatsd::api_key::ApiKeyFactory;
-
 const OTLP_AGENT_HTTP_PORT: u16 = 4318;
 
 type AgentState = (
@@ -32,7 +30,6 @@ type AgentState = (
     OtlpProcessor,
     Arc<dyn TraceProcessor + Send + Sync>,
     Sender<SendData>,
-    Arc<ApiKeyFactory>,
 );
 
 pub struct Agent {
@@ -43,7 +40,6 @@ pub struct Agent {
     trace_tx: Sender<SendData>,
     port: u16,
     cancel_token: CancellationToken,
-    api_key_factory: Arc<ApiKeyFactory>,
 }
 
 impl Agent {
@@ -52,7 +48,6 @@ impl Agent {
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendData>,
-        api_key_factory: Arc<ApiKeyFactory>,
     ) -> Self {
         let port = Self::parse_port(
             &config.otlp_config_receiver_protocols_http_endpoint,
@@ -68,7 +63,6 @@ impl Agent {
             trace_tx,
             port,
             cancel_token,
-            api_key_factory,
         }
     }
 
@@ -119,7 +113,6 @@ impl Agent {
             self.processor.clone(),
             Arc::clone(&self.trace_processor),
             self.trace_tx.clone(),
-            Arc::clone(&self.api_key_factory),
         );
 
         Router::new()
@@ -134,20 +127,9 @@ impl Agent {
     }
 
     async fn v1_traces(
-        State((config, tags_provider, processor, trace_processor, trace_tx, api_key_factory)): State<AgentState>,
+        State((config, tags_provider, processor, trace_processor, trace_tx)): State<AgentState>,
         request: Request,
     ) -> Response {
-        let Some(api_key) = api_key_factory.get_api_key().await else {
-            error!(
-                "OTLP | Skipping sending traces to the trace flusher: failed to resolve API key"
-            );
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({ "message": "Failed to resolve API key" }).to_string(),
-            )
-                .into_response();
-        };
-
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -181,7 +163,6 @@ impl Agent {
                 traces,
                 body_size,
                 None,
-                api_key,
             )
             .await;
 

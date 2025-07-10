@@ -125,7 +125,6 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-        api_key: &str,
     ) -> SendData;
 }
 
@@ -139,7 +138,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-        api_key: &str,
     ) -> SendData {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
@@ -165,7 +163,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_dd_url)
                 .expect("can't parse trace intake URL, exiting"),
-            api_key: Some(api_key.into()),
+            // Will be set at flush time
+            api_key: None,
             timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
