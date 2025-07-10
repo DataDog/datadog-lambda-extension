@@ -505,7 +505,7 @@ async fn extension_loop_active(
         trace_agent_shutdown_token,
     ) = start_trace_agent(
         config,
-        Arc::clone(&api_key_factory),
+        &api_key_factory,
         &tags_provider,
         Arc::clone(&invocation_processor),
         Arc::clone(&trace_aggregator),
@@ -1028,7 +1028,7 @@ fn start_metrics_flushers(
 #[allow(clippy::type_complexity)]
 fn start_trace_agent(
     config: &Arc<Config>,
-    api_key_factory: Arc<ApiKeyFactory>,
+    api_key_factory: &Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,

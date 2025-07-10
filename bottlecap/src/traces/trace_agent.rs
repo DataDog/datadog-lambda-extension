@@ -36,7 +36,6 @@ use crate::{
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
 use ddcommon::hyper_migration;
-use dogstatsd::api_key::ApiKeyFactory;
 
 const TRACE_AGENT_PORT: usize = 8126;
 
@@ -73,7 +72,6 @@ pub struct TraceState {
     pub trace_tx: Sender<SendData>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
-    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 #[derive(Clone)]
@@ -197,7 +195,6 @@ impl TraceAgent {
             trace_tx: self.tx.clone(),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
-            api_key_factory: Arc::clone(&self.api_key_factory),
         };
 
         let stats_state = StatsState {
@@ -529,14 +526,6 @@ impl TraceAgent {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
-        };
-
-        let Some(api_key) = api_key_factory.get_api_key().await else {
-            error!("Failed to resolve API key");
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to resolve API key",
-            );
         };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);

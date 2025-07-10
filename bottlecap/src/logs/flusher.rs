@@ -42,7 +42,6 @@ impl Flusher {
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(&config);
-
         Flusher {
             client,
             endpoint,
