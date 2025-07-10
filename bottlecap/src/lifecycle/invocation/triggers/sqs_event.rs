@@ -90,9 +90,7 @@ impl Trigger for SqsRecord {
             .and_then(|r| r.first())
             .take()
         {
-            first_record
-                .get("eventSource")
-                .and_then(Value::as_str) == Some("aws:sqs")
+            first_record.get("eventSource").and_then(Value::as_str) == Some("aws:sqs")
         } else {
             false
         }

@@ -991,12 +991,7 @@ mod tests {
             Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
         ));
 
-        Processor::new(
-            tags_provider,
-            config,
-            aws_config,
-            metrics_aggregator,
-        )
+        Processor::new(tags_provider, config, aws_config, metrics_aggregator)
     }
 
     #[test]

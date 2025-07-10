@@ -14,7 +14,11 @@ use crate::traces::trace_aggregator::TraceAggregator;
 
 #[async_trait]
 pub trait TraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>, api_key_factory: Arc<ApiKeyFactory>) -> Self
+    fn new(
+        aggregator: Arc<Mutex<TraceAggregator>>,
+        config: Arc<Config>,
+        api_key_factory: Arc<ApiKeyFactory>,
+    ) -> Self
     where
         Self: Sized;
     /// Given a `Vec<SendData>`, a tracer payload, send it to the Datadog intake endpoint.
@@ -37,8 +41,16 @@ pub struct ServerlessTraceFlusher {
 
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>, api_key_factory: Arc<ApiKeyFactory>) -> Self {
-        ServerlessTraceFlusher { aggregator, config, api_key_factory }
+    fn new(
+        aggregator: Arc<Mutex<TraceAggregator>>,
+        config: Arc<Config>,
+        api_key_factory: Arc<ApiKeyFactory>,
+    ) -> Self {
+        ServerlessTraceFlusher {
+            aggregator,
+            config,
+            api_key_factory,
+        }
     }
 
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {

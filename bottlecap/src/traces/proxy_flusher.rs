@@ -82,8 +82,7 @@ impl Flusher {
         &self,
         retry_requests: Option<Vec<reqwest::RequestBuilder>>,
     ) -> Option<Vec<reqwest::RequestBuilder>> {
-        let api_key = self.api_key_factory.get_api_key().await;
-        let Some(api_key) = api_key else {
+        let Some(api_key) = self.api_key_factory.get_api_key().await else {
             error!("Skipping flush in proxy flusher: Failed to resolve API key");
             return None;
         };

@@ -64,7 +64,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
             error!("Skipping flushing stats: Failed to resolve API key");
             return;
         };
-        
+
         let api_key_clone = api_key.to_string();
         let endpoint = self
             .endpoint
