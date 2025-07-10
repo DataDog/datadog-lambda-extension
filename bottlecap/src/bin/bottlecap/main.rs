@@ -1087,7 +1087,7 @@ fn start_trace_agent(
         proxy_aggregator,
         invocation_processor,
         Arc::clone(tags_provider),
-        api_key_factory,
+        Arc::clone(api_key_factory),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
@@ -1161,12 +1161,7 @@ fn start_otlp_agent(
         return None;
     }
 
-    let agent = OtlpAgent::new(
-        config.clone(),
-        tags_provider,
-        trace_processor,
-        trace_tx,
-    );
+    let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
     let cancel_token = agent.cancel_token();
     tokio::spawn(async move {
         if let Err(e) = agent.start() {
