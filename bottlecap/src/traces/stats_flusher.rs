@@ -56,7 +56,6 @@ impl StatsFlusher for ServerlessStatsFlusher {
     }
 
     async fn send(&self, stats: Vec<pb::ClientStatsPayload>) {
-        
         if stats.is_empty() {
             return;
         }

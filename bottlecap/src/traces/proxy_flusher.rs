@@ -1,8 +1,11 @@
-use std::{error::Error, sync::Arc};
-use thiserror::Error as ThisError;
-use tokio::{sync::{Mutex, OnceCell}, task::JoinSet};
 use dogstatsd::api_key::ApiKeyFactory;
 use reqwest::header::HeaderMap;
+use std::{error::Error, sync::Arc};
+use thiserror::Error as ThisError;
+use tokio::{
+    sync::{Mutex, OnceCell},
+    task::JoinSet,
+};
 use tracing::{debug, error};
 
 use crate::{
@@ -52,26 +55,28 @@ impl Flusher {
     }
 
     async fn get_headers(&self, api_key: &str) -> &HeaderMap {
-        self.headers.get_or_init(move || async move {
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "DD-API-KEY",
-                api_key.parse().expect("Failed to parse API key header"),
-            );
-            let additional_tags = format!(
-                "_dd.origin:lambda;functionname:{}",
-                self.tags_provider
-                    .get_canonical_resource_name()
-                    .unwrap_or_default()
-            );
-            headers.insert(
-                DD_ADDITIONAL_TAGS_HEADER,
-                additional_tags
-                    .parse()
-                    .expect("Failed to parse additional tags header"),
-            );
-            headers
-        }).await
+        self.headers
+            .get_or_init(move || async move {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "DD-API-KEY",
+                    api_key.parse().expect("Failed to parse API key header"),
+                );
+                let additional_tags = format!(
+                    "_dd.origin:lambda;functionname:{}",
+                    self.tags_provider
+                        .get_canonical_resource_name()
+                        .unwrap_or_default()
+                );
+                headers.insert(
+                    DD_ADDITIONAL_TAGS_HEADER,
+                    additional_tags
+                        .parse()
+                        .expect("Failed to parse additional tags header"),
+                );
+                headers
+            })
+            .await
     }
 
     pub async fn flush(
@@ -104,7 +109,11 @@ impl Flusher {
         Self::get_failed_requests(send_results)
     }
 
-    async fn create_request(&self, request: ProxyRequest, api_key: &str) -> reqwest::RequestBuilder {
+    async fn create_request(
+        &self,
+        request: ProxyRequest,
+        api_key: &str,
+    ) -> reqwest::RequestBuilder {
         let mut incoming_headers = request.headers.clone();
 
         // Remove headers that are not needed for the proxy request
