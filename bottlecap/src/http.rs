@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tracing::error;
 
 #[must_use]
-pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
+pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
     build_client(config).unwrap_or_else(|e| {
         error!(
             "Unable to parse proxy configuration: {}, no proxy will be used",
@@ -23,7 +23,7 @@ pub fn get_client(config: Arc<config::Config>) -> reqwest::Client {
     })
 }
 
-fn build_client(config: Arc<config::Config>) -> Result<reqwest::Client, Box<dyn Error>> {
+fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn Error>> {
     let mut client = create_reqwest_client_builder()?
         .timeout(Duration::from_secs(config.flush_timeout))
         .pool_idle_timeout(Some(Duration::from_secs(270)))
