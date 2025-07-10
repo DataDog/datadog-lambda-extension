@@ -1054,6 +1054,7 @@ fn start_trace_agent(
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
         aggregator: trace_aggregator.clone(),
         config: Arc::clone(config),
+        api_key_factory: Arc::clone(api_key_factory),
     });
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
@@ -1087,7 +1088,6 @@ fn start_trace_agent(
         proxy_aggregator,
         invocation_processor,
         Arc::clone(tags_provider),
-        Arc::clone(api_key_factory),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();

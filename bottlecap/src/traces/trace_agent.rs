@@ -36,7 +36,6 @@ use crate::{
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self, SendData};
 use ddcommon::hyper_migration;
-use dogstatsd::api_key::ApiKeyFactory;
 
 const TRACE_AGENT_PORT: usize = 8126;
 
@@ -85,7 +84,6 @@ pub struct StatsState {
 pub struct ProxyState {
     pub config: Arc<config::Config>,
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
-    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 pub struct TraceAgent {
@@ -96,7 +94,6 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    api_key_factory: Arc<ApiKeyFactory>,
     tx: Sender<SendData>,
     shutdown_token: CancellationToken,
 }
@@ -119,7 +116,6 @@ impl TraceAgent {
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
-        api_key_factory: Arc<ApiKeyFactory>,
     ) -> TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -146,7 +142,6 @@ impl TraceAgent {
             invocation_processor,
             tags_provider,
             tx: trace_tx,
-            api_key_factory,
             shutdown_token: CancellationToken::new(),
         }
     }
@@ -206,7 +201,6 @@ impl TraceAgent {
         let proxy_state = ProxyState {
             config: Arc::clone(&self.config),
             proxy_aggregator: Arc::clone(&self.proxy_aggregator),
-            api_key_factory: Arc::clone(&self.api_key_factory),
         };
 
         let trace_router = Router::new()

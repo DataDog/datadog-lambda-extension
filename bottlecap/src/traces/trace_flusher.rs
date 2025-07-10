@@ -7,13 +7,14 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use datadog_trace_utils::trace_utils::{self, SendData};
+use dogstatsd::api_key::ApiKeyFactory;
 
 use crate::config::Config;
 use crate::traces::trace_aggregator::TraceAggregator;
 
 #[async_trait]
 pub trait TraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self
+    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>, api_key_factory: Arc<ApiKeyFactory>) -> Self
     where
         Self: Sized;
     /// Given a `Vec<SendData>`, a tracer payload, send it to the Datadog intake endpoint.
@@ -31,15 +32,21 @@ pub trait TraceFlusher {
 pub struct ServerlessTraceFlusher {
     pub aggregator: Arc<Mutex<TraceAggregator>>,
     pub config: Arc<Config>,
+    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>) -> Self {
-        ServerlessTraceFlusher { aggregator, config }
+    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>, api_key_factory: Arc<ApiKeyFactory>) -> Self {
+        ServerlessTraceFlusher { aggregator, config, api_key_factory }
     }
 
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
+        let Some(api_key) = self.api_key_factory.get_api_key().await else {
+            error!("Skipping flush in trace flusher: Failed to resolve API key");
+            return None;
+        };
+
         let mut failed_batch: Option<Vec<SendData>> = None;
 
         if let Some(traces) = failed_traces {
@@ -57,6 +64,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
         // Process new traces from the aggregator
         let mut guard = self.aggregator.lock().await;
         let mut traces = guard.get_batch();
+        // Lazily set the API key
+        for trace in traces.iter_mut() {
+            trace.get_target_mut().api_key = Some(api_key.to_string().into());
+        }
 
         while !traces.is_empty() {
             if let Some(failed) = self.send(traces).await {
