@@ -136,9 +136,7 @@ impl Flusher {
                             elapsed.as_millis()
                         );
                     } else {
-                        error!(
-                            "Proxy Flusher | Request failed with status {status}: {body:?}"
-                        );
+                        error!("Proxy Flusher | Request failed with status {status}: {body:?}");
                     }
 
                     return Ok(());
