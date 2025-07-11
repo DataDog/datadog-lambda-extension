@@ -8,11 +8,40 @@ pub struct PeriodicStrategy {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum FlushStrategy {
+    // Flush every 1s and at the end of the invocation
     Default,
+    // User specifies the interval in milliseconds, will not block on the runtimeDone event
+    Periodically(PeriodicStrategy),
+    // Always flush at the end of the invocation
+    End,
+    // Flush both (1) at the end of the invocation and (2) periodically with the specified interval
+    EndPeriodically(PeriodicStrategy),
+    // Flush in a non-blocking, asynchronous manner, so the next invocation can start without waiting
+    // for the flush to complete
+    Continuously(PeriodicStrategy),
+}
+
+// A restricted subset of `FlushStrategy`. The Default strategy is now allowed, which is required to be
+// translated into a concrete strategy.
+#[allow(clippy::module_name_repetitions)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ConcreteFlushStrategy {
+    Periodically(PeriodicStrategy),
     End,
     EndPeriodically(PeriodicStrategy),
-    Periodically(PeriodicStrategy),
     Continuously(PeriodicStrategy),
+}
+
+impl From<FlushStrategy> for ConcreteFlushStrategy {
+    fn from(strategy: FlushStrategy) -> ConcreteFlushStrategy {
+        match strategy {
+            FlushStrategy::Periodically(p) => ConcreteFlushStrategy::Periodically(p),
+            FlushStrategy::End => ConcreteFlushStrategy::End,
+            FlushStrategy::Continuously(p) => ConcreteFlushStrategy::Continuously(p),
+            FlushStrategy::EndPeriodically(p) => ConcreteFlushStrategy::EndPeriodically(p),
+            FlushStrategy::Default => unreachable!("Default strategy is not allowed"),
+        }
+    }
 }
 
 // Deserialize for FlushStrategy

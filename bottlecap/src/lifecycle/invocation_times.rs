@@ -1,4 +1,4 @@
-use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
+use crate::config::flush_strategy::{ConcreteFlushStrategy, PeriodicStrategy};
 
 const TWENTY_SECONDS: u64 = 20 * 1000;
 const LOOKBACK_COUNT: usize = 20;
@@ -23,15 +23,22 @@ impl InvocationTimes {
         self.head = (self.head + 1) % LOOKBACK_COUNT;
     }
 
-    pub(crate) fn should_adapt(&self, now: u64, flush_timeout: u64) -> FlushStrategy {
-        // If the buffer isn't full, then we haven't seen enough invocations, so we should flush.
+    // Translate FlushStrategy::Default to a ConcreteFlushStrategy, based on past invocation times.
+    pub(crate) fn evaluate_default_strategy(&self, now: u64, flush_timeout: u64) -> ConcreteFlushStrategy {
+        // If the buffer isn't full, then we haven't seen enough invocations, so we should flush
+        // at the end of the invocation.
         for idx in self.head..LOOKBACK_COUNT {
             if self.times[idx] == 0 {
-                return FlushStrategy::End;
+                return ConcreteFlushStrategy::End;
             }
         }
 
-        // Now we've seen at least 20 invocations. Switch to periodic if we're invoked at least once every 2 minutes.
+        // Now we've seen at least 20 invocations. Possible cases:
+        // 1. If the average time between invocations is longer than 2 minutes, stick to End strategy.
+        // 2. If average interval is shorter than 2 minutes:
+        //   2.1 If it's very short, use the continuous strategy to minimize delaying the next invocation.
+        //   2.2 If it's not too short, use the periodic strategy to minimize the risk that
+        //       flushing is delayed due to the Lambda environment being frozen between invocations.
         // We get the average time between each invocation by taking the difference between newest (`now`) and the
         // oldest invocation in the buffer, then dividing by `LOOKBACK_COUNT - 1`.
         let oldest = self.times[self.head];
@@ -40,22 +47,23 @@ impl InvocationTimes {
         let should_adapt = (elapsed as f64 / (LOOKBACK_COUNT - 1) as f64) < ONE_TWENTY_SECONDS;
         if should_adapt {
             // Both units here are in seconds
+            // TODO: What does this mean?
             if elapsed < flush_timeout {
-                return FlushStrategy::Continuously(PeriodicStrategy {
+                return ConcreteFlushStrategy::Continuously(PeriodicStrategy {
                     interval: TWENTY_SECONDS,
                 });
             }
-            return FlushStrategy::Periodically(PeriodicStrategy {
+            return ConcreteFlushStrategy::Periodically(PeriodicStrategy {
                 interval: TWENTY_SECONDS,
             });
         }
-        FlushStrategy::End
+        ConcreteFlushStrategy::End
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
+    use crate::config::flush_strategy::{ConcreteFlushStrategy, PeriodicStrategy};
     use crate::lifecycle::invocation_times::{self, TWENTY_SECONDS};
 
     #[test]
@@ -75,7 +83,7 @@ mod tests {
         invocation_times.add(timestamp);
         assert_eq!(invocation_times.times[0], timestamp);
         assert_eq!(invocation_times.head, 1);
-        assert_eq!(invocation_times.should_adapt(1, 60), FlushStrategy::End);
+        assert_eq!(invocation_times.evaluate_default_strategy(1, 60), ConcreteFlushStrategy::End);
     }
 
     #[test]
@@ -88,8 +96,8 @@ mod tests {
         assert_eq!(invocation_times.times[0], 20);
         assert_eq!(invocation_times.head, 1);
         assert_eq!(
-            invocation_times.should_adapt(21, 60),
-            FlushStrategy::Continuously(PeriodicStrategy {
+            invocation_times.evaluate_default_strategy(21, 60),
+            ConcreteFlushStrategy::Continuously(PeriodicStrategy {
                 interval: TWENTY_SECONDS
             })
         );
@@ -105,8 +113,8 @@ mod tests {
         assert_eq!(invocation_times.times[0], 20);
         assert_eq!(invocation_times.head, 1);
         assert_eq!(
-            invocation_times.should_adapt(21, 1),
-            FlushStrategy::Periodically(PeriodicStrategy {
+            invocation_times.evaluate_default_strategy(21, 1),
+            ConcreteFlushStrategy::Periodically(PeriodicStrategy {
                 interval: TWENTY_SECONDS
             })
         );
@@ -122,7 +130,7 @@ mod tests {
         // should wrap around
         assert_eq!(invocation_times.times[0], 5019);
         assert_eq!(invocation_times.head, 1);
-        assert_eq!(invocation_times.should_adapt(10000, 60), FlushStrategy::End);
+        assert_eq!(invocation_times.evaluate_default_strategy(10000, 60), ConcreteFlushStrategy::End);
     }
 
     #[test]
@@ -140,8 +148,8 @@ mod tests {
             1901
         );
         assert_eq!(
-            invocation_times.should_adapt(2501, 60),
-            FlushStrategy::Periodically(PeriodicStrategy {
+            invocation_times.evaluate_default_strategy(2501, 60),
+            ConcreteFlushStrategy::Periodically(PeriodicStrategy {
                 interval: TWENTY_SECONDS
             })
         );
@@ -161,6 +169,6 @@ mod tests {
             invocation_times.times[invocation_times::LOOKBACK_COUNT - 1],
             2471
         );
-        assert_eq!(invocation_times.should_adapt(3251, 60), FlushStrategy::End);
+        assert_eq!(invocation_times.evaluate_default_strategy(3251, 60), ConcreteFlushStrategy::End);
     }
 }

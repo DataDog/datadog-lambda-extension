@@ -1,4 +1,4 @@
-use crate::config::flush_strategy::FlushStrategy;
+use crate::config::flush_strategy::{ConcreteFlushStrategy, FlushStrategy};
 use std::time;
 use tokio::time::{Interval, MissedTickBehavior::Skip};
 
@@ -15,6 +15,7 @@ pub struct FlushControl {
     flush_timeout: u64,
 }
 
+// The flush behavior for the current moment
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum FlushDecision {
     Continuous,
@@ -23,12 +24,6 @@ pub enum FlushDecision {
     Dont,
 }
 
-// 1. Default Strategy
-//   - Flush every 1s and at the end of the invocation
-//  2. Periodic Strategy
-//      - User specifies the interval in milliseconds, will not block on the runtimeDone event
-//  3. End strategy
-//      - Always flush at the end of the invocation
 impl FlushControl {
     #[must_use]
     pub fn new(flush_strategy: FlushStrategy, flush_timeout: u64) -> FlushControl {
@@ -57,12 +52,15 @@ impl FlushControl {
                 i.set_missed_tick_behavior(Skip);
                 i
             }
+            // TODO: Why is this 15 minutes?
             FlushStrategy::End => {
                 tokio::time::interval(tokio::time::Duration::from_millis(FIFTEEN_MINUTES))
             }
         }
     }
 
+    // Evaluate the flush decision for the current moment, based on the flush strategy, current time,
+    // and the past invocation times.
     #[must_use]
     pub fn evaluate_flush_decision(&mut self) -> FlushDecision {
         let now = time::SystemTime::now()
@@ -71,16 +69,13 @@ impl FlushControl {
             .as_secs();
         self.invocation_times.add(now);
         let evaluated_flush_strategy = if self.flush_strategy == FlushStrategy::Default {
-            &self.invocation_times.should_adapt(now, self.flush_timeout)
+            &self.invocation_times.evaluate_default_strategy(now, self.flush_timeout)
         } else {
             // User specified one
-            &self.flush_strategy
+            &self.flush_strategy.into()
         };
         match evaluated_flush_strategy {
-            FlushStrategy::Default => {
-                unreachable!("should_adapt must translate default strategy to concrete strategy")
-            }
-            FlushStrategy::Periodically(strategy) => {
+            ConcreteFlushStrategy::Periodically(strategy) => {
                 if self.interval_passed(now, strategy.interval) {
                     self.last_flush = now;
                     // TODO calculate periodic rate. if it's more frequent than the flush_timeout
@@ -90,7 +85,7 @@ impl FlushControl {
                     FlushDecision::Dont
                 }
             }
-            FlushStrategy::Continuously(strategy) => {
+            ConcreteFlushStrategy::Continuously(strategy) => {
                 if self.interval_passed(now, strategy.interval) {
                     self.last_flush = now;
                     // TODO calculate periodic rate. if it's more frequent than the flush_timeout
@@ -100,8 +95,8 @@ impl FlushControl {
                     FlushDecision::Dont
                 }
             }
-            FlushStrategy::End => FlushDecision::End,
-            FlushStrategy::EndPeriodically(strategy) => {
+            ConcreteFlushStrategy::End => FlushDecision::End,
+            ConcreteFlushStrategy::EndPeriodically(strategy) => {
                 if self.interval_passed(now, strategy.interval) {
                     self.last_flush = now;
                     FlushDecision::End
