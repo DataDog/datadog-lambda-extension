@@ -69,7 +69,9 @@ impl FlushControl {
             .as_secs();
         self.invocation_times.add(now);
         let evaluated_flush_strategy = if self.flush_strategy == FlushStrategy::Default {
-            &self.invocation_times.evaluate_default_strategy(now, self.flush_timeout)
+            &self
+                .invocation_times
+                .evaluate_default_strategy(now, self.flush_timeout)
         } else {
             // User specified one
             &self.flush_strategy.into()
