@@ -14,7 +14,7 @@ pub struct Aggregator {
 impl Default for Aggregator {
     fn default() -> Self {
         Aggregator {
-            queue: Vec::with_capacity(128), // arbritrary capacity for request queue
+            queue: Vec::with_capacity(128), // arbitrary capacity for request queue
         }
     }
 }
