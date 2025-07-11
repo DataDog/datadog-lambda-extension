@@ -93,17 +93,17 @@ impl Flusher {
     }
 
     fn create_request(&self, request: ProxyRequest) -> reqwest::RequestBuilder {
-        let mut incoming_headers = request.headers.clone();
+        let mut headers = request.headers.clone();
 
         // Remove headers that are not needed for the proxy request
-        incoming_headers.remove("host");
-        incoming_headers.remove("content-length");
+        headers.remove("host");
+        headers.remove("content-length");
 
-        incoming_headers.extend(self.headers.clone());
+        headers.extend(self.headers.clone());
 
         self.client
             .post(&request.target_url)
-            .headers(request.headers)
+            .headers(headers)
             .timeout(std::time::Duration::from_secs(self.config.flush_timeout))
             .body(request.body)
     }
