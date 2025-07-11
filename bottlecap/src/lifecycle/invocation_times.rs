@@ -24,7 +24,11 @@ impl InvocationTimes {
     }
 
     // Translate FlushStrategy::Default to a ConcreteFlushStrategy, based on past invocation times.
-    pub(crate) fn evaluate_default_strategy(&self, now: u64, flush_timeout: u64) -> ConcreteFlushStrategy {
+    pub(crate) fn evaluate_default_strategy(
+        &self,
+        now: u64,
+        flush_timeout: u64,
+    ) -> ConcreteFlushStrategy {
         // If the buffer isn't full, then we haven't seen enough invocations, so we should flush
         // at the end of the invocation.
         for idx in self.head..LOOKBACK_COUNT {
@@ -83,7 +87,10 @@ mod tests {
         invocation_times.add(timestamp);
         assert_eq!(invocation_times.times[0], timestamp);
         assert_eq!(invocation_times.head, 1);
-        assert_eq!(invocation_times.evaluate_default_strategy(1, 60), ConcreteFlushStrategy::End);
+        assert_eq!(
+            invocation_times.evaluate_default_strategy(1, 60),
+            ConcreteFlushStrategy::End
+        );
     }
 
     #[test]
@@ -130,7 +137,10 @@ mod tests {
         // should wrap around
         assert_eq!(invocation_times.times[0], 5019);
         assert_eq!(invocation_times.head, 1);
-        assert_eq!(invocation_times.evaluate_default_strategy(10000, 60), ConcreteFlushStrategy::End);
+        assert_eq!(
+            invocation_times.evaluate_default_strategy(10000, 60),
+            ConcreteFlushStrategy::End
+        );
     }
 
     #[test]
@@ -169,6 +179,9 @@ mod tests {
             invocation_times.times[invocation_times::LOOKBACK_COUNT - 1],
             2471
         );
-        assert_eq!(invocation_times.evaluate_default_strategy(3251, 60), ConcreteFlushStrategy::End);
+        assert_eq!(
+            invocation_times.evaluate_default_strategy(3251, 60),
+            ConcreteFlushStrategy::End
+        );
     }
 }
