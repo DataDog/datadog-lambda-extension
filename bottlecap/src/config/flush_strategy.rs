@@ -32,18 +32,6 @@ pub enum ConcreteFlushStrategy {
     Continuously(PeriodicStrategy),
 }
 
-impl From<FlushStrategy> for ConcreteFlushStrategy {
-    fn from(strategy: FlushStrategy) -> ConcreteFlushStrategy {
-        match strategy {
-            FlushStrategy::Periodically(p) => ConcreteFlushStrategy::Periodically(p),
-            FlushStrategy::End => ConcreteFlushStrategy::End,
-            FlushStrategy::Continuously(p) => ConcreteFlushStrategy::Continuously(p),
-            FlushStrategy::EndPeriodically(p) => ConcreteFlushStrategy::EndPeriodically(p),
-            FlushStrategy::Default => unreachable!("Default strategy is not allowed"),
-        }
-    }
-}
-
 // Deserialize for FlushStrategy
 // Flush Strategy can be either "end", "end,<ms>", or "periodically,<ms>"
 impl<'de> Deserialize<'de> for FlushStrategy {
