@@ -52,8 +52,9 @@ impl FlushControl {
                 i.set_missed_tick_behavior(Skip);
                 i
             }
-            // TODO: Why is this 15 minutes?
             FlushStrategy::End => {
+                // Set the race flush interval to the maximum value of Lambda timeout, so flush will
+                // only happen at the end of the invocation, and race flush will never happen.
                 tokio::time::interval(tokio::time::Duration::from_millis(FIFTEEN_MINUTES))
             }
         }
