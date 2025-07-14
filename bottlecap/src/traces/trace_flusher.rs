@@ -32,7 +32,7 @@ pub trait TraceFlusher {
     async fn send(
         &self,
         traces: Vec<SendData>,
-        endpoint: Option<Endpoint>,
+        endpoint: Option<&Endpoint>,
     ) -> Option<Vec<SendData>>;
 
     /// Flushes traces by getting every available batch on the aggregator.
@@ -111,15 +111,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 .map(SendDataBuilder::build)
                 .collect();
             if let Some(mut failed) = self.send(traces.clone(), None).await {
-                // Keep track of the failed batch
                 failed_batch.append(&mut failed);
             }
 
             // Send to additional endpoints
             let tasks = self.additional_endpoints.iter().map(|endpoint| {
-                let traces = traces.clone();
-                let endpoint = endpoint.clone();
-                async move { self.send(traces, Some(endpoint)).await }
+                let traces_clone = traces.clone();
+                async move { self.send(traces_clone, Some(endpoint)).await }
             });
             for mut failed in join_all(tasks).await.into_iter().flatten() {
                 failed_batch.append(&mut failed);
@@ -143,27 +141,25 @@ impl TraceFlusher for ServerlessTraceFlusher {
     async fn send(
         &self,
         traces: Vec<SendData>,
-        endpoint: Option<Endpoint>,
+        endpoint: Option<&Endpoint>,
     ) -> Option<Vec<SendData>> {
         if traces.is_empty() {
             return None;
         }
         let start = std::time::Instant::now();
-        debug!("Flushing {} traces", traces.len());
-
-        // Since we return the original traces on error, we need to clone them before coalescing
-        let traces_clone = traces.clone();
 
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
         let mut tasks = Vec::with_capacity(coalesced_traces.len());
+        debug!("Flushing {} traces", coalesced_traces.len());
 
-        for mut traces in coalesced_traces {
-            if let Some(additional_endpoint) = endpoint.clone() {
-                traces.set_target(additional_endpoint);
-            }
+        for trace in coalesced_traces.iter() {
+            let trace_with_endpoint = match endpoint.clone() {
+                Some(additional_endpoint) => trace.with_endpoint(additional_endpoint),
+                None => trace.clone(),
+            };
             let proxy = self.config.proxy_https.clone();
             tasks.push(tokio::spawn(async move {
-                traces.send_proxy(proxy.as_deref()).await.last_result
+                trace_with_endpoint.send_proxy(proxy.as_deref()).await.last_result
             }));
         }
 
@@ -173,13 +169,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     if let Err(e) = result {
                         error!("Error sending trace: {e:?}");
                         // Return the original traces for retry
-                        return Some(traces_clone);
+                        return Some(coalesced_traces.clone());
                     }
                 }
                 Err(e) => {
                     error!("Task join error: {e:?}");
                     // Return the original traces for retry if a task panics
-                    return Some(traces_clone);
+                    return Some(coalesced_traces.clone());
                 }
             }
         }

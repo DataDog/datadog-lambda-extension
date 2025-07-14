@@ -772,7 +772,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-agent"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=2643867ebc240bd356a5f974c3aab9e973fba721#2643867ebc240bd356a5f974c3aab9e973fba721"
+source = "git+https://github.com/DataDog/serverless-components?rev=8078e5f6b016a8ff2ca952165f982e68fad97a62#8078e5f6b016a8ff2ca952165f982e68fad97a62"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -794,7 +794,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=b708db75c1f21addcd43cf607d0ebf2ff4cfb17f#b708db75c1f21addcd43cf607d0ebf2ff4cfb17f"
+source = "git+https://github.com/DataDog/libdatadog?rev=5610c65786cb7c7e24eab40b214251424a9ae3fb#5610c65786cb7c7e24eab40b214251424a9ae3fb"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf 17.0.0",
@@ -812,7 +812,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=b708db75c1f21addcd43cf607d0ebf2ff4cfb17f#b708db75c1f21addcd43cf607d0ebf2ff4cfb17f"
+source = "git+https://github.com/DataDog/libdatadog?rev=5610c65786cb7c7e24eab40b214251424a9ae3fb#5610c65786cb7c7e24eab40b214251424a9ae3fb"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf 17.0.0",
@@ -866,7 +866,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=b708db75c1f21addcd43cf607d0ebf2ff4cfb17f#b708db75c1f21addcd43cf607d0ebf2ff4cfb17f"
+source = "git+https://github.com/DataDog/libdatadog?rev=5610c65786cb7c7e24eab40b214251424a9ae3fb#5610c65786cb7c7e24eab40b214251424a9ae3fb"
 dependencies = [
  "anyhow",
  "bytes 1.10.1",
