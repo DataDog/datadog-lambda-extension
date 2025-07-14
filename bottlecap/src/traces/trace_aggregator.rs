@@ -155,5 +155,15 @@ mod tests {
         aggregator.add(payload.clone());
         aggregator.add(payload.clone());
         aggregator.add(payload.clone());
+
+        // The batch should only contain the first 2 payloads
+        let first_batch = aggregator.get_batch();
+        assert_eq!(first_batch.len(), 2);
+        assert_eq!(aggregator.queue.len(), 1);
+
+        // The second batch should only contain the last log
+        let second_batch = aggregator.get_batch();
+        assert_eq!(second_batch.len(), 1);
+        assert_eq!(aggregator.queue.len(), 0);
     }
 }

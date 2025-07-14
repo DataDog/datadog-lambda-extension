@@ -167,7 +167,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
         };
 
         let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
-            .with_api_key(self.resolved_api_key.clone().as_str())
             .with_compression(Compression::Zstd(6))
             .with_retry_strategy(RetryStrategy::new(
                 1,
