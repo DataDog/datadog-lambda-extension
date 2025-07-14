@@ -93,7 +93,7 @@ impl Trigger for SqsRecord {
             first_record
                 .get("eventSource")
                 .and_then(Value::as_str)
-                .map_or(false, |s| s == "aws:sqs")
+                .is_some_and(|s| s == "aws:sqs")
         } else {
             false
         }

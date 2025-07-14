@@ -110,6 +110,8 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
 /// If the LWA proxy lambda runtime API is not provided, the default Extension
 /// host and port will be used.
 ///
+// TODO (Yiming): Fix this lint
+#[allow(clippy::ref_option)]
 fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -> SocketAddr {
     if let Some(socket_addr) = aws_lwa_proxy_lambda_runtime_api
         .as_ref()

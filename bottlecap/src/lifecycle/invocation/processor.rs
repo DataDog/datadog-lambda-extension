@@ -898,7 +898,7 @@ impl Processor {
 
         let is_error = headers
             .get(DATADOG_INVOCATION_ERROR_KEY)
-            .map_or(false, |v| v.to_lowercase() == "true")
+            .is_some_and(|v| v.to_lowercase() == "true")
             || message.is_some()
             || stack.is_some()
             || r#type.is_some()

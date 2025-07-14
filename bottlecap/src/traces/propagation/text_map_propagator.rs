@@ -96,7 +96,7 @@ impl DatadogHeaderPropagator {
     fn validate_sampling_decision(tags: &mut HashMap<String, String>) {
         let should_remove =
             tags.get(DATADOG_SAMPLING_DECISION_KEY)
-                .map_or(false, |sampling_decision| {
+                .is_some_and(|sampling_decision| {
                     let is_invalid = !VALID_SAMPLING_DECISION_REGEX.is_match(sampling_decision);
                     if is_invalid {
                         warn!("Failed to decode `_dd.p.dm`: {}", sampling_decision);
