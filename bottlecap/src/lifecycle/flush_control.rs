@@ -68,15 +68,12 @@ impl FlushControl {
             .expect("unable to poll clock, unrecoverable")
             .as_secs();
         self.invocation_times.add(now);
-        let evaluated_flush_strategy = if self.flush_strategy == FlushStrategy::Default {
-            &self
-                .invocation_times
-                .evaluate_default_strategy(now, self.flush_timeout)
-        } else {
-            // User specified one
-            &self.flush_strategy.into()
-        };
-        match evaluated_flush_strategy {
+        let concrete_flush_strategy = self.invocation_times.evaluate_concrete_strategy(
+            now,
+            self.flush_timeout,
+            self.flush_strategy,
+        );
+        match concrete_flush_strategy {
             ConcreteFlushStrategy::Periodically(strategy) => {
                 if self.interval_passed(now, strategy.interval) {
                     self.last_flush = now;
