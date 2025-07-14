@@ -1,4 +1,4 @@
-use datadog_trace_utils::send_data::SendData;
+use datadog_trace_utils::send_data::SendDataBuilder;
 use std::collections::VecDeque;
 
 /// Maximum content size per payload uncompressed in bytes,
@@ -9,9 +9,9 @@ pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
 
 #[allow(clippy::module_name_repetitions)]
 pub struct TraceAggregator {
-    queue: VecDeque<SendData>,
+    queue: VecDeque<SendDataBuilder>,
     max_content_size_bytes: usize,
-    buffer: Vec<SendData>,
+    buffer: Vec<SendDataBuilder>,
 }
 
 impl Default for TraceAggregator {
@@ -35,11 +35,11 @@ impl TraceAggregator {
         }
     }
 
-    pub fn add(&mut self, p: SendData) {
+    pub fn add(&mut self, p: SendDataBuilder) {
         self.queue.push_back(p);
     }
 
-    pub fn get_batch(&mut self) -> Vec<SendData> {
+    pub fn get_batch(&mut self) -> Vec<SendDataBuilder> {
         let mut batch_size = 0;
 
         // Fill the batch
@@ -89,7 +89,7 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
-        let payload = SendData::new(
+        let payload = SendDataBuilder::new(
             1,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
@@ -116,7 +116,7 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
-        let payload = SendData::new(
+        let payload = SendDataBuilder::new(
             1,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
@@ -144,7 +144,7 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
-        let payload = SendData::new(
+        let payload = SendDataBuilder::new(
             1,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,

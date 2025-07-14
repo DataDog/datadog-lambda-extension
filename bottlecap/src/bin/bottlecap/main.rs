@@ -61,7 +61,7 @@ use bottlecap::{
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
 use datadog_trace_obfuscation::obfuscation_config;
-use datadog_trace_utils::send_data::SendData;
+use datadog_trace_utils::{send_data::SendDataBuilder, trace_utils::SendData};
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
@@ -802,7 +802,7 @@ async fn handle_event_bus_event(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
-    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
+    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendDataBuilder>,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::Metric(event) => {
@@ -1024,7 +1024,7 @@ fn start_trace_agent(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
 ) -> (
-    Sender<datadog_trace_utils::send_data::SendData>,
+    Sender<datadog_trace_utils::send_data::SendDataBuilder>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
     Arc<stats_flusher::ServerlessStatsFlusher>,
@@ -1146,7 +1146,7 @@ fn start_otlp_agent(
     config: &Arc<Config>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    trace_tx: Sender<SendData>,
+    trace_tx: Sender<SendDataBuilder>,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;
