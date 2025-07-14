@@ -166,15 +166,14 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
+        SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
             .with_compression(Compression::Zstd(6))
             .with_retry_strategy(RetryStrategy::new(
                 1,
                 100,
                 RetryBackoffType::Exponential,
                 None,
-            ));
-        send_data_builder
+            ))
     }
 }
 
