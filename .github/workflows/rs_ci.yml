@@ -164,6 +164,6 @@ jobs:
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
-      - run: cargo install dd-rust-license-tool
+      - run: cargo install dd-rust-license-tool --locked
       - run: dd-rust-license-tool check
         working-directory: bottlecap
