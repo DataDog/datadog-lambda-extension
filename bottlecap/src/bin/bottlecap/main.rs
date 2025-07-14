@@ -669,32 +669,12 @@ async fn extension_loop_active(
             }
         }
 
-        if let NextEventResponse::Shutdown {
-            shutdown_reason, ..
-        } = maybe_shutdown_event
-        {
+        if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
                 .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flushers)
                 .await;
-            // The Shutdown event we get during a timeout will
-            // never include a report log
-            if shutdown_reason != "timeout" {
-                'shutdown: loop {
-                    tokio::select! {
-                        Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                                if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
-                                    // Wait for the report event before shutting down
-                                    break 'shutdown;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             if let Some(api_runtime_proxy_cancel_token) = api_runtime_proxy_shutdown_signal {
                 api_runtime_proxy_cancel_token.cancel();
             }
