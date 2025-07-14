@@ -792,7 +792,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-normalization"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=93417a9dd3d9aa82133e10b3eab76f3282ffab72#93417a9dd3d9aa82133e10b3eab76f3282ffab72"
+source = "git+https://github.com/DataDog/libdatadog?rev=4a7e422180fd4a9befe4d9481d5b2d6fe56a245c#4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf 19.0.1",
@@ -818,7 +818,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=93417a9dd3d9aa82133e10b3eab76f3282ffab72#93417a9dd3d9aa82133e10b3eab76f3282ffab72"
+source = "git+https://github.com/DataDog/libdatadog?rev=4a7e422180fd4a9befe4d9481d5b2d6fe56a245c#4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf 19.0.1",
@@ -845,7 +845,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-protobuf"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=93417a9dd3d9aa82133e10b3eab76f3282ffab72#93417a9dd3d9aa82133e10b3eab76f3282ffab72"
+source = "git+https://github.com/DataDog/libdatadog?rev=4a7e422180fd4a9befe4d9481d5b2d6fe56a245c#4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"
 dependencies = [
  "prost",
  "serde",
@@ -883,7 +883,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-utils"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=93417a9dd3d9aa82133e10b3eab76f3282ffab72#93417a9dd3d9aa82133e10b3eab76f3282ffab72"
+source = "git+https://github.com/DataDog/libdatadog?rev=4a7e422180fd4a9befe4d9481d5b2d6fe56a245c#4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"
 dependencies = [
  "anyhow",
  "bytes 1.10.1",
@@ -948,7 +948,7 @@ dependencies = [
 [[package]]
 name = "ddcommon"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=93417a9dd3d9aa82133e10b3eab76f3282ffab72#93417a9dd3d9aa82133e10b3eab76f3282ffab72"
+source = "git+https://github.com/DataDog/libdatadog?rev=4a7e422180fd4a9befe4d9481d5b2d6fe56a245c#4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"
 dependencies = [
  "anyhow",
  "cc",
@@ -3475,7 +3475,7 @@ dependencies = [
 [[package]]
 name = "tinybytes"
 version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=93417a9dd3d9aa82133e10b3eab76f3282ffab72#93417a9dd3d9aa82133e10b3eab76f3282ffab72"
+source = "git+https://github.com/DataDog/libdatadog?rev=4a7e422180fd4a9befe4d9481d5b2d6fe56a245c#4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"
 dependencies = [
  "serde",
 ]

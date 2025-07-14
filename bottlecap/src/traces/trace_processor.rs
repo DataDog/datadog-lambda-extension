@@ -325,7 +325,7 @@ mod tests {
         };
 
         let received_payload =
-            if let TracerPayloadCollection::V07(payload) = tracer_payload.get_payloads() {
+            if let TracerPayloadCollection::V07(payload) = tracer_payload.build().get_payloads() {
                 Some(payload[0].clone())
             } else {
                 None
