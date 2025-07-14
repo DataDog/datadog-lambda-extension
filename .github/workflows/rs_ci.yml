@@ -157,7 +157,8 @@ jobs:
       - working-directory: bottlecap
         run: cargo fmt --all -- --check
 
-  # If this fails, run `dd-rust-license-tool write` in bottlecap/
+  # If this fails, install the license tool: `cargo install dd-rust-license-tool --locked`,
+  # then run `dd-rust-license-tool write` in bottlecap/
   license-3rdparty:
     runs-on: ubuntu-22.04
     name: "Valid LICENSE-3rdparty.csv"
