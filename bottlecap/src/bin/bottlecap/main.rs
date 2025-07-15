@@ -669,28 +669,26 @@ async fn extension_loop_active(
             }
         }
 
-        if let NextEventResponse::Shutdown {
-            shutdown_reason, ..
-        } = maybe_shutdown_event
-        {
+        if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
                 .await_flush_handles(&logs_flusher.clone(), &tf, &metrics_flushers)
                 .await;
-            // The Shutdown event we get during a timeout will
-            // never include a report log
-            if shutdown_reason != "timeout" {
-                'shutdown: loop {
-                    tokio::select! {
-                        Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                                if let TelemetryRecord::PlatformReport{ .. } = telemetry_event.record {
-                                    // Wait for the report event before shutting down
-                                    break 'shutdown;
-                                }
-                            }
+            // Wait for tombstone event from telemetry listener to ensure all events are processed
+            'shutdown: loop {
+                tokio::select! {
+                    Some(event) = event_bus.rx.recv() => {
+                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
+                            debug!("Received tombstone event, proceeding with shutdown");
+                            break 'shutdown;
                         }
+                    handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                    }
+                    // Add timeout to prevent hanging indefinitely
+                    () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
+                        debug!("Timeout waiting for tombstone event, proceeding with shutdown");
+                        break 'shutdown;
                     }
                 }
             }
