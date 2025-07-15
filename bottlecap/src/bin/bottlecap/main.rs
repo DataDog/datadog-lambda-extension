@@ -679,20 +679,11 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                        match event {
-                            Event::Telemetry(telemetry_event) => {
-                                if let TelemetryRecord::PlatformTombstone = telemetry_event.record {
-                                    debug!("Received tombstone event, proceeding with shutdown");
-                                    break 'shutdown;
-                                }
-                                // Process other telemetry events normally
-                                handle_event_bus_event(Event::Telemetry(telemetry_event), invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
-                            }
-                            other_event => {
-                                // Process non-telemetry events
-                                handle_event_bus_event(other_event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
-                            }
+                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
+                            debug!("Received tombstone event, proceeding with shutdown");
+                            break 'shutdown;
                         }
+                    handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
