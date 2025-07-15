@@ -1,4 +1,4 @@
-use super::{body::parse_body, ExtractRequest, HttpRequestData, IsValid, RequestType};
+use super::{body::parse_body, ExtractRequest, HttpData, IsValid, RequestType};
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -47,7 +47,7 @@ impl IsValid for apigw::ApiGatewayProxyRequest {
 }
 impl ExtractRequest for apigw::ApiGatewayProxyRequest {
     const TYPE: RequestType = RequestType::APIGatewayV1;
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let (headers, cookies) = filter_headers(self.multi_value_headers);
 
         // Headers are normalized to lowercase by [`filter_headers`].
@@ -61,18 +61,16 @@ impl ExtractRequest for apigw::ApiGatewayProxyRequest {
             None
         };
 
-        HttpRequestData {
-            _source_ip: self.request_context.identity.source_ip.clone(),
-            _route: self.resource,
-            client_ip: self.request_context.identity.source_ip, // API Gateway exposes the Client IP as the Source IP
+        HttpData::Request {
             raw_uri: self.path,
+            method: Some(self.http_method.to_string()),
+            route: self.resource,
+            client_ip: self.request_context.identity.source_ip, // API Gateway exposes the Client IP as the Source IP
             headers: Some(headers),
             cookies,
             query: query_to_optional_map(self.query_string_parameters),
             path_params: Some(self.path_parameters),
             body,
-            response_body: None,
-            response_status: None,
         }
     }
 }
@@ -104,7 +102,7 @@ impl IsValid for apigw::ApiGatewayV2httpRequest {
 }
 impl ExtractRequest for apigw::ApiGatewayV2httpRequest {
     const TYPE: RequestType = RequestType::APIGatewayV2Http;
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let (headers, cookies) = filter_headers(self.headers);
 
         let content_type = headers["content-type"].first().map(String::as_str);
@@ -117,18 +115,16 @@ impl ExtractRequest for apigw::ApiGatewayV2httpRequest {
             None
         };
 
-        HttpRequestData {
-            _source_ip: self.request_context.http.source_ip.clone(),
-            _route: self.route_key,
-            client_ip: self.request_context.http.source_ip, // API Gateway exposes the Client IP as the Source IP
+        HttpData::Request {
             raw_uri: self.raw_path,
+            route: self.route_key,
+            method: Some(self.http_method.to_string()),
+            client_ip: self.request_context.http.source_ip, // API Gateway exposes the Client IP as the Source IP
             headers: Some(headers),
             cookies,
             query: query_to_optional_map(self.query_string_parameters),
             path_params: Some(self.path_parameters),
             body,
-            response_body: None,
-            response_status: None,
         }
     }
 }
@@ -141,7 +137,7 @@ impl IsValid for KongAPIGatewayEvent {
 }
 impl ExtractRequest for KongAPIGatewayEvent {
     const TYPE: RequestType = RequestType::APIGatewayV1;
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         self.0.extract().await
     }
 }
@@ -160,7 +156,7 @@ impl IsValid for apigw::ApiGatewayWebsocketProxyRequest {
 }
 impl ExtractRequest for apigw::ApiGatewayWebsocketProxyRequest {
     const TYPE: RequestType = RequestType::APIGatewayV2Websocket;
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let (headers, cookies) = filter_headers(self.multi_value_headers);
 
         let content_type = headers["content-type"].first().map(String::as_str);
@@ -173,18 +169,16 @@ impl ExtractRequest for apigw::ApiGatewayWebsocketProxyRequest {
             None
         };
 
-        HttpRequestData {
-            _source_ip: self.request_context.identity.source_ip.clone(),
-            _route: self.resource,
-            client_ip: self.request_context.identity.source_ip, // API Gateway exposes the Client IP as the Source IP
+        HttpData::Request {
             raw_uri: self.path,
+            method: self.http_method.map(|m| m.to_string()),
+            route: self.resource,
+            client_ip: self.request_context.identity.source_ip, // API Gateway exposes the Client IP as the Source IP
             headers: Some(headers),
             cookies,
             query: query_to_optional_map(self.multi_value_query_string_parameters),
             path_params: Some(self.path_parameters),
             body,
-            response_body: None,
-            response_status: None,
         }
     }
 }
@@ -205,12 +199,12 @@ impl IsValid for apigw::ApiGatewayCustomAuthorizerRequest {
 }
 impl ExtractRequest for apigw::ApiGatewayCustomAuthorizerRequest {
     const TYPE: RequestType = RequestType::APIGatewayLambdaAuthorizerToken;
-    async fn extract(self) -> HttpRequestData {
-        HttpRequestData {
-            _source_ip: None,
-            _route: None,
-            client_ip: None,
+    async fn extract(self) -> HttpData {
+        HttpData::Request {
             raw_uri: None,
+            method: None,
+            route: None,
+            client_ip: None,
             headers: self.authorization_token.map(|token| {
                 HashMap::from([("Authorization".to_string(), vec![token.to_string()])])
             }),
@@ -218,8 +212,6 @@ impl ExtractRequest for apigw::ApiGatewayCustomAuthorizerRequest {
             query: None,
             path_params: None,
             body: None,
-            response_body: None,
-            response_status: None,
         }
     }
 }
@@ -250,23 +242,21 @@ impl IsValid for apigw::ApiGatewayCustomAuthorizerRequestTypeRequest {
 }
 impl ExtractRequest for apigw::ApiGatewayCustomAuthorizerRequestTypeRequest {
     const TYPE: RequestType = RequestType::APIGatewayLambdaAuthorizerRequest;
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let source_ip = self.request_context.identity.and_then(|i| i.source_ip);
 
         let (headers, cookies) = filter_headers(self.headers);
 
-        HttpRequestData {
-            _source_ip: source_ip.clone(),
-            _route: self.resource,
-            client_ip: source_ip,
+        HttpData::Request {
             raw_uri: self.path,
+            method: self.http_method.map(|m| m.to_string()),
+            route: self.resource,
+            client_ip: source_ip,
             headers: Some(headers),
             cookies,
             query: query_to_optional_map(self.multi_value_query_string_parameters),
             path_params: Some(self.path_parameters),
             body: None,
-            response_body: None,
-            response_status: None,
         }
     }
 }
@@ -285,7 +275,7 @@ impl IsValid for alb::AlbTargetGroupRequest {
 }
 impl ExtractRequest for alb::AlbTargetGroupRequest {
     const TYPE: RequestType = RequestType::Alb;
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         // Based on configuration, ALB provides headers EITHER in multi-value form OR in single-value form, never both.
         let (headers, cookies) = filter_headers(if self.multi_value_headers.is_empty() {
             self.headers
@@ -309,18 +299,16 @@ impl ExtractRequest for alb::AlbTargetGroupRequest {
             None
         };
 
-        HttpRequestData {
-            _source_ip: None,
-            _route: None,
-            client_ip: None,
+        HttpData::Request {
             raw_uri: self.path,
+            method: Some(self.http_method.to_string()),
+            route: None,
+            client_ip: None,
             headers: Some(headers),
             cookies,
             query,
             path_params: None,
             body,
-            response_body: None,
-            response_status: None,
         }
     }
 }
@@ -392,7 +380,7 @@ impl IsValid for lambda_function_urls::LambdaFunctionUrlRequest {
 }
 impl ExtractRequest for lambda_function_urls::LambdaFunctionUrlRequest {
     const TYPE: RequestType = RequestType::LambdaFunctionUrl;
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let (headers, cookies) = filter_headers(self.headers);
 
         let content_type = headers["content-type"].first().map(String::as_str);
@@ -405,18 +393,16 @@ impl ExtractRequest for lambda_function_urls::LambdaFunctionUrlRequest {
             None
         };
 
-        HttpRequestData {
-            _source_ip: self.request_context.http.source_ip.clone(),
-            _route: None,
-            client_ip: self.request_context.http.source_ip,
+        HttpData::Request {
             raw_uri: self.raw_path,
+            method: self.request_context.http.method,
+            route: None,
+            client_ip: self.request_context.http.source_ip,
             headers: Some(headers),
             cookies,
             query: to_optional_multimap(self.query_string_parameters),
             path_params: None,
             body,
-            response_body: None,
-            response_status: None,
         }
     }
 }

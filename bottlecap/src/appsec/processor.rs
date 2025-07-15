@@ -1,6 +1,8 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::appsec::payload::ToWafMap;
 use crate::appsec::{is_enabled, is_standalone, payload};
 use crate::config::Config;
 
@@ -14,7 +16,6 @@ use tracing::{debug, info, warn};
 /// the request payload, and evaluate in-app WAF rules against that data.
 pub struct Processor {
     handle: Handle,
-    _diagnostics: WafOwned<WafMap>,
     waf_timeout: Duration,
 }
 
@@ -52,9 +53,12 @@ impl Processor {
             return Err("Failed to build WAF instance".into());
         };
 
+        if let Some(version) = diagnostics.get(b"ruleset_version").and_then(|o| o.to_str()) {
+            debug!("appsec: loaded ruleset vesion: {version}");
+        }
+
         Ok(Self {
             handle,
-            _diagnostics: diagnostics,
             waf_timeout: config.appsec_waf_timeout,
         })
     }
@@ -62,42 +66,40 @@ impl Processor {
     /// Process the `/runtime/invocation/next` payload, which is sent to Lambda to request an
     /// invocation event.
     #[must_use]
-    pub async fn process_invocation_next(&self, body: &Bytes) -> Option<ProcessorContext> {
+    pub async fn process_invocation_next(&self, body: &Bytes) -> Option<AppSecContext> {
         let (address_data, request_type) = payload::extract_request_address_data(body).await?;
 
-        let mut context = ProcessorContext {
+        let mut context = AppSecContext {
             request_type,
-            waf_context: self.handle.new_context(),
+            waf_context: Arc::new(Mutex::new(self.handle.new_context())),
             waf_timeout: self.waf_timeout,
             duration: Duration::ZERO,
             timeouts: 0,
             keep: false,
             attributes: HashMap::new(),
+            tags_always: HashMap::new(),
+            tags_on_event: HashMap::new(),
             events: Vec::new(),
         };
 
-        context.run(address_data);
+        context
+            .tags_always
+            .insert("_dd.origin".to_string(), "appsec".to_string());
+
+        context.absorb_data(address_data);
         Some(context)
     }
 
     /// Process the `/runtime/invocation/<request_id>/response>` payload, which is sent to Lambda
     /// after the invocation has run to completion, to provide the result of the invocation.
-    pub async fn process_invocation_response(
-        &self,
-        context: Option<&mut ProcessorContext>,
-        body: &Bytes,
-    ) {
-        let Some(context) = context else {
-            return;
-        };
-
+    pub async fn process_invocation_response(&self, context: &mut AppSecContext, body: &Bytes) {
         let Some(address_data) =
             payload::extract_response_address_data(context.request_type, body).await
         else {
             return;
         };
 
-        context.run(address_data);
+        context.absorb_data(address_data);
     }
 
     /// Parses the App & API Protection ruleset from the provided [Config], falling back to the
@@ -117,20 +119,181 @@ impl Processor {
     }
 }
 
+/// Request headers that are always collected as long as AAP is enabled.
+///
+/// This list should contain lowercase-normalized header names.
+///
+/// See: <https://datadoghq.atlassian.net/wiki/spaces/SAAL/pages/2186870984/HTTP+header+collection>.
+const REQUEST_HEADERS_ON_EVENT: &[&str] = &[
+    // IP address releated headers
+    "x-forwarded-for",
+    "x-real-ip",
+    "true-client-ip",
+    "x-client-ip",
+    "x-forwarded",
+    "forwarded-for",
+    "x-cluster-client-ip",
+    "fastly-client-ip",
+    "cf-connecting-ip",
+    "cf-connecting-ipv6",
+    "forwarded",
+    "via",
+    // Message body information
+    "content-length",
+    "content-encoding",
+    "content-language",
+    // Host request context
+    "host",
+    // Content negotiation
+    "accept-encoding",
+    "accept-language",
+];
+/// Request headers that are collected only if AAP is enabled, and security activity has been
+/// detected.
+///
+/// This list should contain lowercase-normalized header names.
+///
+/// See: <https://datadoghq.atlassian.net/wiki/spaces/SAAL/pages/2186870984/HTTP+header+collection>.
+const REQUEST_HEADERS_ALWAYS: &[&str] = &[
+    // Message body information
+    "content-type",
+    // Client user agent
+    "user-agent",
+    // Content negotiation
+    "accept",
+    // AWS WAF logs to traces (RFC 0996)
+    "x-amzn-trace-id",
+    // WAF Integration - Identify Requests (RFC 0992)
+    "cloudfront-viewer-ja3-fingerprint",
+    "cf-ray",
+    "x-cloud-trace-context",
+    "x-appgw-trace-id",
+    "x-sigsci-requestid",
+    "x-sigsci-tags",
+    "akamai-user-risk",
+];
+/// Response headers that are always collected as long as AAP is enabled.
+///
+/// See: <https://datadoghq.atlassian.net/wiki/spaces/SAAL/pages/2186870984/HTTP+header+collection>.
+const RESPONSE_HEADERS_ALWAYS: &[&str] = &[
+    // Message body information
+    "content-length",
+    "content-type",
+    "content-encoding",
+    "content-language",
+];
+
 /// The WAF context for a single invocation.
 ///
 /// This is used to process both the request & response of a given invocation.
-pub struct ProcessorContext {
+#[derive(Clone)]
+pub struct AppSecContext {
     request_type: payload::RequestType,
-    waf_context: Context,
+    // This must be clone-able due to how the request contexts are handled, so we have to wrap the
+    // WAF context in an Arc-Mutex.
+    waf_context: Arc<Mutex<Context>>,
     waf_timeout: Duration,
-    duration: Duration,
-    timeouts: u32,
-    keep: bool,
+    pub duration: Duration,
+    pub timeouts: u32,
+    pub keep: bool,
     attributes: HashMap<String, String>,
-    events: Vec<String>,
+    /// The trace tags that are added to the trace unconditionally.
+    tags_always: HashMap<String, String>,
+    /// The trace tags that are added to the trace ONLY if there is a security event.
+    tags_on_event: HashMap<String, String>,
+    pub events: Vec<String>,
 }
-impl ProcessorContext {
+impl AppSecContext {
+    /// Returns the list of trace tags to add to the trace.
+    pub fn tags(&self) -> impl Iterator<Item = (&String, &String)> {
+        let next: Box<dyn Iterator<Item = (&String, &String)>> = if self.events.is_empty() {
+            Box::new(std::iter::empty())
+        } else {
+            Box::new(self.tags_on_event.iter())
+        };
+        self.attributes
+            .iter()
+            .chain(self.tags_always.iter())
+            .chain(next)
+    }
+
+    /// Evaluates the appsec rules against the provided request data, and creates any relevant
+    /// attributes from it.
+    fn absorb_data(&mut self, address_data: payload::HttpData) {
+        match &address_data {
+            payload::HttpData::Request {
+                raw_uri,
+                method,
+                route,
+                client_ip,
+                headers,
+                ..
+            } => {
+                if let Some(uri) = raw_uri {
+                    self.tags_always
+                        .entry("http.url".to_string())
+                        .or_insert(uri.clone());
+                }
+                if let Some(method) = method {
+                    self.tags_always
+                        .entry("http.method".to_string())
+                        .or_insert(method.clone());
+                }
+                if let Some(route) = route {
+                    self.tags_on_event
+                        .entry("http.endpoint".to_string())
+                        .or_insert(route.clone());
+                }
+                if let Some(headers) = headers {
+                    for name in REQUEST_HEADERS_ALWAYS {
+                        let Some(values) = headers.get(*name) else {
+                            continue;
+                        };
+                        self.tags_always
+                            .entry(format!("http.request.headers.{name}"))
+                            .or_insert(values.join(","));
+                    }
+                    for name in REQUEST_HEADERS_ON_EVENT {
+                        let Some(values) = headers.get(*name) else {
+                            continue;
+                        };
+                        self.tags_on_event
+                            .entry(format!("http.request.headers.{name}"))
+                            .or_insert(values.join(","));
+                    }
+                }
+                if let Some(client_ip) = client_ip {
+                    self.tags_on_event
+                        .entry("network.client.ip".to_string())
+                        .or_insert(client_ip.clone());
+                }
+            }
+            payload::HttpData::Response {
+                status_code,
+                headers,
+                ..
+            } => {
+                if let Some(status_code) = status_code {
+                    self.tags_always
+                        .entry("http.status_code".to_string())
+                        .or_insert(status_code.to_string());
+                }
+                if let Some(headers) = headers {
+                    for name in RESPONSE_HEADERS_ALWAYS {
+                        let Some(values) = headers.get(*name) else {
+                            continue;
+                        };
+                        self.tags_always
+                            .entry(format!("http.response.headers.{name}"))
+                            .or_insert(values.join(","));
+                    }
+                }
+            }
+        }
+
+        self.run(address_data.to_waf_map());
+    }
+
     /// Evaluates the in-app WAF rules against the provided address data.
     fn run(&mut self, address_data: WafMap) {
         let timeout = self.waf_timeout.saturating_sub(self.duration);
@@ -141,7 +304,14 @@ impl ProcessorContext {
             return;
         }
 
-        let result = match self.waf_context.run(Some(address_data), None, timeout) {
+        let mut waf_context = match self.waf_context.lock() {
+            Ok(waf_context) => waf_context,
+            Err(e) => {
+                warn!("appsec: failed to lock WAF context: {e}");
+                return;
+            }
+        };
+        let result = match waf_context.run(Some(address_data), None, timeout) {
             Ok(RunResult::Match(result) | RunResult::NoMatch(result)) => result,
             Err(e) => {
                 warn!("Failed to evalute in-app WAF rules against request: {e}");
@@ -192,6 +362,30 @@ impl ProcessorContext {
         }
     }
 }
+impl std::fmt::Debug for AppSecContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(stringify!(AppSecContext))
+            .field("request_type", &self.request_type)
+            .field("waf_timeout", &self.waf_timeout)
+            .field("duration", &self.duration)
+            .field("timeouts", &self.timeouts)
+            .field("keep", &self.keep)
+            .field("attributes", &self.attributes)
+            .field("events", &self.events)
+            .finish_non_exhaustive()
+    }
+}
+impl std::cmp::PartialEq for AppSecContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.request_type == other.request_type
+            && self.waf_timeout == other.waf_timeout
+            && self.duration == other.duration
+            && self.timeouts == other.timeouts
+            && self.keep == other.keep
+            && self.attributes == other.attributes
+            && self.events == other.events
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -205,10 +399,6 @@ mod tests {
             serverless_appsec_enabled: true,
             ..Config::default()
         };
-        let proc = Processor::new(&config).expect("Should not fail");
-        match proc._diagnostics.get(b"ruleset_version") {
-            None => panic!("Ruleset version should be present in diagnostics"),
-            Some(version) => assert_ne!(version.to_str().expect("Should be a valid string"), ""),
-        }
+        let _ = Processor::new(&config).expect("Should not fail");
     }
 }

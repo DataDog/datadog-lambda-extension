@@ -16,83 +16,122 @@ trait IsValid {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool;
 }
 
-#[derive(Default)]
-struct HttpRequestData {
-    _source_ip: Option<String>,
-    _route: Option<String>,
-    client_ip: Option<String>,
-    raw_uri: Option<String>,
-    headers: Option<HashMap<String, Vec<String>>>,
-    cookies: Option<HashMap<String, Vec<String>>>,
-    query: Option<HashMap<String, Vec<String>>>,
-    path_params: Option<HashMap<String, String>>,
-    body: Option<WafObject>,
-    response_body: Option<WafObject>,
-    response_status: Option<i64>,
+#[allow(clippy::large_enum_variant)]
+pub(crate) enum HttpData {
+    Request {
+        raw_uri: Option<String>,
+        method: Option<String>,
+        route: Option<String>,
+        client_ip: Option<String>,
+        headers: Option<HashMap<String, Vec<String>>>,
+        cookies: Option<HashMap<String, Vec<String>>>,
+        query: Option<HashMap<String, Vec<String>>>,
+        path_params: Option<HashMap<String, String>>,
+        body: Option<WafObject>,
+    },
+    Response {
+        status_code: Option<i64>,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<WafObject>,
+    },
 }
 
-trait ToWafMap {
+pub(crate) trait ToWafMap {
     fn to_waf_map(self) -> WafMap;
 }
-impl ToWafMap for HttpRequestData {
+impl ToWafMap for HttpData {
     fn to_waf_map(self) -> WafMap {
-        let count = [
-            self.client_ip.is_some(),
-            self.raw_uri.is_some(),
-            self.headers.is_some(),
-            self.cookies.is_some(),
-            self.query.is_some(),
-            self.path_params.is_some(),
-            self.body.is_some(),
-            self.response_body.is_some(),
-            self.response_status.is_some(),
-        ]
-        .into_iter()
-        .filter(|b| *b)
-        .count();
-        let mut map = WafMap::new(count as u64);
-        let mut i = 0;
+        match self {
+            HttpData::Request {
+                client_ip,
+                raw_uri,
+                headers: request_headers,
+                cookies,
+                query,
+                path_params,
+                body,
+                ..
+            } => {
+                let count = [
+                    client_ip.is_some(),
+                    raw_uri.is_some(),
+                    request_headers.is_some(),
+                    cookies.is_some(),
+                    query.is_some(),
+                    path_params.is_some(),
+                    body.is_some(),
+                ]
+                .into_iter()
+                .filter(|b| *b)
+                .count();
+                let mut map = WafMap::new(count as u64);
+                let mut i = 0;
 
-        if let Some(client_ip) = self.client_ip {
-            map[i] = ("http.client_ip", client_ip.as_str()).into();
-            i += 1;
-        }
-        if let Some(raw_uri) = self.raw_uri {
-            map[i] = ("server.request.uri.raw", raw_uri.as_str()).into();
-            i += 1;
-        }
-        if let Some(headers) = self.headers {
-            map[i] = ("server.request.headers.no_cookies", headers.to_waf_map()).into();
-            i += 1;
-        }
-        if let Some(cookies) = self.cookies {
-            map[i] = ("server.request.cookies", cookies.to_waf_map()).into();
-            i += 1;
-        }
-        if let Some(query) = self.query {
-            map[i] = ("server.request.query", query.to_waf_map()).into();
-            i += 1;
-        }
-        if let Some(path_params) = self.path_params {
-            map[i] = ("server.request.path_params", path_params.to_waf_map()).into();
-            i += 1;
-        }
-        if let Some(body) = self.body {
-            map[i] = ("server.request.body", body).into();
-            i += 1;
-        }
-        if let Some(response_body) = self.response_body {
-            map[i] = ("server.response.body", response_body).into();
-            i += 1;
-        }
-        if let Some(response_status) = self.response_status {
-            map[i] = ("server.response.status", response_status).into();
-            i += 1;
-        }
+                if let Some(client_ip) = client_ip {
+                    map[i] = ("http.client_ip", client_ip.as_str()).into();
+                    i += 1;
+                }
+                if let Some(raw_uri) = raw_uri {
+                    map[i] = ("server.request.uri.raw", raw_uri.as_str()).into();
+                    i += 1;
+                }
+                if let Some(headers) = request_headers {
+                    map[i] = ("server.request.headers.no_cookies", headers.to_waf_map()).into();
+                    i += 1;
+                }
+                if let Some(cookies) = cookies {
+                    map[i] = ("server.request.cookies", cookies.to_waf_map()).into();
+                    i += 1;
+                }
+                if let Some(query) = query {
+                    map[i] = ("server.request.query", query.to_waf_map()).into();
+                    i += 1;
+                }
+                if let Some(path_params) = path_params {
+                    map[i] = ("server.request.path_params", path_params.to_waf_map()).into();
+                    i += 1;
+                }
+                if let Some(body) = body {
+                    map[i] = ("server.request.body", body).into();
+                    i += 1;
+                }
+                debug_assert_eq!(i, count); // Sanity check that we didn't over-allocate
 
-        debug_assert_eq!(i, count); // Sanity check that we didn't over-allocate
+                map
+            }
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+                ..
+            } => {
+                let count = [status_code.is_some(), headers.is_some(), body.is_some()]
+                    .into_iter()
+                    .filter(|b| *b)
+                    .count();
+                let mut map = WafMap::new(count as u64);
+                let mut i = 0;
 
-        map
+                if let Some(response_status) = status_code {
+                    map[i] = ("server.response.status", response_status).into();
+                    i += 1;
+                }
+                if let Some(headers) = headers {
+                    let mut headers = headers.clone();
+                    headers.remove("set-cookie");
+                    map[i] = ("server.response.headers.no_cookies", headers.to_waf_map()).into();
+                    i += 1;
+                }
+                if let Some(response_body) = body {
+                    map[i] = ("server.response.body", response_body).into();
+                    i += 1;
+                }
+
+                debug_assert_eq!(i, count); // Sanity check that we didn't over-allocate
+
+                map
+            }
+        }
     }
 }
 impl ToWafMap for HashMap<String, Vec<String>> {
@@ -123,7 +162,7 @@ impl ToWafMap for HashMap<String, String> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum RequestType {
     APIGatewayV1, // Or Kong
     APIGatewayV2Http,
@@ -136,13 +175,13 @@ pub(super) enum RequestType {
 
 trait ExtractRequest {
     const TYPE: RequestType;
-    async fn extract(self) -> HttpRequestData;
+    async fn extract(self) -> HttpData;
 }
 trait ExtractResponse {
-    async fn extract(self) -> HttpRequestData;
+    async fn extract(self) -> HttpData;
 }
 
-pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<(WafMap, RequestType)> {
+pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<(HttpData, RequestType)> {
     let reader = body.clone().reader();
     let data: serde_json::Map<String, serde_json::Value> = match serde_json::from_reader(reader) {
         Ok(data) => data,
@@ -163,7 +202,7 @@ pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<(WafMap
                 let Ok(val) = serde_json::from_value::<$ty>(serde_json::Value::Object(data)) else {
                     return None;
                 };
-                return Some((val.extract().await.to_waf_map(), <$ty>::TYPE));
+                return Some((val.extract().await, <$ty>::TYPE));
             }
         };
     }
@@ -206,11 +245,11 @@ pub(super) async fn extract_request_address_data(body: &Bytes) -> Option<(WafMap
 pub(super) async fn extract_response_address_data(
     request_type: RequestType,
     body: &Bytes,
-) -> Option<WafMap> {
+) -> Option<HttpData> {
     request_type.extract_response_address_data(body).await
 }
 impl RequestType {
-    async fn extract_response_address_data(self, body: &Bytes) -> Option<WafMap> {
+    async fn extract_response_address_data(self, body: &Bytes) -> Option<HttpData> {
         macro_rules! match_types {
             ($($name:ident => $ty:ty),+) => {
                 match self {$(
@@ -229,17 +268,14 @@ impl RequestType {
             }
         }
 
-        Some(
-            match_types! {
-                APIGatewayV1 => apigw::ApiGatewayProxyResponse,
-                APIGatewayV2Http => apigw::ApiGatewayV2httpResponse,
-                APIGatewayV2Websocket => response::Opaque,
-                APIGatewayLambdaAuthorizerToken => response::Opaque,
-                APIGatewayLambdaAuthorizerRequest => response::Opaque,
-                Alb => alb::AlbTargetGroupResponse,
-                LambdaFunctionUrl => lambda_function_urls::LambdaFunctionUrlResponse
-            }
-            .to_waf_map(),
-        )
+        Some(match_types! {
+            APIGatewayV1 => apigw::ApiGatewayProxyResponse,
+            APIGatewayV2Http => apigw::ApiGatewayV2httpResponse,
+            APIGatewayV2Websocket => response::Opaque,
+            APIGatewayLambdaAuthorizerToken => response::Opaque,
+            APIGatewayLambdaAuthorizerRequest => response::Opaque,
+            Alb => alb::AlbTargetGroupResponse,
+            LambdaFunctionUrl => lambda_function_urls::LambdaFunctionUrlResponse
+        })
     }
 }

@@ -1,3 +1,5 @@
+use crate::appsec::processor::AppSecContext;
+use crate::lifecycle::invocation::processor::TAG_SAMPLING_PRIORITY;
 use crate::{
     lifecycle::invocation::processor::MS_TO_NS, metrics::enhanced::lambda::EnhancedMetricData,
     traces::context::SpanContext,
@@ -8,9 +10,9 @@ use std::{
 };
 
 use datadog_trace_protobuf::pb::Span;
-use tracing::debug;
+use tracing::{debug, warn};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Context {
     /// The timestamp when the context was created.
     created_at: i64,
@@ -38,6 +40,56 @@ pub struct Context {
     /// tracing.
     ///
     pub extracted_span_context: Option<SpanContext>,
+    /// The [`AppSecContext`] for this invocation, if one exists.
+    appsec_context: Option<AppSecContext>,
+}
+impl Context {
+    pub fn absorb_appsec_tags(&mut self) {
+        let Some(appsec_context) = self.appsec_context.as_mut() else {
+            // Nothing to do -- we don't have AppSec context data for this invocation.
+            return;
+        };
+
+        self.invocation_span
+            .metrics
+            .insert("_dd.appsec.enabled".to_string(), 1f64);
+
+        // Up-sert any attributes from the AppSec context into the invocation span. This includes
+        // synthetic attributes produced by the WAF (fingerprints, schemas, ...) as well as tracking
+        // spans expected by AAP. We do upsert to avoid overwriting anything previously set.
+        for (key, value) in appsec_context.tags() {
+            self.invocation_span
+                .meta
+                .entry(key.clone())
+                .or_insert(value.clone());
+        }
+
+        if !appsec_context.events.is_empty() {
+            self.invocation_span
+                .meta
+                .insert("appsec.event".to_string(), "true".to_string());
+            match serde_json::to_string(&appsec_context.events) {
+                Ok(encoded) => {
+                    self.invocation_span
+                        .meta
+                        .insert("_dd.appsec.json".to_string(), encoded);
+                }
+                Err(e) => {
+                    warn!("appsec: unable to encode WAF events: {e}");
+                }
+            }
+        }
+
+        // Note: We intentionally don't set `actor.ip` because we don't have a definitive signal here.
+
+        //TODO(romain.marcadier): Figure out whether we can set "_dd.runtime_family" here; and to what value.
+
+        if appsec_context.keep {
+            self.invocation_span
+                .metrics
+                .insert(TAG_SAMPLING_PRIORITY.to_string(), 2f64 /* USER_KEEP */);
+        }
+    }
 }
 
 /// Struct containing the information needed to reparent a span.
@@ -88,6 +140,7 @@ impl Default for Context {
             cold_start_span: None,
             tracer_span: None,
             extracted_span_context: None,
+            appsec_context: None,
         }
     }
 }
@@ -123,6 +176,9 @@ pub struct ContextBuffer {
     universal_instrumentation_start_events: VecDeque<UniversalInstrumentationData>,
     universal_instrumentation_end_events: VecDeque<UniversalInstrumentationData>,
     pub sorted_reparenting_info: VecDeque<ReparentingInfo>,
+
+    /// The buffer of appsec contexts that are bound before the corresponding [`Context`] is created.
+    appsec_contexts: VecDeque<(String, AppSecContext)>,
 }
 
 struct UniversalInstrumentationData {
@@ -148,27 +204,71 @@ impl ContextBuffer {
             universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
             universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
             sorted_reparenting_info: VecDeque::with_capacity(capacity),
+            appsec_contexts: VecDeque::with_capacity(capacity),
         }
     }
 
     /// Inserts a context into the buffer. If the buffer is full, the oldest `Context` is removed.
     ///
-    fn insert(&mut self, context: Context) {
+    fn insert(&mut self, mut context: Context) {
+        if let Some(i) = self
+            .appsec_contexts
+            .iter()
+            .position(|(id, _)| id == &context.request_id)
+        {
+            context.appsec_context = self.appsec_contexts.remove(i).map(|(_, c)| c);
+        }
+
         if self.size() == self.buffer.capacity() {
             self.buffer.pop_front();
-            self.buffer.push_back(context);
-        } else {
-            if self.get(&context.request_id).is_some() {
-                self.remove(&context.request_id);
-            }
-
-            self.buffer.push_back(context);
+        } else if self.get(&context.request_id).is_some() {
+            self.remove(&context.request_id);
         }
+        self.buffer.push_back(context);
+    }
+
+    /// Binds the provided security context to the invocation context for the given `request_id`.
+    pub fn bind_security_context(&mut self, request_id: &str, appsec_context: AppSecContext) {
+        // If we already have a [`Context`] for this `request_id`, we can just directly bind to it.
+        if let Some(context) = self.get_mut(request_id) {
+            context.appsec_context = Some(appsec_context);
+            return;
+        }
+
+        if self.appsec_contexts.len() == self.appsec_contexts.capacity() {
+            self.appsec_contexts.pop_front();
+        } else if let Some(i) = self
+            .appsec_contexts
+            .iter()
+            .position(|(id, _)| id == request_id)
+        {
+            self.appsec_contexts.remove(i);
+        }
+        self.appsec_contexts
+            .push_back((request_id.to_string(), appsec_context));
+    }
+
+    /// Retrieves the security context bound to the given `request_id`, if one exists.
+    pub fn get_security_context_mut(&mut self, request_id: &str) -> Option<&mut AppSecContext> {
+        if let Some(ctx) = self.get_mut(request_id) {
+            return ctx.appsec_context.as_mut();
+        }
+
+        None
     }
 
     /// Removes a context from the buffer. Returns the removed `Context` if found.
     ///
     pub fn remove(&mut self, request_id: &String) -> Option<Context> {
+        // Purge the associated AppSec context, if any exists.
+        if let Some(i) = self
+            .appsec_contexts
+            .iter()
+            .position(|(id, _)| id == request_id)
+        {
+            self.appsec_contexts.remove(i);
+        }
+
         if let Some(i) = self
             .buffer
             .iter()
@@ -184,7 +284,7 @@ impl ContextBuffer {
     /// Returns a reference to a `Context` from the buffer if found.
     ///
     #[must_use]
-    pub fn get(&self, request_id: &String) -> Option<&Context> {
+    pub fn get(&self, request_id: &str) -> Option<&Context> {
         self.buffer
             .iter()
             .find(|context| context.request_id == *request_id)
@@ -193,7 +293,7 @@ impl ContextBuffer {
     /// Returns a mutable reference to a `Context` from the buffer if found.
     ///
     #[must_use]
-    pub fn get_mut(&mut self, request_id: &String) -> Option<&mut Context> {
+    pub fn get_mut(&mut self, request_id: &str) -> Option<&mut Context> {
         self.buffer
             .iter_mut()
             .find(|context| context.request_id == *request_id)

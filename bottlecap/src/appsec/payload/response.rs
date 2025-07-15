@@ -1,10 +1,13 @@
-use super::{body::parse_body, ExtractResponse, HttpRequestData};
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+
+use super::{body::parse_body, ExtractResponse, HttpData};
 
 use aws_lambda_events::{alb, apigw, lambda_function_urls};
 use tracing::warn;
 
 impl ExtractResponse for apigw::ApiGatewayProxyResponse {
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let body = if let Some(body) = self.body {
             match parse_body(
                 body,
@@ -25,16 +28,16 @@ impl ExtractResponse for apigw::ApiGatewayProxyResponse {
             None
         };
 
-        HttpRequestData {
-            response_status: Some(self.status_code),
-            response_body: body,
-            ..Default::default()
+        HttpData::Response {
+            status_code: Some(self.status_code),
+            headers: normalize_headers(self.multi_value_headers, self.headers),
+            body,
         }
     }
 }
 
 impl ExtractResponse for apigw::ApiGatewayV2httpResponse {
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let body = if let Some(body) = self.body {
             match parse_body(
                 body,
@@ -55,10 +58,10 @@ impl ExtractResponse for apigw::ApiGatewayV2httpResponse {
             None
         };
 
-        HttpRequestData {
-            response_status: Some(self.status_code),
-            response_body: body,
-            ..Default::default()
+        HttpData::Response {
+            status_code: Some(self.status_code),
+            headers: normalize_headers(self.multi_value_headers, self.headers),
+            body,
         }
     }
 }
@@ -68,13 +71,17 @@ impl ExtractResponse for apigw::ApiGatewayV2httpResponse {
 #[repr(transparent)]
 pub(super) struct Opaque(serde_json::Value);
 impl ExtractResponse for Opaque {
-    async fn extract(self) -> HttpRequestData {
-        HttpRequestData::default()
+    async fn extract(self) -> HttpData {
+        HttpData::Response {
+            status_code: None,
+            headers: None,
+            body: None,
+        }
     }
 }
 
 impl ExtractResponse for alb::AlbTargetGroupResponse {
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let body = if let Some(body) = self.body {
             match parse_body(
                 body,
@@ -95,16 +102,16 @@ impl ExtractResponse for alb::AlbTargetGroupResponse {
             None
         };
 
-        HttpRequestData {
-            response_status: Some(self.status_code),
-            response_body: body,
-            ..Default::default()
+        HttpData::Response {
+            status_code: Some(self.status_code),
+            headers: normalize_headers(self.multi_value_headers, self.headers),
+            body,
         }
     }
 }
 
 impl ExtractResponse for lambda_function_urls::LambdaFunctionUrlResponse {
-    async fn extract(self) -> HttpRequestData {
+    async fn extract(self) -> HttpData {
         let body = if let Some(body) = self.body {
             match parse_body(
                 body,
@@ -125,10 +132,44 @@ impl ExtractResponse for lambda_function_urls::LambdaFunctionUrlResponse {
             None
         };
 
-        HttpRequestData {
-            response_status: Some(self.status_code),
-            response_body: body,
-            ..Default::default()
+        HttpData::Response {
+            status_code: Some(self.status_code),
+            headers: normalize_headers(aws_lambda_events::http::HeaderMap::default(), self.headers),
+            body,
         }
     }
+}
+
+/// Converts a header multimap + single-map into a normalized multi-map where all header names are
+/// normalized to the lower case form.
+pub(super) fn normalize_headers(
+    multi_value_headers: aws_lambda_events::http::HeaderMap,
+    headers: aws_lambda_events::http::HeaderMap,
+) -> Option<HashMap<String, Vec<String>>> {
+    if multi_value_headers.is_empty() && headers.is_empty() {
+        return None;
+    }
+
+    let mut normalized = HashMap::with_capacity(multi_value_headers.len() + headers.len());
+
+    for (key, value) in multi_value_headers {
+        let Some(key) = key else { continue };
+        let Ok(value) = value.to_str() else { continue };
+        match normalized.entry(key.as_str().to_lowercase()) {
+            Entry::Vacant(entry) => {
+                entry.insert(vec![value.to_string()]);
+            }
+            Entry::Occupied(mut entry) => entry.get_mut().push(value.to_string()),
+        }
+    }
+
+    for (key, value) in headers {
+        let Some(key) = key else { continue };
+        let Ok(value) = value.to_str() else { continue };
+        normalized
+            .entry(key.as_str().to_lowercase())
+            .or_insert_with(move || vec![value.to_string()]);
+    }
+
+    Some(normalized)
 }

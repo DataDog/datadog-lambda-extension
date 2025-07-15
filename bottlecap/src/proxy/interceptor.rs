@@ -189,9 +189,21 @@ async fn invocation_next_proxy(
 
     // K9 / ASM
     if let Some(appsec_processor) = appsec_processor {
-        let _ = appsec_processor
-            .process_invocation_next(&intercepted_bytes)
-            .await;
+        if let Some(request_id) = intercepted_parts
+            .headers
+            .get("Lambda-Runtime-Aws-Request-Id")
+        {
+            if let Ok(request_id) = request_id.to_str() {
+                if let Some(context) = appsec_processor
+                    .process_invocation_next(&intercepted_bytes)
+                    .await
+                {
+                    let invocation_processor = invocation_processor.clone();
+                    let mut invocation_processor = invocation_processor.lock().await;
+                    invocation_processor.bind_security_context(request_id, context);
+                }
+            }
+        }
     }
 
     match build_forward_response(intercepted_parts, intercepted_bytes) {
@@ -241,9 +253,13 @@ async fn invocation_response_proxy(
 
     // K9 / ASM
     if let Some(appsec_processor) = appsec_processor {
-        appsec_processor
-            .process_invocation_response(None, &body_bytes)
-            .await;
+        let invocation_processor = invocation_processor.clone();
+        let mut invocation_processor = invocation_processor.lock().await;
+        if let Some(appsec_context) = invocation_processor.get_security_context_mut(&request_id) {
+            appsec_processor
+                .process_invocation_response(appsec_context, &body_bytes)
+                .await;
+        }
     }
 
     let (intercepted_parts, intercepted_bytes) =

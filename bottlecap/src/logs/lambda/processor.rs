@@ -163,7 +163,7 @@ impl LambdaProcessor {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
 
-                let mut message = format!("END RequestId: {request_id}"); 
+                let mut message = format!("END RequestId: {request_id}");
                 let mut result_status = "info".to_string();
                 if let Some(metrics) = metrics {
                     self.invocation_context.runtime_duration_ms = metrics.duration_ms;

@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::{debug, warn};
 
+use crate::appsec::processor::AppSecContext;
 use crate::{
     config::{self, aws::AwsConfig},
     lifecycle::invocation::{
@@ -47,7 +48,7 @@ pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-err
 pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-type";
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
-const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
+pub const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
 
 pub struct Processor {
     /// Buffer containing context of the previous 5 invocations
@@ -108,6 +109,23 @@ impl Processor {
             resource,
             dynamic_tags: HashMap::new(),
         }
+    }
+
+    /// Binds the provided security context to the invocation context for the given `request_id`.
+    ///
+    /// This may happen before [`on_invoke_event`][Self::on_invoke_event] is called and hence cannot assume any
+    /// request-specific state has been initialized at this time.
+    pub(crate) fn bind_security_context(&mut self, request_id: &str, context: AppSecContext) {
+        self.context_buffer
+            .bind_security_context(request_id, context);
+    }
+
+    /// Retrieves the security context bound to the given `request_id`, if one exists.
+    pub(crate) fn get_security_context_mut(
+        &mut self,
+        request_id: &str,
+    ) -> Option<&mut AppSecContext> {
+        self.context_buffer.get_security_context_mut(request_id)
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
@@ -387,7 +405,8 @@ impl Processor {
             _ = offsets.process_chan_tx.send(());
         }
 
-        // todo(duncanista): Add missing metric tags for ASM
+        context.absorb_appsec_tags();
+
         // Add dynamic and trigger tags
         context
             .invocation_span
@@ -536,12 +555,7 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(
-        &mut self,
-        request_id: &String,
-        metrics: ReportMetrics,
-        timestamp: i64,
-    ) {
+    pub fn on_platform_report(&mut self, request_id: &str, metrics: ReportMetrics, timestamp: i64) {
         // Set the report log metrics
         self.enhanced_metrics
             .set_report_log_metrics(&metrics, timestamp);
