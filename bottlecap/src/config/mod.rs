@@ -198,7 +198,7 @@ impl ConfigBuilder {
         // or in the `proxy_no_proxy` config field.
         if self.config.proxy_https.is_some() {
             let site_in_no_proxy = std::env::var("NO_PROXY")
-                .map_or(false, |no_proxy| no_proxy.contains(&self.config.site))
+                .is_ok_and(|no_proxy| no_proxy.contains(&self.config.site))
                 || self
                     .config
                     .proxy_no_proxy

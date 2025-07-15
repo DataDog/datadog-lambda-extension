@@ -1,6 +1,7 @@
 use datadog_trace_protobuf::pb::ClientStatsPayload;
 use std::collections::VecDeque;
 
+#[allow(clippy::empty_line_after_doc_comments)]
 /// Maximum number of entries in a stat payload.
 ///
 /// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>

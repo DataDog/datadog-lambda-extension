@@ -47,7 +47,7 @@ impl Trigger for EventBridgeEvent {
             && payload
                 .get("source")
                 .and_then(Value::as_str)
-                .map_or(false, |s| s != "aws.events")
+                .is_some_and(|s| s != "aws.events")
     }
 
     #[allow(clippy::cast_possible_truncation)]
