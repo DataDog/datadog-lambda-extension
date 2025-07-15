@@ -15,17 +15,9 @@ TRACER_VERSION=${TRACER_VERSION#v} # remove the 'v' prefix
 
 # Download the tracer to the dd_tracer folder
 echo Downloading version "${TRACER_VERSION}" of the .NET tracer into /tmp/datadog-dotnet-apm.tar.gz
-
-# Use Github authentication token if provided
-if [ -n "$GITHUB_TOKEN" ]; then
-    curl -L -H "Authorization: Bearer $GITHUB_TOKEN" \
-        "https://github.com/DataDog/dd-trace-dotnet/releases/download/v${TRACER_VERSION}/datadog-dotnet-apm-${TRACER_VERSION}.tar.gz" \
-        -o /tmp/datadog-dotnet-apm.tar.gz
-else
-    curl -L \
-        "https://github.com/DataDog/dd-trace-dotnet/releases/download/v${TRACER_VERSION}/datadog-dotnet-apm-${TRACER_VERSION}.tar.gz" \
-        -o /tmp/datadog-dotnet-apm.tar.gz
-fi
+curl -L -H "Authorization: Bearer $GITHUB_TOKEN" \
+    "https://github.com/DataDog/dd-trace-dotnet/releases/download/v${TRACER_VERSION}/datadog-dotnet-apm-${TRACER_VERSION}.tar.gz" \
+    -o /tmp/datadog-dotnet-apm.tar.gz
 
 # Unarchive the tracer and remove the tmp
 mkdir -p /dd_tracer/dotnet
