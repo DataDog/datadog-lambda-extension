@@ -695,7 +695,7 @@ async fn extension_loop_active(
                         }
                     }
                     // Add timeout to prevent hanging indefinitely
-                    _ = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
+                    () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
                         debug!("Timeout waiting for tombstone event, proceeding with shutdown");
                         break 'shutdown;
                     }
