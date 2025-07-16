@@ -29,11 +29,10 @@ use crate::{
     tags::provider,
     traces::{
         proxy_aggregator::{self, ProxyRequest},
-        stats_aggregator, stats_processor, trace_aggregator, trace_processor,
-        INVOCATION_SPAN_RESOURCE,
+        stats_aggregator, stats_processor,
+        trace_aggregator::{self, SendDataBuilderInfo},
+        trace_processor, INVOCATION_SPAN_RESOURCE,
     },
-    stats_aggregator, stats_processor, trace_aggregator::{self, SendDataBuilderInfo},
-    trace_processor, INVOCATION_SPAN_RESOURCE,
 };
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self};
