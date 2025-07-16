@@ -141,7 +141,8 @@ impl ExtractResponse for lambda_function_urls::LambdaFunctionUrlResponse {
 }
 
 /// Converts a header multimap + single-map into a normalized multi-map where all header names are
-/// normalized to the lower case form.
+/// normalized to the lower case form. It also removes the `Set-Cookie` header, which should not be
+/// carried any further due to its potential for including sensitive information.
 pub(super) fn normalize_headers(
     multi_value_headers: aws_lambda_events::http::HeaderMap,
     headers: aws_lambda_events::http::HeaderMap,
@@ -154,6 +155,9 @@ pub(super) fn normalize_headers(
 
     for (key, value) in multi_value_headers {
         let Some(key) = key else { continue };
+        if key.as_str().eq_ignore_ascii_case("set-cookie") {
+            continue;
+        }
         let Ok(value) = value.to_str() else { continue };
         match normalized.entry(key.as_str().to_lowercase()) {
             Entry::Vacant(entry) => {
@@ -165,6 +169,9 @@ pub(super) fn normalize_headers(
 
     for (key, value) in headers {
         let Some(key) = key else { continue };
+        if key.as_str().eq_ignore_ascii_case("set-cookie") {
+            continue;
+        }
         let Ok(value) = value.to_str() else { continue };
         normalized
             .entry(key.as_str().to_lowercase())

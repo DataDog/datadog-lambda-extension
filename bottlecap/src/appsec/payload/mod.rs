@@ -792,4 +792,485 @@ mod tests {
             HttpData::Response { .. } => panic!("Expected Request HttpData"),
         }
     }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_v2_http_response() {
+        let payload = r#"{
+            "statusCode": 200,
+            "multiValueHeaders": {
+                "Content-Type": ["application/json"],
+                "X-Custom-Header": ["custom-value"]
+            },
+            "body": "{\"message\": \"success\", \"data\": \"test\"}",
+            "isBase64Encoded": false,
+            "cookies": []
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::APIGatewayV2Http, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                assert_eq!(status_code, Some(200));
+                assert_eq!(
+                    headers,
+                    Some(HashMap::from([
+                        (
+                            "content-type".to_string(),
+                            vec!["application/json".to_string()]
+                        ),
+                        (
+                            "x-custom-header".to_string(),
+                            vec!["custom-value".to_string()]
+                        ),
+                    ]))
+                );
+                assert_eq!(
+                    body,
+                    Some(waf_map!(("message", "success"), ("data", "test")).into())
+                );
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_v2_http_response_no_body() {
+        let payload = r#"{
+            "statusCode": 204,
+            "headers": { "Content-Length": "0" },
+            "cookies": []
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::APIGatewayV2Http, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                assert_eq!(status_code, Some(204));
+                assert_eq!(
+                    headers,
+                    Some(HashMap::from([(
+                        "content-length".to_string(),
+                        vec!["0".to_string()]
+                    )]))
+                );
+                assert_eq!(body, None);
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_v2_http_response_base64_body() {
+        let payload = r#"{
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": "eyJtZXNzYWdlIjogImVuY29kZWQifQ==",
+            "isBase64Encoded": true,
+            "cookies": []
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::APIGatewayV2Http, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response { body, .. } => {
+                assert_eq!(body, Some(waf_map!(("message", "encoded")).into()));
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_websocket_response() {
+        let payload = r#"{
+            "statusCode": 200,
+            "body": "Message sent"
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result =
+            extract_response_address_data(RequestType::APIGatewayV2Websocket, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                // Websocket responses use Opaque type, which returns None for all fields
+                assert_eq!(status_code, None);
+                assert_eq!(headers, None);
+                assert_eq!(body, None);
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_lambda_authorizer_token_response() {
+        let payload = r#"{
+            "principalId": "user123",
+            "policyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "execute-api:Invoke",
+                        "Resource": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/users"
+                    }
+                ]
+            }
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result =
+            extract_response_address_data(RequestType::APIGatewayLambdaAuthorizerToken, &bytes)
+                .await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                // Lambda authorizer responses use Opaque type, which returns None for all fields
+                assert_eq!(status_code, None);
+                assert_eq!(headers, None);
+                assert_eq!(body, None);
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_lambda_authorizer_request_response() {
+        let payload = r#"{
+            "principalId": "user123",
+            "policyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "execute-api:Invoke",
+                        "Resource": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/users"
+                    }
+                ]
+            },
+            "context": {
+                "userId": "user123"
+            }
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result =
+            extract_response_address_data(RequestType::APIGatewayLambdaAuthorizerRequest, &bytes)
+                .await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                // Lambda authorizer responses use Opaque type, which returns None for all fields
+                assert_eq!(status_code, None);
+                assert_eq!(headers, None);
+                assert_eq!(body, None);
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_alb_target_group_response() {
+        let payload = r#"{
+            "statusCode": 200,
+            "statusDescription": "200 OK",
+            "headers": {
+                "Content-Type": "text/html",
+                "Set-Cookie": "cookie1=value1; Path=/",
+                "X-Custom-Header": "custom-value"
+            },
+            "body": "<html><body><h1>Hello from ALB!</h1></body></html>",
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::Alb, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                assert_eq!(status_code, Some(200));
+                assert_eq!(
+                    headers,
+                    Some(HashMap::from([
+                        ("content-type".to_string(), vec!["text/html".to_string()]),
+                        (
+                            "x-custom-header".to_string(),
+                            vec!["custom-value".to_string()]
+                        ),
+                    ]))
+                );
+                assert!(body.is_none()); // text/html is not relevant for security
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_alb_target_group_response_json_body() {
+        let payload = r#"{
+            "statusCode": 201,
+            "statusDescription": "201 Created",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": "{\"id\": 123, \"name\": \"test\", \"active\": true}",
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::Alb, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code, body, ..
+            } => {
+                assert_eq!(status_code, Some(201));
+                assert_eq!(
+                    body,
+                    Some(waf_map!(("id", 123u64), ("name", "test"), ("active", true)).into())
+                );
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_alb_target_group_response_empty_body() {
+        let payload = r#"{
+            "statusCode": 204,
+            "statusDescription": "204 No Content",
+            "headers": {
+                "Content-Type": "text/plain"
+            },
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::Alb, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code, body, ..
+            } => {
+                assert_eq!(status_code, Some(204));
+                assert_eq!(body, None);
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_lambda_function_url_response() {
+        let payload = r#"{
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json",
+                "X-Custom-Header": "custom-value",
+                "Cache-Control": "no-cache"
+            },
+            "body": "{\"message\": \"Hello from Lambda function URL!\", \"timestamp\": 1234567890}",
+            "isBase64Encoded": false,
+            "cookies": []
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::LambdaFunctionUrl, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                assert_eq!(status_code, Some(200));
+                assert_eq!(
+                    headers,
+                    Some(HashMap::from([
+                        (
+                            "content-type".to_string(),
+                            vec!["application/json".to_string()]
+                        ),
+                        (
+                            "x-custom-header".to_string(),
+                            vec!["custom-value".to_string()]
+                        ),
+                        ("cache-control".to_string(), vec!["no-cache".to_string()]),
+                    ]))
+                );
+                assert_eq!(
+                    body,
+                    Some(
+                        waf_map!(
+                            ("message", "Hello from Lambda function URL!"),
+                            ("timestamp", 1_234_567_890u64)
+                        )
+                        .into()
+                    )
+                );
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_lambda_function_url_response_base64_body() {
+        let payload = r#"{
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": "eyJzdGF0dXMiOiAib2sifQ==",
+            "isBase64Encoded": true,
+            "cookies": []
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::LambdaFunctionUrl, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response { body, .. } => {
+                assert_eq!(body, Some(waf_map!(("status", "ok")).into()));
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_lambda_function_url_response_error_status() {
+        let payload = r#"{
+            "statusCode": 500,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": "{\"error\": \"Internal Server Error\", \"code\": 500}",
+            "isBase64Encoded": false,
+            "cookies": []
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::LambdaFunctionUrl, &bytes).await;
+
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code, body, ..
+            } => {
+                assert_eq!(status_code, Some(500));
+                assert_eq!(
+                    body,
+                    Some(waf_map!(("error", "Internal Server Error"), ("code", 500u64)).into())
+                );
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_response_invalid_json() {
+        let payload = r#"{"invalid": json}"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::APIGatewayV2Http, &bytes).await;
+
+        // Should return None for invalid JSON
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_response_malformed_structure() {
+        let payload = r#"{
+            "some": "unrecognized",
+            "structure": "that doesnt match expected response format"
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_response_address_data(RequestType::APIGatewayV2Http, &bytes).await;
+
+        // Should return None for malformed structure
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_opaque_response_shouldnt_cause_failures() {
+        // Test that opaque payloads (like custom authorizer responses) don't cause failures
+        let complex_payload = r#"{
+            "principalId": "user123",
+            "policyDocument": {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "execute-api:Invoke",
+                        "Resource": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/users"
+                    }
+                ]
+            },
+            "context": {
+                "userId": "user123",
+                "department": "engineering",
+                "permissions": ["read", "write"]
+            },
+            "usageIdentifierKey": "some-key"
+        }"#;
+
+        let bytes = Bytes::from(complex_payload);
+        let result =
+            extract_response_address_data(RequestType::APIGatewayLambdaAuthorizerToken, &bytes)
+                .await;
+
+        // Should handle complex opaque payloads gracefully
+        let http_data = result.expect("Expected result to be Some");
+        match http_data {
+            HttpData::Response {
+                status_code,
+                headers,
+                body,
+            } => {
+                // Opaque responses should return None for all fields
+                assert_eq!(status_code, None);
+                assert_eq!(headers, None);
+                assert_eq!(body, None);
+            }
+            HttpData::Request { .. } => panic!("Expected Response HttpData"),
+        }
+    }
 }
