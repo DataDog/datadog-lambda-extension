@@ -414,9 +414,554 @@ mod tests {
 
         let config = Config {
             serverless_appsec_enabled: true,
-            appsec_rules: Some(tmp.path().to_str().expect("Failed to get tempfile path").to_string()),
+            appsec_rules: Some(
+                tmp.path()
+                    .to_str()
+                    .expect("Failed to get tempfile path")
+                    .to_string(),
+            ),
             ..Config::default()
         };
         let _ = Processor::new(&config).expect_err("should have failed");
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_api_gateway_v1() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            appsec_waf_timeout: Duration::from_secs(3600), // Avoids falkes on slower CI hardware
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Accept": ["*/*"],
+                "Content-Type": ["application/json"]
+            },
+            "queryStringParameters": {
+                "foo": "bar"
+            },
+            "multiValueQueryStringParameters": {
+                "foo": ["bar"]
+            },
+            "pathParameters": {
+                "proxy": "/path/to/resource"
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "extendedRequestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "requestTime": "09/Apr/2015:12:34:56 +0000",
+                "path": "/path/to/resource",
+                "accountId": "123456789012",
+                "protocol": "HTTP/1.1",
+                "stage": "prod",
+                "domainPrefix": "1234567890",
+                "requestTimeEpoch": 1428582896000,
+                "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "identity": {
+                    "cognitoIdentityPoolId": null,
+                    "accountId": null,
+                    "cognitoIdentityId": null,
+                    "caller": null,
+                    "accessKey": null,
+                    "sourceIp": "127.0.0.1",
+                    "cognitoAuthenticationType": null,
+                    "cognitoAuthenticationProvider": null,
+                    "userArn": null,
+                    "userAgent": "Custom User Agent String",
+                    "user": null
+                },
+                "domainName": "1234567890.execute-api.us-east-1.amazonaws.com",
+                "apiId": "1234567890"
+            },
+            "body": "{\"test\":\"body\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor.process_invocation_next(&bytes).await;
+
+        let context = context.expect("an AppSec context should have been created");
+        assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
+        assert!(context.tags_always.contains_key("_dd.origin"));
+        assert_eq!(
+            context.tags_always.get("_dd.origin"),
+            Some(&"appsec".to_string())
+        );
+        // Duration might be greater than zero due to WAF processing
+        assert!(context.duration >= Duration::ZERO);
+        assert_eq!(context.timeouts, 0);
+        assert!(!context.keep);
+        assert!(context.events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_api_gateway_v2() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{
+            "version": "2.0",
+            "routeKey": "GET /httpapi/get",
+            "rawPath": "/httpapi/get",
+            "rawQueryString": "foo=bar",
+            "cookies": ["cookie1", "cookie2"],
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json",
+                "Host": "example.amazonaws.com"
+            },
+            "queryStringParameters": {
+                "foo": "bar"
+            },
+            "requestContext": {
+                "accountId": "123456789012",
+                "apiId": "1234567890",
+                "authentication": {
+                    "clientCert": {
+                        "clientCertPem": "CERT_CONTENT",
+                        "subjectDN": "www.example.com",
+                        "issuerDN": "Example issuer",
+                        "serialNumber": "a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1",
+                        "validity": {
+                            "start": "May 28 12:30:02 2019 GMT",
+                            "end": "Aug  5 09:36:04 2021 GMT"
+                        }
+                    }
+                },
+                "domainName": "example.amazonaws.com",
+                "domainPrefix": "1234567890",
+                "http": {
+                    "method": "GET",
+                    "path": "/httpapi/get",
+                    "protocol": "HTTP/1.1",
+                    "sourceIp": "192.168.1.1",
+                    "userAgent": "agent"
+                },
+                "requestId": "JKJaXmPLvHcESHA=",
+                "routeKey": "GET /httpapi/get",
+                "stage": "$default",
+                "time": "10/Mar/2020:05:28:40 +0000",
+                "timeEpoch": 1583817320220
+            },
+            "body": "{\"message\":\"hello world\"}",
+            "pathParameters": {
+                "parameter1": "value1"
+            },
+            "isBase64Encoded": false,
+            "stageVariables": {
+                "stageVariable1": "value1",
+                "stageVariable2": "value2"
+            }
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor.process_invocation_next(&bytes).await;
+
+        let context = context.expect("an AppSec context should have been created");
+        assert_eq!(context.request_type, payload::RequestType::APIGatewayV2Http);
+        assert!(context.tags_always.contains_key("_dd.origin"));
+        assert_eq!(
+            context.tags_always.get("_dd.origin"),
+            Some(&"appsec".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_unsupported_payload() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{
+            "Records": [
+                {
+                    "EventSource": "aws:sns",
+                    "EventVersion": "1.0",
+                    "EventSubscriptionArn": "arn:aws:sns:us-east-1:123456789012:example-topic:2bcfbf39-05c3-41de-beaa-fcfcc21c8f55",
+                    "Sns": {
+                        "Type": "Notification",
+                        "MessageId": "95df01b4-ee98-5cb9-9903-4c221d41eb5e",
+                        "TopicArn": "arn:aws:sns:us-east-1:123456789012:example-topic",
+                        "Subject": "example subject",
+                        "Message": "example message",
+                        "Timestamp": "1970-01-01T00:00:00.000Z",
+                        "SignatureVersion": "1",
+                        "Signature": "EXAMPLE",
+                        "SigningCertUrl": "EXAMPLE",
+                        "UnsubscribeUrl": "EXAMPLE"
+                    }
+                }
+            ]
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor.process_invocation_next(&bytes).await;
+
+        // SNS events are not supported, so should return None
+        assert!(context.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_invalid_json() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{"invalid": json}"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor.process_invocation_next(&bytes).await;
+
+        // Invalid JSON should return None
+        assert!(context.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_empty_payload() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = "";
+
+        let bytes = Bytes::from(payload);
+        let context = processor.process_invocation_next(&bytes).await;
+
+        // Empty payload should return None
+        assert!(context.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_response_with_api_gateway_v1() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        // First create a context with a request
+        let request_payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Accept": ["*/*"],
+                "Content-Type": ["application/json"]
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "stage": "prod",
+                "identity": {
+                    "sourceIp": "127.0.0.1"
+                }
+            },
+            "body": "{\"test\":\"body\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let request_bytes = Bytes::from(request_payload);
+        let mut context = processor
+            .process_invocation_next(&request_bytes)
+            .await
+            .expect("Should create context");
+
+        // Now test the response processing
+        let response_payload = r#"{
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": "{\"response\":\"success\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let response_bytes = Bytes::from(response_payload);
+
+        // This should not panic and should complete successfully
+        processor
+            .process_invocation_response(&mut context, &response_bytes)
+            .await;
+
+        // Verify context state after response processing
+        assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_response_with_api_gateway_v2() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        // First create a context with a request
+        let request_payload = r#"{
+            "version": "2.0",
+            "routeKey": "GET /httpapi/get",
+            "rawPath": "/httpapi/get",
+            "rawQueryString": "foo=bar",
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json",
+                "Host": "example.amazonaws.com"
+            },
+            "requestContext": {
+                "accountId": "123456789012",
+                "apiId": "1234567890",
+                "domainName": "example.amazonaws.com",
+                "domainPrefix": "1234567890",
+                "http": {
+                    "method": "GET",
+                    "path": "/httpapi/get",
+                    "protocol": "HTTP/1.1",
+                    "sourceIp": "192.168.1.1",
+                    "userAgent": "agent"
+                },
+                "requestId": "JKJaXmPLvHcESHA=",
+                "routeKey": "GET /httpapi/get",
+                "stage": "$default",
+                "time": "10/Mar/2020:05:28:40 +0000",
+                "timeEpoch": 1583817320220
+            },
+            "body": "{\"message\":\"hello world\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let request_bytes = Bytes::from(request_payload);
+        let mut context = processor
+            .process_invocation_next(&request_bytes)
+            .await
+            .expect("Should create context");
+
+        // Now test the response processing
+        let response_payload = r#"{
+            "statusCode": 200,
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "body": "{\"response\":\"success\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let response_bytes = Bytes::from(response_payload);
+
+        // This should not panic and should complete successfully
+        processor
+            .process_invocation_response(&mut context, &response_bytes)
+            .await;
+
+        // Verify context state after response processing
+        assert_eq!(context.request_type, payload::RequestType::APIGatewayV2Http);
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_response_with_invalid_response() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        // First create a context with a request
+        let request_payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Accept": ["*/*"],
+                "Content-Type": ["application/json"]
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "stage": "prod",
+                "identity": {
+                    "sourceIp": "127.0.0.1"
+                }
+            },
+            "body": "{\"test\":\"body\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let request_bytes = Bytes::from(request_payload);
+        let mut context = processor
+            .process_invocation_next(&request_bytes)
+            .await
+            .expect("Should create context");
+
+        // Now test the response processing with invalid JSON
+        let response_payload = r#"{"invalid": json}"#;
+
+        let response_bytes = Bytes::from(response_payload);
+
+        // This should not panic even with invalid response JSON
+        processor
+            .process_invocation_response(&mut context, &response_bytes)
+            .await;
+
+        // Verify context state is still valid
+        assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_response_with_empty_response() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        // First create a context with a request
+        let request_payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Accept": ["*/*"],
+                "Content-Type": ["application/json"]
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "stage": "prod",
+                "identity": {
+                    "sourceIp": "127.0.0.1"
+                }
+            },
+            "body": "{\"test\":\"body\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let request_bytes = Bytes::from(request_payload);
+        let mut context = processor
+            .process_invocation_next(&request_bytes)
+            .await
+            .expect("Should create context");
+
+        // Now test the response processing with empty response
+        let response_payload = "";
+
+        let response_bytes = Bytes::from(response_payload);
+
+        // This should not panic even with empty response
+        processor
+            .process_invocation_response(&mut context, &response_bytes)
+            .await;
+
+        // Verify context state is still valid
+        assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
+    }
+
+    #[tokio::test]
+    async fn test_appsec_context_absorb_data_does_not_panic() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        // Create a context with various payload types to ensure absorb_data doesn't panic
+        let test_payloads = vec![
+            // API Gateway V1
+            r#"{
+                "resource": "/{proxy+}",
+                "path": "/path/to/resource",
+                "httpMethod": "POST",
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "multiValueHeaders": {
+                    "Content-Type": ["application/json"]
+                },
+                "requestContext": {
+                    "resourceId": "123456",
+                    "resourcePath": "/{proxy+}",
+                    "httpMethod": "POST",
+                    "stage": "prod",
+                    "identity": {
+                        "sourceIp": "127.0.0.1"
+                    }
+                },
+                "body": "{\"test\":\"body\"}",
+                "isBase64Encoded": false
+            }"#,
+            // Lambda Function URL
+            r#"{
+                "version": "2.0",
+                "routeKey": "$default",
+                "rawPath": "/my/path",
+                "rawQueryString": "parameter1=value1",
+                "headers": {
+                    "Header1": "value1",
+                    "Content-Type": "application/json"
+                },
+                "requestContext": {
+                    "accountId": "123456789012",
+                    "apiId": "r3pmxmplak",
+                    "domainName": "r3pmxmplak.lambda-url.us-east-2.on.aws",
+                    "domainPrefix": "r3pmxmplak",
+                    "http": {
+                        "method": "POST",
+                        "path": "/my/path",
+                        "protocol": "HTTP/1.1",
+                        "sourceIp": "123.123.123.123",
+                        "userAgent": "agent"
+                    },
+                    "requestId": "id",
+                    "routeKey": "$default",
+                    "stage": "$default",
+                    "time": "12/Mar/2020:19:03:58 +0000",
+                    "timeEpoch": 1584043438390
+                },
+                "body": "Hello from Lambda!",
+                "isBase64Encoded": false
+            }"#,
+        ];
+
+        for payload in test_payloads {
+            let bytes = Bytes::from(payload);
+            let context = processor.process_invocation_next(&bytes).await;
+
+            // Should not panic and should create a valid context
+            assert!(context.is_some());
+            let context = context.unwrap();
+            assert!(context.tags_always.contains_key("_dd.origin"));
+        }
     }
 }

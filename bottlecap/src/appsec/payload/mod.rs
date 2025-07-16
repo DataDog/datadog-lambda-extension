@@ -279,3 +279,514 @@ impl RequestType {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bytes::Bytes;
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_v1_request() {
+        let payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Accept": ["*/*"],
+                "Content-Type": ["application/json"]
+            },
+            "queryStringParameters": {
+                "foo": "bar"
+            },
+            "multiValueQueryStringParameters": {
+                "foo": ["bar"]
+            },
+            "pathParameters": {
+                "proxy": "/path/to/resource"
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "extendedRequestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "requestTime": "09/Apr/2015:12:34:56 +0000",
+                "path": "/path/to/resource",
+                "accountId": "123456789012",
+                "protocol": "HTTP/1.1",
+                "stage": "prod",
+                "domainPrefix": "1234567890",
+                "requestTimeEpoch": 1428582896000,
+                "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "identity": {
+                    "cognitoIdentityPoolId": null,
+                    "accountId": null,
+                    "cognitoIdentityId": null,
+                    "caller": null,
+                    "accessKey": null,
+                    "sourceIp": "127.0.0.1",
+                    "cognitoAuthenticationType": null,
+                    "cognitoAuthenticationProvider": null,
+                    "userArn": null,
+                    "userAgent": "Custom User Agent String",
+                    "user": null
+                },
+                "domainName": "1234567890.execute-api.us-east-1.amazonaws.com",
+                "apiId": "1234567890"
+            },
+            "body": "{\"test\":\"body\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_some());
+        let (http_data, request_type) = result.unwrap();
+        assert_eq!(request_type, RequestType::APIGatewayV1);
+
+        match http_data {
+            HttpData::Request {
+                method,
+                route,
+                client_ip,
+                body,
+                ..
+            } => {
+                assert_eq!(method, Some("POST".to_string()));
+                assert_eq!(route, Some("/{proxy+}".to_string()));
+                assert_eq!(client_ip, Some("127.0.0.1".to_string()));
+                assert!(body.is_some());
+            }
+            _ => panic!("Expected Request HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_v2_http_request() {
+        let payload = r#"{
+            "version": "2.0",
+            "routeKey": "GET /httpapi/get",
+            "rawPath": "/httpapi/get",
+            "rawQueryString": "foo=bar",
+            "cookies": ["cookie1", "cookie2"],
+            "headers": {
+                "Accept": "*/*",
+                "Content-Type": "application/json",
+                "Host": "example.amazonaws.com"
+            },
+            "queryStringParameters": {
+                "foo": "bar"
+            },
+            "requestContext": {
+                "accountId": "123456789012",
+                "apiId": "1234567890",
+                "authentication": {
+                    "clientCert": {
+                        "clientCertPem": "CERT_CONTENT",
+                        "subjectDN": "www.example.com",
+                        "issuerDN": "Example issuer",
+                        "serialNumber": "a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1",
+                        "validity": {
+                            "start": "May 28 12:30:02 2019 GMT",
+                            "end": "Aug  5 09:36:04 2021 GMT"
+                        }
+                    }
+                },
+                "domainName": "example.amazonaws.com",
+                "domainPrefix": "1234567890",
+                "http": {
+                    "method": "GET",
+                    "path": "/httpapi/get",
+                    "protocol": "HTTP/1.1",
+                    "sourceIp": "192.168.1.1",
+                    "userAgent": "agent"
+                },
+                "requestId": "JKJaXmPLvHcESHA=",
+                "routeKey": "GET /httpapi/get",
+                "stage": "$default",
+                "time": "10/Mar/2020:05:28:40 +0000",
+                "timeEpoch": 1583817320220
+            },
+            "body": "{\"message\":\"hello world\"}",
+            "pathParameters": {
+                "parameter1": "value1"
+            },
+            "isBase64Encoded": false,
+            "stageVariables": {
+                "stageVariable1": "value1",
+                "stageVariable2": "value2"
+            }
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_some());
+        let (http_data, request_type) = result.unwrap();
+        assert_eq!(request_type, RequestType::APIGatewayV2Http);
+
+        match http_data {
+            HttpData::Request {
+                method,
+                route,
+                client_ip,
+                body,
+                ..
+            } => {
+                assert_eq!(method, Some("GET".to_string()));
+                assert_eq!(route, Some("GET /httpapi/get".to_string()));
+                assert_eq!(client_ip, Some("192.168.1.1".to_string()));
+                assert!(body.is_some());
+            }
+            _ => panic!("Expected Request HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_api_gateway_websocket_request() {
+        let payload = r#"{
+            "requestContext": {
+                "routeKey": "$connect",
+                "messageId": null,
+                "eventType": "CONNECT",
+                "extendedRequestId": "JKJaXmPLvHcESHA=",
+                "requestTime": "10/Mar/2020:05:28:40 +0000",
+                "messageDirection": "IN",
+                "stage": "prod",
+                "connectedAt": 1583817320220,
+                "requestTimeEpoch": 1583817320220,
+                "identity": {
+                    "cognitoIdentityPoolId": null,
+                    "cognitoIdentityId": null,
+                    "principalOrgId": null,
+                    "cognitoAuthenticationType": null,
+                    "userArn": null,
+                    "userAgent": "Custom User Agent String",
+                    "accountId": null,
+                    "cognitoAuthenticationProvider": null,
+                    "sourceIp": "127.0.0.1",
+                    "accessKey": null,
+                    "caller": null,
+                    "principalUserId": null,
+                    "user": null
+                },
+                "requestId": "JKJaXmPLvHcESHA=",
+                "domainName": "example.amazonaws.com",
+                "connectionId": "JKJaXmPLvHcESHA=",
+                "apiId": "1234567890"
+            },
+            "headers": {
+                "Host": "example.amazonaws.com",
+                "User-Agent": "Custom User Agent String",
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Host": ["example.amazonaws.com"],
+                "User-Agent": ["Custom User Agent String"],
+                "Content-Type": ["application/json"]
+            },
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_some());
+        let (http_data, request_type) = result.unwrap();
+        assert_eq!(request_type, RequestType::APIGatewayV2Websocket);
+
+        match http_data {
+            HttpData::Request { client_ip, .. } => {
+                assert_eq!(client_ip, Some("127.0.0.1".to_string()));
+            }
+            _ => panic!("Expected Request HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_alb_request() {
+        let payload = r#"{
+            "requestContext": {
+                "elb": {
+                    "targetGroupArn": "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/lambda-279XGJDqGZ5rsrHC2Fjr/49e9d65c45c6791a"
+                }
+            },
+            "httpMethod": "GET",
+            "path": "/lambda",
+            "queryStringParameters": {
+                "query": "1234ABCD"
+            },
+            "headers": {
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Connection": "keep-alive",
+                "Host": "lambda-alb-123578498.us-east-1.elb.amazonaws.com",
+                "Upgrade-Insecure-Requests": "1",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36",
+                "X-Amzn-Trace-Id": "Root=1-5c536348-3d683b8b04734faae651f476",
+                "X-Forwarded-For": "72.12.164.125",
+                "X-Forwarded-Port": "80",
+                "X-Forwarded-Proto": "http",
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Accept": ["text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"],
+                "Accept-Encoding": ["gzip, deflate, br"],
+                "Accept-Language": ["en-US,en;q=0.9"],
+                "Connection": ["keep-alive"],
+                "Host": ["lambda-alb-123578498.us-east-1.elb.amazonaws.com"],
+                "Upgrade-Insecure-Requests": ["1"],
+                "User-Agent": ["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36"],
+                "X-Amzn-Trace-Id": ["Root=1-5c536348-3d683b8b04734faae651f476"],
+                "X-Forwarded-For": ["72.12.164.125"],
+                "X-Forwarded-Port": ["80"],
+                "X-Forwarded-Proto": ["http"],
+                "Content-Type": ["application/json"]
+            },
+            "body": "",
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_some());
+        let (http_data, request_type) = result.unwrap();
+        assert_eq!(request_type, RequestType::Alb);
+
+        match http_data {
+            HttpData::Request {
+                method, client_ip, ..
+            } => {
+                assert_eq!(method, Some("GET".to_string()));
+                // ALB implementation doesn't extract client IP from X-Forwarded-For header
+                assert_eq!(client_ip, None);
+            }
+            _ => panic!("Expected Request HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_lambda_function_url_request() {
+        let payload = r#"{
+            "version": "2.0",
+            "routeKey": "$default",
+            "rawPath": "/my/path",
+            "rawQueryString": "parameter1=value1&parameter1=value2&parameter2=value",
+            "cookies": [
+                "cookie1",
+                "cookie2"
+            ],
+            "headers": {
+                "Header1": "value1",
+                "Header2": "value2",
+                "Content-Type": "application/json"
+            },
+            "queryStringParameters": {
+                "parameter1": "value1,value2",
+                "parameter2": "value"
+            },
+            "requestContext": {
+                "accountId": "123456789012",
+                "apiId": "r3pmxmplak",
+                "domainName": "r3pmxmplak.lambda-url.us-east-2.on.aws",
+                "domainPrefix": "r3pmxmplak",
+                "http": {
+                    "method": "POST",
+                    "path": "/my/path",
+                    "protocol": "HTTP/1.1",
+                    "sourceIp": "123.123.123.123",
+                    "userAgent": "agent"
+                },
+                "requestId": "id",
+                "routeKey": "$default",
+                "stage": "$default",
+                "time": "12/Mar/2020:19:03:58 +0000",
+                "timeEpoch": 1584043438390
+            },
+            "body": "Hello from Lambda!",
+            "pathParameters": null,
+            "isBase64Encoded": false,
+            "stageVariables": null
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_some());
+        let (http_data, request_type) = result.unwrap();
+        assert_eq!(request_type, RequestType::LambdaFunctionUrl);
+
+        match http_data {
+            HttpData::Request {
+                method, client_ip, ..
+            } => {
+                assert_eq!(method, Some("POST".to_string()));
+                assert_eq!(client_ip, Some("123.123.123.123".to_string()));
+            }
+            _ => panic!("Expected Request HttpData"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_extract_unsupported_sns_event() {
+        let payload = r#"{
+            "Records": [
+                {
+                    "EventSource": "aws:sns",
+                    "EventVersion": "1.0",
+                    "EventSubscriptionArn": "arn:aws:sns:us-east-1:123456789012:example-topic:2bcfbf39-05c3-41de-beaa-fcfcc21c8f55",
+                    "Sns": {
+                        "Type": "Notification",
+                        "MessageId": "95df01b4-ee98-5cb9-9903-4c221d41eb5e",
+                        "TopicArn": "arn:aws:sns:us-east-1:123456789012:example-topic",
+                        "Subject": "example subject",
+                        "Message": "example message",
+                        "Timestamp": "1970-01-01T00:00:00.000Z",
+                        "SignatureVersion": "1",
+                        "Signature": "EXAMPLE",
+                        "SigningCertUrl": "EXAMPLE",
+                        "UnsubscribeUrl": "EXAMPLE"
+                    }
+                }
+            ]
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        // SNS events are explicitly unsupported
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_unsupported_sqs_event() {
+        let payload = r#"{
+            "Records": [
+                {
+                    "messageId": "19dd0b57-b21e-4ac1-bd88-01bbb068cb78",
+                    "receiptHandle": "MessageReceiptHandle",
+                    "body": "Hello from SQS!",
+                    "attributes": {
+                        "ApproximateReceiveCount": "1",
+                        "SentTimestamp": "1523232000000",
+                        "SenderId": "123456789012",
+                        "ApproximateFirstReceiveTimestamp": "1523232000001"
+                    },
+                    "messageAttributes": {},
+                    "md5OfBody": "7b270e59b47ff90a553787216d55d91d",
+                    "eventSource": "aws:sqs",
+                    "eventSourceARN": "arn:aws:sqs:us-east-1:123456789012:MyQueue",
+                    "awsRegion": "us-east-1"
+                }
+            ]
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        // SQS events are explicitly unsupported
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_invalid_json() {
+        let payload = r#"{"invalid": json}"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_unrecognized_event_structure() {
+        let payload = r#"{
+            "some": "unrecognized",
+            "event": "structure",
+            "that": "doesnt",
+            "match": "any known patterns"
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_empty_payload() {
+        let payload = "{}";
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_malformed_api_gateway_event() {
+        let payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "requestContext": {
+                "stage": "prod"
+            }
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        // This malformed event should not be recognized since it's missing required fields
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_extract_with_base64_encoded_body() {
+        let payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Content-Type": ["application/json"]
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "stage": "prod",
+                "identity": {
+                    "sourceIp": "127.0.0.1"
+                }
+            },
+            "body": "eyJ0ZXN0IjoiYm9keSJ9",
+            "isBase64Encoded": true
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let result = extract_request_address_data(&bytes).await;
+
+        assert!(result.is_some());
+        let (http_data, request_type) = result.unwrap();
+        assert_eq!(request_type, RequestType::APIGatewayV1);
+
+        match http_data {
+            HttpData::Request { body, .. } => {
+                assert!(body.is_some());
+            }
+            _ => panic!("Expected Request HttpData"),
+        }
+    }
+}

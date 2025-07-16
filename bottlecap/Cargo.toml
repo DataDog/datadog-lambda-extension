@@ -31,7 +31,6 @@ reqwest = { version = "0.12.11", features = ["json", "http2"], default-features 
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_html_form = { version = "0.2", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-serde-xml-rs = { version = "0.8", default-features = false }
 thiserror = { version = "1.0", default-features = false }
 tokio = { version = "1.37", default-features = false, features = ["macros", "rt-multi-thread"] }
 tokio-util = { version = "0.7", default-features = false }
@@ -67,7 +66,7 @@ datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78", default-features = false }
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78", default-features = false }
-libddwaf = { version = "1.25.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "b23b2d7e6abd6340b30dc8031482a6326bda57cd", default-features = false, features = ["default"] }
+libddwaf = { version = "1.25.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "6a261457113f9339572537704385d870eac2a986", default-features = false, features = ["default"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }

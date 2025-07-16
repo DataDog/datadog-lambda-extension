@@ -499,4 +499,377 @@ mod tests {
         let _ = proxy_handle.cancel();
         final_destination.abort();
     }
+
+    #[tokio::test]
+    async fn test_proxy_with_appsec_enabled_and_valid_config() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        });
+        let aws_config = AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "test-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:9001".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+        };
+
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            &aws_config,
+            metrics_aggregator,
+        )));
+
+        // Should be able to start proxy successfully with valid AppSec config
+        let result = start(config, aws_config, invocation_processor);
+        assert!(result.is_ok());
+
+        // Clean up
+        if let Ok(handle) = result {
+            handle.cancel();
+        }
+    }
+
+    #[test]
+    fn test_proxy_with_appsec_enabled_and_invalid_rules() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some("/nonexistent/path/to/rules.json".to_string()),
+            ..Config::default()
+        });
+        let aws_config = AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "test-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:9001".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+        };
+
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            &aws_config,
+            metrics_aggregator,
+        )));
+
+        // Should fail to start proxy with invalid AppSec rules
+        let result = start(config, aws_config, invocation_processor);
+        assert!(result.is_err());
+
+        // The error should be related to AppSec processor initialization
+        let error = result.expect_err("Expected an error");
+        // The actual error message might vary, but it should indicate a file system issue
+        assert!(
+            error.to_string().contains("Failed to open")
+                || error.to_string().contains("No such file")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_proxy_with_appsec_disabled() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: false,
+            ..Config::default()
+        });
+        let aws_config = AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "test-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:9001".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+        };
+
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            &aws_config,
+            metrics_aggregator,
+        )));
+
+        // Should be able to start proxy successfully with AppSec disabled
+        let result = start(config, aws_config, invocation_processor);
+        assert!(result.is_ok());
+
+        // Clean up
+        if let Ok(handle) = result {
+            handle.cancel();
+        }
+    }
+
+    #[test]
+    fn test_get_proxy_socket_address_with_lwa_proxy() {
+        let aws_lwa_proxy_lambda_runtime_api = Some("127.0.0.1:12345".to_string());
+        let socket_addr = get_proxy_socket_address(&aws_lwa_proxy_lambda_runtime_api);
+
+        // Should use the LWA proxy address
+        assert_eq!(socket_addr.to_string(), "127.0.0.1:12345");
+    }
+
+    #[test]
+    fn test_get_proxy_socket_address_without_lwa_proxy() {
+        let aws_lwa_proxy_lambda_runtime_api = None;
+        let socket_addr = get_proxy_socket_address(&aws_lwa_proxy_lambda_runtime_api);
+
+        // Should use the default interceptor address (0.0.0.0:9000)
+        assert_eq!(socket_addr.to_string(), "0.0.0.0:9000");
+    }
+
+    #[test]
+    fn test_get_proxy_socket_address_with_invalid_lwa_proxy() {
+        let aws_lwa_proxy_lambda_runtime_api = Some("invalid-address".to_string());
+        let socket_addr = get_proxy_socket_address(&aws_lwa_proxy_lambda_runtime_api);
+
+        // Should fall back to default interceptor address when LWA proxy is invalid
+        assert_eq!(socket_addr.to_string(), "0.0.0.0:9000");
+    }
+
+    #[tokio::test]
+    async fn test_appsec_integration_with_api_gateway_payload() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        });
+        let aws_config = AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "test-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:9001".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+        };
+
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            &aws_config,
+            metrics_aggregator,
+        )));
+
+        // Create an AppSec processor to test integration
+        let appsec_processor = AppSecProcessor::new(config.as_ref());
+
+        // Should be able to create AppSec processor with valid config
+        assert!(appsec_processor.is_ok());
+
+        let appsec_processor = appsec_processor.unwrap();
+
+        // Test processing API Gateway payload
+        let payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Content-Type": ["application/json"]
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "stage": "prod",
+                "identity": {
+                    "sourceIp": "127.0.0.1"
+                }
+            },
+            "body": "{\"test\":\"body\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = appsec_processor.process_invocation_next(&bytes).await;
+
+        // Should successfully process the payload
+        assert!(context.is_some());
+        let _context = context.expect("Should have context");
+        // Note: Cannot test private fields directly, but the fact that we got a context is sufficient
+    }
+
+    #[tokio::test]
+    async fn test_appsec_integration_with_unsupported_payload() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        });
+
+        // Create an AppSec processor to test integration
+        let appsec_processor = AppSecProcessor::new(config.as_ref());
+        assert!(appsec_processor.is_ok());
+
+        let appsec_processor = appsec_processor.unwrap();
+
+        // Test processing unsupported SNS payload
+        let payload = r#"{
+            "Records": [
+                {
+                    "EventSource": "aws:sns",
+                    "EventVersion": "1.0",
+                    "EventSubscriptionArn": "arn:aws:sns:us-east-1:123456789012:example-topic:2bcfbf39-05c3-41de-beaa-fcfcc21c8f55",
+                    "Sns": {
+                        "Type": "Notification",
+                        "MessageId": "95df01b4-ee98-5cb9-9903-4c221d41eb5e",
+                        "TopicArn": "arn:aws:sns:us-east-1:123456789012:example-topic",
+                        "Subject": "example subject",
+                        "Message": "example message",
+                        "Timestamp": "1970-01-01T00:00:00.000Z",
+                        "SignatureVersion": "1",
+                        "Signature": "EXAMPLE",
+                        "SigningCertUrl": "EXAMPLE",
+                        "UnsubscribeUrl": "EXAMPLE"
+                    }
+                }
+            ]
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = appsec_processor.process_invocation_next(&bytes).await;
+
+        // Should return None for unsupported payload
+        assert!(context.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_appsec_integration_with_malformed_payload() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        });
+
+        // Create an AppSec processor to test integration
+        let appsec_processor = AppSecProcessor::new(config.as_ref());
+        assert!(appsec_processor.is_ok());
+
+        let appsec_processor = appsec_processor.unwrap();
+
+        // Test processing malformed JSON payload
+        let payload = r#"{"invalid": json}"#;
+
+        let bytes = Bytes::from(payload);
+        let context = appsec_processor.process_invocation_next(&bytes).await;
+
+        // Should return None for malformed payload and not panic
+        assert!(context.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_appsec_response_processing_does_not_panic() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        });
+
+        // Create an AppSec processor to test integration
+        let appsec_processor = AppSecProcessor::new(config.as_ref());
+        assert!(appsec_processor.is_ok());
+
+        let appsec_processor = appsec_processor.unwrap();
+
+        // First create a context with a valid request
+        let request_payload = r#"{
+            "resource": "/{proxy+}",
+            "path": "/path/to/resource",
+            "httpMethod": "POST",
+            "headers": {
+                "Content-Type": "application/json"
+            },
+            "multiValueHeaders": {
+                "Content-Type": ["application/json"]
+            },
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/{proxy+}",
+                "httpMethod": "POST",
+                "stage": "prod",
+                "identity": {
+                    "sourceIp": "127.0.0.1"
+                }
+            },
+            "body": "{\"test\":\"body\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let request_bytes = Bytes::from(request_payload);
+        let mut context = appsec_processor
+            .process_invocation_next(&request_bytes)
+            .await
+            .expect("Should create context");
+
+        // Test various response scenarios
+        let response_scenarios = vec![
+            // Valid response
+            r#"{
+                "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "body": "{\"response\":\"success\"}",
+                "isBase64Encoded": false
+            }"#,
+            // Invalid JSON response
+            r#"{"invalid": json}"#,
+            // Empty response
+            "",
+            // Response with null body
+            r#"{
+                "statusCode": 200,
+                "headers": {
+                    "Content-Type": "application/json"
+                },
+                "body": null,
+                "isBase64Encoded": false
+            }"#,
+        ];
+
+        for response_payload in response_scenarios {
+            let response_bytes = Bytes::from(response_payload);
+
+            // This should not panic regardless of the response format
+            appsec_processor
+                .process_invocation_response(&mut context, &response_bytes)
+                .await;
+
+            // Note: Cannot test private fields directly, but the fact that we can process responses is sufficient
+        }
+    }
 }

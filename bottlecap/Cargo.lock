@@ -610,7 +610,6 @@ dependencies = [
  "rustls-native-certs",
  "serde",
  "serde-aux",
- "serde-xml-rs",
  "serde_html_form",
  "serde_json",
  "serial_test",
@@ -2254,7 +2253,7 @@ checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 [[package]]
 name = "libddwaf"
 version = "1.25.1"
-source = "git+https://github.com/DataDog/libddwaf-rust?rev=b23b2d7e6abd6340b30dc8031482a6326bda57cd#b23b2d7e6abd6340b30dc8031482a6326bda57cd"
+source = "git+https://github.com/DataDog/libddwaf-rust?rev=6a261457113f9339572537704385d870eac2a986#6a261457113f9339572537704385d870eac2a986"
 dependencies = [
  "bindgen 0.72.0",
  "flate2",
@@ -3481,18 +3480,6 @@ checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float 2.10.1",
  "serde",
-]
-
-[[package]]
-name = "serde-xml-rs"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53630160a98edebde0123eb4dfd0fce6adff091b2305db3154a9e920206eb510"
-dependencies = [
- "log",
- "serde",
- "thiserror 1.0.69",
- "xml-rs",
 ]
 
 [[package]]
@@ -4769,12 +4756,6 @@ dependencies = [
  "libc",
  "rustix 1.0.5",
 ]
-
-[[package]]
-name = "xml-rs"
-version = "0.8.26"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a62ce76d9b56901b19a74f19431b0d8b3bc7ca4ad685a746dfd78ca8f4fc6bda"
 
 [[package]]
 name = "yansi"
