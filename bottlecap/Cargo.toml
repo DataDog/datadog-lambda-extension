@@ -52,11 +52,11 @@ rustls-native-certs = { version = "0.8.1", optional = true }
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "c89b58e5784b985819baf11f13f7d35876741222"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "4a7e422180fd4a9befe4d9481d5b2d6fe56a245c" }
-datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"  }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "4a7e422180fd4a9befe4d9481d5b2d6fe56a245c" , features = ["mini_agent"] }
-datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "4a7e422180fd4a9befe4d9481d5b2d6fe56a245c" }
-datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "4a7e422180fd4a9befe4d9481d5b2d6fe56a245c"  }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "a3a21a409189558f79e0ca00229182a1c8d95c94" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "a3a21a409189558f79e0ca00229182a1c8d95c94"  }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "a3a21a409189558f79e0ca00229182a1c8d95c94" , features = ["mini_agent"] }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "a3a21a409189558f79e0ca00229182a1c8d95c94" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "a3a21a409189558f79e0ca00229182a1c8d95c94"  }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78", default-features = false }
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "c3d8ed4f90591c6958921145d485463860307f78", default-features = false }

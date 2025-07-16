@@ -157,6 +157,15 @@ impl Agent {
 
         let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
         let body_size = size_of_val(&traces);
+        if body_size == 0 {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({ "message": "Not sending traces, processor returned empty data" })
+                    .to_string(),
+            )
+                .into_response();
+        }
+
         let send_data_builder = trace_processor.process_traces(
             config,
             tags_provider,
@@ -166,14 +175,6 @@ impl Agent {
             None,
         );
 
-        if send_data_builder.is_empty() {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({ "message": "Not sending traces, processor returned empty data" })
-                    .to_string(),
-            )
-                .into_response();
-        }
 
         match trace_tx.send(send_data_builder).await {
             Ok(()) => {

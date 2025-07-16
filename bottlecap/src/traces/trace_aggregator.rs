@@ -46,7 +46,7 @@ impl TraceAggregator {
         while batch_size < self.max_content_size_bytes {
             if let Some(payload) = self.queue.pop_front() {
                 // TODO(duncanista): revisit if this is bigger than limit
-                let payload_size = payload.len();
+                let payload_size = payload.size;
 
                 // Put stats back in the queue
                 if batch_size + payload_size > self.max_content_size_bytes {
