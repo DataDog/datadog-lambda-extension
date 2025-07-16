@@ -177,10 +177,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 None,
             ));
 
-        SendDataBuilderInfo {
-            builder,
-            size: body_size,
-        }
+        SendDataBuilderInfo::new(builder, body_size)
     }
 }
 
