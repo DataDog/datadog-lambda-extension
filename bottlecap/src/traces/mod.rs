@@ -3,6 +3,8 @@
 
 pub mod context;
 pub mod propagation;
+pub mod proxy_aggregator;
+pub mod proxy_flusher;
 pub mod span_pointers;
 pub mod stats_aggregator;
 pub mod stats_flusher;
@@ -32,3 +34,10 @@ const AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX: &str = "169.254.79.129";
 
 // Name of the placeholder invocation span set by Java and Go tracers
 const INVOCATION_SPAN_RESOURCE: &str = "dd-tracer-serverless-span";
+
+#[allow(clippy::doc_markdown)]
+/// Header used for additional tags when sending APM data to the Datadog intake
+///
+/// Used when we are appending Lambda specific tags to incoming APM data from
+/// products like DSM, Profiling, LLMObs, Live Debugger, and more.
+const DD_ADDITIONAL_TAGS_HEADER: &str = "X-Datadog-Additional-Tags";
