@@ -23,6 +23,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
 
+use super::trace_aggregator::SendDataBuilderInfo;
+
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
@@ -124,7 +126,7 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendDataBuilder;
+    ) -> SendDataBuilderInfo;
 }
 
 impl TraceProcessor for ServerlessTraceProcessor {
@@ -136,7 +138,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendDataBuilder {
+    ) -> SendDataBuilderInfo {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -166,14 +168,19 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
+        let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
             .with_compression(Compression::Zstd(6))
             .with_retry_strategy(RetryStrategy::new(
                 1,
                 100,
                 RetryBackoffType::Exponential,
                 None,
-            ))
+            ));
+
+        SendDataBuilderInfo {
+            builder,
+            size: body_size,
+        }
     }
 }
 

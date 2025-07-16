@@ -50,7 +50,7 @@ use bottlecap::{
         proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
         stats_flusher::{self, StatsFlusher},
-        stats_processor, trace_agent, trace_aggregator,
+        stats_processor, trace_agent, trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor,
     },
@@ -61,7 +61,7 @@ use bottlecap::{
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
 use datadog_trace_obfuscation::obfuscation_config;
-use datadog_trace_utils::{send_data::SendDataBuilder, trace_utils::SendData};
+use datadog_trace_utils::trace_utils::SendData;
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator::Aggregator as MetricsAggregator,
@@ -802,7 +802,7 @@ async fn handle_event_bus_event(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
-    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendDataBuilder>,
+    trace_agent_channel: Sender<SendDataBuilderInfo>,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::Metric(event) => {
@@ -1024,7 +1024,7 @@ fn start_trace_agent(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
 ) -> (
-    Sender<datadog_trace_utils::send_data::SendDataBuilder>,
+    Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
     Arc<stats_flusher::ServerlessStatsFlusher>,
@@ -1146,7 +1146,7 @@ fn start_otlp_agent(
     config: &Arc<Config>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    trace_tx: Sender<SendDataBuilder>,
+    trace_tx: Sender<SendDataBuilderInfo>,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;

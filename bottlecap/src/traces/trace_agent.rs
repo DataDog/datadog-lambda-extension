@@ -20,6 +20,7 @@ use tokio::sync::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
+<<<<<<< HEAD
 use crate::{
     config,
     http::{extract_request_body, handler_not_found},
@@ -32,9 +33,17 @@ use crate::{
         stats_aggregator, stats_processor, trace_aggregator, trace_processor,
         INVOCATION_SPAN_RESOURCE,
     },
+=======
+use crate::config;
+use crate::http::{extract_request_body, get_client, handler_not_found};
+use crate::lifecycle::invocation::context::ReparentingInfo;
+use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
+use crate::tags::provider;
+use crate::traces::{
+    stats_aggregator, stats_processor, trace_aggregator::{self, SendDataBuilderInfo}, trace_processor, INVOCATION_SPAN_RESOURCE,
+>>>>>>> 3bbdeb1 (Use SendDataBuilderInfo)
 };
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::send_data::SendDataBuilder;
 use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
@@ -70,7 +79,7 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub trace_tx: Sender<SendDataBuilder>,
+    pub trace_tx: Sender<SendDataBuilderInfo>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
 }
@@ -95,7 +104,7 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    tx: Sender<SendDataBuilder>,
+    tx: Sender<SendDataBuilderInfo>,
     shutdown_token: CancellationToken,
 }
 
@@ -121,16 +130,16 @@ impl TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace flusher.
-        let (trace_tx, mut trace_rx): (Sender<SendDataBuilder>, Receiver<SendDataBuilder>) =
+        let (trace_tx, mut trace_rx): (Sender<SendDataBuilderInfo>, Receiver<SendDataBuilderInfo>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
 
         tokio::spawn(async move {
-            while let Some(tracer_payload) = trace_rx.recv().await {
+            while let Some(tracer_payload_info) = trace_rx.recv().await {
                 let mut aggregator = trace_aggregator.lock().await;
-                aggregator.add(tracer_payload);
+                aggregator.add(tracer_payload_info);
             }
         });
 
@@ -393,7 +402,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         request: Request,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendDataBuilder>,
+        trace_tx: Sender<SendDataBuilderInfo>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -538,7 +547,7 @@ impl TraceAgent {
     }
 
     #[must_use]
-    pub fn get_sender_copy(&self) -> Sender<SendDataBuilder> {
+    pub fn get_sender_copy(&self) -> Sender<SendDataBuilderInfo> {
         self.tx.clone()
     }
 

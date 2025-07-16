@@ -7,9 +7,14 @@ use std::collections::VecDeque;
 /// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
 pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
 
+pub struct SendDataBuilderInfo {
+    pub builder: SendDataBuilder,
+    pub size: usize,
+}
+
 #[allow(clippy::module_name_repetitions)]
 pub struct TraceAggregator {
-    queue: VecDeque<SendDataBuilder>,
+    queue: VecDeque<SendDataBuilderInfo>,
     max_content_size_bytes: usize,
     buffer: Vec<SendDataBuilder>,
 }
@@ -35,8 +40,8 @@ impl TraceAggregator {
         }
     }
 
-    pub fn add(&mut self, p: SendDataBuilder) {
-        self.queue.push_back(p);
+    pub fn add(&mut self, payload_info: SendDataBuilderInfo) {
+        self.queue.push_back(payload_info);
     }
 
     pub fn get_batch(&mut self) -> Vec<SendDataBuilder> {
@@ -44,17 +49,17 @@ impl TraceAggregator {
 
         // Fill the batch
         while batch_size < self.max_content_size_bytes {
-            if let Some(payload) = self.queue.pop_front() {
+            if let Some(payload_info) = self.queue.pop_front() {
                 // TODO(duncanista): revisit if this is bigger than limit
-                let payload_size = payload.size;
-
+                let payload_size = payload_info.size;
+                
                 // Put stats back in the queue
                 if batch_size + payload_size > self.max_content_size_bytes {
-                    self.queue.push_front(payload);
+                    self.queue.push_front(payload_info);
                     break;
                 }
                 batch_size += payload_size;
-                self.buffer.push(payload);
+                self.buffer.push(payload_info.builder);
             } else {
                 break;
             }

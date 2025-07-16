@@ -5,7 +5,6 @@ use axum::{
     routing::post,
     Router,
 };
-use datadog_trace_utils::send_data::SendDataBuilder;
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use serde_json::json;
 use std::net::SocketAddr;
@@ -19,7 +18,10 @@ use crate::{
     http::{extract_request_body, handler_not_found},
     otlp::processor::Processor as OtlpProcessor,
     tags::provider,
-    traces::trace_processor::TraceProcessor,
+    traces::{
+        trace_aggregator::SendDataBuilderInfo,
+        trace_processor::TraceProcessor,
+    },
 };
 
 const OTLP_AGENT_HTTP_PORT: u16 = 4318;
@@ -29,7 +31,7 @@ type AgentState = (
     Arc<provider::Provider>,
     OtlpProcessor,
     Arc<dyn TraceProcessor + Send + Sync>,
-    Sender<SendDataBuilder>,
+    Sender<SendDataBuilderInfo>,
 );
 
 pub struct Agent {
@@ -37,7 +39,7 @@ pub struct Agent {
     tags_provider: Arc<provider::Provider>,
     processor: OtlpProcessor,
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-    trace_tx: Sender<SendDataBuilder>,
+    trace_tx: Sender<SendDataBuilderInfo>,
     port: u16,
     cancel_token: CancellationToken,
 }
@@ -47,7 +49,7 @@ impl Agent {
         config: Arc<Config>,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendDataBuilder>,
+        trace_tx: Sender<SendDataBuilderInfo>,
     ) -> Self {
         let port = Self::parse_port(
             &config.otlp_config_receiver_protocols_http_endpoint,
