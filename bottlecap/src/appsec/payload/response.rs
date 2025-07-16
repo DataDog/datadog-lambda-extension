@@ -151,30 +151,36 @@ pub(super) fn normalize_headers(
         return None;
     }
 
-    let mut normalized = HashMap::with_capacity(multi_value_headers.len() + headers.len());
+    let mut normalized =
+        HashMap::with_capacity(multi_value_headers.keys_len() + headers.keys_len());
 
-    for (key, value) in multi_value_headers {
-        let Some(key) = key else { continue };
-        if key.as_str().eq_ignore_ascii_case("set-cookie") {
+    for key in multi_value_headers.keys() {
+        let key = key.as_str();
+        if key.eq_ignore_ascii_case("set-cookie") {
             continue;
         }
-        let Ok(value) = value.to_str() else { continue };
-        match normalized.entry(key.as_str().to_lowercase()) {
-            Entry::Vacant(entry) => {
-                entry.insert(vec![value.to_string()]);
-            }
-            Entry::Occupied(mut entry) => entry.get_mut().push(value.to_string()),
-        }
+
+        normalized.insert(
+            key.to_lowercase(),
+            multi_value_headers
+                .get_all(key)
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .map(str::to_string)
+                .collect(),
+        );
     }
 
-    for (key, value) in headers {
-        let Some(key) = key else { continue };
-        if key.as_str().eq_ignore_ascii_case("set-cookie") {
+    for key in headers.keys() {
+        let key = key.as_str();
+        if key.eq_ignore_ascii_case("set-cookie") {
             continue;
         }
-        let Ok(value) = value.to_str() else { continue };
+        let Some(value) = headers.get(key).and_then(|v| v.to_str().ok()) else {
+            continue;
+        };
         normalized
-            .entry(key.as_str().to_lowercase())
+            .entry(key.to_lowercase())
             .or_insert_with(move || vec![value.to_string()]);
     }
 

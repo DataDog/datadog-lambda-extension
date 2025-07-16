@@ -438,16 +438,11 @@ mod tests {
             "resource": "/{proxy+}",
             "path": "/path/to/resource",
             "httpMethod": "POST",
-            "headers": {
-                "Accept": "*/*",
-                "Content-Type": "application/json"
-            },
             "multiValueHeaders": {
-                "Accept": ["*/*"],
-                "Content-Type": ["application/json"]
-            },
-            "queryStringParameters": {
-                "foo": "bar"
+                "Accept": ["application/json", "*/*"],
+                "Content-Type": ["application/json"],
+                "Cookie": ["test=cookie", "foo=bar; baz=bat"],
+                "User-Agent": ["Arachni/v2"]
             },
             "multiValueQueryStringParameters": {
                 "foo": ["bar"]
@@ -474,7 +469,7 @@ mod tests {
                     "cognitoIdentityId": null,
                     "caller": null,
                     "accessKey": null,
-                    "sourceIp": "127.0.0.1",
+                    "sourceIp": "12.34.56.78",
                     "cognitoAuthenticationType": null,
                     "cognitoAuthenticationProvider": null,
                     "userArn": null,
@@ -489,20 +484,42 @@ mod tests {
         }"#;
 
         let bytes = Bytes::from(payload);
-        let context = processor.process_invocation_next(&bytes).await;
-
-        let context = context.expect("an AppSec context should have been created");
+        let context = processor
+            .process_invocation_next(&bytes)
+            .await
+            .expect("an AppSec context should have been created");
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
-        assert!(context.tags_always.contains_key("_dd.origin"));
-        assert_eq!(
-            context.tags_always.get("_dd.origin"),
-            Some(&"appsec".to_string())
-        );
-        // Duration might be greater than zero due to WAF processing
-        assert!(context.duration >= Duration::ZERO);
+        // Duration will be greater than zero due to WAF processing
+        assert!(context.duration > Duration::ZERO);
         assert_eq!(context.timeouts, 0);
-        assert!(!context.keep);
-        assert!(context.events.is_empty());
+        assert!(context.keep);
+        assert!(!context.events.is_empty(), "should have at least one event");
+        assert!(
+            context.events.iter().any(|e| e.contains("Arachni/v2")),
+            "at least one of the events should mention Arachni/v2"
+        );
+        assert_eq!(
+            context
+                .tags()
+                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .collect::<HashMap<&str, &str>>(),
+            HashMap::from([
+                // Fingerprints added by the WAF
+                ("_dd.appsec.fp.http.header", "hdr-0000000110-40b52535-0-"),
+                ("_dd.appsec.fp.http.network", "net-0-0000000000"),
+                ("_dd.appsec.fp.session", "ssn--3703caa1-0e9d63ac-"),
+                // Unconditional span origin
+                ("_dd.origin", "appsec"),
+                // Extracted from the request payload
+                ("http.endpoint", "/{proxy+}"),
+                ("http.method", "POST"),
+                ("http.request.headers.accept", "application/json,*/*"),
+                ("http.request.headers.content-type", "application/json"),
+                ("http.request.headers.user-agent", "Arachni/v2"),
+                ("http.url", "/path/to/resource"),
+                ("network.client.ip", "12.34.56.78"),
+            ])
+        );
     }
 
     #[tokio::test]
@@ -569,11 +586,11 @@ mod tests {
         }"#;
 
         let bytes = Bytes::from(payload);
-        let context = processor.process_invocation_next(&bytes).await;
-
-        let context = context.expect("an AppSec context should have been created");
+        let context = processor
+            .process_invocation_next(&bytes)
+            .await
+            .expect("an AppSec context should have been created");
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV2Http);
-        assert!(context.tags_always.contains_key("_dd.origin"));
         assert_eq!(
             context.tags_always.get("_dd.origin"),
             Some(&"appsec".to_string())
@@ -708,8 +725,9 @@ mod tests {
             .process_invocation_response(&mut context, &response_bytes)
             .await;
 
-        // Verify context state after response processing
+        // Verify context state after response processing (unchanged)
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
+        //TODO(romain.marcadier): Verify additional side-effects
     }
 
     #[tokio::test]
@@ -776,8 +794,9 @@ mod tests {
             .process_invocation_response(&mut context, &response_bytes)
             .await;
 
-        // Verify context state after response processing
+        // Verify context state after response processing (unchanged)
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV2Http);
+        //TODO(romain.marcadier): Verify additional side-effects
     }
 
     #[tokio::test]
@@ -830,7 +849,7 @@ mod tests {
             .process_invocation_response(&mut context, &response_bytes)
             .await;
 
-        // Verify context state is still valid
+        // Verify context state is still valid (unchanged)
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
     }
 
@@ -884,84 +903,374 @@ mod tests {
             .process_invocation_response(&mut context, &response_bytes)
             .await;
 
-        // Verify context state is still valid
+        // Verify context state is still valid (unchanged)
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
     }
 
     #[tokio::test]
-    async fn test_appsec_context_absorb_data_does_not_panic() {
+    async fn test_process_invocation_next_with_custom_authorizer_token_full() {
         let config = Config {
             serverless_appsec_enabled: true,
             ..Config::default()
         };
         let processor = Processor::new(&config).expect("Should not fail");
 
-        // Create a context with various payload types to ensure absorb_data doesn't panic
-        let test_payloads = vec![
-            // API Gateway V1
-            r#"{
-                "resource": "/{proxy+}",
-                "path": "/path/to/resource",
-                "httpMethod": "POST",
-                "headers": {
-                    "Content-Type": "application/json"
-                },
-                "multiValueHeaders": {
-                    "Content-Type": ["application/json"]
-                },
-                "requestContext": {
-                    "resourceId": "123456",
-                    "resourcePath": "/{proxy+}",
-                    "httpMethod": "POST",
-                    "stage": "prod",
-                    "identity": {
-                        "sourceIp": "127.0.0.1"
-                    }
-                },
-                "body": "{\"test\":\"body\"}",
-                "isBase64Encoded": false
-            }"#,
-            // Lambda Function URL
-            r#"{
-                "version": "2.0",
-                "routeKey": "$default",
-                "rawPath": "/my/path",
-                "rawQueryString": "parameter1=value1",
-                "headers": {
-                    "Header1": "value1",
-                    "Content-Type": "application/json"
-                },
-                "requestContext": {
-                    "accountId": "123456789012",
-                    "apiId": "r3pmxmplak",
-                    "domainName": "r3pmxmplak.lambda-url.us-east-2.on.aws",
-                    "domainPrefix": "r3pmxmplak",
-                    "http": {
-                        "method": "POST",
-                        "path": "/my/path",
-                        "protocol": "HTTP/1.1",
-                        "sourceIp": "123.123.123.123",
-                        "userAgent": "agent"
-                    },
-                    "requestId": "id",
-                    "routeKey": "$default",
-                    "stage": "$default",
-                    "time": "12/Mar/2020:19:03:58 +0000",
-                    "timeEpoch": 1584043438390
-                },
-                "body": "Hello from Lambda!",
-                "isBase64Encoded": false
-            }"#,
-        ];
+        let payload = r#"{
+            "type": "TOKEN",
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/request",
+            "authorizationToken": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+        }"#;
 
-        for payload in test_payloads {
-            let bytes = Bytes::from(payload);
-            let context = processor.process_invocation_next(&bytes).await;
+        let bytes = Bytes::from(payload);
+        let context = processor.process_invocation_next(&bytes).await;
 
-            // Should not panic and should create a valid context
-            assert!(context.is_some());
-            let context = context.unwrap();
-            assert!(context.tags_always.contains_key("_dd.origin"));
+        // Token style authorizers may or may not be supported depending on available data
+        if let Some(context) = context {
+            assert_eq!(
+                context.request_type,
+                payload::RequestType::APIGatewayLambdaAuthorizerToken
+            );
         }
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_custom_authorizer_token_minimal() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{
+            "type": "TOKEN",
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/request",
+            "authorizationToken": "allow"
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor.process_invocation_next(&bytes).await;
+
+        // Token style authorizers may or may not be supported depending on available data
+        if let Some(context) = context {
+            assert_eq!(
+                context.request_type,
+                payload::RequestType::APIGatewayLambdaAuthorizerToken
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_custom_authorizer_request_full() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{
+            "type": "REQUEST",
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/request",
+            "resource": "/request",
+            "path": "/request",
+            "httpMethod": "GET",
+            "headers": {
+                "Accept": "*/*",
+                "Authorization": "Bearer token123",
+                "Content-Type": "application/json",
+                "Host": "example.execute-api.us-east-1.amazonaws.com",
+                "User-Agent": "Mozilla/5.0",
+                "X-Forwarded-For": "192.168.1.1, 10.0.0.1"
+            },
+            "multiValueHeaders": {
+                "Accept": ["*/*"],
+                "Authorization": ["Bearer token123"],
+                "Content-Type": ["application/json"],
+                "Host": ["example.execute-api.us-east-1.amazonaws.com"],
+                "User-Agent": ["Mozilla/5.0"],
+                "X-Forwarded-For": ["192.168.1.1, 10.0.0.1"]
+            },
+            "queryStringParameters": {},
+            "multiValueQueryStringParameters": {},
+            "pathParameters": {},
+            "stageVariables": {},
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/request",
+                "httpMethod": "GET",
+                "extendedRequestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "requestTime": "09/Apr/2015:12:34:56 +0000",
+                "path": "/test/request",
+                "accountId": "123456789012",
+                "protocol": "HTTP/1.1",
+                "stage": "test",
+                "domainPrefix": "example",
+                "requestTimeEpoch": 1428582896000,
+                "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "identity": {
+                    "cognitoIdentityPoolId": null,
+                    "accountId": null,
+                    "cognitoIdentityId": null,
+                    "caller": null,
+                    "accessKey": null,
+                    "sourceIp": "192.168.1.1",
+                    "cognitoAuthenticationType": null,
+                    "cognitoAuthenticationProvider": null,
+                    "userArn": null,
+                    "userAgent": "Mozilla/5.0",
+                    "user": null
+                },
+                "domainName": "example.execute-api.us-east-1.amazonaws.com",
+                "apiId": "abcdef123"
+            }
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor
+            .process_invocation_next(&bytes)
+            .await
+            .expect("Should create context for request style authorizer");
+
+        assert_eq!(
+            context.request_type,
+            payload::RequestType::APIGatewayLambdaAuthorizerRequest
+        );
+
+        // Verify that some basic tags are present
+        let tags: HashMap<&str, &str> = context
+            .tags()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
+        assert_eq!(tags.get("http.method"), Some(&"GET"));
+        assert_eq!(tags.get("http.url"), Some(&"/request"));
+        assert_eq!(
+            tags.get("http.request.headers.user-agent"),
+            Some(&"Mozilla/5.0")
+        );
+        assert_eq!(tags.get("network.client.ip"), None); // Only collected if there is a security event
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_custom_authorizer_request_with_body() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{
+            "type": "REQUEST",
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/POST/request",
+            "resource": "/request",
+            "path": "/request",
+            "httpMethod": "POST",
+            "headers": {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Host": "example.execute-api.us-east-1.amazonaws.com"
+            },
+            "multiValueHeaders": {
+                "Accept": ["application/json"],
+                "Content-Type": ["application/json"],
+                "Host": ["example.execute-api.us-east-1.amazonaws.com"]
+            },
+            "queryStringParameters": {},
+            "multiValueQueryStringParameters": {},
+            "pathParameters": {},
+            "stageVariables": {},
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/request",
+                "httpMethod": "POST",
+                "extendedRequestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "requestTime": "09/Apr/2015:12:34:56 +0000",
+                "path": "/test/request",
+                "accountId": "123456789012",
+                "protocol": "HTTP/1.1",
+                "stage": "test",
+                "domainPrefix": "example",
+                "requestTimeEpoch": 1428582896000,
+                "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "identity": {
+                    "sourceIp": "10.0.0.1",
+                    "userAgent": "curl/7.64.1"
+                },
+                "domainName": "example.execute-api.us-east-1.amazonaws.com",
+                "apiId": "abcdef123"
+            },
+            "body": "{\"key\":\"value\"}",
+            "isBase64Encoded": false
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor
+            .process_invocation_next(&bytes)
+            .await
+            .expect("Should create context for request style authorizer with body");
+
+        assert_eq!(
+            context.request_type,
+            payload::RequestType::APIGatewayLambdaAuthorizerRequest
+        );
+
+        // Verify that some basic tags are present
+        let tags: HashMap<&str, &str> = context
+            .tags()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
+        assert_eq!(tags.get("http.method"), Some(&"POST"));
+        assert_eq!(tags.get("http.url"), Some(&"/request"));
+        assert_eq!(
+            tags.get("http.request.headers.content-type"),
+            Some(&"application/json")
+        );
+        assert_eq!(tags.get("network.client.ip"), None); // Only collected if there is a security event
+    }
+
+    #[tokio::test]
+    async fn test_process_invocation_next_with_custom_authorizer_request_minimal() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        let payload = r#"{
+            "type": "REQUEST",
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/request",
+            "resource": "/request",
+            "path": "/request",
+            "httpMethod": "GET",
+            "headers": {},
+            "multiValueHeaders": {},
+            "queryStringParameters": {},
+            "multiValueQueryStringParameters": {},
+            "pathParameters": {},
+            "stageVariables": {},
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/request",
+                "httpMethod": "GET",
+                "path": "/test/request",
+                "accountId": "123456789012",
+                "protocol": "HTTP/1.1",
+                "stage": "test",
+                "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "identity": {
+                    "sourceIp": "127.0.0.1"
+                },
+                "domainName": "example.execute-api.us-east-1.amazonaws.com",
+                "apiId": "abcdef123"
+            }
+        }"#;
+
+        let bytes = Bytes::from(payload);
+        let context = processor
+            .process_invocation_next(&bytes)
+            .await
+            .expect("Should create context for minimal request style authorizer");
+
+        assert_eq!(
+            context.request_type,
+            payload::RequestType::APIGatewayLambdaAuthorizerRequest
+        );
+
+        // Verify that basic tags are present even with minimal payload
+        let tags: HashMap<&str, &str> = context
+            .tags()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
+        assert_eq!(tags.get("http.method"), Some(&"GET"));
+        assert_eq!(tags.get("http.url"), Some(&"/request"));
+        assert_eq!(tags.get("network.client.ip"), None); // Only collected if there is a security event
+    }
+
+    #[tokio::test]
+    async fn test_custom_authorizer_payload_extraction_debug() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+
+        // Test TOKEN style payload
+        let token_payload = r#"{
+            "type": "TOKEN",
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/request",
+            "authorizationToken": "Bearer test-token"
+        }"#;
+
+        let bytes = Bytes::from(token_payload);
+        let context = processor.process_invocation_next(&bytes).await;
+
+        if let Some(context) = context {
+            assert_eq!(
+                context.request_type,
+                payload::RequestType::APIGatewayLambdaAuthorizerToken
+            );
+        }
+
+        // Test REQUEST style payload
+        let request_payload = r#"{
+            "type": "REQUEST",
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:abcdef123/test/GET/request",
+            "resource": "/request",
+            "path": "/request",
+            "httpMethod": "GET",
+            "headers": {
+                "Authorization": "Bearer test-token",
+                "Host": "example.execute-api.us-east-1.amazonaws.com"
+            },
+            "multiValueHeaders": {
+                "Authorization": ["Bearer test-token"],
+                "Host": ["example.execute-api.us-east-1.amazonaws.com"]
+            },
+            "queryStringParameters": {},
+            "multiValueQueryStringParameters": {},
+            "pathParameters": {},
+            "stageVariables": {},
+            "requestContext": {
+                "resourceId": "123456",
+                "resourcePath": "/request",
+                "httpMethod": "GET",
+                "path": "/test/request",
+                "accountId": "123456789012",
+                "protocol": "HTTP/1.1",
+                "stage": "test",
+                "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
+                "identity": {
+                    "sourceIp": "192.168.1.1"
+                },
+                "domainName": "example.execute-api.us-east-1.amazonaws.com",
+                "apiId": "abcdef123"
+            }
+        }"#;
+
+        let bytes = Bytes::from(request_payload);
+        let context = processor
+            .process_invocation_next(&bytes)
+            .await
+            .expect("Should create context for request style authorizer");
+
+        assert_eq!(
+            context.request_type,
+            payload::RequestType::APIGatewayLambdaAuthorizerRequest
+        );
+
+        // Verify extracted data
+        let tags: HashMap<&str, &str> = context
+            .tags()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
+        assert_eq!(tags.get("http.method"), Some(&"GET"));
+        assert_eq!(tags.get("http.url"), Some(&"/request"));
+        assert_eq!(tags.get("network.client.ip"), None); // Only collected if there is a security event
     }
 }

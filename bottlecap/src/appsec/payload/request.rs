@@ -17,7 +17,7 @@ trait RecordSet {
 }
 impl<T: RecordSet> IsValid for T {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool {
-        match map.get("records") {
+        match map.get("Records") {
             Some(serde_json::Value::Array(records)) => records.iter().any(|record| match record {
                 serde_json::Value::Object(record) => {
                     matches!(
@@ -51,7 +51,10 @@ impl ExtractRequest for apigw::ApiGatewayProxyRequest {
         let (headers, cookies) = filter_headers(self.multi_value_headers);
 
         // Headers are normalized to lowercase by [`filter_headers`].
-        let content_type = headers["content-type"].first().map(String::as_str);
+        let content_type = headers
+            .get("content-type")
+            .and_then(|v| v.first())
+            .map(String::as_str);
         let body = if let Some(body) = self.body {
             parse_body(body, self.is_base64_encoded, content_type)
                 .await
@@ -105,7 +108,10 @@ impl ExtractRequest for apigw::ApiGatewayV2httpRequest {
     async fn extract(self) -> HttpData {
         let (headers, cookies) = filter_headers(self.headers);
 
-        let content_type = headers["content-type"].first().map(String::as_str);
+        let content_type = headers
+            .get("content-type")
+            .and_then(|v| v.first())
+            .map(String::as_str);
         let body = if let Some(body) = self.body {
             parse_body(body, self.is_base64_encoded, content_type)
                 .await
@@ -159,7 +165,10 @@ impl ExtractRequest for apigw::ApiGatewayWebsocketProxyRequest {
     async fn extract(self) -> HttpData {
         let (headers, cookies) = filter_headers(self.multi_value_headers);
 
-        let content_type = headers["content-type"].first().map(String::as_str);
+        let content_type = headers
+            .get("content-type")
+            .and_then(|v| v.first())
+            .map(String::as_str);
         let body = if let Some(body) = self.body {
             parse_body(body, self.is_base64_encoded, content_type)
                 .await
@@ -186,7 +195,7 @@ impl IsValid for apigw::ApiGatewayCustomAuthorizerRequest {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool {
         match map.get("type") {
             Some(serde_json::Value::String(t)) => {
-                t == "token"
+                t == "TOKEN"
                     && matches!(
                         map.get("authorizationToken"),
                         Some(serde_json::Value::String(_))
@@ -219,7 +228,7 @@ impl IsValid for apigw::ApiGatewayCustomAuthorizerRequestTypeRequest {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool {
         match map.get("type") {
             Some(serde_json::Value::String(t)) => {
-                t == "request"
+                t == "REQUEST"
                     && matches!(map.get("methodArn"), Some(serde_json::Value::String(_)))
                     && matches!(map.get("headers"), Some(serde_json::Value::Object(_)))
                     && matches!(
@@ -289,7 +298,10 @@ impl ExtractRequest for alb::AlbTargetGroupRequest {
             query_to_optional_map(self.multi_value_query_string_parameters)
         };
 
-        let content_type = headers["content-type"].first().map(String::as_str);
+        let content_type = headers
+            .get("content-type")
+            .and_then(|v| v.first())
+            .map(String::as_str);
         let body = if let Some(body) = self.body {
             parse_body(body, self.is_base64_encoded, content_type)
                 .await
@@ -340,7 +352,7 @@ impl RecordSet for sns::SnsEvent {
 }
 impl IsValid for sqs::SqsEvent {
     fn is_valid(map: &serde_json::Map<String, serde_json::Value>) -> bool {
-        match map.get("records") {
+        match map.get("Records") {
             Some(serde_json::Value::Array(records)) => records.iter().any(|record| match record {
                 serde_json::Value::Object(record) => match record.get("eventSource") {
                     Some(serde_json::Value::String(source)) => source == "aws:sqs",
@@ -383,7 +395,10 @@ impl ExtractRequest for lambda_function_urls::LambdaFunctionUrlRequest {
     async fn extract(self) -> HttpData {
         let (headers, cookies) = filter_headers(self.headers);
 
-        let content_type = headers["content-type"].first().map(String::as_str);
+        let content_type = headers
+            .get("content-type")
+            .and_then(|v| v.first())
+            .map(String::as_str);
         let body = if let Some(body) = self.body {
             parse_body(body, self.is_base64_encoded, content_type)
                 .await
@@ -414,39 +429,32 @@ fn filter_headers(
     HashMap<String, Vec<String>>,
     Option<HashMap<String, Vec<String>>>,
 ) {
-    let mut filtered_headers = HashMap::new();
+    let mut filtered_headers = HashMap::with_capacity(headers.keys_len());
     let mut parsed_cookies = HashMap::new();
 
-    for (hdr, val) in headers {
-        let Some(hdr) = hdr else { continue };
-        let Ok(val) = val.to_str() else { continue };
-
+    for hdr in headers.keys() {
         let hdr = hdr.as_str();
+        let val = headers.get_all(hdr).iter().filter_map(|v| v.to_str().ok());
         if hdr.eq_ignore_ascii_case("cookie") {
-            let cookies = axum_extra::extract::cookie::Cookie::split_parse_encoded(val);
-            for cookie in cookies {
-                let Ok(cookie) = cookie else {
-                    continue;
-                };
-                match parsed_cookies.entry(cookie.name().to_string()) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(vec![cookie.value().to_string()]);
-                    }
-                    Entry::Occupied(entry) => {
-                        entry.into_mut().push(cookie.value().to_string());
+            for val in val {
+                let cookies = axum_extra::extract::cookie::Cookie::split_parse_encoded(val);
+                for cookie in cookies {
+                    let Ok(cookie) = cookie else {
+                        continue;
+                    };
+                    match parsed_cookies.entry(cookie.name().to_string()) {
+                        Entry::Vacant(entry) => {
+                            entry.insert(vec![cookie.value().to_string()]);
+                        }
+                        Entry::Occupied(entry) => {
+                            entry.into_mut().push(cookie.value().to_string());
+                        }
                     }
                 }
             }
             continue;
         }
-        match filtered_headers.entry(hdr.to_lowercase()) {
-            Entry::Vacant(entry) => {
-                entry.insert(vec![val.to_string()]);
-            }
-            Entry::Occupied(entry) => {
-                entry.into_mut().push(val.to_string());
-            }
-        }
+        filtered_headers.insert(hdr.to_lowercase(), val.map(str::to_string).collect());
     }
 
     (
