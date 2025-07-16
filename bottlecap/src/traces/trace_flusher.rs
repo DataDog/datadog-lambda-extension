@@ -6,7 +6,10 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
-use datadog_trace_utils::trace_utils::{self, SendData};
+use datadog_trace_utils::{
+    send_data::SendDataBuilder,
+    trace_utils::{self, SendData},
+};
 
 use crate::config::Config;
 use crate::traces::trace_aggregator::TraceAggregator;
@@ -56,9 +59,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         // Process new traces from the aggregator
         let mut guard = self.aggregator.lock().await;
-        let mut traces = guard.get_batch();
+        let mut trace_builders = guard.get_batch();
 
-        while !traces.is_empty() {
+        while !trace_builders.is_empty() {
+            let traces: Vec<_> = trace_builders
+                .into_iter()
+                .map(SendDataBuilder::build)
+                .collect();
             if let Some(failed) = self.send(traces).await {
                 // Keep track of the failed batch
                 failed_batch = Some(failed);
@@ -66,7 +73,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 break;
             }
 
-            traces = guard.get_batch();
+            trace_builders = guard.get_batch();
         }
 
         failed_batch

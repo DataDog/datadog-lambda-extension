@@ -50,7 +50,8 @@ use bottlecap::{
         proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
         stats_flusher::{self, StatsFlusher},
-        stats_processor, trace_agent, trace_aggregator,
+        stats_processor, trace_agent,
+        trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor,
     },
@@ -802,7 +803,7 @@ async fn handle_event_bus_event(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
-    trace_agent_channel: Sender<datadog_trace_utils::send_data::SendData>,
+    trace_agent_channel: Sender<SendDataBuilderInfo>,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::Metric(event) => {
@@ -1024,7 +1025,7 @@ fn start_trace_agent(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
 ) -> (
-    Sender<datadog_trace_utils::send_data::SendData>,
+    Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
     Arc<trace_processor::ServerlessTraceProcessor>,
     Arc<stats_flusher::ServerlessStatsFlusher>,
@@ -1146,7 +1147,7 @@ fn start_otlp_agent(
     config: &Arc<Config>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    trace_tx: Sender<SendData>,
+    trace_tx: Sender<SendDataBuilderInfo>,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;

@@ -13,7 +13,7 @@ use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
+use datadog_trace_utils::send_data::{Compression, SendDataBuilder};
 use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
@@ -22,6 +22,8 @@ use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
+
+use super::trace_aggregator::SendDataBuilderInfo;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -124,7 +126,7 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendData;
+    ) -> SendDataBuilderInfo;
 }
 
 impl TraceProcessor for ServerlessTraceProcessor {
@@ -136,7 +138,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendData {
+    ) -> SendDataBuilderInfo {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -166,17 +168,16 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
-        let mut send_data = send_data_builder
+        let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
             .with_compression(Compression::Zstd(6))
-            .build();
-        send_data.set_retry_strategy(RetryStrategy::new(
-            1,
-            100,
-            RetryBackoffType::Exponential,
-            None,
-        ));
-        send_data
+            .with_retry_strategy(RetryStrategy::new(
+                1,
+                100,
+                RetryBackoffType::Exponential,
+                None,
+            ));
+
+        SendDataBuilderInfo::new(builder, body_size)
     }
 }
 
@@ -325,12 +326,13 @@ mod tests {
             app_version: String::new(),
         };
 
-        let received_payload =
-            if let TracerPayloadCollection::V07(payload) = tracer_payload.get_payloads() {
-                Some(payload[0].clone())
-            } else {
-                None
-            };
+        let received_payload = if let TracerPayloadCollection::V07(payload) =
+            tracer_payload.builder.build().get_payloads()
+        {
+            Some(payload[0].clone())
+        } else {
+            None
+        };
 
         assert_eq!(
             expected_tracer_payload,

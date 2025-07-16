@@ -29,12 +29,13 @@ use crate::{
     tags::provider,
     traces::{
         proxy_aggregator::{self, ProxyRequest},
-        stats_aggregator, stats_processor, trace_aggregator, trace_processor,
-        INVOCATION_SPAN_RESOURCE,
+        stats_aggregator, stats_processor,
+        trace_aggregator::{self, SendDataBuilderInfo},
+        trace_processor, INVOCATION_SPAN_RESOURCE,
     },
 };
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::trace_utils::{self, SendData};
+use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
 const TRACE_AGENT_PORT: usize = 8126;
@@ -69,7 +70,7 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub trace_tx: Sender<SendData>,
+    pub trace_tx: Sender<SendDataBuilderInfo>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
 }
@@ -94,7 +95,7 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    tx: Sender<SendData>,
+    tx: Sender<SendDataBuilderInfo>,
     shutdown_token: CancellationToken,
 }
 
@@ -120,16 +121,16 @@ impl TraceAgent {
         // setup a channel to send processed traces to our flusher. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace flusher.
-        let (trace_tx, mut trace_rx): (Sender<SendData>, Receiver<SendData>) =
+        let (trace_tx, mut trace_rx): (Sender<SendDataBuilderInfo>, Receiver<SendDataBuilderInfo>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
         // start our trace flusher. receives trace payloads and handles buffering + deciding when to
         // flush to backend.
 
         tokio::spawn(async move {
-            while let Some(tracer_payload) = trace_rx.recv().await {
+            while let Some(tracer_payload_info) = trace_rx.recv().await {
                 let mut aggregator = trace_aggregator.lock().await;
-                aggregator.add(tracer_payload);
+                aggregator.add(tracer_payload_info);
             }
         });
 
@@ -392,7 +393,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         request: Request,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendData>,
+        trace_tx: Sender<SendDataBuilderInfo>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -537,7 +538,7 @@ impl TraceAgent {
     }
 
     #[must_use]
-    pub fn get_sender_copy(&self) -> Sender<SendData> {
+    pub fn get_sender_copy(&self) -> Sender<SendDataBuilderInfo> {
         self.tx.clone()
     }
 
