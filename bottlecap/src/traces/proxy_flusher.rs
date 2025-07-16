@@ -128,11 +128,12 @@ impl Flusher {
 
             match response {
                 Ok(r) => {
+                    let url = r.url().to_string();
                     let status = r.status();
                     let body = r.text().await;
                     if status == 202 || status == 200 {
                         debug!(
-                            "Proxy Flusher | Successfully sent request in {} ms",
+                            "Proxy Flusher | Successfully sent request in {} ms to {url}",
                             elapsed.as_millis()
                         );
                     } else {
