@@ -284,6 +284,7 @@ impl RequestType {
 mod tests {
     use super::*;
     use bytes::Bytes;
+    use libddwaf::{waf_map, waf_object};
 
     #[tokio::test]
     async fn test_extract_api_gateway_v1_request() {
@@ -344,8 +345,7 @@ mod tests {
         let bytes = Bytes::from(payload);
         let result = extract_request_address_data(&bytes).await;
 
-        assert!(result.is_some());
-        let (http_data, request_type) = result.unwrap();
+        let (http_data, request_type) = result.expect("Expected result to be Some");
         assert_eq!(request_type, RequestType::APIGatewayV1);
 
         match http_data {
@@ -359,9 +359,9 @@ mod tests {
                 assert_eq!(method, Some("POST".to_string()));
                 assert_eq!(route, Some("/{proxy+}".to_string()));
                 assert_eq!(client_ip, Some("127.0.0.1".to_string()));
-                assert!(body.is_some());
+                assert_eq!(body, Some(waf_map!(("test", "body")).into()));
             }
-            _ => panic!("Expected Request HttpData"),
+            HttpData::Response { .. } => panic!("Expected Request HttpData"),
         }
     }
 
@@ -425,8 +425,7 @@ mod tests {
         let bytes = Bytes::from(payload);
         let result = extract_request_address_data(&bytes).await;
 
-        assert!(result.is_some());
-        let (http_data, request_type) = result.unwrap();
+        let (http_data, request_type) = result.expect("Expected result to be Some");
         assert_eq!(request_type, RequestType::APIGatewayV2Http);
 
         match http_data {
@@ -440,9 +439,9 @@ mod tests {
                 assert_eq!(method, Some("GET".to_string()));
                 assert_eq!(route, Some("GET /httpapi/get".to_string()));
                 assert_eq!(client_ip, Some("192.168.1.1".to_string()));
-                assert!(body.is_some());
+                assert_eq!(body, Some(waf_map!(("message", "hello world")).into()));
             }
-            _ => panic!("Expected Request HttpData"),
+            HttpData::Response { .. } => panic!("Expected Request HttpData"),
         }
     }
 
@@ -495,15 +494,14 @@ mod tests {
         let bytes = Bytes::from(payload);
         let result = extract_request_address_data(&bytes).await;
 
-        assert!(result.is_some());
-        let (http_data, request_type) = result.unwrap();
+        let (http_data, request_type) = result.expect("Expected result to be Some");
         assert_eq!(request_type, RequestType::APIGatewayV2Websocket);
 
         match http_data {
             HttpData::Request { client_ip, .. } => {
                 assert_eq!(client_ip, Some("127.0.0.1".to_string()));
             }
-            _ => panic!("Expected Request HttpData"),
+            HttpData::Response { .. } => panic!("Expected Request HttpData"),
         }
     }
 
@@ -532,7 +530,7 @@ mod tests {
                 "X-Forwarded-For": "72.12.164.125",
                 "X-Forwarded-Port": "80",
                 "X-Forwarded-Proto": "http",
-                "Content-Type": "application/json"
+                "Content-Type": "text/plain"
             },
             "multiValueHeaders": {
                 "Accept": ["text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8"],
@@ -546,7 +544,7 @@ mod tests {
                 "X-Forwarded-For": ["72.12.164.125"],
                 "X-Forwarded-Port": ["80"],
                 "X-Forwarded-Proto": ["http"],
-                "Content-Type": ["application/json"]
+                "Content-Type": ["text/plain"]
             },
             "body": "",
             "isBase64Encoded": false
@@ -555,19 +553,22 @@ mod tests {
         let bytes = Bytes::from(payload);
         let result = extract_request_address_data(&bytes).await;
 
-        assert!(result.is_some());
-        let (http_data, request_type) = result.unwrap();
+        let (http_data, request_type) = result.expect("Expected result to be Some");
         assert_eq!(request_type, RequestType::Alb);
 
         match http_data {
             HttpData::Request {
-                method, client_ip, ..
+                method,
+                client_ip,
+                body,
+                ..
             } => {
                 assert_eq!(method, Some("GET".to_string()));
                 // ALB implementation doesn't extract client IP from X-Forwarded-For header
                 assert_eq!(client_ip, None);
+                assert_eq!(body, Some(waf_object!("")));
             }
-            _ => panic!("Expected Request HttpData"),
+            HttpData::Response { .. } => panic!("Expected Request HttpData"),
         }
     }
 
@@ -585,7 +586,7 @@ mod tests {
             "headers": {
                 "Header1": "value1",
                 "Header2": "value2",
-                "Content-Type": "application/json"
+                "Content-Type": "text/plain"
             },
             "queryStringParameters": {
                 "parameter1": "value1,value2",
@@ -618,18 +619,21 @@ mod tests {
         let bytes = Bytes::from(payload);
         let result = extract_request_address_data(&bytes).await;
 
-        assert!(result.is_some());
-        let (http_data, request_type) = result.unwrap();
+        let (http_data, request_type) = result.expect("Expected result to be Some");
         assert_eq!(request_type, RequestType::LambdaFunctionUrl);
 
         match http_data {
             HttpData::Request {
-                method, client_ip, ..
+                method,
+                client_ip,
+                body,
+                ..
             } => {
                 assert_eq!(method, Some("POST".to_string()));
                 assert_eq!(client_ip, Some("123.123.123.123".to_string()));
+                assert_eq!(body, Some(waf_object!("Hello from Lambda!")));
             }
-            _ => panic!("Expected Request HttpData"),
+            HttpData::Response { .. } => panic!("Expected Request HttpData"),
         }
     }
 
@@ -778,15 +782,14 @@ mod tests {
         let bytes = Bytes::from(payload);
         let result = extract_request_address_data(&bytes).await;
 
-        assert!(result.is_some());
-        let (http_data, request_type) = result.unwrap();
+        let (http_data, request_type) = result.expect("Expected result to be Some");
         assert_eq!(request_type, RequestType::APIGatewayV1);
 
         match http_data {
             HttpData::Request { body, .. } => {
-                assert!(body.is_some());
+                assert_eq!(body, Some(waf_map!(("test", "body")).into()));
             }
-            _ => panic!("Expected Request HttpData"),
+            HttpData::Response { .. } => panic!("Expected Request HttpData"),
         }
     }
 }

@@ -2253,7 +2253,7 @@ checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
 [[package]]
 name = "libddwaf"
 version = "1.25.1"
-source = "git+https://github.com/DataDog/libddwaf-rust?rev=6a261457113f9339572537704385d870eac2a986#6a261457113f9339572537704385d870eac2a986"
+source = "git+https://github.com/DataDog/libddwaf-rust?rev=64cdfd2df538c0672d4c17634968deb5a7e21c6e#64cdfd2df538c0672d4c17634968deb5a7e21c6e"
 dependencies = [
  "bindgen 0.72.0",
  "flate2",
