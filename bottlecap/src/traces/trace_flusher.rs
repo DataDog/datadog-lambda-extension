@@ -84,7 +84,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             let traces: Vec<_> = trace_builders
                 .into_iter()
                 // Lazily set the API key
-                .map(|builder| builder.with_api_key(&api_key))
+                .map(|builder| builder.with_api_key(api_key))
                 .map(SendDataBuilder::build)
                 .collect();
             if let Some(failed) = self.send(traces).await {
