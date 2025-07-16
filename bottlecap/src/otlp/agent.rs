@@ -18,10 +18,7 @@ use crate::{
     http::{extract_request_body, handler_not_found},
     otlp::processor::Processor as OtlpProcessor,
     tags::provider,
-    traces::{
-        trace_aggregator::SendDataBuilderInfo,
-        trace_processor::TraceProcessor,
-    },
+    traces::{trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor},
 };
 
 const OTLP_AGENT_HTTP_PORT: u16 = 4318;
@@ -176,7 +173,6 @@ impl Agent {
             body_size,
             None,
         );
-
 
         match trace_tx.send(send_data_builder).await {
             Ok(()) => {

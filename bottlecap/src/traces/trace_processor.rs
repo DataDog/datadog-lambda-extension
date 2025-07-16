@@ -329,12 +329,13 @@ mod tests {
             app_version: String::new(),
         };
 
-        let received_payload =
-            if let TracerPayloadCollection::V07(payload) = tracer_payload.build().get_payloads() {
-                Some(payload[0].clone())
-            } else {
-                None
-            };
+        let received_payload = if let TracerPayloadCollection::V07(payload) =
+            tracer_payload.builder.build().get_payloads()
+        {
+            Some(payload[0].clone())
+        } else {
+            None
+        };
 
         assert_eq!(
             expected_tracer_payload,

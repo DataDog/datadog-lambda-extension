@@ -20,7 +20,6 @@ use tokio::sync::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
-<<<<<<< HEAD
 use crate::{
     config,
     http::{extract_request_body, handler_not_found},
@@ -33,15 +32,8 @@ use crate::{
         stats_aggregator, stats_processor, trace_aggregator, trace_processor,
         INVOCATION_SPAN_RESOURCE,
     },
-=======
-use crate::config;
-use crate::http::{extract_request_body, get_client, handler_not_found};
-use crate::lifecycle::invocation::context::ReparentingInfo;
-use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
-use crate::tags::provider;
-use crate::traces::{
-    stats_aggregator, stats_processor, trace_aggregator::{self, SendDataBuilderInfo}, trace_processor, INVOCATION_SPAN_RESOURCE,
->>>>>>> 3bbdeb1 (Use SendDataBuilderInfo)
+    stats_aggregator, stats_processor, trace_aggregator::{self, SendDataBuilderInfo},
+    trace_processor, INVOCATION_SPAN_RESOURCE,
 };
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self};

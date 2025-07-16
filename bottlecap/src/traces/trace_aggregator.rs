@@ -7,9 +7,17 @@ use std::collections::VecDeque;
 /// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
 pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
 
+// Bundle SendDataBuilder with payload size because SendDataBuilder doesn't
+// expose a getter for the size
 pub struct SendDataBuilderInfo {
     pub builder: SendDataBuilder,
     pub size: usize,
+}
+
+impl SendDataBuilderInfo {
+    pub fn new(builder: SendDataBuilder, size: usize) -> Self {
+        Self { builder, size }
+    }
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -52,7 +60,7 @@ impl TraceAggregator {
             if let Some(payload_info) = self.queue.pop_front() {
                 // TODO(duncanista): revisit if this is bigger than limit
                 let payload_size = payload_info.size;
-                
+
                 // Put stats back in the queue
                 if batch_size + payload_size > self.max_content_size_bytes {
                     self.queue.push_front(payload_info);
@@ -94,16 +102,16 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
+        let size = 1;
         let payload = SendDataBuilder::new(
-            1,
+            size,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
             &Endpoint::from_slice("localhost"),
         );
 
-        aggregator.add(payload.clone());
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
         assert_eq!(aggregator.queue.len(), 1);
-        assert_eq!(aggregator.queue[0].is_empty(), payload.is_empty());
     }
 
     #[test]
@@ -121,14 +129,15 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
+        let size = 1;
         let payload = SendDataBuilder::new(
-            1,
+            size,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
             &Endpoint::from_slice("localhost"),
         );
 
-        aggregator.add(payload.clone());
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
         assert_eq!(aggregator.queue.len(), 1);
         let batch = aggregator.get_batch();
         assert_eq!(batch.len(), 1);
@@ -149,17 +158,18 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
+        let size = 1;
         let payload = SendDataBuilder::new(
-            1,
+            size,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
             &Endpoint::from_slice("localhost"),
         );
 
         // Add 3 payloads
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
 
         // The batch should only contain the first 2 payloads
         let first_batch = aggregator.get_batch();
