@@ -74,6 +74,7 @@ figment = { version = "0.10", default-features = false, features = ["yaml", "env
 proptest = "1.4"
 httpmock = "0.7"
 serial_test = "3.1"
+tempfile = "3.20"
 
 [build-dependencies]
 # No external dependencies needed for the build script

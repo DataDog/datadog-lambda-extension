@@ -18,7 +18,6 @@ pub struct Processor {
     handle: Handle,
     waf_timeout: Duration,
 }
-
 impl Processor {
     /// Creates a new [`Processor`] instance using the provided [`Config`].
     ///
@@ -116,6 +115,13 @@ impl Processor {
                 Ok(serde_json::from_reader(rules)?)
             }
         }
+    }
+}
+impl std::fmt::Debug for Processor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct(stringify!(Processor))
+            .field("waf_timeout", &self.waf_timeout)
+            .finish_non_exhaustive()
     }
 }
 
@@ -400,5 +406,17 @@ mod tests {
             ..Config::default()
         };
         let _ = Processor::new(&config).expect("Should not fail");
+    }
+
+    #[test]
+    fn test_new_with_invalid_config() {
+        let tmp = tempfile::NamedTempFile::new().expect("Failed to create tempfile");
+
+        let config = Config {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some(tmp.path().to_str().expect("Failed to get tempfile path").to_string()),
+            ..Config::default()
+        };
+        let _ = Processor::new(&config).expect_err("should have failed");
     }
 }
