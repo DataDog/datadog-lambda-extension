@@ -280,6 +280,7 @@ impl RequestType {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 mod tests {
     use super::*;

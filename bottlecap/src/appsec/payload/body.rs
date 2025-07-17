@@ -88,6 +88,7 @@ pub(super) async fn parse_body(
     })
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 mod tests {
     use libddwaf::{waf_array, waf_map, waf_object};

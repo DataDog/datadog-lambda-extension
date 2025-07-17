@@ -1,3 +1,5 @@
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+
 //! Crate for the `bottlecap` project
 #![deny(clippy::all)]
 #![deny(clippy::pedantic)]

@@ -1,4 +1,3 @@
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use super::{body::parse_body, ExtractResponse, HttpData};

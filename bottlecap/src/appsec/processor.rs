@@ -26,9 +26,9 @@ impl Processor {
     /// - If the [`Config::appsec_rules`] points to a non-existent file;
     /// - If the [`Config::appsec_rules`] points to a file that is not a valid JSON-encoded ruleset;
     /// - If the in-app WAF fails to initialize, integrate the ruleset, or build the WAF instance.
-    pub fn new(config: &Config) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new(config: &Config) -> Result<Self, Error> {
         if !is_enabled(config) {
-            return Err("AppSec is not enabled".into());
+            return Err(Error::FeatureDisabled);
         }
         debug!("Starting ASM processor");
 
@@ -39,17 +39,17 @@ impl Processor {
         }
 
         let Some(mut builder) = Builder::new(&WAFConfig::default()) else {
-            return Err("Failed to create WAF builder".into());
+            return Err(Error::BuilderCreationFailed);
         };
 
         let rules = Self::get_rules(config)?;
         let mut diagnostics = WafOwned::<WafMap>::default();
         if !builder.add_or_update_config("rules", &rules, Some(&mut diagnostics)) {
-            return Err("Failed to add ruleset to the WAF builder".into());
+            return Err(Error::RulesetAdditionFailed(diagnostics));
         }
 
         let Some(handle) = builder.build() else {
-            return Err("Failed to build WAF instance".into());
+            return Err(Error::WafCreationFailed);
         };
 
         if let Some(version) = diagnostics.get(b"ruleset_version").and_then(|o| o.to_str()) {
@@ -103,16 +103,19 @@ impl Processor {
 
     /// Parses the App & API Protection ruleset from the provided [Config], falling back to the
     /// default built-in ruleset if the [Config] has [None].
-    fn get_rules(config: &Config) -> Result<WafMap, Box<dyn std::error::Error>> {
+    fn get_rules(config: &Config) -> Result<WafMap, Error> {
         // Default on recommended rules
         match &config.appsec_rules {
             None => {
                 let default_rules = include_bytes!("rules.json");
-                Ok(serde_json::from_slice(default_rules)?)
+                Ok(serde_json::from_slice(default_rules).map_err(Error::RulesetParseError)?)
             }
             Some(path) => {
-                let rules = std::fs::File::open(path)?;
-                Ok(serde_json::from_reader(rules)?)
+                let rules = std::fs::File::open(path).map_err(|e| Error::RulesetFileError {
+                    path: path.clone(),
+                    cause: e,
+                })?;
+                Ok(serde_json::from_reader(rules).map_err(Error::RulesetParseError)?)
             }
         }
     }
@@ -124,6 +127,37 @@ impl std::fmt::Debug for Processor {
             .finish_non_exhaustive()
     }
 }
+
+/// Errors that can occur when calling [`Processor::new`].
+#[derive(Debug)]
+pub enum Error {
+    FeatureDisabled,
+    BuilderCreationFailed,
+    RulesetFileError { path: String, cause: std::io::Error },
+    RulesetParseError(serde_json::Error),
+    RulesetAdditionFailed(libddwaf::object::WafOwned<WafMap>),
+    WafCreationFailed,
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FeatureDisabled => write!(f, "appsec: feature disabled"),
+            Self::BuilderCreationFailed => write!(f, "appsec: failed to create WAF builder"),
+            Self::RulesetFileError { path, cause } => {
+                write!(f, "appsec: failed to open ruleset file {path:#}: {cause}")
+            }
+            Self::RulesetParseError(e) => write!(f, "appsec: failed to parse ruleset: {e}"),
+            Self::RulesetAdditionFailed(diags) => {
+                write!(
+                    f,
+                    "appsec: failed to add ruleset to the WAF builder: {diags:?}"
+                )
+            }
+            Self::WafCreationFailed => write!(f, "appsec: failed to build WAF instance"),
+        }
+    }
+}
+impl std::error::Error for Error {}
 
 /// Request headers that are always collected as long as AAP is enabled.
 ///
@@ -320,7 +354,7 @@ impl AppSecContext {
         let result = match waf_context.run(Some(address_data), None, timeout) {
             Ok(RunResult::Match(result) | RunResult::NoMatch(result)) => result,
             Err(e) => {
-                warn!("Failed to evalute in-app WAF rules against request: {e}");
+                warn!("appsec: failed to evalute in-app WAF rules against request: {e}");
                 return;
             }
         };
@@ -393,8 +427,11 @@ impl std::cmp::PartialEq for AppSecContext {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use crate::config::Config;
 
     use super::*;
@@ -406,6 +443,18 @@ mod tests {
             ..Config::default()
         };
         let _ = Processor::new(&config).expect("Should not fail");
+    }
+
+    #[test]
+    fn test_new_disabled() {
+        let config = Config {
+            serverless_appsec_enabled: false, // Explicitly testing this condition
+            ..Config::default()
+        };
+        assert!(matches!(
+            Processor::new(&config),
+            Err(Error::FeatureDisabled)
+        ));
     }
 
     #[test]
@@ -422,7 +471,90 @@ mod tests {
             ),
             ..Config::default()
         };
-        let _ = Processor::new(&config).expect_err("should have failed");
+        assert!(matches!(
+            Processor::new(&config),
+            Err(Error::RulesetParseError(_))
+        ));
+    }
+
+    #[test]
+    fn test_new_with_no_rules_or_processors() {
+        let mut tmp = tempfile::NamedTempFile::new().expect("Failed to create tempfile");
+        tmp.write_all(
+            br#"{
+                "version": "2.2",
+                "metadata":{
+                    "ruleset_version": "0.0.0-blank"
+                },
+                "scanners":[{
+                    "id": "406f8606-52c4-4663-8db9-df70f9e8766c",
+                    "name": "ZIP Code",
+                    "key": {
+                        "operator": "match_regex",
+                        "parameters": {
+                            "regex": "\\b(?:zip|postal)\\b",
+                            "options": {
+                                "case_sensitive": false,
+                                "min_length": 3
+                            }
+                        }
+                    },
+                    "value": {
+                        "operator": "match_regex",
+                        "parameters": {
+                            "regex": "^[0-9]{5}(?:-[0-9]{4})?$",
+                            "options": {
+                                "case_sensitive": true,
+                                "min_length": 5
+                            }
+                        }
+                    },
+                    "tags": {
+                        "type": "zipcode",
+                        "category": "address"
+                    }
+                }]
+            }"#,
+        )
+        .expect("Failed to write to temp file");
+        tmp.flush().expect("Failed to flush temp file");
+
+        let config = Config {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some(
+                tmp.path()
+                    .to_str()
+                    .expect("Failed to get tempfile path")
+                    .to_string(),
+            ),
+            ..Config::default()
+        };
+        let result = Processor::new(&config);
+        assert!(
+            matches!(
+                result,
+                Err(Error::WafCreationFailed), // There is no rule nor processor in the ruleset
+            ),
+            concat!(
+                "should have failed with ",
+                stringify!(Error::WafCreationFailed),
+                " but was {:?}"
+            ),
+            result
+        );
+    }
+
+    #[test]
+    fn test_new_with_inexistent_ruleset_file() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some("/definitely/not/a/file/that/exists".to_string()),
+            ..Config::default()
+        };
+        assert!(matches!(
+            Processor::new(&config),
+            Err(Error::RulesetFileError { .. })
+        ));
     }
 
     #[tokio::test]
