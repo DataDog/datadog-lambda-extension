@@ -250,11 +250,19 @@ impl ContextBuffer {
 
     /// Retrieves the security context bound to the given `request_id`, if one exists.
     pub fn get_security_context_mut(&mut self, request_id: &str) -> Option<&mut AppSecContext> {
-        if let Some(ctx) = self.get_mut(request_id) {
-            return ctx.appsec_context.as_mut();
+        // Try to get from the context buffer first; not using `get_mut` because this causes the borrow checker to
+        // consider `self` as mutably borrowed for the entire function call, preventing mutable access to
+        // `self.appsec_contexts`...
+        for context in &mut self.buffer {
+            if context.request_id == request_id {
+                return context.appsec_context.as_mut();
+            }
         }
 
-        None
+        // If not found in context buffer, try the appsec_contexts buffer
+        self.appsec_contexts
+            .iter_mut()
+            .find_map(|(rid, ctx)| if rid == request_id { Some(ctx) } else { None })
     }
 
     /// Removes a context from the buffer. Returns the removed `Context` if found.
@@ -523,6 +531,7 @@ impl ContextBuffer {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use crate::proc::{CPUData, NetworkData};
+    use bytes::Bytes;
     use std::collections::HashMap;
     use tokio::sync::watch;
 
@@ -870,5 +879,252 @@ mod tests {
         let result = buffer.pair_universal_instrumentation_start_event(&headers, &payload);
         assert!(result.is_some());
         assert_eq!(result.unwrap(), request_id2);
+    }
+
+    #[tokio::test]
+    async fn test_appsec_context_buffer_capacity() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.bind_security_context("2", ctx.clone());
+
+        // We replace the context for 1 three times, but that should not cause 2 to slip out of the buffer
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.bind_security_context("1", ctx.clone());
+
+        assert_eq!(buffer.appsec_contexts.len(), 2); // Capped
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "request 1 should still be in the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("2").is_some(),
+            "request 2 should still be in the buffer"
+        );
+
+        buffer.bind_security_context("3", ctx.clone());
+        // At this point, 2 should slip out of the buffer (1 was replaced later)
+        buffer.bind_security_context("4", ctx.clone());
+
+        assert_eq!(buffer.appsec_contexts.len(), 3); // Capped
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "request 1 should still be in the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("2").is_none(),
+            "request 2 should still have slipped out of the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("3").is_some(),
+            "request 3 should still be in the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("4").is_some(),
+            "request 4 should still be in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_appsec_context_buffer_skip() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+        buffer.bind_security_context("1", ctx.clone());
+        assert!(
+            buffer.appsec_contexts.is_empty(),
+            "the appsec context buffer should have been skipped"
+        );
+
+        assert!(
+            buffer
+                .get("1")
+                .expect("should have a context for request 1")
+                .appsec_context
+                .is_some(),
+            "the appsec context should have been bound to the invocation context"
+        );
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "the appsec context should be available through the security context buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_appsec_context_hoist_from_buffer() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.start_context("1", Span::default());
+
+        assert!(
+            buffer.appsec_contexts.is_empty(),
+            "the appsec context buffer should have been hoisted from the buffer"
+        );
+
+        assert!(
+            buffer
+                .get("1")
+                .expect("should have a context for request 1")
+                .appsec_context
+                .is_some(),
+            "the appsec context should have been bound to the invocation context"
+        );
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "the appsec context should be available through the security context buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_context_absorb_appsec_tags() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.appsec_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+        buffer.bind_security_context("1", ctx.clone());
+
+        let context = buffer
+            .get_mut("1")
+            .expect("should have a context for request 1");
+        context.absorb_appsec_tags();
+
+        assert_eq!(
+            context.invocation_span.meta,
+            HashMap::from([
+                ("_dd.appsec.fp.http.header".to_string(), "hdr-0000000010-40b52535-5-1e6648af".to_string()),
+                ("_dd.appsec.fp.http.network".to_string(), "net-1-1000000000".to_string()),
+                ("_dd.appsec.json".to_string(), "[\"{\\\"rule\\\":{\\\"id\\\":\\\"ua0-600-12x\\\",\\\"name\\\":\\\"Arachni\\\",\\\"tags\\\":{\\\"type\\\":\\\"attack_tool\\\",\\\"category\\\":\\\"attack_attempt\\\",\\\"confidence\\\":\\\"1\\\",\\\"module\\\":\\\"waf\\\",\\\"tool_name\\\":\\\"Arachni\\\",\\\"cwe\\\":\\\"200\\\",\\\"capec\\\":\\\"1000/118/169\\\"},\\\"on_match\\\":[]},\\\"rule_matches\\\":[{\\\"operator\\\":\\\"match_regex\\\",\\\"operator_value\\\":\\\"^Arachni\\\\\\\\/v\\\",\\\"parameters\\\":[{\\\"address\\\":\\\"server.request.headers.no_cookies\\\",\\\"key_path\\\":[\\\"user-agent\\\",\\\"0\\\"],\\\"value\\\":\\\"Arachni/v2\\\",\\\"highlight\\\":[\\\"Arachni/v\\\"]}]}]}\"]".to_string()),
+                ("_dd.origin".to_string(), "appsec".to_string()),
+                ("appsec.event".to_string(), "true".to_string()),
+                ("http.endpoint".to_string(), "GET /httpapi/get".to_string()),
+                ("http.method".to_string(), "GET".to_string()),
+                ("http.request.headers.accept".to_string(), "*/*".to_string()),
+                ("http.request.headers.content-length".to_string(), "0".to_string()),
+                ("http.request.headers.host".to_string(), "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string()),
+                ("http.request.headers.user-agent".to_string(), "Arachni/v2".to_string()),
+                ("http.request.headers.x-amzn-trace-id".to_string(), "Root=1-613a52fb-4c43cfc95e0241c1471bfa05".to_string()),
+                ("http.request.headers.x-forwarded-for".to_string(), "38.122.226.210".to_string()),
+                ("http.url".to_string(), "/httpapi/get".to_string()),
+                ("network.client.ip".to_string(), "38.122.226.210".to_string()),
+                ("request_id".to_string(), "1".to_string()),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_context_absorb_appsec_tags_no_event() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+        buffer.bind_security_context("1", ctx.clone());
+
+        let context = buffer
+            .get_mut("1")
+            .expect("should have a context for request 1");
+        context.absorb_appsec_tags();
+
+        assert_eq!(
+            context.invocation_span.meta,
+            HashMap::from([
+                (
+                    "_dd.appsec.fp.http.header".to_string(),
+                    "hdr-0000000010-47a6a72c-5-1e6648af".to_string()
+                ),
+                (
+                    "_dd.appsec.fp.http.network".to_string(),
+                    "net-1-1000000000".to_string()
+                ),
+                ("_dd.origin".to_string(), "appsec".to_string()),
+                ("http.method".to_string(), "GET".to_string()),
+                ("http.request.headers.accept".to_string(), "*/*".to_string()),
+                (
+                    "http.request.headers.user-agent".to_string(),
+                    "curl/7.64.1".to_string()
+                ),
+                (
+                    "http.request.headers.x-amzn-trace-id".to_string(),
+                    "Root=1-613a52fb-4c43cfc95e0241c1471bfa05".to_string()
+                ),
+                ("http.url".to_string(), "/httpapi/get".to_string()),
+                ("request_id".to_string(), "1".to_string()),
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_context_absorb_appsec_tags_no_appsec_context() {
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+
+        let context = buffer
+            .get_mut("1")
+            .expect("should have a context for request 1");
+        context.absorb_appsec_tags();
+
+        assert_eq!(
+            context.invocation_span.meta,
+            HashMap::from([("request_id".to_string(), "1".to_string()),])
+        );
     }
 }
