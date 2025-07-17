@@ -1,4 +1,4 @@
-use datadog_trace_utils::send_data::SendData;
+use datadog_trace_utils::send_data::SendDataBuilder;
 use std::collections::VecDeque;
 
 /// Maximum content size per payload uncompressed in bytes,
@@ -7,11 +7,24 @@ use std::collections::VecDeque;
 /// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
 pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
 
+// Bundle SendDataBuilder with payload size because SendDataBuilder doesn't
+// expose a getter for the size
+pub struct SendDataBuilderInfo {
+    pub builder: SendDataBuilder,
+    pub size: usize,
+}
+
+impl SendDataBuilderInfo {
+    pub fn new(builder: SendDataBuilder, size: usize) -> Self {
+        Self { builder, size }
+    }
+}
+
 #[allow(clippy::module_name_repetitions)]
 pub struct TraceAggregator {
-    queue: VecDeque<SendData>,
+    queue: VecDeque<SendDataBuilderInfo>,
     max_content_size_bytes: usize,
-    buffer: Vec<SendData>,
+    buffer: Vec<SendDataBuilder>,
 }
 
 impl Default for TraceAggregator {
@@ -35,26 +48,26 @@ impl TraceAggregator {
         }
     }
 
-    pub fn add(&mut self, p: SendData) {
-        self.queue.push_back(p);
+    pub fn add(&mut self, payload_info: SendDataBuilderInfo) {
+        self.queue.push_back(payload_info);
     }
 
-    pub fn get_batch(&mut self) -> Vec<SendData> {
+    pub fn get_batch(&mut self) -> Vec<SendDataBuilder> {
         let mut batch_size = 0;
 
         // Fill the batch
         while batch_size < self.max_content_size_bytes {
-            if let Some(payload) = self.queue.pop_front() {
+            if let Some(payload_info) = self.queue.pop_front() {
                 // TODO(duncanista): revisit if this is bigger than limit
-                let payload_size = payload.len();
+                let payload_size = payload_info.size;
 
                 // Put stats back in the queue
                 if batch_size + payload_size > self.max_content_size_bytes {
-                    self.queue.push_front(payload);
+                    self.queue.push_front(payload_info);
                     break;
                 }
                 batch_size += payload_size;
-                self.buffer.push(payload);
+                self.buffer.push(payload_info.builder);
             } else {
                 break;
             }
@@ -89,16 +102,16 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
-        let payload = SendData::new(
-            1,
+        let size = 1;
+        let payload = SendDataBuilder::new(
+            size,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
             &Endpoint::from_slice("localhost"),
         );
 
-        aggregator.add(payload.clone());
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
         assert_eq!(aggregator.queue.len(), 1);
-        assert_eq!(aggregator.queue[0].is_empty(), payload.is_empty());
     }
 
     #[test]
@@ -116,14 +129,15 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
-        let payload = SendData::new(
-            1,
+        let size = 1;
+        let payload = SendDataBuilder::new(
+            size,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
             &Endpoint::from_slice("localhost"),
         );
 
-        aggregator.add(payload.clone());
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
         assert_eq!(aggregator.queue.len(), 1);
         let batch = aggregator.get_batch();
         assert_eq!(batch.len(), 1);
@@ -144,17 +158,18 @@ mod tests {
             dropped_p0_traces: 0,
             dropped_p0_spans: 0,
         };
-        let payload = SendData::new(
-            1,
+        let size = 1;
+        let payload = SendDataBuilder::new(
+            size,
             TracerPayloadCollection::V07(Vec::new()),
             tracer_header_tags,
             &Endpoint::from_slice("localhost"),
         );
 
         // Add 3 payloads
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
-        aggregator.add(payload.clone());
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
+        aggregator.add(SendDataBuilderInfo::new(payload.clone(), size));
 
         // The batch should only contain the first 2 payloads
         let first_batch = aggregator.get_batch();

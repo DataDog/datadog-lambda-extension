@@ -575,11 +575,11 @@ dependencies = [
  "datadog-fips",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "datadog-trace-agent",
- "datadog-trace-normalization 19.0.1",
- "datadog-trace-obfuscation 19.0.1",
- "datadog-trace-protobuf 19.0.1",
- "datadog-trace-utils 19.0.1",
- "ddcommon 19.0.1",
+ "datadog-trace-normalization 19.1.0",
+ "datadog-trace-obfuscation 19.1.0",
+ "datadog-trace-protobuf 19.1.0",
+ "datadog-trace-utils 19.1.0",
+ "ddcommon 19.1.0",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/)",
  "dogstatsd",
  "figment",
@@ -938,11 +938,11 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-normalization"
-version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=ca19adc5c782be316210b69510ebb6c8dff12d87#ca19adc5c782be316210b69510ebb6c8dff12d87"
+version = "19.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=8a49c7df2d9cbf05118bfd5b85772676f71b34f2#8a49c7df2d9cbf05118bfd5b85772676f71b34f2"
 dependencies = [
  "anyhow",
- "datadog-trace-protobuf 19.0.1",
+ "datadog-trace-protobuf 19.1.0",
 ]
 
 [[package]]
@@ -964,13 +964,13 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-obfuscation"
-version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=ca19adc5c782be316210b69510ebb6c8dff12d87#ca19adc5c782be316210b69510ebb6c8dff12d87"
+version = "19.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=8a49c7df2d9cbf05118bfd5b85772676f71b34f2#8a49c7df2d9cbf05118bfd5b85772676f71b34f2"
 dependencies = [
  "anyhow",
- "datadog-trace-protobuf 19.0.1",
- "datadog-trace-utils 19.0.1",
- "ddcommon 19.0.1",
+ "datadog-trace-protobuf 19.1.0",
+ "datadog-trace-utils 19.1.0",
+ "ddcommon 19.1.0",
  "log",
  "percent-encoding",
  "regex",
@@ -991,8 +991,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-protobuf"
-version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=ca19adc5c782be316210b69510ebb6c8dff12d87#ca19adc5c782be316210b69510ebb6c8dff12d87"
+version = "19.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=8a49c7df2d9cbf05118bfd5b85772676f71b34f2#8a49c7df2d9cbf05118bfd5b85772676f71b34f2"
 dependencies = [
  "prost",
  "serde",
@@ -1029,14 +1029,14 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-utils"
-version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=ca19adc5c782be316210b69510ebb6c8dff12d87#ca19adc5c782be316210b69510ebb6c8dff12d87"
+version = "19.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=8a49c7df2d9cbf05118bfd5b85772676f71b34f2#8a49c7df2d9cbf05118bfd5b85772676f71b34f2"
 dependencies = [
  "anyhow",
  "bytes 1.10.1",
- "datadog-trace-normalization 19.0.1",
- "datadog-trace-protobuf 19.0.1",
- "ddcommon 19.0.1",
+ "datadog-trace-normalization 19.1.0",
+ "datadog-trace-protobuf 19.1.0",
+ "ddcommon 19.1.0",
  "flate2",
  "futures 0.3.31",
  "http-body-util",
@@ -1049,7 +1049,7 @@ dependencies = [
  "rmpv",
  "serde",
  "serde_json",
- "tinybytes 19.0.1",
+ "tinybytes 19.1.0",
  "tokio",
  "tracing",
  "zstd",
@@ -1094,8 +1094,8 @@ dependencies = [
 
 [[package]]
 name = "ddcommon"
-version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=ca19adc5c782be316210b69510ebb6c8dff12d87#ca19adc5c782be316210b69510ebb6c8dff12d87"
+version = "19.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=8a49c7df2d9cbf05118bfd5b85772676f71b34f2#8a49c7df2d9cbf05118bfd5b85772676f71b34f2"
 dependencies = [
  "anyhow",
  "cc",
@@ -3979,8 +3979,8 @@ dependencies = [
 
 [[package]]
 name = "tinybytes"
-version = "19.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=ca19adc5c782be316210b69510ebb6c8dff12d87#ca19adc5c782be316210b69510ebb6c8dff12d87"
+version = "19.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=8a49c7df2d9cbf05118bfd5b85772676f71b34f2#8a49c7df2d9cbf05118bfd5b85772676f71b34f2"
 dependencies = [
  "serde",
 ]

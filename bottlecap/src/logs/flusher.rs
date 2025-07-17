@@ -38,7 +38,7 @@ impl Flusher {
         aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
-        let client = get_client(config.clone());
+        let client = get_client(&config);
         let mut headers = HeaderMap::new();
         headers.insert(
             "DD-API-KEY",
