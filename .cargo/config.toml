@@ -1,4 +1,4 @@
 [alias]
-license = "bundle-licenses --format yaml --output LICENSE-3rdparty.yml"
 format = "fmt --all && clippy --workspace --all-features --fix"
+license = "bundle-licenses --format yaml --output LICENSE-3rdparty.yml"
 
