@@ -20,7 +20,6 @@ use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
 use ddcommon::Endpoint;
-use dogstatsd::api_key::ApiKeyFactory;
 use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
@@ -31,7 +30,6 @@ use super::trace_aggregator::SendDataBuilderInfo;
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    pub api_key_factory: Arc<ApiKeyFactory>,
 }
 
 struct ChunkProcessor {
@@ -164,11 +162,11 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 tracer_payload.tags.extend(tags.clone());
             }
         }
-        let api_key = self.api_key_factory.get_api_key().await.to_string();
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_dd_url)
                 .expect("can't parse trace intake URL, exiting"),
-            api_key: Some(api_key.into()),
+            // Will be set at flush time
+            api_key: None,
             timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
@@ -194,7 +192,6 @@ mod tests {
     };
 
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
-    use dogstatsd::api_key::ApiKeyFactory;
 
     use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
 
@@ -299,7 +296,6 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            api_key_factory: Arc::new(ApiKeyFactory::new("test-api-key")),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
