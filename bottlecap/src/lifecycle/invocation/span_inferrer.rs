@@ -358,6 +358,7 @@ mod tests {
     use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::sync::Arc;
     use std::time::Instant;
 
     use super::*;
@@ -478,14 +479,14 @@ mod tests {
             }]
         });
 
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some("".to_string()),
             runtime_api: "".to_string(),
             function_name: "".to_string(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
-        };
+        });
         inferrer.infer_span(&payload, &aws_config);
 
         assert!(
