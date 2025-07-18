@@ -194,6 +194,9 @@ impl Processor {
 
         self.dynamic_tags
             .insert(String::from("cold_start"), cold_start.to_string());
+        self.dynamic_tags
+            .insert(String::from("span.kind"), "server".to_string());
+
         if proactive_initialization {
             self.dynamic_tags.insert(
                 String::from("proactive_initialization"),
