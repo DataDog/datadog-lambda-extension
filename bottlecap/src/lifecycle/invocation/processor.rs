@@ -41,6 +41,7 @@ use crate::{
 };
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
+pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
