@@ -214,7 +214,7 @@ mod tests {
         let service_mapping = HashMap::new();
         event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.s3");
-        assert_eq!(span.service, "s3");
+        assert_eq!(span.service, "example-bucket");
         assert_eq!(span.resource, "example-bucket");
         assert_eq!(span.r#type, "web");
 
@@ -286,14 +286,22 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "s3"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "s3"
+            ),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_s3".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "s3"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "s3"
+            ),
             "generic-service"
         );
     }

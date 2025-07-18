@@ -231,7 +231,7 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.request_context.elb.target_group_arn,
-                None
+                "lambda_application_load_balancer"
             ),
             "specific-service"
         );
@@ -244,7 +244,7 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.request_context.elb.target_group_arn,
-                None
+                "lambda_application_load_balancer"
             ),
             "generic-service"
         );

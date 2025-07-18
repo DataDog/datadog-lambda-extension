@@ -193,7 +193,7 @@ mod tests {
         let service_mapping = HashMap::new();
         event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.kinesis");
-        assert_eq!(span.service, "kinesis");
+        assert_eq!(span.service, "kinesisStream");
         assert_eq!(span.resource, "kinesisStream");
         assert_eq!(span.r#type, "web");
 
@@ -280,14 +280,22 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "kinesis"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "kinesis"
+            ),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_kinesis".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "kinesis"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "kinesis"
+            ),
             "generic-service"
         );
     }

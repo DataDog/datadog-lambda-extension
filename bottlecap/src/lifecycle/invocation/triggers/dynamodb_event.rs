@@ -279,7 +279,7 @@ mod tests {
         let service_mapping = HashMap::new();
         event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.dynamodb");
-        assert_eq!(span.service, "dynamodb");
+        assert_eq!(span.service, "ExampleTableWithStream");
         assert_eq!(span.resource, "INSERT ExampleTableWithStream");
         assert_eq!(span.r#type, "web");
 
@@ -355,14 +355,22 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "dynamodb"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb"
+            ),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_dynamodb".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "dynamodb"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb"
+            ),
             "generic-service"
         );
     }

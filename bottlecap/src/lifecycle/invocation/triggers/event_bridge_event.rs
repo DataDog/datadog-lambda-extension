@@ -65,7 +65,11 @@ impl Trigger for EventBridgeEvent {
             .and_then(|s| s.parse::<f64>().ok())
             .map_or(start_time_seconds, |s| (s * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(service_mapping, &self.get_specific_identifier(), "eventbridge");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &self.get_specific_identifier(),
+            "eventbridge",
+        );
 
         span.name = String::from("aws.eventbridge");
         span.service = service_name.to_string();
@@ -271,7 +275,11 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "eventbridge"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "eventbridge"
+            ),
             "specific-service"
         );
 
@@ -280,7 +288,11 @@ mod tests {
             "generic-service".to_string(),
         )]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "eventbridge"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "eventbridge"
+            ),
             "generic-service"
         );
     }

@@ -78,8 +78,11 @@ impl Trigger for APIGatewayHttpEvent {
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name =
-            self.resolve_service_name(service_mapping, &self.request_context.domain_name, None);
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &self.request_context.domain_name,
+            "api_gateway_http",
+        );
 
         span.name = "aws.httpapi".to_string();
         span.service = service_name;
@@ -422,7 +425,7 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.request_context.domain_name,
-                None
+                "api_gateway_http"
             ),
             "specific-service"
         );
@@ -432,8 +435,11 @@ mod tests {
             "generic-service".to_string(),
         )]);
         assert_eq!(
-            event
-                .resolve_service_name(&generic_service_mapping, &event.request_context.domain_name, None),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.request_context.domain_name,
+                "api_gateway_http"
+            ),
             "generic-service"
         );
     }
