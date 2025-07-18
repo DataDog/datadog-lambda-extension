@@ -17,6 +17,7 @@ use datadog_trace_utils::{
 use dogstatsd::api_key::ApiKeyFactory;
 
 use crate::config::Config;
+use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::trace_aggregator::TraceAggregator;
 
 #[async_trait]
@@ -60,7 +61,6 @@ impl TraceFlusher for ServerlessTraceFlusher {
     ) -> Self {
         let mut additional_endpoints: Vec<Endpoint> = Vec::new();
 
-        //let config_apm_additional_endpoints = config.apm_additional_endpoints.clone();
         for (endpoint_url, api_keys) in config.apm_additional_endpoints.clone() {
             for api_key in api_keys {
                 let trace_intake_url = trace_intake_url_prefixed(&endpoint_url);
@@ -68,7 +68,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     url: hyper::Uri::from_str(&trace_intake_url)
                         .expect("can't parse additional trace intake URL, exiting"),
                     api_key: Some(api_key.clone().into()),
-                    timeout_ms: config.flush_timeout * 1_000,
+                    timeout_ms: config.flush_timeout * S_TO_MS,
                     test_token: None,
                 };
 
@@ -136,11 +136,11 @@ impl TraceFlusher for ServerlessTraceFlusher {
             trace_builders = guard.get_batch();
         }
 
-        if failed_batch.is_empty() {
-            None
-        } else {
-            Some(failed_batch)
+        if !failed_batch.is_empty() {
+            return Some(failed_batch);
         }
+
+        None
     }
 
     async fn send(
