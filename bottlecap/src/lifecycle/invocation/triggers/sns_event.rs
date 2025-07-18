@@ -93,7 +93,7 @@ impl Trigger for SnsRecord {
             .timestamp_nanos_opt()
             .unwrap_or((self.sns.timestamp.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(service_mapping, "sns");
+        let service_name = self.resolve_service_name(service_mapping, &resource_name, "sns");
 
         span.name = "aws.sns".to_string();
         span.service = service_name.to_string();
@@ -369,14 +369,14 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "sns"),
+            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "sns"),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_sns".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "sns"),
+            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "sns"),
             "generic-service"
         );
     }

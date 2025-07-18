@@ -230,7 +230,8 @@ mod tests {
         assert_eq!(
             event.resolve_service_name(
                 &specific_service_mapping,
-                &event.request_context.elb.target_group_arn
+                &event.request_context.elb.target_group_arn,
+                None
             ),
             "specific-service"
         );
@@ -242,7 +243,8 @@ mod tests {
         assert_eq!(
             event.resolve_service_name(
                 &generic_service_mapping,
-                &event.request_context.elb.target_group_arn
+                &event.request_context.elb.target_group_arn,
+                None
             ),
             "generic-service"
         );

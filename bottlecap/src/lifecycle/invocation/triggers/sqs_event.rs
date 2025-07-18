@@ -110,7 +110,7 @@ impl Trigger for SqsRecord {
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(service_mapping, "sqs");
+        let service_name = self.resolve_service_name(service_mapping, &resource, "sqs");
 
         span.name = "aws.sqs".to_string();
         span.service = service_name.to_string();
@@ -506,14 +506,14 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "sqs"),
+            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "sqs"),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "sqs"),
+            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "sqs"),
             "generic-service"
         );
     }

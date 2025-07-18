@@ -108,7 +108,7 @@ impl Trigger for DynamoDbRecord {
 
         let start_time = (self.dynamodb.approximate_creation_date_time * S_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(service_mapping, "dynamodb");
+        let service_name = self.resolve_service_name(service_mapping, &table_name, "dynamodb");
 
         span.name = String::from("aws.dynamodb");
         span.service = service_name.to_string();
@@ -355,14 +355,14 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "dynamodb"),
+            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "dynamodb"),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_dynamodb".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "dynamodb"),
+            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "dynamodb"),
             "generic-service"
         );
     }

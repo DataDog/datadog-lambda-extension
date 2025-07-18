@@ -78,7 +78,7 @@ impl Trigger for LambdaFunctionUrlEvent {
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
         let service_name =
-            self.resolve_service_name(service_mapping, &self.request_context.domain_name);
+            self.resolve_service_name(service_mapping, &self.request_context.domain_name, None);
 
         span.name = String::from("aws.lambda.url");
         span.service = service_name;
@@ -336,14 +336,14 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "domain-name"),
+            event.resolve_service_name(&specific_service_mapping, "domain-name", None),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_url".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "domain-name"),
+            event.resolve_service_name(&generic_service_mapping, "domain-name", None),
             "generic-service"
         );
     }

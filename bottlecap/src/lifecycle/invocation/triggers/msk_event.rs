@@ -63,7 +63,7 @@ impl Trigger for MSKEvent {
         debug!("Enriching an Inferred Span for an MSK event");
 
         span.name = String::from("aws.msk");
-        span.service = self.resolve_service_name(service_mapping, "msk");
+        span.service = self.resolve_service_name(service_mapping, &self.get_specific_identifier(), "msk");
         span.r#type = String::from("web");
 
         let first_value = self.records.values().find_map(|arr| arr.first());
@@ -241,14 +241,14 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "msk"),
+            event.resolve_service_name(&specific_service_mapping, &event.get_specific_identifier(), "msk"),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_msk".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "msk"),
+            event.resolve_service_name(&generic_service_mapping, &event.get_specific_identifier(), "msk"),
             "generic-service"
         );
     }

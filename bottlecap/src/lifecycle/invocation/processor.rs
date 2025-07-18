@@ -89,11 +89,11 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
     ) -> Self {
-        let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
 
+        let service = config.service.clone().unwrap_or(resource.clone());
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
