@@ -282,6 +282,7 @@ impl SpanInferrer {
                 String::from("peer.service"),
                 invocation_span.service.clone(),
             );
+            s.meta.insert("span.kind".to_string(), "server".to_string());
 
             if let Some(ws) = &mut self.wrapped_inferred_span {
                 ws.trace_id = invocation_span.trace_id;
