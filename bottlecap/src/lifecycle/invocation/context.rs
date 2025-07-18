@@ -1058,6 +1058,16 @@ mod tests {
                 ("request_id".to_string(), "1".to_string()),
             ])
         );
+        assert_eq!(
+            context.invocation_span.metrics,
+            HashMap::from([
+                ("_dd.appsec.enabled".to_string(), 1f64),
+                (
+                    "_sampling_priority_v1".to_string(),
+                    2f64 /* USER_KEEP */
+                )
+            ])
+        );
     }
 
     #[tokio::test]
@@ -1110,6 +1120,10 @@ mod tests {
                 ("request_id".to_string(), "1".to_string()),
             ])
         );
+        assert_eq!(
+            context.invocation_span.metrics,
+            HashMap::from([("_dd.appsec.enabled".to_string(), 1f64)])
+        );
     }
 
     #[tokio::test]
@@ -1126,5 +1140,6 @@ mod tests {
             context.invocation_span.meta,
             HashMap::from([("request_id".to_string(), "1".to_string()),])
         );
+        assert!(context.invocation_span.metrics.is_empty());
     }
 }
