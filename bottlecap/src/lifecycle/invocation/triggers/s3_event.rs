@@ -86,7 +86,7 @@ impl Trigger for S3Record {
             .timestamp_nanos_opt()
             .unwrap_or((self.event_time.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(service_mapping, "s3");
+        let service_name = self.resolve_service_name(service_mapping, &bucket_name, "s3");
 
         span.name = String::from("aws.s3");
         span.service = service_name.to_string();
@@ -214,7 +214,7 @@ mod tests {
         let service_mapping = HashMap::new();
         event.enrich_span(&mut span, &service_mapping);
         assert_eq!(span.name, "aws.s3");
-        assert_eq!(span.service, "s3");
+        assert_eq!(span.service, "example-bucket");
         assert_eq!(span.resource, "example-bucket");
         assert_eq!(span.r#type, "web");
 
@@ -286,14 +286,22 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "s3"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "s3"
+            ),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_s3".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "s3"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "s3"
+            ),
             "generic-service"
         );
     }
