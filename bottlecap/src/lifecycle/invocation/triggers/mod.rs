@@ -121,10 +121,10 @@ pub trait Trigger: ServiceNameResolver {
             .or_else(|| service_mapping.get(self.get_generic_identifier()))
             .cloned()
             .unwrap_or_else(|| {
-                if !instance_name.is_empty() {
-                    instance_name.to_string()
-                } else {
+                if instance_name.is_empty() {
                     fallback.to_string()
+                } else {
+                    instance_name.to_string()
                 }
             })
     }
