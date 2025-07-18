@@ -65,7 +65,7 @@ impl Trigger for EventBridgeEvent {
             .and_then(|s| s.parse::<f64>().ok())
             .map_or(start_time_seconds, |s| (s * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(service_mapping, &resource_name, "eventbridge");
+        let service_name = self.resolve_service_name(service_mapping, &self.get_specific_identifier(), "eventbridge");
 
         span.name = String::from("aws.eventbridge");
         span.service = service_name.to_string();

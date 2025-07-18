@@ -110,7 +110,7 @@ impl Trigger for SqsRecord {
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(service_mapping, &resource, "sqs");
+        let service_name = self.resolve_service_name(service_mapping, &self.get_specific_identifier(), "sqs");
 
         span.name = "aws.sqs".to_string();
         span.service = service_name.to_string();
