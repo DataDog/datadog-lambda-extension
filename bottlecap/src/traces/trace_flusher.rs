@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use datadog_trace_utils::{
+    config_utils::trace_intake_url_prefixed,
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
@@ -52,10 +53,14 @@ pub struct ServerlessTraceFlusher {
 
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
-    fn new(aggregator: Arc<Mutex<TraceAggregator>>, config: Arc<Config>, api_key_factory: Arc<ApiKeyFactory>) -> Self {
+    fn new(
+        aggregator: Arc<Mutex<TraceAggregator>>,
+        config: Arc<Config>,
+        api_key_factory: Arc<ApiKeyFactory>,
+    ) -> Self {
         let mut additional_endpoints: Vec<Endpoint> = Vec::new();
-        let config_clone = Arc::clone(&config);
 
+        //let config_apm_additional_endpoints = config.apm_additional_endpoints.clone();
         for (endpoint_url, api_keys) in config.apm_additional_endpoints.clone() {
             for api_key in api_keys {
                 let trace_intake_url = trace_intake_url_prefixed(&endpoint_url);
@@ -73,7 +78,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         ServerlessTraceFlusher {
             aggregator,
-            config: config_clone,
+            config,
             api_key_factory,
             additional_endpoints,
         }
@@ -152,14 +157,17 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let mut tasks = Vec::with_capacity(coalesced_traces.len());
         debug!("Flushing {} traces", coalesced_traces.len());
 
-        for trace in coalesced_traces.iter() {
-            let trace_with_endpoint = match endpoint.clone() {
-                Some(additional_endpoint) => trace.with_endpoint(additional_endpoint),
+        for trace in &coalesced_traces {
+            let trace_with_endpoint = match endpoint {
+                Some(additional_endpoint) => trace.with_endpoint(additional_endpoint.clone()),
                 None => trace.clone(),
             };
             let proxy = self.config.proxy_https.clone();
             tasks.push(tokio::spawn(async move {
-                trace_with_endpoint.send_proxy(proxy.as_deref()).await.last_result
+                trace_with_endpoint
+                    .send_proxy(proxy.as_deref())
+                    .await
+                    .last_result
             }));
         }
 
