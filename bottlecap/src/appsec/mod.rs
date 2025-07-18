@@ -4,6 +4,7 @@ use crate::config::Config;
 
 mod payload;
 pub mod processor;
+mod sampler;
 
 #[must_use]
 pub const fn is_enabled(config: &Config) -> bool {

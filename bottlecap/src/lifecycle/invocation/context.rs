@@ -60,8 +60,8 @@ impl Context {
         for (key, value) in appsec_context.tags() {
             self.invocation_span
                 .meta
-                .entry(key.clone())
-                .or_insert(value.clone());
+                .entry(key.to_string())
+                .or_insert(value.to_string());
         }
 
         if !appsec_context.events.is_empty() {
@@ -1045,7 +1045,7 @@ mod tests {
                 ("_dd.appsec.json".to_string(), "[\"{\\\"rule\\\":{\\\"id\\\":\\\"ua0-600-12x\\\",\\\"name\\\":\\\"Arachni\\\",\\\"tags\\\":{\\\"type\\\":\\\"attack_tool\\\",\\\"category\\\":\\\"attack_attempt\\\",\\\"confidence\\\":\\\"1\\\",\\\"module\\\":\\\"waf\\\",\\\"tool_name\\\":\\\"Arachni\\\",\\\"cwe\\\":\\\"200\\\",\\\"capec\\\":\\\"1000/118/169\\\"},\\\"on_match\\\":[]},\\\"rule_matches\\\":[{\\\"operator\\\":\\\"match_regex\\\",\\\"operator_value\\\":\\\"^Arachni\\\\\\\\/v\\\",\\\"parameters\\\":[{\\\"address\\\":\\\"server.request.headers.no_cookies\\\",\\\"key_path\\\":[\\\"user-agent\\\",\\\"0\\\"],\\\"value\\\":\\\"Arachni/v2\\\",\\\"highlight\\\":[\\\"Arachni/v\\\"]}]}]}\"]".to_string()),
                 ("_dd.origin".to_string(), "appsec".to_string()),
                 ("appsec.event".to_string(), "true".to_string()),
-                ("http.endpoint".to_string(), "GET /httpapi/get".to_string()),
+                ("http.route".to_string(), "GET /httpapi/get".to_string()),
                 ("http.method".to_string(), "GET".to_string()),
                 ("http.request.headers.accept".to_string(), "*/*".to_string()),
                 ("http.request.headers.content-length".to_string(), "0".to_string()),

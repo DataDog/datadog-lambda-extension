@@ -1,14 +1,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::appsec::payload::ToWafMap;
+use crate::appsec::sampler::Sampler;
 use crate::appsec::{is_enabled, is_standalone, payload};
 use crate::config::Config;
 
 use bytes::Bytes;
-use libddwaf::object::{WafMap, WafOwned};
-use libddwaf::{Builder, Config as WAFConfig, Context, Handle, RunResult};
+use libddwaf::object::{WafMap, WafObject, WafOwned};
+use libddwaf::{waf_map, Builder, Config as WAFConfig, Context, Handle, RunResult};
 use tracing::{debug, info, warn};
 /// The App & API Protection processor.
 ///
@@ -17,6 +17,7 @@ use tracing::{debug, info, warn};
 pub struct Processor {
     handle: Handle,
     waf_timeout: Duration,
+    api_sec_sampler: Mutex<Sampler>,
 }
 impl Processor {
     /// Creates a new [`Processor`] instance using the provided [`Config`].
@@ -59,6 +60,7 @@ impl Processor {
         Ok(Self {
             handle,
             waf_timeout: config.appsec_waf_timeout,
+            api_sec_sampler: Mutex::new(Sampler::with_interval(config.api_security_sample_delay)),
         })
     }
 
@@ -72,7 +74,7 @@ impl Processor {
             request_type,
             waf_context: Arc::new(Mutex::new(self.handle.new_context())),
             waf_timeout: self.waf_timeout,
-            duration: Duration::ZERO,
+            waf_duration: Duration::ZERO,
             timeouts: 0,
             keep: false,
             attributes: HashMap::new(),
@@ -85,20 +87,30 @@ impl Processor {
             .tags_always
             .insert("_dd.origin".to_string(), "appsec".to_string());
 
-        context.absorb_data(address_data);
+        context.absorb_data(
+            address_data,
+            None, // API Security samplingdecision is taken when the response is processed
+        );
         Some(context)
     }
 
     /// Process the `/runtime/invocation/<request_id>/response>` payload, which is sent to Lambda
     /// after the invocation has run to completion, to provide the result of the invocation.
     pub async fn process_invocation_response(&self, context: &mut AppSecContext, body: &Bytes) {
-        let Some(address_data) =
-            payload::extract_response_address_data(context.request_type, body).await
-        else {
-            return;
-        };
+        let address_data = payload::extract_response_address_data(context.request_type, body)
+            .await
+            .unwrap_or(payload::HttpData::Response {
+                status_code: None,
+                headers: None,
+                body: None,
+            });
 
-        context.absorb_data(address_data);
+        let mut api_sec_sampler = self
+            .api_sec_sampler
+            .lock()
+            .inspect_err(|e| warn!("appsec: API security sampler mutex was poisoned: {e}"))
+            .ok();
+        context.absorb_data(address_data, api_sec_sampler.as_deref_mut());
     }
 
     /// Parses the App & API Protection ruleset from the provided [Config], falling back to the
@@ -233,7 +245,7 @@ pub struct AppSecContext {
     // WAF context in an Arc-Mutex.
     waf_context: Arc<Mutex<Context>>,
     waf_timeout: Duration,
-    pub duration: Duration,
+    pub waf_duration: Duration,
     pub timeouts: u32,
     pub keep: bool,
     attributes: HashMap<String, String>,
@@ -245,7 +257,7 @@ pub struct AppSecContext {
 }
 impl AppSecContext {
     /// Returns the list of trace tags to add to the trace.
-    pub fn tags(&self) -> impl Iterator<Item = (&String, &String)> {
+    pub fn tags(&self) -> impl Iterator<Item = (&str, &str)> {
         let next: Box<dyn Iterator<Item = (&String, &String)>> = if self.events.is_empty() {
             Box::new(std::iter::empty())
         } else {
@@ -255,12 +267,69 @@ impl AppSecContext {
             .iter()
             .chain(self.tags_always.iter())
             .chain(next)
+            .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
     /// Evaluates the appsec rules against the provided request data, and creates any relevant
     /// attributes from it.
-    fn absorb_data(&mut self, address_data: payload::HttpData) {
-        match &address_data {
+    fn absorb_data(
+        &mut self,
+        address_data: payload::HttpData,
+        api_sec_sampler: Option<&mut Sampler>,
+    ) {
+        let timeout = self.remaining_time_budget();
+        if timeout == Duration::ZERO {
+            warn!(
+                "appsec: WAF timeout already reached ({waf:?}), not evaluating request with {address_data:?}",
+                waf = &self.waf_duration,
+            );
+            return;
+        }
+
+        let recording_start = Instant::now();
+        self.record_tags(&address_data);
+        let recording_duration = recording_start.elapsed();
+        debug!("appsec: processing tags took {recording_duration:?}");
+
+        let extras = if let Some(sampler) = api_sec_sampler {
+            let method = self
+                .tags_always
+                .get("http.method")
+                .map_or("", String::as_str);
+            let route = self
+                .tags_on_event
+                .get("http.route")
+                .or_else(|| self.tags_always.get("http.url"))
+                .map_or("", String::as_str);
+            let status_code = self
+                .tags_always
+                .get("http.status_code")
+                .map_or("", String::as_str);
+
+            if sampler.decision_for(method, route, status_code) {
+                vec![(
+                    "waf.context.processor",
+                    waf_map!(("extract-schema", true)).into(),
+                )]
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        let encoding_start = Instant::now();
+        let address_data = address_data.into_waf_map(extras);
+        let encoding_duration = encoding_start.elapsed();
+        debug!("appsec: encoding address data took {encoding_duration:?}");
+
+        self.run(address_data, timeout);
+    }
+
+    /// Records the tags from the provided [`payload::HttpData`] into the [`Self::tags_always`] and
+    /// [`Self::tags_on_event`] maps.
+    fn record_tags(&mut self, address_data: &payload::HttpData) {
+        match address_data {
             payload::HttpData::Request {
                 raw_uri,
                 method,
@@ -281,7 +350,7 @@ impl AppSecContext {
                 }
                 if let Some(route) = route {
                     self.tags_on_event
-                        .entry("http.endpoint".to_string())
+                        .entry("http.route".to_string())
                         .or_insert(route.clone());
                 }
                 if let Some(headers) = headers {
@@ -330,20 +399,10 @@ impl AppSecContext {
                 }
             }
         }
-
-        self.run(address_data.to_waf_map());
     }
 
     /// Evaluates the in-app WAF rules against the provided address data.
-    fn run(&mut self, address_data: WafMap) {
-        let timeout = self.waf_timeout.saturating_sub(self.duration);
-        if timeout == Duration::ZERO {
-            warn!(
-                "appsec: WAF timeout already reached, not evaluating request with {address_data:?}"
-            );
-            return;
-        }
-
+    fn run(&mut self, address_data: WafMap, timeout: Duration) {
         let mut waf_context = match self.waf_context.lock() {
             Ok(waf_context) => waf_context,
             Err(e) => {
@@ -359,7 +418,7 @@ impl AppSecContext {
             }
         };
 
-        self.duration += result.duration();
+        self.waf_duration += result.duration();
         if result.timeout() {
             self.timeouts += 1;
         }
@@ -381,8 +440,14 @@ impl AppSecContext {
                 } else if let Some(value) = attr.to_bool() {
                     value.to_string()
                 } else {
-                    debug!("appsec: unsupported attribute produced by the WAF: {attr:?}");
-                    continue;
+                    let attr: &WafObject = attr; // Forcing deref type conversion
+                    match serde_json::to_string(attr) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            warn!("appsec: unable to encode WAF attribute to JSON: {e}\n{attr:?}");
+                            continue;
+                        }
+                    }
                 };
                 self.attributes.insert(key.to_string(), value);
             }
@@ -401,13 +466,18 @@ impl AppSecContext {
             }
         }
     }
+
+    /// Returns the time remaining to process WAF rules.
+    const fn remaining_time_budget(&self) -> Duration {
+        self.waf_timeout.saturating_add(self.waf_duration)
+    }
 }
 impl std::fmt::Debug for AppSecContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct(stringify!(AppSecContext))
             .field("request_type", &self.request_type)
             .field("waf_timeout", &self.waf_timeout)
-            .field("duration", &self.duration)
+            .field("duration", &self.waf_duration)
             .field("timeouts", &self.timeouts)
             .field("keep", &self.keep)
             .field("attributes", &self.attributes)
@@ -419,7 +489,7 @@ impl std::cmp::PartialEq for AppSecContext {
     fn eq(&self, other: &Self) -> bool {
         self.request_type == other.request_type
             && self.waf_timeout == other.waf_timeout
-            && self.duration == other.duration
+            && self.waf_duration == other.waf_duration
             && self.timeouts == other.timeouts
             && self.keep == other.keep
             && self.attributes == other.attributes
@@ -435,6 +505,8 @@ mod tests {
     use crate::config::Config;
 
     use super::*;
+
+    use serde_json::json;
 
     #[test]
     fn test_new_with_default_config() {
@@ -558,6 +630,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_new_timed_out() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            appsec_waf_timeout: Duration::ZERO, // Immediate timeout!
+            ..Config::default()
+        };
+        let processor = Processor::new(&config).expect("Should not fail");
+        let context = processor
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/api_gateway_proxy_event.json"
+            )))
+            .await
+            .expect("context should be Some");
+        let tags = context.tags().collect::<HashMap<_, _>>();
+        assert_eq!(tags, HashMap::from([("_dd.origin", "appsec")]));
+    }
+
+    #[tokio::test]
     async fn test_process_invocation_next_with_api_gateway_v1() {
         let config = Config {
             serverless_appsec_enabled: true,
@@ -566,63 +656,15 @@ mod tests {
         };
         let processor = Processor::new(&config).expect("Should not fail");
 
-        let payload = r#"{
-            "resource": "/{proxy+}",
-            "path": "/path/to/resource",
-            "httpMethod": "POST",
-            "multiValueHeaders": {
-                "Accept": ["application/json", "*/*"],
-                "Content-Type": ["application/json"],
-                "Cookie": ["test=cookie", "foo=bar; baz=bat"],
-                "User-Agent": ["Arachni/v2"]
-            },
-            "multiValueQueryStringParameters": {
-                "foo": ["bar"]
-            },
-            "pathParameters": {
-                "proxy": "/path/to/resource"
-            },
-            "requestContext": {
-                "resourceId": "123456",
-                "resourcePath": "/{proxy+}",
-                "httpMethod": "POST",
-                "extendedRequestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
-                "requestTime": "09/Apr/2015:12:34:56 +0000",
-                "path": "/path/to/resource",
-                "accountId": "123456789012",
-                "protocol": "HTTP/1.1",
-                "stage": "prod",
-                "domainPrefix": "1234567890",
-                "requestTimeEpoch": 1428582896000,
-                "requestId": "c6af9ac6-7b61-11e6-9a41-93e8deadbeef",
-                "identity": {
-                    "cognitoIdentityPoolId": null,
-                    "accountId": null,
-                    "cognitoIdentityId": null,
-                    "caller": null,
-                    "accessKey": null,
-                    "sourceIp": "12.34.56.78",
-                    "cognitoAuthenticationType": null,
-                    "cognitoAuthenticationProvider": null,
-                    "userArn": null,
-                    "userAgent": "Custom User Agent String",
-                    "user": null
-                },
-                "domainName": "1234567890.execute-api.us-east-1.amazonaws.com",
-                "apiId": "1234567890"
-            },
-            "body": "{\"test\":\"body\"}",
-            "isBase64Encoded": false
-        }"#;
-
-        let bytes = Bytes::from(payload);
         let context = processor
-            .process_invocation_next(&bytes)
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/api_gateway_proxy_event.appsec_event.json"
+            )))
             .await
             .expect("an AppSec context should have been created");
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
         // Duration will be greater than zero due to WAF processing
-        assert!(context.duration > Duration::ZERO);
+        assert!(context.waf_duration > Duration::ZERO);
         assert_eq!(context.timeouts, 0);
         assert!(context.keep);
         assert!(!context.events.is_empty(), "should have at least one event");
@@ -631,25 +673,43 @@ mod tests {
             "at least one of the events should mention Arachni/v2"
         );
         assert_eq!(
-            context
-                .tags()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
-                .collect::<HashMap<&str, &str>>(),
+            context.tags().collect::<HashMap<_, _>>(),
             HashMap::from([
                 // Fingerprints added by the WAF
-                ("_dd.appsec.fp.http.header", "hdr-0000000110-40b52535-0-"),
-                ("_dd.appsec.fp.http.network", "net-0-0000000000"),
-                ("_dd.appsec.fp.session", "ssn--3703caa1-0e9d63ac-"),
-                // Unconditional span origin
+                (
+                    "_dd.appsec.fp.http.header",
+                    "hdr-0010100011-40b52535-12-d7bf5e5b"
+                ),
+                ("_dd.appsec.fp.http.network", "net-2-1000000000"),
+                // Origin tag
                 ("_dd.origin", "appsec"),
-                // Extracted from the request payload
-                ("http.endpoint", "/{proxy+}"),
+                // Extracted HTTP request information (complete, there is a security event here)
                 ("http.method", "POST"),
-                ("http.request.headers.accept", "application/json,*/*"),
-                ("http.request.headers.content-type", "application/json"),
+                (
+                    "http.request.headers.accept-encoding",
+                    "gzip, deflate, sdch"
+                ),
+                ("http.request.headers.accept-language", "en-US,en;q=0.8"),
+                (
+                    "http.request.headers.accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+                ),
+                (
+                    "http.request.headers.host",
+                    "0123456789.execute-api.us-east-1.amazonaws.com"
+                ),
                 ("http.request.headers.user-agent", "Arachni/v2"),
+                (
+                    "http.request.headers.via",
+                    "1.1 08f323deadbeefa7af34d5feb414ce27.cloudfront.net (CloudFront)"
+                ),
+                (
+                    "http.request.headers.x-forwarded-for",
+                    "127.0.0.1, 127.0.0.2"
+                ),
+                ("http.route", "/{proxy+}"),
                 ("http.url", "/path/to/resource"),
-                ("network.client.ip", "12.34.56.78"),
+                ("network.client.ip", "127.0.0.1"),
             ])
         );
     }
@@ -662,67 +722,17 @@ mod tests {
         };
         let processor = Processor::new(&config).expect("Should not fail");
 
-        let payload = r#"{
-            "version": "2.0",
-            "routeKey": "GET /httpapi/get",
-            "rawPath": "/httpapi/get",
-            "rawQueryString": "foo=bar",
-            "cookies": ["cookie1", "cookie2"],
-            "headers": {
-                "Accept": "*/*",
-                "Content-Type": "application/json",
-                "Host": "example.amazonaws.com"
-            },
-            "queryStringParameters": {
-                "foo": "bar"
-            },
-            "requestContext": {
-                "accountId": "123456789012",
-                "apiId": "1234567890",
-                "authentication": {
-                    "clientCert": {
-                        "clientCertPem": "CERT_CONTENT",
-                        "subjectDN": "www.example.com",
-                        "issuerDN": "Example issuer",
-                        "serialNumber": "a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1:a1",
-                        "validity": {
-                            "start": "May 28 12:30:02 2019 GMT",
-                            "end": "Aug  5 09:36:04 2021 GMT"
-                        }
-                    }
-                },
-                "domainName": "example.amazonaws.com",
-                "domainPrefix": "1234567890",
-                "http": {
-                    "method": "GET",
-                    "path": "/httpapi/get",
-                    "protocol": "HTTP/1.1",
-                    "sourceIp": "192.168.1.1",
-                    "userAgent": "agent"
-                },
-                "requestId": "JKJaXmPLvHcESHA=",
-                "routeKey": "GET /httpapi/get",
-                "stage": "$default",
-                "time": "10/Mar/2020:05:28:40 +0000",
-                "timeEpoch": 1583817320220
-            },
-            "body": "{\"message\":\"hello world\"}",
-            "pathParameters": {
-                "parameter1": "value1"
-            },
-            "isBase64Encoded": false,
-            "stageVariables": {
-                "stageVariable1": "value1",
-                "stageVariable2": "value2"
-            }
-        }"#;
-
-        let bytes = Bytes::from(payload);
         let context = processor
-            .process_invocation_next(&bytes)
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/api_gateway_http_event.json"
+            )))
             .await
             .expect("an AppSec context should have been created");
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV2Http);
+        assert!(
+            context.events.is_empty(),
+            "should not have produced any AppSec event"
+        );
         assert_eq!(
             context.tags_always.get("_dd.origin"),
             Some(&"appsec".to_string())
@@ -737,30 +747,11 @@ mod tests {
         };
         let processor = Processor::new(&config).expect("Should not fail");
 
-        let payload = r#"{
-            "Records": [
-                {
-                    "EventSource": "aws:sns",
-                    "EventVersion": "1.0",
-                    "EventSubscriptionArn": "arn:aws:sns:us-east-1:123456789012:example-topic:2bcfbf39-05c3-41de-beaa-fcfcc21c8f55",
-                    "Sns": {
-                        "Type": "Notification",
-                        "MessageId": "95df01b4-ee98-5cb9-9903-4c221d41eb5e",
-                        "TopicArn": "arn:aws:sns:us-east-1:123456789012:example-topic",
-                        "Subject": "example subject",
-                        "Message": "example message",
-                        "Timestamp": "1970-01-01T00:00:00.000Z",
-                        "SignatureVersion": "1",
-                        "Signature": "EXAMPLE",
-                        "SigningCertUrl": "EXAMPLE",
-                        "UnsubscribeUrl": "EXAMPLE"
-                    }
-                }
-            ]
-        }"#;
-
-        let bytes = Bytes::from(payload);
-        let context = processor.process_invocation_next(&bytes).await;
+        let context = processor
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/sns_event.json"
+            )))
+            .await;
 
         // SNS events are not supported, so should return None
         assert!(context.is_none());
@@ -804,39 +795,16 @@ mod tests {
     async fn test_process_invocation_response_with_api_gateway_v1() {
         let config = Config {
             serverless_appsec_enabled: true,
+            // appsec_waf_timeout: Duration::from_secs(3600), // Avoids falkes on slower CI hardware
             ..Config::default()
         };
         let processor = Processor::new(&config).expect("Should not fail");
 
         // First create a context with a request
-        let request_payload = r#"{
-            "resource": "/{proxy+}",
-            "path": "/path/to/resource",
-            "httpMethod": "POST",
-            "headers": {
-                "Accept": "*/*",
-                "Content-Type": "application/json"
-            },
-            "multiValueHeaders": {
-                "Accept": ["*/*"],
-                "Content-Type": ["application/json"]
-            },
-            "requestContext": {
-                "resourceId": "123456",
-                "resourcePath": "/{proxy+}",
-                "httpMethod": "POST",
-                "stage": "prod",
-                "identity": {
-                    "sourceIp": "127.0.0.1"
-                }
-            },
-            "body": "{\"test\":\"body\"}",
-            "isBase64Encoded": false
-        }"#;
-
-        let request_bytes = Bytes::from(request_payload);
         let mut context = processor
-            .process_invocation_next(&request_bytes)
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/api_gateway_proxy_event.json"
+            )))
             .await
             .expect("Should create context");
 
@@ -859,7 +827,62 @@ mod tests {
 
         // Verify context state after response processing (unchanged)
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
-        //TODO(romain.marcadier): Verify additional side-effects
+        assert_eq!(context.timeouts, 0);
+        assert!(context.events.is_empty());
+        assert_eq!(
+            context
+                .tags()
+                .filter(|(k, _)| !k.starts_with("_dd.appsec.s."))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                // Fingerprints added by the WAF
+                (
+                    "_dd.appsec.fp.http.header",
+                    "hdr-0010100011-8a1b5aba-12-d7bf5e5b"
+                ),
+                ("_dd.appsec.fp.http.network", "net-2-1000000000"),
+                // Origin tag
+                ("_dd.origin", "appsec"),
+                // Extracted HTTP request information (shallow, no security event here)
+                ("http.method", "POST"),
+                (
+                    "http.request.headers.accept",
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
+                ),
+                (
+                    "http.request.headers.user-agent",
+                    "Custom User Agent String"
+                ),
+                ("http.response.headers.content-type", "application/json"),
+                ("http.status_code", "200"),
+                ("http.url", "/path/to/resource"),
+            ])
+        );
+
+        // Schemas extracted by the WAF (encoded order is not necessarily deterministic, so we compare after parsing back)
+        assert_eq!(
+            context
+                .tags()
+                .filter(|(k, _)| k.starts_with("_dd.appsec.s."))
+                .map(|(k, v)| (k, serde_json::from_str(v).expect("should be valid JSON")))
+                .collect::<HashMap<_, serde_json::Value>>(),
+            HashMap::from([
+                ("_dd.appsec.s.res.body", json!([{"response":[8]}])),
+                (
+                    "_dd.appsec.s.res.headers",
+                    json!([{"content-type":[[[8]],{"len":1}]}])
+                ),
+                ("_dd.appsec.s.req.body", json!([{"test":[8]}])),
+                (
+                    "_dd.appsec.s.req.headers",
+                    json!(
+                        [{"host":[[[8]],{"len":1}],"accept-encoding":[[[8]],{"len":1}],"x-amz-cf-id":[[[8]],{"len":1}],"via":[[[8]],{"len":1}],"cloudfront-is-desktop-viewer":[[[8]],{"len":1}],"accept-language":[[[8]],{"len":1}],"x-forwarded-port":[[[8]],{"len":1}],"cloudfront-viewer-country":[[[8]],{"len":1}],"cloudfront-is-mobile-viewer":[[[8]],{"len":1}],"cache-control":[[[8]],{"len":1}],"cloudfront-forwarded-proto":[[[8]],{"len":1}],"x-forwarded-proto":[[[8]],{"len":1}],"cloudfront-is-tablet-viewer":[[[8]],{"len":1}],"upgrade-insecure-requests":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}],"cloudfront-is-smarttv-viewer":[[[8]],{"len":1}],"x-forwarded-for":[[[8]],{"len":1}],"accept":[[[8]],{"len":1}]}]
+                    )
+                ),
+                ("_dd.appsec.s.req.params", json!([{"proxy":[8]}])),
+                ("_dd.appsec.s.req.query", json!([{"foo":[[[8]],{"len":1}]}])),
+            ])
+        );
     }
 
     #[tokio::test]
@@ -871,41 +894,10 @@ mod tests {
         let processor = Processor::new(&config).expect("Should not fail");
 
         // First create a context with a request
-        let request_payload = r#"{
-            "version": "2.0",
-            "routeKey": "GET /httpapi/get",
-            "rawPath": "/httpapi/get",
-            "rawQueryString": "foo=bar",
-            "headers": {
-                "Accept": "*/*",
-                "Content-Type": "application/json",
-                "Host": "example.amazonaws.com"
-            },
-            "requestContext": {
-                "accountId": "123456789012",
-                "apiId": "1234567890",
-                "domainName": "example.amazonaws.com",
-                "domainPrefix": "1234567890",
-                "http": {
-                    "method": "GET",
-                    "path": "/httpapi/get",
-                    "protocol": "HTTP/1.1",
-                    "sourceIp": "192.168.1.1",
-                    "userAgent": "agent"
-                },
-                "requestId": "JKJaXmPLvHcESHA=",
-                "routeKey": "GET /httpapi/get",
-                "stage": "$default",
-                "time": "10/Mar/2020:05:28:40 +0000",
-                "timeEpoch": 1583817320220
-            },
-            "body": "{\"message\":\"hello world\"}",
-            "isBase64Encoded": false
-        }"#;
-
-        let request_bytes = Bytes::from(request_payload);
         let mut context = processor
-            .process_invocation_next(&request_bytes)
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/api_gateway_http_event.json"
+            )))
             .await
             .expect("Should create context");
 
@@ -940,34 +932,10 @@ mod tests {
         let processor = Processor::new(&config).expect("Should not fail");
 
         // First create a context with a request
-        let request_payload = r#"{
-            "resource": "/{proxy+}",
-            "path": "/path/to/resource",
-            "httpMethod": "POST",
-            "headers": {
-                "Accept": "*/*",
-                "Content-Type": "application/json"
-            },
-            "multiValueHeaders": {
-                "Accept": ["*/*"],
-                "Content-Type": ["application/json"]
-            },
-            "requestContext": {
-                "resourceId": "123456",
-                "resourcePath": "/{proxy+}",
-                "httpMethod": "POST",
-                "stage": "prod",
-                "identity": {
-                    "sourceIp": "127.0.0.1"
-                }
-            },
-            "body": "{\"test\":\"body\"}",
-            "isBase64Encoded": false
-        }"#;
-
-        let request_bytes = Bytes::from(request_payload);
         let mut context = processor
-            .process_invocation_next(&request_bytes)
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/api_gateway_proxy_event.json"
+            )))
             .await
             .expect("Should create context");
 
@@ -983,6 +951,27 @@ mod tests {
 
         // Verify context state is still valid (unchanged)
         assert_eq!(context.request_type, payload::RequestType::APIGatewayV1);
+
+        // Schemas extracted by the WAF (encoded order is not necessarily deterministic, so we compare after parsing back)
+        // We cannot have observed the response body (it's not valid), but we have been able to observe the request...
+        assert_eq!(
+            context
+                .tags()
+                .filter(|(k, _)| k.starts_with("_dd.appsec.s."))
+                .map(|(k, v)| (k, serde_json::from_str(v).expect("should be valid JSON")))
+                .collect::<HashMap<_, serde_json::Value>>(),
+            HashMap::from([
+                ("_dd.appsec.s.req.body", json!([{"test":[8]}])),
+                (
+                    "_dd.appsec.s.req.headers",
+                    json!(
+                        [{"host":[[[8]],{"len":1}],"accept-encoding":[[[8]],{"len":1}],"x-amz-cf-id":[[[8]],{"len":1}],"via":[[[8]],{"len":1}],"cloudfront-is-desktop-viewer":[[[8]],{"len":1}],"accept-language":[[[8]],{"len":1}],"x-forwarded-port":[[[8]],{"len":1}],"cloudfront-viewer-country":[[[8]],{"len":1}],"cloudfront-is-mobile-viewer":[[[8]],{"len":1}],"cache-control":[[[8]],{"len":1}],"cloudfront-forwarded-proto":[[[8]],{"len":1}],"x-forwarded-proto":[[[8]],{"len":1}],"cloudfront-is-tablet-viewer":[[[8]],{"len":1}],"upgrade-insecure-requests":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}],"cloudfront-is-smarttv-viewer":[[[8]],{"len":1}],"x-forwarded-for":[[[8]],{"len":1}],"accept":[[[8]],{"len":1}]}]
+                    )
+                ),
+                ("_dd.appsec.s.req.params", json!([{"proxy":[8]}])),
+                ("_dd.appsec.s.req.query", json!([{"foo":[[[8]],{"len":1}]}])),
+            ])
+        );
     }
 
     #[tokio::test]
@@ -994,34 +983,10 @@ mod tests {
         let processor = Processor::new(&config).expect("Should not fail");
 
         // First create a context with a request
-        let request_payload = r#"{
-            "resource": "/{proxy+}",
-            "path": "/path/to/resource",
-            "httpMethod": "POST",
-            "headers": {
-                "Accept": "*/*",
-                "Content-Type": "application/json"
-            },
-            "multiValueHeaders": {
-                "Accept": ["*/*"],
-                "Content-Type": ["application/json"]
-            },
-            "requestContext": {
-                "resourceId": "123456",
-                "resourcePath": "/{proxy+}",
-                "httpMethod": "POST",
-                "stage": "prod",
-                "identity": {
-                    "sourceIp": "127.0.0.1"
-                }
-            },
-            "body": "{\"test\":\"body\"}",
-            "isBase64Encoded": false
-        }"#;
-
-        let request_bytes = Bytes::from(request_payload);
         let mut context = processor
-            .process_invocation_next(&request_bytes)
+            .process_invocation_next(&Bytes::from(include_str!(
+                "../../tests/payloads/api_gateway_proxy_event.json"
+            )))
             .await
             .expect("Should create context");
 
@@ -1168,10 +1133,7 @@ mod tests {
         );
 
         // Verify that some basic tags are present
-        let tags: HashMap<&str, &str> = context
-            .tags()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let tags: HashMap<_, _> = context.tags().collect();
 
         assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
         assert_eq!(tags.get("http.method"), Some(&"GET"));
@@ -1247,10 +1209,7 @@ mod tests {
         );
 
         // Verify that some basic tags are present
-        let tags: HashMap<&str, &str> = context
-            .tags()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let tags: HashMap<_, _> = context.tags().collect();
 
         assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
         assert_eq!(tags.get("http.method"), Some(&"POST"));
@@ -1311,10 +1270,7 @@ mod tests {
         );
 
         // Verify that basic tags are present even with minimal payload
-        let tags: HashMap<&str, &str> = context
-            .tags()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let tags: HashMap<_, _> = context.tags().collect();
 
         assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
         assert_eq!(tags.get("http.method"), Some(&"GET"));
@@ -1395,10 +1351,7 @@ mod tests {
         );
 
         // Verify extracted data
-        let tags: HashMap<&str, &str> = context
-            .tags()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let tags: HashMap<_, _> = context.tags().collect();
 
         assert_eq!(tags.get("_dd.origin"), Some(&"appsec"));
         assert_eq!(tags.get("http.method"), Some(&"GET"));

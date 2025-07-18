@@ -328,6 +328,7 @@ pub struct Config {
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
     pub appsec_waf_timeout: Duration,
+    pub api_security_sample_delay: Duration,
     pub extension_version: Option<String>,
 }
 
@@ -412,6 +413,7 @@ impl Default for Config {
             serverless_appsec_enabled: false,
             appsec_rules: None,
             appsec_waf_timeout: Duration::from_millis(1),
+            api_security_sample_delay: Duration::from_secs(30),
             extension_version: None,
         }
     }
@@ -520,6 +522,16 @@ where
 {
     let micros: Option<u64> = Option::deserialize(deserializer)?;
     Ok(micros.map(Duration::from_micros))
+}
+
+pub fn deserialize_optional_duration_from_optional_seconds<'de, D>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let micros: Option<f64> = Option::deserialize(deserializer)?;
+    Ok(micros.map(Duration::from_secs_f64))
 }
 
 pub fn deserialize_optional_bool_from_anything<'de, D>(

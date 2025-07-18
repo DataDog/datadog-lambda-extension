@@ -17,6 +17,7 @@ trait IsValid {
 }
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 pub(crate) enum HttpData {
     Request {
         raw_uri: Option<String>,
@@ -37,10 +38,10 @@ pub(crate) enum HttpData {
 }
 
 pub(crate) trait ToWafMap {
-    fn to_waf_map(self) -> WafMap;
+    fn into_waf_map(self) -> WafMap;
 }
-impl ToWafMap for HttpData {
-    fn to_waf_map(self) -> WafMap {
+impl HttpData {
+    pub(crate) fn into_waf_map(self, extras: Vec<(&str, WafObject)>) -> WafMap {
         match self {
             HttpData::Request {
                 client_ip,
@@ -64,7 +65,7 @@ impl ToWafMap for HttpData {
                 .into_iter()
                 .filter(|b| *b)
                 .count();
-                let mut map = WafMap::new(count as u64);
+                let mut map = WafMap::new(count as u64 + extras.len() as u64);
                 let mut i = 0;
 
                 if let Some(client_ip) = client_ip {
@@ -76,19 +77,19 @@ impl ToWafMap for HttpData {
                     i += 1;
                 }
                 if let Some(headers) = request_headers {
-                    map[i] = ("server.request.headers.no_cookies", headers.to_waf_map()).into();
+                    map[i] = ("server.request.headers.no_cookies", headers.into_waf_map()).into();
                     i += 1;
                 }
                 if let Some(cookies) = cookies {
-                    map[i] = ("server.request.cookies", cookies.to_waf_map()).into();
+                    map[i] = ("server.request.cookies", cookies.into_waf_map()).into();
                     i += 1;
                 }
                 if let Some(query) = query {
-                    map[i] = ("server.request.query", query.to_waf_map()).into();
+                    map[i] = ("server.request.query", query.into_waf_map()).into();
                     i += 1;
                 }
                 if let Some(path_params) = path_params {
-                    map[i] = ("server.request.path_params", path_params.to_waf_map()).into();
+                    map[i] = ("server.request.path_params", path_params.into_waf_map()).into();
                     i += 1;
                 }
                 if let Some(body) = body {
@@ -109,7 +110,7 @@ impl ToWafMap for HttpData {
                     .into_iter()
                     .filter(|b| *b)
                     .count();
-                let mut map = WafMap::new(count as u64);
+                let mut map = WafMap::new(count as u64 + extras.len() as u64);
                 let mut i = 0;
 
                 if let Some(response_status) = status_code {
@@ -119,15 +120,21 @@ impl ToWafMap for HttpData {
                 if let Some(headers) = headers {
                     let mut headers = headers.clone();
                     headers.remove("set-cookie");
-                    map[i] = ("server.response.headers.no_cookies", headers.to_waf_map()).into();
+                    map[i] = ("server.response.headers.no_cookies", headers.into_waf_map()).into();
                     i += 1;
                 }
                 if let Some(response_body) = body {
                     map[i] = ("server.response.body", response_body).into();
                     i += 1;
                 }
-
                 debug_assert_eq!(i, count); // Sanity check that we didn't over-allocate
+
+                let extras_len = extras.len();
+                for (k, v) in extras {
+                    map[i] = (k, v).into();
+                    i += 1;
+                }
+                debug_assert_eq!(i, count + extras_len); // Sanity check that we didn't over-allocate
 
                 map
             }
@@ -135,7 +142,7 @@ impl ToWafMap for HttpData {
     }
 }
 impl ToWafMap for HashMap<String, Vec<String>> {
-    fn to_waf_map(self) -> WafMap {
+    fn into_waf_map(self) -> WafMap {
         let mut map = WafMap::new(self.len() as u64);
 
         for (i, (k, v)) in self.into_iter().enumerate() {
@@ -151,7 +158,7 @@ impl ToWafMap for HashMap<String, Vec<String>> {
     }
 }
 impl ToWafMap for HashMap<String, String> {
-    fn to_waf_map(self) -> WafMap {
+    fn into_waf_map(self) -> WafMap {
         let mut map = WafMap::new(self.len() as u64);
 
         for (i, (k, v)) in self.into_iter().enumerate() {
