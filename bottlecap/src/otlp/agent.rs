@@ -49,7 +49,7 @@ impl Agent {
         trace_tx: Sender<SendDataBuilderInfo>,
     ) -> Self {
         let port = Self::parse_port(
-            &config.otlp_config_receiver_protocols_http_endpoint,
+            config.otlp_config_receiver_protocols_http_endpoint.as_ref(),
             OTLP_AGENT_HTTP_PORT,
         );
         let cancel_token = CancellationToken::new();
@@ -70,9 +70,7 @@ impl Agent {
         self.cancel_token.clone()
     }
 
-    // TODO (Yiming): Fix this lint
-    #[allow(clippy::ref_option)]
-    fn parse_port(endpoint: &Option<String>, default_port: u16) -> u16 {
+    fn parse_port(endpoint: Option<&String>, default_port: u16) -> u16 {
         if let Some(endpoint) = endpoint {
             let port = endpoint.split(':').nth(1);
             if let Some(port) = port {
@@ -204,7 +202,10 @@ mod tests {
     fn test_parse_port_with_valid_endpoint() {
         // Test with a valid endpoint containing a port
         let endpoint = Some("localhost:8080".to_string());
-        assert_eq!(Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT), 8080);
+        assert_eq!(
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
+            8080
+        );
     }
 
     #[test]
@@ -212,7 +213,7 @@ mod tests {
         // Test with an endpoint containing an invalid port format
         let endpoint = Some("localhost:invalid".to_string());
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }
@@ -222,7 +223,7 @@ mod tests {
         // Test with an endpoint missing a port
         let endpoint = Some("localhost".to_string());
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }
@@ -232,7 +233,7 @@ mod tests {
         // Test with None endpoint
         let endpoint: Option<String> = None;
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }
@@ -242,7 +243,7 @@ mod tests {
         // Test with an empty endpoint
         let endpoint = Some("".to_string());
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }

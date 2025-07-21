@@ -43,7 +43,7 @@ pub fn start(
     aws_config: Arc<AwsConfig>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
-    let socket = get_proxy_socket_address(&aws_config.aws_lwa_proxy_lambda_runtime_api);
+    let socket = get_proxy_socket_address(aws_config.aws_lwa_proxy_lambda_runtime_api.as_ref());
     let shutdown_token = CancellationToken::new();
 
     let mut connector = HttpConnector::new();
@@ -122,11 +122,8 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
 /// If the LWA proxy lambda runtime API is not provided, the default Extension
 /// host and port will be used.
 ///
-// TODO (Yiming): Fix this lint
-#[allow(clippy::ref_option)]
-fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -> SocketAddr {
+fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: Option<&String>) -> SocketAddr {
     if let Some(socket_addr) = aws_lwa_proxy_lambda_runtime_api
-        .as_ref()
         .and_then(|uri_str| lwa::get_lwa_proxy_socket_address(uri_str).ok())
     {
         debug!("PROXY | get_proxy_socket_address | LWA proxy detected");
@@ -629,7 +626,7 @@ mod tests {
     #[test]
     fn test_get_proxy_socket_address_with_lwa_proxy() {
         let aws_lwa_proxy_lambda_runtime_api = Some("127.0.0.1:12345".to_string());
-        let socket_addr = get_proxy_socket_address(&aws_lwa_proxy_lambda_runtime_api);
+        let socket_addr = get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api.as_ref());
 
         // Should use the LWA proxy address
         assert_eq!(socket_addr.to_string(), "127.0.0.1:12345");
@@ -638,7 +635,7 @@ mod tests {
     #[test]
     fn test_get_proxy_socket_address_without_lwa_proxy() {
         let aws_lwa_proxy_lambda_runtime_api = None;
-        let socket_addr = get_proxy_socket_address(&aws_lwa_proxy_lambda_runtime_api);
+        let socket_addr = get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api.as_ref());
 
         // Should use the default interceptor address (0.0.0.0:9000)
         assert_eq!(socket_addr.to_string(), "0.0.0.0:9000");
@@ -647,7 +644,7 @@ mod tests {
     #[test]
     fn test_get_proxy_socket_address_with_invalid_lwa_proxy() {
         let aws_lwa_proxy_lambda_runtime_api = Some("invalid-address".to_string());
-        let socket_addr = get_proxy_socket_address(&aws_lwa_proxy_lambda_runtime_api);
+        let socket_addr = get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api.as_ref());
 
         // Should fall back to default interceptor address when LWA proxy is invalid
         assert_eq!(socket_addr.to_string(), "0.0.0.0:9000");

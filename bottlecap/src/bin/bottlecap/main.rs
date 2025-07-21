@@ -1057,11 +1057,11 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher {
-        aggregator: trace_aggregator.clone(),
-        config: Arc::clone(config),
-        api_key_factory: Arc::clone(api_key_factory),
-    });
+    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
+        trace_aggregator.clone(),
+        config.clone(),
+        api_key_factory.clone(),
+    ));
 
     let obfuscation_config = obfuscation_config::ObfuscationConfig {
         tag_replace_rules: config.apm_replace_tags.clone(),
@@ -1183,7 +1183,7 @@ fn start_api_runtime_proxy(
     aws_config: &Arc<AwsConfig>,
     invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
 ) -> Option<CancellationToken> {
-    if !should_start_proxy(config, Arc::clone(&aws_config)) {
+    if !should_start_proxy(config, aws_config) {
         debug!("Skipping API runtime proxy, no LWA proxy or datadog wrapper found");
         return None;
     }

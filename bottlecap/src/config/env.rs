@@ -166,9 +166,21 @@ pub struct EnvConfig {
     /// @env `DD_APM_CONFIG_OBFUSCATION_HTTP_REMOVE_PATHS_WITH_DIGITS`
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub apm_config_obfuscation_http_remove_paths_with_digits: Option<bool>,
+    /// @env `DD_APM_CONFIG_COMPRESSION_LEVEL`
+    ///
+    /// The Agent compresses traces before sending them. The `compression_level` parameter
+    /// accepts values from 0 (no compression) to 9 (maximum compression but
+    /// higher resource usage).
+    pub apm_config_compression_level: Option<i32>,
     /// @env `DD_APM_FEATURES`
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
     pub apm_features: Vec<String>,
+    /// @env `DD_APM_ADDITIONAL_ENDPOINTS`
+    ///
+    /// Additional endpoints to send traces to.
+    /// <https://docs.datadoghq.com/agent/configuration/dual-shipping/?tab=helm#environment-variable-configuration-1>
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    pub apm_additional_endpoints: HashMap<String, Vec<String>>,
     //
     // Trace Propagation
     /// @env `DD_TRACE_PROPAGATION_STYLE`
@@ -364,7 +376,9 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         env_config,
         apm_config_obfuscation_http_remove_paths_with_digits
     );
+    merge_option_to_value!(config, env_config, apm_config_compression_level);
     merge_vec!(config, env_config, apm_features);
+    merge_hashmap!(config, env_config, apm_additional_endpoints);
 
     // Trace Propagation
     merge_vec!(config, env_config, trace_propagation_style);
@@ -555,10 +569,12 @@ mod tests {
                 "DD_APM_CONFIG_OBFUSCATION_HTTP_REMOVE_PATHS_WITH_DIGITS",
                 "true",
             );
+            jail.set_env("DD_APM_CONFIG_COMPRESSION_LEVEL", "3");
             jail.set_env(
                 "DD_APM_FEATURES",
                 "enable_otlp_compute_top_level_by_span_kind,enable_stats_by_span_kind",
             );
+            jail.set_env("DD_APM_ADDITIONAL_ENDPOINTS", "{\"https://trace.agent.datadoghq.com\": [\"apikey2\", \"apikey3\"], \"https://trace.agent.datadoghq.eu\": [\"apikey4\"]}");
 
             // Trace Propagation
             jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog");
@@ -698,10 +714,21 @@ mod tests {
                 ),
                 apm_config_obfuscation_http_remove_query_string: true,
                 apm_config_obfuscation_http_remove_paths_with_digits: true,
+                apm_config_compression_level: 3,
                 apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
                 ],
+                apm_additional_endpoints: HashMap::from([
+                    (
+                        "https://trace.agent.datadoghq.com".to_string(),
+                        vec!["apikey2".to_string(), "apikey3".to_string()],
+                    ),
+                    (
+                        "https://trace.agent.datadoghq.eu".to_string(),
+                        vec!["apikey4".to_string()],
+                    ),
+                ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,
