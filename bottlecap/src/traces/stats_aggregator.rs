@@ -7,9 +7,9 @@ use std::collections::VecDeque;
 /// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
 // const MAX_BATCH_ENTRIES_SIZE: usize = 4000;
 
-/// Aproximate size an entry in a stat payload occupies
-///
-/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L33-L35>
+// Aproximate size an entry in a stat payload occupies
+//
+// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L33-L35>
 // const MAX_ENTRY_SIZE_BYTES: usize = 375;
 
 /// Maximum content size per payload in compressed bytes,

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::config;
+use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::tags::provider;
 use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
 use crate::traces::{
@@ -167,7 +168,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 .expect("can't parse trace intake URL, exiting"),
             // Will be set at flush time
             api_key: None,
-            timeout_ms: config.flush_timeout * 1_000,
+            timeout_ms: config.flush_timeout * S_TO_MS,
             test_token: None,
         };
 
