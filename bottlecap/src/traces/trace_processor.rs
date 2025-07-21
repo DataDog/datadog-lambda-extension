@@ -9,6 +9,7 @@ use crate::traces::{
     DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
     LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
 };
+use async_trait::async_trait;
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
@@ -29,7 +30,6 @@ use super::trace_aggregator::SendDataBuilderInfo;
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    pub resolved_api_key: String,
 }
 
 struct ChunkProcessor {
@@ -117,24 +117,26 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
 
 #[allow(clippy::module_name_repetitions)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait TraceProcessor {
-    fn process_traces(
+    async fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        header_tags: tracer_header_tags::TracerHeaderTags,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
     ) -> SendDataBuilderInfo;
 }
 
+#[async_trait]
 impl TraceProcessor for ServerlessTraceProcessor {
-    fn process_traces(
+    async fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        header_tags: tracer_header_tags::TracerHeaderTags,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
@@ -163,7 +165,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_dd_url)
                 .expect("can't parse trace intake URL, exiting"),
-            api_key: Some(self.resolved_api_key.clone().into()),
+            // Will be set at flush time
+            api_key: None,
             timeout_ms: config.flush_timeout * 1_000,
             test_token: None,
         };
@@ -293,7 +296,6 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            resolved_api_key: "foo".to_string(),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
@@ -327,7 +329,7 @@ mod tests {
         };
 
         let received_payload = if let TracerPayloadCollection::V07(payload) =
-            tracer_payload.builder.build().get_payloads()
+            tracer_payload.await.builder.build().get_payloads()
         {
             Some(payload[0].clone())
         } else {

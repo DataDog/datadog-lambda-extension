@@ -31,7 +31,7 @@ use tracing::{debug, error};
 const INTERCEPTOR_DEFAULT_PORT: u16 = 9000;
 
 type InterceptorState = (
-    AwsConfig,
+    Arc<AwsConfig>,
     Arc<Client<HttpConnector, Body>>,
     Arc<Mutex<InvocationProcessor>>,
     Option<Arc<AppSecProcessor>>,
@@ -40,7 +40,7 @@ type InterceptorState = (
 
 pub fn start(
     config: Arc<Config>,
-    aws_config: AwsConfig,
+    aws_config: Arc<AwsConfig>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
     let socket = get_proxy_socket_address(&aws_config.aws_lwa_proxy_lambda_runtime_api);
@@ -447,19 +447,18 @@ mod tests {
         let metrics_aggregator = Arc::new(Mutex::new(
             MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
         ));
-
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "arn:some-function".to_string(),
             sandbox_init_time: Instant::now(),
             runtime_api: aws_lambda_runtime_api.to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
-        };
+        });
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
-            &aws_config,
+            Arc::clone(&aws_config),
             metrics_aggregator,
         )));
 
@@ -506,14 +505,14 @@ mod tests {
             serverless_appsec_enabled: true,
             ..Config::default()
         });
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "test-function".to_string(),
             sandbox_init_time: Instant::now(),
             runtime_api: "127.0.0.1:9001".to_string(),
             aws_lwa_proxy_lambda_runtime_api: None,
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
-        };
+        });
 
         let tags_provider = Arc::new(Provider::new(
             Arc::clone(&config),
@@ -527,7 +526,7 @@ mod tests {
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
-            &aws_config,
+            aws_config.clone(),
             metrics_aggregator,
         )));
 
@@ -548,14 +547,14 @@ mod tests {
             appsec_rules: Some("/nonexistent/path/to/rules.json".to_string()),
             ..Config::default()
         });
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "test-function".to_string(),
             sandbox_init_time: Instant::now(),
             runtime_api: "127.0.0.1:9001".to_string(),
             aws_lwa_proxy_lambda_runtime_api: None,
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
-        };
+        });
 
         let tags_provider = Arc::new(Provider::new(
             Arc::clone(&config),
@@ -569,7 +568,7 @@ mod tests {
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
-            &aws_config,
+            aws_config.clone(),
             metrics_aggregator,
         )));
 
@@ -592,14 +591,14 @@ mod tests {
             serverless_appsec_enabled: false,
             ..Config::default()
         });
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "test-function".to_string(),
             sandbox_init_time: Instant::now(),
             runtime_api: "127.0.0.1:9001".to_string(),
             aws_lwa_proxy_lambda_runtime_api: None,
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
-        };
+        });
 
         let tags_provider = Arc::new(Provider::new(
             Arc::clone(&config),
@@ -613,7 +612,7 @@ mod tests {
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
-            &aws_config,
+            aws_config.clone(),
             metrics_aggregator,
         )));
 

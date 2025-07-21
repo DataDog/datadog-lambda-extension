@@ -849,7 +849,7 @@ extension_version: "compatibility"
                 capture_lambda_payload_max_depth: 5,
                 serverless_appsec_enabled: true,
                 appsec_rules: None,
-                appsec_waf_timeout: Duration::from_millis(1),
+                appsec_waf_timeout: Duration::from_millis(5),
                 api_security_sample_delay: Duration::from_secs(30),
                 extension_version: Some("compatibility".to_string()),
             };

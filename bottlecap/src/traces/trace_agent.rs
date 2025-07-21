@@ -95,8 +95,8 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    tx: Sender<SendDataBuilderInfo>,
     shutdown_token: CancellationToken,
+    tx: Sender<SendDataBuilderInfo>,
 }
 
 #[derive(Clone, Copy)]
@@ -389,6 +389,8 @@ impl TraceAgent {
         (StatusCode::OK, response_json.to_string()).into_response()
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     async fn handle_traces(
         config: Arc<config::Config>,
         request: Request,
@@ -486,14 +488,16 @@ impl TraceAgent {
             }
         }
 
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        );
+        let send_data = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
 
         // send trace payload to our trace flusher
         match trace_tx.send(send_data).await {

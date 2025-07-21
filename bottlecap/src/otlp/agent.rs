@@ -165,14 +165,16 @@ impl Agent {
                 .into_response();
         }
 
-        let send_data_builder = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        );
+        let send_data_builder = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
 
         match trace_tx.send(send_data_builder).await {
             Ok(()) => {

@@ -633,7 +633,7 @@ mod tests {
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD_MAX_DEPTH", "5");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
             jail.set_env("DD_APPSEC_RULES", "/path/to/rules.json");
-            jail.set_env("DD_APPSEC_WAF_TIMEOUT", "3000"); // Milliseconds
+            jail.set_env("DD_APPSEC_WAF_TIMEOUT", "3000"); // Microseconds
             jail.set_env("DD_API_SECURITY_SAMPLE_DELAY", "60.0"); // Seconds
             jail.set_env("DD_EXTENSION_VERSION", "compatibility");
 

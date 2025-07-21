@@ -795,7 +795,7 @@ mod tests {
     async fn test_process_invocation_response_with_api_gateway_v1() {
         let config = Config {
             serverless_appsec_enabled: true,
-            // appsec_waf_timeout: Duration::from_secs(3600), // Avoids falkes on slower CI hardware
+            appsec_waf_timeout: Duration::from_secs(3600), // Avoids falkes on slower CI hardware
             ..Config::default()
         };
         let processor = Processor::new(&config).expect("Should not fail");

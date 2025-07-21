@@ -8,6 +8,7 @@ fn check_forbidden_dependency(dependency_name: &str) -> Result<(), String> {
     );
 
     // First run cargo tree to get dependency with detailed info
+    // Use --edges normal to exclude build and test dependencies
     let output = Command::new("cargo")
         .args([
             "tree",
@@ -17,6 +18,7 @@ fn check_forbidden_dependency(dependency_name: &str) -> Result<(), String> {
             "--prefix-depth",
             "--features=fips",
             "--no-default-features",
+            "--edges=normal",
         ])
         .output()
         .map_err(|e| {
@@ -27,6 +29,7 @@ fn check_forbidden_dependency(dependency_name: &str) -> Result<(), String> {
         })?;
 
     // Also get the complete dependency path to help debugging
+    // Use --edges normal to exclude build and test dependencies
     let path_output = Command::new("cargo")
         .args([
             "tree",
@@ -34,6 +37,7 @@ fn check_forbidden_dependency(dependency_name: &str) -> Result<(), String> {
             dependency_name,
             "--features=fips",
             "--no-default-features",
+            "--edges=normal",
         ])
         .output()
         .map_err(|e| {

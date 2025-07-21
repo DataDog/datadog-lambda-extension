@@ -62,7 +62,7 @@ pub struct Processor {
     /// Helper class to send enhanced metrics.
     enhanced_metrics: EnhancedMetrics,
     /// AWS configuration from the Lambda environment.
-    aws_config: AwsConfig,
+    aws_config: Arc<AwsConfig>,
     /// Flag to determine if a tracer was detected through
     /// universal instrumentation.
     tracer_detected: bool,
@@ -87,7 +87,7 @@ impl Processor {
     pub fn new(
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
-        aws_config: &AwsConfig,
+        aws_config: Arc<AwsConfig>,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
     ) -> Self {
         let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
@@ -102,7 +102,7 @@ impl Processor {
             inferrer: SpanInferrer::new(config.service_mapping.clone()),
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
-            aws_config: aws_config.clone(),
+            aws_config,
             tracer_detected: false,
             runtime: None,
             config: Arc::clone(&config),
@@ -536,14 +536,16 @@ impl Processor {
             dropped_p0_spans: 0,
         };
 
-        let send_data_builder_info: SendDataBuilderInfo = trace_processor.process_traces(
-            self.config.clone(),
-            tags_provider.clone(),
-            header_tags,
-            vec![traces],
-            body_size,
-            self.inferrer.span_pointers.clone(),
-        );
+        let send_data_builder_info: SendDataBuilderInfo = trace_processor
+            .process_traces(
+                self.config.clone(),
+                tags_provider.clone(),
+                header_tags,
+                vec![traces],
+                body_size,
+                self.inferrer.span_pointers.clone(),
+            )
+            .await;
 
         if let Err(e) = trace_agent_tx.send(send_data_builder_info).await {
             debug!("Failed to send context spans to agent: {e}");
@@ -979,14 +981,14 @@ mod tests {
     use dogstatsd::metric::EMPTY_TAGS;
 
     fn setup() -> Processor {
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
             function_name: "test-function".into(),
             sandbox_init_time: Instant::now(),
             runtime_api: "***".into(),
             exec_wrapper: None,
-        };
+        });
 
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
@@ -1004,7 +1006,7 @@ mod tests {
             Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
         ));
 
-        Processor::new(tags_provider, config, &aws_config, metrics_aggregator)
+        Processor::new(tags_provider, config, aws_config, metrics_aggregator)
     }
 
     #[test]

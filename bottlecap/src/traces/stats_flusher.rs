@@ -5,18 +5,20 @@ use async_trait::async_trait;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::sync::OnceCell;
 
 use crate::config;
 use crate::traces::stats_aggregator::StatsAggregator;
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use ddcommon::Endpoint;
+use dogstatsd::api_key::ApiKeyFactory;
 use tracing::{debug, error};
 
 #[async_trait]
 pub trait StatsFlusher {
     fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
     ) -> Self
@@ -34,29 +36,22 @@ pub struct ServerlessStatsFlusher {
     // pub buffer: Arc<Mutex<Vec<pb::ClientStatsPayload>>>,
     aggregator: Arc<Mutex<StatsAggregator>>,
     config: Arc<config::Config>,
-    endpoint: Endpoint,
+    api_key_factory: Arc<ApiKeyFactory>,
+    endpoint: OnceCell<Endpoint>,
 }
 
 #[async_trait]
 impl StatsFlusher for ServerlessStatsFlusher {
     fn new(
-        api_key: String,
+        api_key_factory: Arc<ApiKeyFactory>,
         aggregator: Arc<Mutex<StatsAggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
-        let stats_url = trace_stats_url(&config.site);
-
-        let endpoint = Endpoint {
-            url: hyper::Uri::from_str(&stats_url).expect("can't make URI from stats url, exiting"),
-            api_key: Some(api_key.clone().into()),
-            timeout_ms: config.flush_timeout * 1_000,
-            test_token: None,
-        };
-
         ServerlessStatsFlusher {
             aggregator,
             config,
-            endpoint,
+            api_key_factory,
+            endpoint: OnceCell::new(),
         }
     }
 
@@ -64,6 +59,29 @@ impl StatsFlusher for ServerlessStatsFlusher {
         if stats.is_empty() {
             return;
         }
+
+        let Some(api_key) = self.api_key_factory.get_api_key().await else {
+            error!("Skipping flushing stats: Failed to resolve API key");
+            return;
+        };
+
+        let api_key_clone = api_key.to_string();
+        let endpoint = self
+            .endpoint
+            .get_or_init({
+                move || async move {
+                    let stats_url = trace_stats_url(&self.config.site);
+                    Endpoint {
+                        url: hyper::Uri::from_str(&stats_url)
+                            .expect("can't make URI from stats url, exiting"),
+                        api_key: Some(api_key_clone.into()),
+                        timeout_ms: self.config.flush_timeout * 1_000,
+                        test_token: None,
+                    }
+                }
+            })
+            .await;
+
         debug!("Flushing {} stats", stats.len());
 
         let stats_payload = stats_utils::construct_stats_payload(stats);
@@ -82,12 +100,8 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let start = std::time::Instant::now();
 
-        let resp = stats_utils::send_stats_payload(
-            serialized_stats_payload,
-            &self.endpoint,
-            &self.config.api_key,
-        )
-        .await;
+        let resp =
+            stats_utils::send_stats_payload(serialized_stats_payload, endpoint, api_key).await;
         let elapsed = start.elapsed();
         debug!(
             "Stats request to {} took {}ms",
