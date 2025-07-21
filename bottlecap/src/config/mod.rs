@@ -240,6 +240,7 @@ pub struct Config {
     pub api_key: String,
     pub log_level: LogLevel,
 
+    // Timeout for the request to flush data to Datadog endpoint
     pub flush_timeout: u64,
 
     // Proxy
