@@ -61,7 +61,6 @@ impl InvocationTimes {
                     (elapsed as f64 / (LOOKBACK_COUNT - 1) as f64) < ONE_TWENTY_SECONDS;
                 if should_adapt {
                     // Both units here are in seconds
-                    // TODO: What does this mean?
                     if elapsed < flush_timeout {
                         return ConcreteFlushStrategy::Continuously(PeriodicStrategy {
                             interval: TWENTY_SECONDS,
