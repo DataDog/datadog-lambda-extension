@@ -16,8 +16,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
   sh -s -- --profile minimal --default-toolchain stable -y
 
 RUN source $HOME/.cargo/env
-ENV PATH /root/.cargo/bin/:$PATH
+ENV PATH=$PATH:/root/.cargo/bin/
 
 RUN rustup component add rust-src --toolchain stable
-
-

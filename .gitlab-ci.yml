@@ -29,7 +29,6 @@ ci image:
       changes:
         - .gitlab/Dockerfile
       when: on_success
-    - when: manual
   variables:
     DOCKER_TARGET: ${DOCKER_TARGET_IMAGE}:${DOCKER_TARGET_VERSION}
   script:
