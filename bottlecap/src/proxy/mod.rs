@@ -42,7 +42,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
-        assert!(should_start_proxy(&config, aws_config));
+        assert!(should_start_proxy(&config, &aws_config));
     }
     #[test]
     fn test_should_start_proxy_lwa_proxy_set() {
@@ -56,7 +56,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
         });
-        assert!(should_start_proxy(&config, aws_config));
+        assert!(should_start_proxy(&config, &aws_config));
     }
 
     #[test]
@@ -74,7 +74,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
-        assert!(should_start_proxy(&config, aws_config));
+        assert!(should_start_proxy(&config, &aws_config));
     }
 
     #[test]
@@ -92,7 +92,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
-        assert!(!should_start_proxy(&config, aws_config));
+        assert!(!should_start_proxy(&config, &aws_config));
     }
 
     #[test]
@@ -111,6 +111,6 @@ mod tests {
             // Datadog wrapper is not set, so we should not start the proxy
             exec_wrapper: Some("/opt/not_datadog".to_string()),
         });
-        assert!(!should_start_proxy(&config, aws_config));
+        assert!(!should_start_proxy(&config, &aws_config));
     }
 }

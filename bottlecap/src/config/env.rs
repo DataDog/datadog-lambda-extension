@@ -304,6 +304,13 @@ pub struct EnvConfig {
     /// The maximum depth of the Lambda payload to capture.
     /// Default is `10`. Requires `capture_lambda_payload` to be `true`.
     pub capture_lambda_payload_max_depth: Option<u32>,
+    /// @env `DD_EXTENSION_VERSION`
+    ///
+    /// Used to decide which version of the Datadog Lambda Extension to use.
+    /// When set to `compatibility`, the extension will boot up in legacy mode.
+    pub extension_version: Option<String>,
+
+    // AppSec
     /// @env `DD_SERVERLESS_APPSEC_ENABLED`
     ///
     /// Enable Application and API Protection (AAP), previously known as AppSec/ASM, for AWS Lambda.
@@ -324,11 +331,6 @@ pub struct EnvConfig {
     /// The delay between two API Security samples for a given endpoint (HTTP method + route + status code).
     #[serde(deserialize_with = "deserialize_optional_duration_from_optional_seconds")]
     pub api_security_sample_delay: Option<Duration>,
-    /// @env `DD_EXTENSION_VERSION`
-    ///
-    /// Used to decide which version of the Datadog Lambda Extension to use.
-    /// When set to `compatibility`, the extension will boot up in legacy mode.
-    pub extension_version: Option<String>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -470,13 +472,13 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, lambda_proc_enhanced_metrics);
     merge_option_to_value!(config, env_config, capture_lambda_payload);
     merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
+    merge_option!(config, env_config, extension_version);
 
+    // AppSec
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
     merge_option!(config, env_config, appsec_rules);
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
     merge_option_to_value!(config, env_config, api_security_sample_delay);
-
-    merge_option!(config, env_config, extension_version);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]

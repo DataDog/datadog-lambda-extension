@@ -1,10 +1,12 @@
-use std::{collections::HashMap, path::PathBuf};
+use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use crate::{
     config::{
         additional_endpoints::deserialize_additional_endpoints,
         deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
-        deserialize_optional_bool_from_anything, deserialize_processing_rules,
+        deserialize_optional_bool_from_anything,
+        deserialize_optional_duration_from_optional_microseconds,
+        deserialize_optional_duration_from_optional_seconds, deserialize_processing_rules,
         deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
@@ -89,9 +91,16 @@ pub struct YamlConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub capture_lambda_payload: Option<bool>,
     pub capture_lambda_payload_max_depth: Option<u32>,
+    pub extension_version: Option<String>,
+
+    // AppSec
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
-    pub extension_version: Option<String>,
+    pub appsec_rules: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_duration_from_optional_microseconds")]
+    pub appsec_waf_timeout: Option<Duration>,
+    #[serde(deserialize_with = "deserialize_optional_duration_from_optional_seconds")]
+    pub api_security_sample_delay: Option<Duration>,
 }
 
 /// Proxy Config
@@ -600,6 +609,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(config, yaml_config, capture_lambda_payload_max_depth);
     merge_option_to_value!(config, yaml_config, serverless_appsec_enabled);
     merge_option!(config, yaml_config, extension_version);
+
+    // AppSec
+    merge_option_to_value!(config, yaml_config, serverless_appsec_enabled);
+    merge_option!(config, yaml_config, appsec_rules);
+    merge_option_to_value!(config, yaml_config, appsec_waf_timeout);
+    merge_option_to_value!(config, yaml_config, api_security_sample_delay);
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -757,8 +772,13 @@ enhanced_metrics: false
 lambda_proc_enhanced_metrics: false
 capture_lambda_payload: true
 capture_lambda_payload_max_depth: 5
-serverless_appsec_enabled: true
 extension_version: "compatibility"
+
+# AppSec
+serverless_appsec_enabled: true
+appsec_rules: "/path/to/rules.json"
+appsec_waf_timeout: 3000
+api_security_sample_delay: 60.0
 "#,
             )?;
 
@@ -881,9 +901,9 @@ extension_version: "compatibility"
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 serverless_appsec_enabled: true,
-                appsec_rules: None,
-                appsec_waf_timeout: Duration::from_millis(5),
-                api_security_sample_delay: Duration::from_secs(30),
+                appsec_rules: Some("/path/to/rules.json".to_string()),
+                appsec_waf_timeout: Duration::from_millis(3),
+                api_security_sample_delay: Duration::from_secs(60),
                 extension_version: Some("compatibility".to_string()),
             };
 
