@@ -6,7 +6,7 @@ ARG FIPS
 # Install dependencies
 RUN apk add --no-cache curl gcc musl-dev make unzip bash \
     autoconf automake libtool g++ perl go cmake linux-headers \
-    clang-dev llvm-dev
+    clang-libclang
 
 SHELL ["/bin/bash", "-c"]
 
