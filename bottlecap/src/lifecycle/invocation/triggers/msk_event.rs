@@ -1,6 +1,6 @@
 use crate::lifecycle::invocation::processor::MS_TO_NS;
 use crate::lifecycle::invocation::triggers::{
-    ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
 };
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
@@ -138,7 +138,9 @@ mod tests {
 
         let expected = MSKEvent {
             event_source: String::from("aws:kafka"),
-            event_source_arn: String::from("arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2"),
+            event_source_arn: String::from(
+                "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+            ),
             records: expected_records,
         };
 

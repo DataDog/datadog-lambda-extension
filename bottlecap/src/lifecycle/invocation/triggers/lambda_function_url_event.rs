@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger, lowercase_key},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]

@@ -1,22 +1,23 @@
 use crate::appsec;
 use crate::{
+    EXTENSION_HOST,
     appsec::processor::Processor as AppSecProcessor,
-    config::{aws::AwsConfig, Config},
+    config::{Config, aws::AwsConfig},
     http::extract_request_body,
     lifecycle::invocation::processor::Processor as InvocationProcessor,
-    lwa, EXTENSION_HOST,
+    lwa,
 };
 use axum::{
+    Router,
     body::{Body, Bytes},
     extract::{Path, Request, State},
     http::{self, Request as HttpRequest, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use http_body_util::BodyExt;
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -402,7 +403,7 @@ mod tests {
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
 
-    use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
+    use crate::{LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider};
 
     use super::*;
 

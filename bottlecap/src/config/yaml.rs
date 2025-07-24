@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf, time::Duration};
 
 use crate::{
     config::{
+        Config, ConfigError, ConfigSource, ProcessingRule,
         additional_endpoints::deserialize_additional_endpoints,
         deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
         deserialize_optional_bool_from_anything,
@@ -12,15 +13,14 @@ use crate::{
         log_level::LogLevel,
         logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
-        Config, ConfigError, ConfigSource, ProcessingRule,
+        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use figment::{
-    providers::{Format, Yaml},
     Figment,
+    providers::{Format, Yaml},
 };
 use serde::Deserialize;
 

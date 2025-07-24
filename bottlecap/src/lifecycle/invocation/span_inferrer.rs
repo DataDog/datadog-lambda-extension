@@ -12,6 +12,7 @@ use crate::{
     lifecycle::invocation::{
         generate_span_id,
         triggers::{
+            FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG, Trigger,
             api_gateway_http_event::APIGatewayHttpEvent,
             api_gateway_rest_event::APIGatewayRestEvent,
             api_gateway_websocket_event::APIGatewayWebSocketEvent,
@@ -22,9 +23,8 @@ use crate::{
             msk_event::MSKEvent,
             s3_event::S3Record,
             sns_event::{SnsEntity, SnsRecord},
-            sqs_event::{extract_trace_context_from_aws_trace_header, SqsRecord},
+            sqs_event::{SqsRecord, extract_trace_context_from_aws_trace_header},
             step_function_event::StepFunctionEvent,
-            Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
         },
     },
 };

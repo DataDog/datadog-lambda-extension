@@ -2,9 +2,9 @@ use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
+        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
         event_bridge_event::EventBridgeEvent,
         sns_event::{SnsEntity, SnsRecord},
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
 use crate::traces::context::{Sampling, SpanContext};

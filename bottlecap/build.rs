@@ -84,7 +84,10 @@ fn check_forbidden_dependency(dependency_name: &str) -> Result<(), String> {
 
         Err(error_msg)
     } else {
-        println!("cargo:warning=No {} dependency found. FIPS compliance check passed for this dependency!", dependency_name);
+        println!(
+            "cargo:warning=No {} dependency found. FIPS compliance check passed for this dependency!",
+            dependency_name
+        );
         Ok(())
     }
 }

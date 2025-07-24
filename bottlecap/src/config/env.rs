@@ -1,4 +1,4 @@
-use figment::{providers::Env, Figment};
+use figment::{Figment, providers::Env};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -7,6 +7,7 @@ use datadog_trace_obfuscation::replacer::ReplaceRule;
 
 use crate::{
     config::{
+        Config, ConfigError, ConfigSource,
         additional_endpoints::deserialize_additional_endpoints,
         apm_replace_rule::deserialize_apm_replace_rules,
         deserialize_array_from_comma_separated_string, deserialize_key_value_pairs,
@@ -16,12 +17,11 @@ use crate::{
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
         logs_additional_endpoints::{
-            deserialize_logs_additional_endpoints, LogsAdditionalEndpoint,
+            LogsAdditionalEndpoint, deserialize_logs_additional_endpoints,
         },
-        processing_rule::{deserialize_processing_rules, ProcessingRule},
+        processing_rule::{ProcessingRule, deserialize_processing_rules},
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
-        Config, ConfigError, ConfigSource,
+        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
@@ -508,11 +508,11 @@ impl ConfigSource for EnvConfigSource {
 mod tests {
     use super::*;
     use crate::config::{
+        Config,
         flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
         processing_rule::{Kind, ProcessingRule},
         trace_propagation_style::TracePropagationStyle,
-        Config,
     };
 
     #[test]

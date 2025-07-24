@@ -6,9 +6,9 @@ use tracing::{debug, error, warn};
 
 use crate::traces::context::{Sampling, SpanContext};
 use crate::traces::propagation::{
+    Propagator,
     carrier::{Extractor, Injector},
     error::Error,
-    Propagator,
 };
 
 // Datadog Keys
@@ -173,7 +173,9 @@ impl DatadogHeaderPropagator {
                 carrier.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
             {
                 if !Self::higher_order_bits_valid(trace_id_higher_order_bits) {
-                    warn!("Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier.");
+                    warn!(
+                        "Malformed Trace ID: {trace_id_higher_order_bits} Failed to decode trace ID from carrier."
+                    );
                     tags.insert(
                         DATADOG_PROPAGATION_ERROR_KEY.to_string(),
                         format!("malformed tid {trace_id_higher_order_bits}"),
@@ -398,11 +400,14 @@ impl TraceContextPropagator {
                 return Err(Error::extract(
                     "`ff` is an invalid traceparent version",
                     "traceparent",
-                ))
+                ));
             }
             "00" => {
                 if !tail.is_empty() {
-                    return Err(Error::extract("Traceparent with version `00` should contain only 4 values delimited by `-`", "traceparent"));
+                    return Err(Error::extract(
+                        "Traceparent with version `00` should contain only 4 values delimited by `-`",
+                        "traceparent",
+                    ));
                 }
             }
             _ => {

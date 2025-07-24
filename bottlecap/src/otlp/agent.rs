@@ -1,9 +1,9 @@
 use axum::{
+    Router,
     extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
-    Router,
 };
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use serde_json::json;

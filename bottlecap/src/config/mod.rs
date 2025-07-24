@@ -28,7 +28,7 @@ use crate::config::{
     flush_strategy::FlushStrategy,
     log_level::LogLevel,
     logs_additional_endpoints::LogsAdditionalEndpoint,
-    processing_rule::{deserialize_processing_rules, ProcessingRule},
+    processing_rule::{ProcessingRule, deserialize_processing_rules},
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };

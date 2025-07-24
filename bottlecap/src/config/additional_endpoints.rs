@@ -26,7 +26,10 @@ where
                         result.insert(key, urls);
                     }
                     _ => {
-                        error!("Failed to deserialize additional endpoints - Invalid YAML format: expected array for key {}", key);
+                        error!(
+                            "Failed to deserialize additional endpoints - Invalid YAML format: expected array for key {}",
+                            key
+                        );
                     }
                 }
             }
@@ -76,7 +79,9 @@ mod tests {
     #[test]
     fn test_deserialize_additional_endpoints_json() {
         // Test JSON string format
-        let input = json!("{\"https://app.datadoghq.com\":[\"key1\",\"key2\"],\"https://app.datadoghq.eu\":[\"key3\"]}");
+        let input = json!(
+            "{\"https://app.datadoghq.com\":[\"key1\",\"key2\"],\"https://app.datadoghq.eu\":[\"key3\"]}"
+        );
 
         let result = deserialize_additional_endpoints(input).unwrap();
 

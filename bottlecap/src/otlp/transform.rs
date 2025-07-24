@@ -3,14 +3,14 @@ use datadog_trace_protobuf::pb::Span as DatadogSpan;
 use hex;
 use lazy_static::lazy_static;
 use opentelemetry_proto::tonic::common::v1::{
-    any_value, AnyValue, InstrumentationScope as OtelInstrumentationScope, KeyValue,
+    AnyValue, InstrumentationScope as OtelInstrumentationScope, KeyValue, any_value,
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as OtelResource;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use opentelemetry_proto::tonic::trace::v1::{
+    Span as OtelSpan,
     span::{Event, Link, SpanKind},
     status::StatusCode,
-    Span as OtelSpan,
 };
 use opentelemetry_semantic_conventions::attribute::{
     DB_QUERY_TEXT, DB_STATEMENT, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT,

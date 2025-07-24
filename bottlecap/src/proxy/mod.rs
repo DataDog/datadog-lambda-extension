@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::config::{aws::AwsConfig, Config};
+use crate::config::{Config, aws::AwsConfig};
 
 pub mod interceptor;
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{body::parse_body, ExtractResponse, HttpData};
+use super::{ExtractResponse, HttpData, body::parse_body};
 
 use aws_lambda_events::{alb, apigw, lambda_function_urls};
 use tracing::warn;

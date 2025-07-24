@@ -40,7 +40,9 @@ mod tests {
 
     #[test]
     fn test_deserialize_logs_additional_endpoints_valid() {
-        let input = json!("[{\"api_key\": \"apiKey2\", \"Host\": \"agent-http-intake.logs.datadoghq.com\", \"Port\": 443, \"is_reliable\": true}]");
+        let input = json!(
+            "[{\"api_key\": \"apiKey2\", \"Host\": \"agent-http-intake.logs.datadoghq.com\", \"Port\": 443, \"is_reliable\": true}]"
+        );
 
         let result = deserialize_logs_additional_endpoints(input).unwrap();
         let mut expected = Vec::new();
@@ -57,7 +59,9 @@ mod tests {
     #[test]
     fn test_deserialize_logs_additional_endpoints_invalid() {
         // input missing "Port" field
-        let input = json!("[{\"api_key\": \"apiKey2\", \"Host\": \"agent-http-intake.logs.datadoghq.com\", \"is_reliable\": true}]");
+        let input = json!(
+            "[{\"api_key\": \"apiKey2\", \"Host\": \"agent-http-intake.logs.datadoghq.com\", \"is_reliable\": true}]"
+        );
 
         let result = deserialize_logs_additional_endpoints(input).unwrap();
         let expected = Vec::new(); // expect empty list due to invalid input

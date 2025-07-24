@@ -4,6 +4,7 @@ use tokio::sync::mpsc::Sender;
 
 use tracing::error;
 
+use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
 use crate::events::Event;
 use crate::lifecycle::invocation::context::Context as InvocationContext;
@@ -11,7 +12,6 @@ use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
 use crate::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
-use crate::LAMBDA_RUNTIME_SLUG;
 
 use crate::logs::lambda::{IntakeLog, Message};
 
@@ -590,10 +590,12 @@ mod tests {
 
         let result = processor.get_message(event).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unable to parse log"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unable to parse log")
+        );
     }
 
     // get_intake_log
