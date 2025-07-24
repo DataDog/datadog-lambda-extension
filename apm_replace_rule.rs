@@ -1,4 +1,4 @@
-use datadog_trace_obfuscation::replacer::{parse_rules_from_string, ReplaceRule};
+use datadog_trace_obfuscation::replacer::{ReplaceRule, parse_rules_from_string};
 use serde::de::{Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use serde_json;
