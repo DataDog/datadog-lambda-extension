@@ -26,7 +26,10 @@ where
                         result.insert(key, urls);
                     }
                     _ => {
-                        error!("Failed to deserialize additional endpoints - Invalid YAML format: expected array for key {}", key);
+                        error!(
+                            "Failed to deserialize additional endpoints - Invalid YAML format: expected array for key {}",
+                            key
+                        );
                     }
                 }
             }
@@ -58,7 +61,8 @@ mod tests {
             "https://app.datadoghq.eu": ["key3"]
         });
 
-        let result = deserialize_additional_endpoints(input).unwrap();
+        let result = deserialize_additional_endpoints(input)
+            .expect("Failed to deserialize additional endpoints");
 
         let mut expected = HashMap::new();
         expected.insert(
@@ -76,9 +80,12 @@ mod tests {
     #[test]
     fn test_deserialize_additional_endpoints_json() {
         // Test JSON string format
-        let input = json!("{\"https://app.datadoghq.com\":[\"key1\",\"key2\"],\"https://app.datadoghq.eu\":[\"key3\"]}");
+        let input = json!(
+            "{\"https://app.datadoghq.com\":[\"key1\",\"key2\"],\"https://app.datadoghq.eu\":[\"key3\"]}"
+        );
 
-        let result = deserialize_additional_endpoints(input).unwrap();
+        let result = deserialize_additional_endpoints(input)
+            .expect("Failed to deserialize additional endpoints");
 
         let mut expected = HashMap::new();
         expected.insert(
@@ -97,22 +104,26 @@ mod tests {
     fn test_deserialize_additional_endpoints_invalid_or_empty() {
         // Test empty YAML
         let input = json!({});
-        let result = deserialize_additional_endpoints(input).unwrap();
+        let result = deserialize_additional_endpoints(input)
+            .expect("Failed to deserialize additional endpoints");
         assert!(result.is_empty());
 
         // Test empty JSON
         let input = json!("");
-        let result = deserialize_additional_endpoints(input).unwrap();
+        let result = deserialize_additional_endpoints(input)
+            .expect("Failed to deserialize additional endpoints");
         assert!(result.is_empty());
 
         let input = json!({
             "https://app.datadoghq.com": "invalid-yaml"
         });
-        let result = deserialize_additional_endpoints(input).unwrap();
+        let result = deserialize_additional_endpoints(input)
+            .expect("Failed to deserialize additional endpoints");
         assert!(result.is_empty());
 
         let input = json!("invalid-json");
-        let result = deserialize_additional_endpoints(input).unwrap();
+        let result = deserialize_additional_endpoints(input)
+            .expect("Failed to deserialize additional endpoints");
         assert!(result.is_empty());
     }
 }

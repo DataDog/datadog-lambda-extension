@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{lowercase_key, ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger, lowercase_key},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_get_arn() {
-        env::set_var("AWS_LAMBDA_FUNCTION_NAME", "mock-lambda");
+        unsafe { env::set_var("AWS_LAMBDA_FUNCTION_NAME", "mock-lambda") };
         let json = read_json_file("lambda_function_url_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = LambdaFunctionUrlEvent::new(payload)
@@ -319,7 +319,7 @@ mod tests {
             event.get_arn("sa-east-1"),
             "arn:aws:lambda:sa-east-1:601427279990:url:mock-lambda"
         );
-        env::remove_var("AWS_LAMBDA_FUNCTION_NAME");
+        unsafe { env::remove_var("AWS_LAMBDA_FUNCTION_NAME") };
     }
 
     #[test]

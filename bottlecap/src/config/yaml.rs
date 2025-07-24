@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     config::{
+        Config, ConfigError, ConfigSource, ProcessingRule,
         additional_endpoints::deserialize_additional_endpoints,
         deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
         deserialize_optional_bool_from_anything, deserialize_processing_rules,
@@ -10,15 +11,14 @@ use crate::{
         log_level::LogLevel,
         logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
-        Config, ConfigError, ConfigSource, ProcessingRule,
+        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use figment::{
-    providers::{Format, Yaml},
     Figment,
+    providers::{Format, Yaml},
 };
 use serde::Deserialize;
 
@@ -634,6 +634,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_merge_config_overrides_with_yaml_file() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
@@ -778,7 +779,7 @@ extension_version: "compatibility"
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
                 dd_url: "https://metrics.datadoghq.com".to_string(),
-                url: "".to_string(), // doesnt exist in yaml
+                url: String::new(), // doesnt exist in yaml
                 additional_endpoints: HashMap::from([
                     (
                         "https://app.datadoghq.com".to_string(),

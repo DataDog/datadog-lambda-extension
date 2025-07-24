@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::config::{aws::AwsConfig, Config};
+use crate::config::{Config, aws::AwsConfig};
 
 pub mod interceptor;
 
@@ -37,8 +37,8 @@ mod tests {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some("127.0.0.1:12345".to_string()),
-            function_name: "".to_string(),
-            runtime_api: "".to_string(),
+            function_name: String::new(),
+            runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
@@ -51,8 +51,8 @@ mod tests {
             region: "us-east-1".to_string(),
             // LWA proxy is set, so we should start the proxy
             aws_lwa_proxy_lambda_runtime_api: Some("127.0.0.1:12345".to_string()),
-            function_name: "".to_string(),
-            runtime_api: "".to_string(),
+            function_name: String::new(),
+            runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
         });
@@ -69,8 +69,8 @@ mod tests {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             aws_lwa_proxy_lambda_runtime_api: None,
-            function_name: "".to_string(),
-            runtime_api: "".to_string(),
+            function_name: String::new(),
+            runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
@@ -87,8 +87,8 @@ mod tests {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             aws_lwa_proxy_lambda_runtime_api: None,
-            function_name: "".to_string(),
-            runtime_api: "".to_string(),
+            function_name: String::new(),
+            runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
@@ -105,8 +105,8 @@ mod tests {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             aws_lwa_proxy_lambda_runtime_api: None,
-            function_name: "".to_string(),
-            runtime_api: "".to_string(),
+            function_name: String::new(),
+            runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             // Datadog wrapper is not set, so we should not start the proxy
             exec_wrapper: Some("/opt/not_datadog".to_string()),

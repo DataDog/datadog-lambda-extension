@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use axum::{
+    Router,
     extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{any, post},
-    Router,
 };
 use serde_json::json;
 use std::collections::VecDeque;
@@ -14,8 +14,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
     Mutex,
+    mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
@@ -28,10 +28,11 @@ use crate::{
     },
     tags::provider,
     traces::{
+        INVOCATION_SPAN_RESOURCE,
         proxy_aggregator::{self, ProxyRequest},
         stats_aggregator, stats_processor,
         trace_aggregator::{self, SendDataBuilderInfo},
-        trace_processor, INVOCATION_SPAN_RESOURCE,
+        trace_processor,
     },
 };
 use datadog_trace_protobuf::pb;

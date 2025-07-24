@@ -1,18 +1,18 @@
 use crate::{
-    config::aws::AwsConfig, http::extract_request_body,
-    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa, EXTENSION_HOST,
+    EXTENSION_HOST, config::aws::AwsConfig, http::extract_request_body,
+    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa,
 };
 use axum::{
+    Router,
     body::{Body, Bytes},
     extract::{Path, Request, State},
     http::{self, Request as HttpRequest, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use http_body_util::BodyExt;
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -354,7 +354,7 @@ mod tests {
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
 
-    use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
+    use crate::{LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider};
 
     use super::*;
 
@@ -384,7 +384,7 @@ mod tests {
                     }),
                 )
                 .await
-                .unwrap();
+                .expect("failed to serve HTTP connection");
         });
 
         let config = Arc::new(Config::default());
@@ -394,7 +394,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
         let metrics_aggregator = Arc::new(Mutex::new(
-            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+            MetricsAggregator::new(EMPTY_TAGS, 1024).expect("failed to create metrics aggregator"),
         ));
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
@@ -419,32 +419,30 @@ mod tests {
 
         let uri_with_schema = format!("http://{aws_lwa_lambda_runtime_api}");
         let mut ask_proxy = client
-            .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+            .get(Uri::try_from(uri_with_schema.clone()).expect("failed to parse URI"))
             .await;
 
-        while ask_proxy.is_err() {
-            error!(
-                "Retrying request to proxy, err: {}",
-                ask_proxy.err().unwrap()
-            );
+        while let Err(err) = ask_proxy {
+            error!("Retrying request to proxy, err: {err}");
             tokio::time::sleep(Duration::from_millis(50)).await;
             ask_proxy = client
-                .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+                .get(Uri::try_from(uri_with_schema.clone()).expect("failed to parse URI"))
                 .await;
         }
 
         let body_bytes = ask_proxy
-            .unwrap()
+            .expect("failed to retrieve response")
             .into_body()
             .collect()
             .await
-            .unwrap()
+            .expect("failed to collect response body")
             .to_bytes();
 
-        let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
+        let bytes =
+            String::from_utf8(body_bytes.to_vec()).expect("failed to convert bytes to String");
         assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
         // Send shutdown signal to the proxy server
-        let _ = proxy_handle.cancel();
+        proxy_handle.cancel();
         final_destination.abort();
     }
 }

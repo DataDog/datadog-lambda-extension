@@ -8,9 +8,9 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
-    triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger},
 };
-use crate::traces::span_pointers::{generate_span_pointer_hash, SpanPointer};
+use crate::traces::span_pointers::{SpanPointer, generate_span_pointer_hash};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct S3Event {
@@ -69,7 +69,6 @@ impl Trigger for S3Record {
             .get("Records")
             .and_then(Value::as_array)
             .and_then(|r| r.first())
-            .take()
         {
             first_record.get("s3").is_some()
         } else {

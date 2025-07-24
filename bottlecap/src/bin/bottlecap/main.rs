@@ -17,11 +17,12 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 use bottlecap::{
-    base_url,
+    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
+    EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
+    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT, base_url,
     config::{
-        self,
-        aws::{build_lambda_function_arn, AwsConfig, AwsCredentials},
-        Config,
+        self, Config,
+        aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
     },
     event_bus::bus::EventBus,
     events::Event,
@@ -55,9 +56,6 @@ use bottlecap::{
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor,
     },
-    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
-    EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
-    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
@@ -74,13 +72,13 @@ use dogstatsd::{
     },
     dogstatsd::{DogStatsD, DogStatsDConfig},
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
-    metric::{SortedTags, EMPTY_TAGS},
+    metric::{EMPTY_TAGS, SortedTags},
 };
 use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
-    collections::{hash_map, HashMap},
+    collections::{HashMap, hash_map},
     env,
     io::{Error, Result},
     os::unix::process::CommandExt,
@@ -89,7 +87,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc::Sender, sync::Mutex as TokioMutex, sync::RwLock, task::JoinHandle};
+use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -1005,7 +1003,9 @@ fn start_metrics_flushers(
         let dd_url = match DdUrl::new(endpoint_url.clone()) {
             Ok(url) => url,
             Err(err) => {
-                error!("Invalid additional endpoint: {err}. Falling back to 'https://app.datadoghq.com'");
+                error!(
+                    "Invalid additional endpoint: {err}. Falling back to 'https://app.datadoghq.com'"
+                );
                 DdUrl::new("https://app.datadoghq.com".to_string())
                     .expect("additional endpoint fallback URL is invalid")
             }
