@@ -1,7 +1,7 @@
 [package]
 name = "bottlecap"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [dependencies]
@@ -68,7 +68,7 @@ datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
-libddwaf = { version = "1.26.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "dc5bba32c6c26d26702b6ef11fdbdb2ba0fbf37b", default-features = false, features = ["default", "static"] }
+libddwaf = { version = "1.26.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "f567dec1685e39af5549421f491b1babacafb173", default-features = false, features = ["default", "static"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }

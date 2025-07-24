@@ -48,7 +48,7 @@ pub fn generate_span_id() -> u64 {
     }
 
     let mut rng = rand::thread_rng();
-    rng.gen()
+    rng.r#gen()
 }
 
 fn redact_value(key: &str, value: String) -> String {
