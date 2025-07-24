@@ -2,7 +2,7 @@ use crate::{
     config::aws::get_aws_partition_by_region,
     lifecycle::invocation::{
         processor::MS_TO_NS,
-        triggers::{lowercase_key, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+        triggers::{FUNCTION_TRIGGER_EVENT_SOURCE_TAG, Trigger, lowercase_key},
     },
 };
 use datadog_trace_protobuf::pb::Span;

@@ -27,7 +27,7 @@ use crate::config::{
     flush_strategy::FlushStrategy,
     log_level::LogLevel,
     logs_additional_endpoints::LogsAdditionalEndpoint,
-    processing_rule::{deserialize_processing_rules, ProcessingRule},
+    processing_rule::{ProcessingRule, deserialize_processing_rules},
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
@@ -1186,10 +1186,10 @@ pub mod tests {
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "TRUE");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "0");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(config.serverless_logs_enabled, true);
-            assert_eq!(config.enhanced_metrics, true);
-            assert_eq!(config.logs_config_use_compression, true);
-            assert_eq!(config.capture_lambda_payload, false);
+            assert!(config.serverless_logs_enabled);
+            assert!(config.enhanced_metrics);
+            assert!(config.logs_config_use_compression);
+            assert!(!config.capture_lambda_payload);
             Ok(())
         });
     }

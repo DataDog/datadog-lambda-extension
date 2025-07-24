@@ -1,7 +1,7 @@
+use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
-use crate::FLUSH_RETRY_COUNT;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
 use reqwest::header::HeaderMap;

@@ -1,6 +1,6 @@
 use crate::lifecycle::invocation::processor::MS_TO_NS;
 use crate::lifecycle::invocation::triggers::{
-    ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
 };
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
@@ -131,14 +131,16 @@ mod tests {
         let record = MSKRecord {
             topic: String::from("topic1"),
             partition: 0,
-            timestamp: 1745846213022.0,
+            timestamp: 1_745_846_213_022f64,
         };
         let mut expected_records = HashMap::new();
         expected_records.insert(String::from("topic1"), vec![record]);
 
         let expected = MSKEvent {
             event_source: String::from("aws:kafka"),
-            event_source_arn: String::from("arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2"),
+            event_source_arn: String::from(
+                "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+            ),
             records: expected_records,
         };
 
@@ -173,7 +175,7 @@ mod tests {
         assert_eq!(span.service, "msk");
         assert_eq!(span.r#type, "web");
         assert_eq!(span.resource, "topic1");
-        assert_eq!(span.start, 1745846213022000128);
+        assert_eq!(span.start, 1_745_846_213_022_000_128);
 
         assert_eq!(
             span.meta,

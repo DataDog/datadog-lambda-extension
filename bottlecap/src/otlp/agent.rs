@@ -1,9 +1,9 @@
 use axum::{
+    Router,
     extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
-    Router,
 };
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use serde_json::json;
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn test_parse_port_with_empty_endpoint() {
         // Test with an empty endpoint
-        let endpoint = Some("".to_string());
+        let endpoint = Some(String::new());
         assert_eq!(
             Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT

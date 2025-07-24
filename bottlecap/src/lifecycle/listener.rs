@@ -5,7 +5,7 @@ use ddcommon::hyper_migration;
 use ddcommon::hyper_migration::Body;
 use http_body_util::BodyExt;
 use hyper::service::service_fn;
-use hyper::{http, HeaderMap, Method, Response, StatusCode};
+use hyper::{HeaderMap, Method, Response, StatusCode, http};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io;

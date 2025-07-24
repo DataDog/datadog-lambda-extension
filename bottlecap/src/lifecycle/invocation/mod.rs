@@ -1,6 +1,6 @@
-use base64::{engine::general_purpose, DecodeError, Engine};
+use base64::{DecodeError, Engine, engine::general_purpose};
 use datadog_trace_protobuf::pb::Span;
-use rand::{rngs::OsRng, Rng, RngCore};
+use rand::{Rng, RngCore, rngs::OsRng};
 use std::collections::HashMap;
 
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
@@ -48,7 +48,7 @@ pub fn generate_span_id() -> u64 {
     }
 
     let mut rng = rand::thread_rng();
-    rng.gen()
+    rng.r#gen()
 }
 
 fn redact_value(key: &str, value: String) -> String {

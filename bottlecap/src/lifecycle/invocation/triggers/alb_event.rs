@@ -1,5 +1,5 @@
 use super::ServiceNameResolver;
-use crate::lifecycle::invocation::triggers::{Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG};
+use crate::lifecycle::invocation::triggers::{FUNCTION_TRIGGER_EVENT_SOURCE_TAG, Trigger};
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -133,7 +133,7 @@ mod tests {
                 ("x-forwarded-port".to_string(), "80".to_string()),
                 ("x-forwarded-proto".to_string(), "http".to_string()),
             ]),
-            multi_value_headers: Default::default(),
+            multi_value_headers: HashMap::default(),
         };
 
         assert_eq!(result, expected);

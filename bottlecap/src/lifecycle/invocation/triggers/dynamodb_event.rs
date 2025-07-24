@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -7,9 +7,9 @@ use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::S_TO_NS,
-    triggers::{ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG},
+    triggers::{FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger},
 };
-use crate::traces::span_pointers::{generate_span_pointer_hash, SpanPointer};
+use crate::traces::span_pointers::{SpanPointer, generate_span_pointer_hash};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct DynamoDbEvent {
@@ -92,7 +92,6 @@ impl Trigger for DynamoDbRecord {
             .get("Records")
             .and_then(Value::as_array)
             .and_then(|r| r.first())
-            .take()
         {
             first_record.get("dynamodb").is_some()
         } else {
@@ -249,7 +248,9 @@ mod tests {
             event_id: String::from("c4ca4238a0b923820dcc509a6f75849b"),
             event_name: String::from("INSERT"),
             event_version: String::from("1.1"),
-            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/ExampleTableWithStream/stream/2015-06-27T00:48:05.899"),
+            event_source_arn: String::from(
+                "arn:aws:dynamodb:us-east-1:123456789012:table/ExampleTableWithStream/stream/2015-06-27T00:48:05.899",
+            ),
         };
 
         assert_eq!(result, expected);
@@ -382,7 +383,9 @@ mod tests {
             event_id: String::from("abc123"),
             event_name: String::from("INSERT"),
             event_version: String::from("1.1"),
-            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+            event_source_arn: String::from(
+                "arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899",
+            ),
         };
 
         let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
@@ -410,7 +413,9 @@ mod tests {
             event_id: String::from("123abc"),
             event_name: String::from("INSERT"),
             event_version: String::from("1.1"),
-            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+            event_source_arn: String::from(
+                "arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899",
+            ),
         };
 
         let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
@@ -439,7 +444,9 @@ mod tests {
             event_id: String::from("123abc"),
             event_name: String::from("INSERT"),
             event_version: String::from("1.1"),
-            event_source_arn: String::from("arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899"),
+            event_source_arn: String::from(
+                "arn:aws:dynamodb:us-east-1:123456789012:table/TestTable/stream/2015-06-27T00:48:05.899",
+            ),
         };
 
         let span_pointers = event.get_span_pointers().expect("Should return Some(vec)");
