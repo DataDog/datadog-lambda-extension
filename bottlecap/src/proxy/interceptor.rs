@@ -389,6 +389,7 @@ fn build_proxy_request(
     Ok(request)
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use std::{
