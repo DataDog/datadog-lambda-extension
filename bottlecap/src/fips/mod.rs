@@ -26,10 +26,14 @@ pub fn runtime_layer_would_enable_fips_mode(region: &str) -> bool {
 pub fn check_fips_mode_mismatch(region: &str) {
     if runtime_layer_would_enable_fips_mode(region) {
         #[cfg(not(feature = "fips"))]
-        debug!("FIPS mode is disabled in this Extension layer but would be enabled in the runtime layer based on region and environment settings. Deploy the FIPS version of the Extension layer or set DD_LAMBDA_FIPS_MODE=false to ensure consistent FIPS behavior.");
+        debug!(
+            "FIPS mode is disabled in this Extension layer but would be enabled in the runtime layer based on region and environment settings. Deploy the FIPS version of the Extension layer or set DD_LAMBDA_FIPS_MODE=false to ensure consistent FIPS behavior."
+        );
     } else {
         #[cfg(feature = "fips")]
-        debug!("FIPS mode is enabled in this Extension layer but would be disabled in the runtime layer based on region and environment settings. Set DD_LAMBDA_FIPS_MODE=true or deploy the standard (non-FIPS) version of the Extension layer to ensure consistent FIPS behavior.");
+        debug!(
+            "FIPS mode is enabled in this Extension layer but would be disabled in the runtime layer based on region and environment settings. Set DD_LAMBDA_FIPS_MODE=true or deploy the standard (non-FIPS) version of the Extension layer to ensure consistent FIPS behavior."
+        );
     }
 }
 

@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::{debug, warn};
 
@@ -21,20 +21,19 @@ use crate::{
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
-        self,
+        self, CPUData, NetworkData,
         constants::{ETC_PATH, PROC_PATH},
-        CPUData, NetworkData,
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{
-            text_map_propagator::{
-                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-                DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY,
-            },
             DatadogCompositePropagator, Propagator,
+            text_map_propagator::{
+                DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY,
+                DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
+            },
         },
         trace_aggregator::SendDataBuilderInfo,
         trace_processor::{self, TraceProcessor},
@@ -371,7 +370,9 @@ impl Processor {
         status: Status,
     ) -> Option<Context> {
         let Some(context) = self.context_buffer.get_mut(request_id) else {
-            debug!("Cannot process on platform runtime done, no invocation context found for request_id: {request_id}");
+            debug!(
+                "Cannot process on platform runtime done, no invocation context found for request_id: {request_id}"
+            );
             return None;
         };
         context.runtime_done_received = true;
@@ -977,7 +978,7 @@ impl Processor {
 mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
 
@@ -1117,10 +1118,12 @@ mod tests {
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
-        assert!(!context
-            .invocation_span
-            .metrics
-            .contains_key(TAG_SAMPLING_PRIORITY));
+        assert!(
+            !context
+                .invocation_span
+                .metrics
+                .contains_key(TAG_SAMPLING_PRIORITY)
+        );
         assert_eq!(context.invocation_span.trace_id, 888);
         assert_eq!(context.invocation_span.parent_id, 999);
     }
@@ -1140,10 +1143,12 @@ mod tests {
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
-        assert!(!context
-            .invocation_span
-            .metrics
-            .contains_key(TAG_SAMPLING_PRIORITY));
+        assert!(
+            !context
+                .invocation_span
+                .metrics
+                .contains_key(TAG_SAMPLING_PRIORITY)
+        );
         assert_eq!(context.invocation_span.trace_id, 111);
         assert_eq!(context.invocation_span.parent_id, 222);
     }

@@ -10,8 +10,8 @@ use crate::lifecycle::invocation::{
     base64_to_string,
     processor::MS_TO_NS,
     triggers::{
-        event_bridge_event::EventBridgeEvent, ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY,
-        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
+        event_bridge_event::EventBridgeEvent,
     },
 };
 
@@ -74,7 +74,6 @@ impl Trigger for SnsRecord {
             .get("Records")
             .and_then(Value::as_array)
             .and_then(|r| r.first())
-            .take()
         {
             return first_record.get("Sns").is_some();
         }

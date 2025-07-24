@@ -701,9 +701,11 @@ mod tests {
         // Create a context with a cold start span
         let request_id_2 = String::from("2");
         let mut context_2 = Context::from_request_id(&request_id_2);
-        let mut cold_start_span = Span::default();
-        cold_start_span.name = "aws.lambda.cold_start".to_string();
-        cold_start_span.span_id = 12345;
+        let cold_start_span = Span {
+            name: "aws.lambda.cold_start".to_string(),
+            span_id: 12345,
+            ..Span::default()
+        };
         context_2.cold_start_span = Some(cold_start_span);
         buffer.insert(context_2);
 

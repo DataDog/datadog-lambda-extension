@@ -8,14 +8,13 @@ use tokio::{sync::Mutex, task::JoinSet};
 use tracing::{debug, error};
 
 use crate::{
-    config,
+    FLUSH_RETRY_COUNT, config,
     http::get_client,
     tags::provider,
     traces::{
-        proxy_aggregator::{Aggregator, ProxyRequest},
         DD_ADDITIONAL_TAGS_HEADER,
+        proxy_aggregator::{Aggregator, ProxyRequest},
     },
-    FLUSH_RETRY_COUNT,
 };
 
 #[derive(ThisError, Debug)]

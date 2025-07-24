@@ -5,7 +5,7 @@ use crate::events::Event;
 use crate::logs::{aggregator::Aggregator, processor::LogsProcessor};
 use crate::tags;
 use crate::telemetry::events::TelemetryEvent;
-use crate::{config, LAMBDA_RUNTIME_SLUG};
+use crate::{LAMBDA_RUNTIME_SLUG, config};
 
 #[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {

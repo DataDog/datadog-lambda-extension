@@ -79,9 +79,9 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
       # We need to do these separately because the fips feature is incompatible with the default feature.
       - working-directory: bottlecap
-        run: cargo clippy --workspace --features default
+        run: cargo clippy --workspace --all-targets --features default
       - working-directory: bottlecap
-        run: cargo clippy --workspace --no-default-features --features fips
+        run: cargo clippy --workspace --all-targets --no-default-features --features fips
 
   build-all:
     name: Build All

@@ -1,16 +1,16 @@
 #![allow(clippy::module_name_repetitions)]
-use base64::engine::general_purpose;
 use base64::Engine;
+use base64::engine::general_purpose;
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
-use serde_json::{from_slice, Value};
+use serde_json::{Value, from_slice};
 use std::collections::HashMap;
 use tracing::debug;
 
 use crate::lifecycle::invocation::{
     processor::S_TO_NS,
     triggers::{
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
     },
 };
 
@@ -62,7 +62,6 @@ impl Trigger for KinesisRecord {
             .get("Records")
             .and_then(Value::as_array)
             .and_then(|r| r.first())
-            .take()
         {
             first_record.get("kinesis").is_some()
         } else {

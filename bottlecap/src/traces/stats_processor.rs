@@ -55,7 +55,9 @@ impl StatsProcessor for ServerlessStatsProcessor {
             if let Ok(length_str) = content_length.to_str() {
                 if let Ok(length) = length_str.parse::<usize>() {
                     if length > MAX_CONTENT_LENGTH {
-                        let error_msg = format!("Content-Length {length} exceeds maximum allowed size {MAX_CONTENT_LENGTH}");
+                        let error_msg = format!(
+                            "Content-Length {length} exceeds maximum allowed size {MAX_CONTENT_LENGTH}"
+                        );
                         error!("{}", error_msg);
                         return Ok((StatusCode::PAYLOAD_TOO_LARGE, error_msg).into_response());
                     }

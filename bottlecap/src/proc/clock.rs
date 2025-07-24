@@ -1,4 +1,4 @@
-use nix::unistd::{sysconf, SysconfVar};
+use nix::unistd::{SysconfVar, sysconf};
 use std::io;
 
 #[allow(clippy::cast_sign_loss)]
