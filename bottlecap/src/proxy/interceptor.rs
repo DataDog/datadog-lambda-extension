@@ -1,10 +1,11 @@
 use crate::appsec;
 use crate::{
+    EXTENSION_HOST,
     appsec::processor::Processor as AppSecProcessor,
-    config::{aws::AwsConfig, Config},
+    config::{Config, aws::AwsConfig},
     http::extract_request_body,
     lifecycle::invocation::processor::Processor as InvocationProcessor,
-    lwa, EXTENSION_HOST,
+    lwa,
 };
 use axum::{
     Router,

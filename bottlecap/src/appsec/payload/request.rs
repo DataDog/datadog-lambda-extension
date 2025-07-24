@@ -1,7 +1,7 @@
-use super::{body::parse_body, ExtractRequest, HttpData, IsValid, RequestType};
+use super::{ExtractRequest, HttpData, IsValid, RequestType, body::parse_body};
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use aws_lambda_events::{
     alb, apigw, cloudwatch_events, cloudwatch_logs, dynamodb, eventbridge, kinesis,

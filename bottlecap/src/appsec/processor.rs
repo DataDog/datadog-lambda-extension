@@ -8,7 +8,7 @@ use crate::config::Config;
 
 use bytes::Bytes;
 use libddwaf::object::{WafMap, WafObject, WafOwned};
-use libddwaf::{waf_map, Builder, Config as WAFConfig, Context, Handle, RunResult};
+use libddwaf::{Builder, Config as WAFConfig, Context, Handle, RunResult, waf_map};
 use tracing::{debug, info, warn};
 /// The App & API Protection processor.
 ///
