@@ -494,7 +494,6 @@ dependencies = [
  "chrono",
  "datadog-fips",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
- "datadog-trace-agent",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
  "datadog-trace-protobuf",
@@ -756,28 +755,6 @@ dependencies = [
  "protobuf-codegen",
  "tonic",
  "tonic-build",
-]
-
-[[package]]
-name = "datadog-trace-agent"
-version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=d131de8419c191ce21c91bb30b5915c4d8a2cc5a#d131de8419c191ce21c91bb30b5915c4d8a2cc5a"
-dependencies = [
- "anyhow",
- "async-trait",
- "datadog-trace-normalization",
- "datadog-trace-obfuscation",
- "datadog-trace-protobuf",
- "datadog-trace-utils",
- "ddcommon",
- "http-body-util",
- "hyper 1.6.0",
- "hyper-util",
- "serde",
- "serde_json",
- "tokio",
- "tower 0.5.2",
- "tracing",
 ]
 
 [[package]]
