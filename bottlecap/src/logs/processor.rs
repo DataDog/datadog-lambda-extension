@@ -4,7 +4,7 @@ use tokio::sync::mpsc::Sender;
 use tracing::debug;
 
 use crate::config::processing_rule;
-use crate::events::Event;
+use crate::event_bus::Event;
 use crate::tags;
 use crate::telemetry::events::TelemetryEvent;
 use crate::{LAMBDA_RUNTIME_SLUG, config};

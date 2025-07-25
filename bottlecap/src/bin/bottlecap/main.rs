@@ -24,8 +24,7 @@ use bottlecap::{
         self, Config,
         aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
     },
-    event_bus::bus::EventBus,
-    events::Event,
+    event_bus::{Event, EventBus},
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
         flush_control::{FlushControl, FlushDecision},
@@ -817,9 +816,6 @@ async fn handle_event_bus_event(
     trace_agent_channel: Sender<SendDataBuilderInfo>,
 ) -> Option<TelemetryEvent> {
     match event {
-        Event::Metric(event) => {
-            debug!("Metric event: {:?}", event);
-        }
         Event::OutOfMemory(event_timestamp) => {
             let mut p = invocation_processor.lock().await;
             p.on_out_of_memory_error(event_timestamp);
