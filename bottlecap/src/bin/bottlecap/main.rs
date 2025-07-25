@@ -518,7 +518,7 @@ async fn extension_loop_active(
     );
 
     let api_runtime_proxy_shutdown_signal =
-        start_api_runtime_proxy(config, aws_config, &invocation_processor);
+        start_api_runtime_proxy(config, &aws_config, &invocation_processor);
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -1180,14 +1180,16 @@ fn start_otlp_agent(
 
 fn start_api_runtime_proxy(
     config: &Arc<Config>,
-    aws_config: Arc<AwsConfig>,
+    aws_config: &Arc<AwsConfig>,
     invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
 ) -> Option<CancellationToken> {
-    if !should_start_proxy(config, Arc::clone(&aws_config)) {
+    if !should_start_proxy(config, aws_config) {
         debug!("Skipping API runtime proxy, no LWA proxy or datadog wrapper found");
         return None;
     }
 
+    let config = config.clone();
+    let aws_config = aws_config.clone();
     let invocation_processor = invocation_processor.clone();
-    interceptor::start(aws_config, invocation_processor).ok()
+    interceptor::start(config, aws_config, invocation_processor).ok()
 }

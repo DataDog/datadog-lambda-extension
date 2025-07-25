@@ -1,6 +1,11 @@
+use crate::appsec;
 use crate::{
-    EXTENSION_HOST, config::aws::AwsConfig, http::extract_request_body,
-    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa,
+    EXTENSION_HOST,
+    appsec::processor::Processor as AppSecProcessor,
+    config::{Config, aws::AwsConfig},
+    http::extract_request_body,
+    lifecycle::invocation::processor::Processor as InvocationProcessor,
+    lwa,
 };
 use axum::{
     Router,
@@ -30,10 +35,12 @@ type InterceptorState = (
     Arc<AwsConfig>,
     Arc<Client<HttpConnector, Body>>,
     Arc<Mutex<InvocationProcessor>>,
+    Option<Arc<AppSecProcessor>>,
     Arc<Mutex<JoinSet<()>>>,
 );
 
 pub fn start(
+    config: Arc<Config>,
     aws_config: Arc<AwsConfig>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
@@ -48,15 +55,21 @@ pub fn start(
         .pool_max_idle_per_host(8)
         .build(connector);
 
+    let appsec_processor = if appsec::is_enabled(&config) {
+        Some(Arc::new(AppSecProcessor::new(config.as_ref())?))
+    } else {
+        None
+    };
+
     let tasks = Arc::new(Mutex::new(JoinSet::new()));
     let state: InterceptorState = (
         aws_config,
         Arc::new(client),
         invocation_processor,
-        tasks.clone(),
+        appsec_processor,
+        Arc::clone(&tasks),
     );
 
-    let tasks_clone = tasks.clone();
     let shutdown_token_clone = shutdown_token.clone();
     tokio::spawn(async move {
         let server = TcpListener::bind(&socket)
@@ -65,7 +78,7 @@ pub fn start(
         let router = make_router(state);
         debug!("PROXY | Starting API runtime proxy on {socket}");
         axum::serve(server, router)
-            .with_graceful_shutdown(graceful_shutdown(tasks_clone, shutdown_token_clone))
+            .with_graceful_shutdown(graceful_shutdown(tasks, shutdown_token_clone))
             .await
             .expect("Failed to start API runtime proxy");
     });
@@ -125,7 +138,9 @@ fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: Option<&String>) -
 
 async fn invocation_next_proxy(
     Path(api_version): Path<String>,
-    State((aws_config, client, invocation_processor, tasks)): State<InterceptorState>,
+    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+        InterceptorState,
+    >,
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_next_proxy | api_version: {api_version}");
@@ -147,12 +162,13 @@ async fn invocation_next_proxy(
                 error!("PROXY | passthrough_proxy | error proxying request: {e}");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to proxy request: {e}"),
+                    format!("Failed to build forward response: {e}"),
                 )
                     .into_response();
             }
         };
 
+    // LWA
     if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
         let mut tasks = tasks.lock().await;
 
@@ -167,6 +183,25 @@ async fn invocation_next_proxy(
             )
             .await;
         });
+    }
+
+    // K9 / ASM
+    if let Some(appsec_processor) = appsec_processor {
+        if let Some(request_id) = intercepted_parts
+            .headers
+            .get("Lambda-Runtime-Aws-Request-Id")
+        {
+            if let Ok(request_id) = request_id.to_str() {
+                if let Some(context) = appsec_processor
+                    .process_invocation_next(&intercepted_bytes)
+                    .await
+                {
+                    let invocation_processor = invocation_processor.clone();
+                    let mut invocation_processor = invocation_processor.lock().await;
+                    invocation_processor.bind_security_context(request_id, context);
+                }
+            }
+        }
     }
 
     match build_forward_response(intercepted_parts, intercepted_bytes) {
@@ -184,7 +219,9 @@ async fn invocation_next_proxy(
 
 async fn invocation_response_proxy(
     Path((api_version, request_id)): Path<(String, String)>,
-    State((aws_config, client, invocation_processor, tasks)): State<InterceptorState>,
+    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+        InterceptorState,
+    >,
     request: Request,
 ) -> Response {
     debug!(
@@ -201,6 +238,7 @@ async fn invocation_response_proxy(
         }
     };
 
+    // LWA
     if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
         let mut tasks = tasks.lock().await;
 
@@ -209,6 +247,17 @@ async fn invocation_response_proxy(
         tasks.spawn(async move {
             lwa::process_invocation_response(&invocation_processor, &body_bytes).await;
         });
+    }
+
+    // K9 / ASM
+    if let Some(appsec_processor) = appsec_processor {
+        let invocation_processor = invocation_processor.clone();
+        let mut invocation_processor = invocation_processor.lock().await;
+        if let Some(appsec_context) = invocation_processor.get_security_context_mut(&request_id) {
+            appsec_processor
+                .process_invocation_response(appsec_context, &body_bytes)
+                .await;
+        }
     }
 
     let (intercepted_parts, intercepted_bytes) =
@@ -238,7 +287,7 @@ async fn invocation_response_proxy(
 }
 
 async fn passthrough_proxy(
-    State((aws_config, client, _, _)): State<InterceptorState>,
+    State((aws_config, client, _, _, _)): State<InterceptorState>,
     request: Request,
 ) -> Response {
     let (parts, body_bytes) = match extract_request_body(request).await {
@@ -340,6 +389,7 @@ fn build_proxy_request(
     Ok(request)
 }
 
+#[allow(clippy::unwrap_used)]
 #[cfg(test)]
 mod tests {
     use std::{
@@ -411,8 +461,8 @@ mod tests {
             metrics_aggregator,
         )));
 
-        let proxy_handle =
-            start(aws_config, invocation_processor).expect("Failed to start API runtime proxy");
+        let proxy_handle = start(config.clone(), aws_config, invocation_processor)
+            .expect("Failed to start API runtime proxy");
         let https = HttpConnector::new();
         let client = Client::builder(hyper_util::rt::TokioExecutor::new())
             .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https);
@@ -444,5 +494,159 @@ mod tests {
         // Send shutdown signal to the proxy server
         proxy_handle.cancel();
         final_destination.abort();
+    }
+
+    #[tokio::test]
+    async fn test_proxy_with_appsec_enabled_and_valid_config() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        });
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "test-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:9001".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+        });
+
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            aws_config.clone(),
+            metrics_aggregator,
+        )));
+
+        // Should be able to start proxy successfully with valid AppSec config
+        let result = start(config, aws_config, invocation_processor);
+        assert!(result.is_ok());
+
+        // Clean up
+        if let Ok(handle) = result {
+            handle.cancel();
+        }
+    }
+
+    #[test]
+    fn test_proxy_with_appsec_enabled_and_invalid_rules() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some("/nonexistent/path/to/rules.json".to_string()),
+            ..Config::default()
+        });
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "test-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:9001".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+        });
+
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            aws_config.clone(),
+            metrics_aggregator,
+        )));
+
+        // Should fail to start proxy with invalid AppSec rules
+        let result = start(config, aws_config, invocation_processor);
+        assert!(result.is_err());
+
+        // The error should be related to AppSec processor initialization
+        let error = result.expect_err("Expected an error");
+        // The actual error message might vary, but it should indicate a file system issue
+        assert!(
+            error.to_string().contains("Failed to open")
+                || error.to_string().contains("No such file")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_proxy_with_appsec_disabled() {
+        let config = Arc::new(Config {
+            serverless_appsec_enabled: false,
+            ..Config::default()
+        });
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".to_string(),
+            function_name: "test-function".to_string(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "127.0.0.1:9001".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: None,
+            exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+        });
+
+        let tags_provider = Arc::new(Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+        let metrics_aggregator = Arc::new(Mutex::new(
+            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+        ));
+
+        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            aws_config.clone(),
+            metrics_aggregator,
+        )));
+
+        // Should be able to start proxy successfully with AppSec disabled
+        let result = start(config, aws_config, invocation_processor);
+        assert!(result.is_ok());
+
+        // Clean up
+        if let Ok(handle) = result {
+            handle.cancel();
+        }
+    }
+
+    #[test]
+    fn test_get_proxy_socket_address_with_lwa_proxy() {
+        let aws_lwa_proxy_lambda_runtime_api = Some("127.0.0.1:12345".to_string());
+        let socket_addr = get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api.as_ref());
+
+        // Should use the LWA proxy address
+        assert_eq!(socket_addr.to_string(), "127.0.0.1:12345");
+    }
+
+    #[test]
+    fn test_get_proxy_socket_address_without_lwa_proxy() {
+        let aws_lwa_proxy_lambda_runtime_api = None;
+        let socket_addr = get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api.as_ref());
+
+        // Should use the default interceptor address (0.0.0.0:9000)
+        assert_eq!(socket_addr.to_string(), "0.0.0.0:9000");
+    }
+
+    #[test]
+    fn test_get_proxy_socket_address_with_invalid_lwa_proxy() {
+        let aws_lwa_proxy_lambda_runtime_api = Some("invalid-address".to_string());
+        let socket_addr = get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api.as_ref());
+
+        // Should fall back to default interceptor address when LWA proxy is invalid
+        assert_eq!(socket_addr.to_string(), "0.0.0.0:9000");
     }
 }

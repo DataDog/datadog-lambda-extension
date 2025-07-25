@@ -37,7 +37,7 @@ rm -rf ${EXTENSION_PATH} 2>/dev/null
 
 cd $ROOT_DIR
 
-ALPINE=0
+ALPINE=${ALPINE:-0}
 ARCHITECTURE=$ARCHITECTURE ALPINE=$ALPINE FILE_SUFFIX=$FILE_SUFFIX .gitlab/scripts/compile_bottlecap.sh
 
 docker buildx build --platform linux/${ARCHITECTURE} \

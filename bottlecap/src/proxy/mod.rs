@@ -11,7 +11,7 @@ pub mod interceptor;
 /// - ASM is enabled and the `AWS_LAMBDA_EXEC_WRAPPER` environment variable is set to `/opt/datadog_wrapper`
 #[must_use]
 #[allow(clippy::module_name_repetitions)]
-pub fn should_start_proxy(config: &Arc<Config>, aws_config: Arc<AwsConfig>) -> bool {
+pub fn should_start_proxy(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> bool {
     let lwa_proxy_set = aws_config.aws_lwa_proxy_lambda_runtime_api.is_some();
     let datadog_wrapper_set = aws_config
         .exec_wrapper
@@ -42,7 +42,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
-        assert!(should_start_proxy(&config, aws_config));
+        assert!(should_start_proxy(&config, &aws_config));
     }
     #[test]
     fn test_should_start_proxy_lwa_proxy_set() {
@@ -56,7 +56,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
         });
-        assert!(should_start_proxy(&config, aws_config));
+        assert!(should_start_proxy(&config, &aws_config));
     }
 
     #[test]
@@ -74,7 +74,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
-        assert!(should_start_proxy(&config, aws_config));
+        assert!(should_start_proxy(&config, &aws_config));
     }
 
     #[test]
@@ -92,7 +92,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
         });
-        assert!(!should_start_proxy(&config, aws_config));
+        assert!(!should_start_proxy(&config, &aws_config));
     }
 
     #[test]
@@ -111,6 +111,6 @@ mod tests {
             // Datadog wrapper is not set, so we should not start the proxy
             exec_wrapper: Some("/opt/not_datadog".to_string()),
         });
-        assert!(!should_start_proxy(&config, aws_config));
+        assert!(!should_start_proxy(&config, &aws_config));
     }
 }

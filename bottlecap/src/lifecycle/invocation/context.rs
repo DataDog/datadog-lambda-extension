@@ -1,3 +1,5 @@
+use crate::appsec::processor::AppSecContext;
+use crate::lifecycle::invocation::processor::TAG_SAMPLING_PRIORITY;
 use crate::{
     lifecycle::invocation::processor::MS_TO_NS, metrics::enhanced::lambda::EnhancedMetricData,
     traces::context::SpanContext,
@@ -8,9 +10,9 @@ use std::{
 };
 
 use datadog_trace_protobuf::pb::Span;
-use tracing::debug;
+use tracing::{debug, warn};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Context {
     /// The timestamp when the context was created.
     created_at: i64,
@@ -38,6 +40,56 @@ pub struct Context {
     /// tracing.
     ///
     pub extracted_span_context: Option<SpanContext>,
+    /// The [`AppSecContext`] for this invocation, if one exists.
+    appsec_context: Option<AppSecContext>,
+}
+impl Context {
+    pub fn absorb_appsec_tags(&mut self) {
+        let Some(appsec_context) = self.appsec_context.as_mut() else {
+            // Nothing to do -- we don't have AppSec context data for this invocation.
+            return;
+        };
+
+        self.invocation_span
+            .metrics
+            .insert("_dd.appsec.enabled".to_string(), 1f64);
+
+        // Up-sert any attributes from the AppSec context into the invocation span. This includes
+        // synthetic attributes produced by the WAF (fingerprints, schemas, ...) as well as tracking
+        // spans expected by AAP. We do upsert to avoid overwriting anything previously set.
+        for (key, value) in appsec_context.tags() {
+            self.invocation_span
+                .meta
+                .entry(key.to_string())
+                .or_insert(value.to_string());
+        }
+
+        if !appsec_context.events.is_empty() {
+            self.invocation_span
+                .meta
+                .insert("appsec.event".to_string(), "true".to_string());
+            match serde_json::to_string(&appsec_context.events) {
+                Ok(encoded) => {
+                    self.invocation_span
+                        .meta
+                        .insert("_dd.appsec.json".to_string(), encoded);
+                }
+                Err(e) => {
+                    warn!("appsec: unable to encode WAF events: {e}");
+                }
+            }
+        }
+
+        // Note: We intentionally don't set `actor.ip` because we don't have a definitive signal here.
+
+        //TODO(romain.marcadier): Figure out whether we can set "_dd.runtime_family" here; and to what value.
+
+        if appsec_context.keep {
+            self.invocation_span
+                .metrics
+                .insert(TAG_SAMPLING_PRIORITY.to_string(), 2f64 /* USER_KEEP */);
+        }
+    }
 }
 
 /// Struct containing the information needed to reparent a span.
@@ -88,6 +140,7 @@ impl Default for Context {
             cold_start_span: None,
             tracer_span: None,
             extracted_span_context: None,
+            appsec_context: None,
         }
     }
 }
@@ -123,6 +176,9 @@ pub struct ContextBuffer {
     universal_instrumentation_start_events: VecDeque<UniversalInstrumentationData>,
     universal_instrumentation_end_events: VecDeque<UniversalInstrumentationData>,
     pub sorted_reparenting_info: VecDeque<ReparentingInfo>,
+
+    /// The buffer of appsec contexts that are bound before the corresponding [`Context`] is created.
+    appsec_contexts: VecDeque<(String, AppSecContext)>,
 }
 
 struct UniversalInstrumentationData {
@@ -148,27 +204,79 @@ impl ContextBuffer {
             universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
             universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
             sorted_reparenting_info: VecDeque::with_capacity(capacity),
+            appsec_contexts: VecDeque::with_capacity(capacity),
         }
     }
 
     /// Inserts a context into the buffer. If the buffer is full, the oldest `Context` is removed.
     ///
-    fn insert(&mut self, context: Context) {
+    fn insert(&mut self, mut context: Context) {
+        if let Some(i) = self
+            .appsec_contexts
+            .iter()
+            .position(|(id, _)| id == &context.request_id)
+        {
+            context.appsec_context = self.appsec_contexts.remove(i).map(|(_, c)| c);
+        }
+
         if self.size() == self.buffer.capacity() {
             self.buffer.pop_front();
-            self.buffer.push_back(context);
-        } else {
-            if self.get(&context.request_id).is_some() {
-                self.remove(&context.request_id);
-            }
-
-            self.buffer.push_back(context);
+        } else if self.get(&context.request_id).is_some() {
+            self.remove(&context.request_id);
         }
+        self.buffer.push_back(context);
+    }
+
+    /// Binds the provided security context to the invocation context for the given `request_id`.
+    pub fn bind_security_context(&mut self, request_id: &str, appsec_context: AppSecContext) {
+        // If we already have a [`Context`] for this `request_id`, we can just directly bind to it.
+        if let Some(context) = self.get_mut(request_id) {
+            context.appsec_context = Some(appsec_context);
+            return;
+        }
+
+        if self.appsec_contexts.len() == self.appsec_contexts.capacity() {
+            self.appsec_contexts.pop_front();
+        } else if let Some(i) = self
+            .appsec_contexts
+            .iter()
+            .position(|(id, _)| id == request_id)
+        {
+            self.appsec_contexts.remove(i);
+        }
+        self.appsec_contexts
+            .push_back((request_id.to_string(), appsec_context));
+    }
+
+    /// Retrieves the security context bound to the given `request_id`, if one exists.
+    pub fn get_security_context_mut(&mut self, request_id: &str) -> Option<&mut AppSecContext> {
+        // Try to get from the context buffer first; not using `get_mut` because this causes the borrow checker to
+        // consider `self` as mutably borrowed for the entire function call, preventing mutable access to
+        // `self.appsec_contexts`...
+        for context in &mut self.buffer {
+            if context.request_id == request_id {
+                return context.appsec_context.as_mut();
+            }
+        }
+
+        // If not found in context buffer, try the appsec_contexts buffer
+        self.appsec_contexts
+            .iter_mut()
+            .find_map(|(rid, ctx)| if rid == request_id { Some(ctx) } else { None })
     }
 
     /// Removes a context from the buffer. Returns the removed `Context` if found.
     ///
     pub fn remove(&mut self, request_id: &String) -> Option<Context> {
+        // Purge the associated AppSec context, if any exists.
+        if let Some(i) = self
+            .appsec_contexts
+            .iter()
+            .position(|(id, _)| id == request_id)
+        {
+            self.appsec_contexts.remove(i);
+        }
+
         if let Some(i) = self
             .buffer
             .iter()
@@ -184,7 +292,7 @@ impl ContextBuffer {
     /// Returns a reference to a `Context` from the buffer if found.
     ///
     #[must_use]
-    pub fn get(&self, request_id: &String) -> Option<&Context> {
+    pub fn get(&self, request_id: &str) -> Option<&Context> {
         self.buffer
             .iter()
             .find(|context| context.request_id == *request_id)
@@ -193,7 +301,7 @@ impl ContextBuffer {
     /// Returns a mutable reference to a `Context` from the buffer if found.
     ///
     #[must_use]
-    pub fn get_mut(&mut self, request_id: &String) -> Option<&mut Context> {
+    pub fn get_mut(&mut self, request_id: &str) -> Option<&mut Context> {
         self.buffer
             .iter_mut()
             .find(|context| context.request_id == *request_id)
@@ -423,6 +531,7 @@ impl ContextBuffer {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use crate::proc::{CPUData, NetworkData};
+    use bytes::Bytes;
     use std::collections::HashMap;
     use tokio::sync::watch;
 
@@ -772,5 +881,267 @@ mod tests {
         let result = buffer.pair_universal_instrumentation_start_event(&headers, &payload);
         assert!(result.is_some());
         assert_eq!(result.unwrap(), request_id2);
+    }
+
+    #[tokio::test]
+    async fn test_appsec_context_buffer_capacity() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.bind_security_context("2", ctx.clone());
+
+        // We replace the context for 1 three times, but that should not cause 2 to slip out of the buffer
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.bind_security_context("1", ctx.clone());
+
+        assert_eq!(buffer.appsec_contexts.len(), 2); // Capped
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "request 1 should still be in the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("2").is_some(),
+            "request 2 should still be in the buffer"
+        );
+
+        buffer.bind_security_context("3", ctx.clone());
+        // At this point, 2 should slip out of the buffer (1 was replaced later)
+        buffer.bind_security_context("4", ctx.clone());
+
+        assert_eq!(buffer.appsec_contexts.len(), 3); // Capped
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "request 1 should still be in the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("2").is_none(),
+            "request 2 should still have slipped out of the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("3").is_some(),
+            "request 3 should still be in the buffer"
+        );
+        assert!(
+            buffer.get_security_context_mut("4").is_some(),
+            "request 4 should still be in the buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_appsec_context_buffer_skip() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+        buffer.bind_security_context("1", ctx.clone());
+        assert!(
+            buffer.appsec_contexts.is_empty(),
+            "the appsec context buffer should have been skipped"
+        );
+
+        assert!(
+            buffer
+                .get("1")
+                .expect("should have a context for request 1")
+                .appsec_context
+                .is_some(),
+            "the appsec context should have been bound to the invocation context"
+        );
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "the appsec context should be available through the security context buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_appsec_context_hoist_from_buffer() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.bind_security_context("1", ctx.clone());
+        buffer.start_context("1", Span::default());
+
+        assert!(
+            buffer.appsec_contexts.is_empty(),
+            "the appsec context buffer should have been hoisted from the buffer"
+        );
+
+        assert!(
+            buffer
+                .get("1")
+                .expect("should have a context for request 1")
+                .appsec_context
+                .is_some(),
+            "the appsec context should have been bound to the invocation context"
+        );
+        assert!(
+            buffer.get_security_context_mut("1").is_some(),
+            "the appsec context should be available through the security context buffer"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_context_absorb_appsec_tags() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.appsec_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+        buffer.bind_security_context("1", ctx.clone());
+
+        let context = buffer
+            .get_mut("1")
+            .expect("should have a context for request 1");
+        context.absorb_appsec_tags();
+
+        assert_eq!(
+            context.invocation_span.meta,
+            HashMap::from([
+                ("_dd.appsec.fp.http.header".to_string(), "hdr-0000000010-40b52535-5-1e6648af".to_string()),
+                ("_dd.appsec.fp.http.network".to_string(), "net-1-1000000000".to_string()),
+                ("_dd.appsec.json".to_string(), "[\"{\\\"rule\\\":{\\\"id\\\":\\\"ua0-600-12x\\\",\\\"name\\\":\\\"Arachni\\\",\\\"tags\\\":{\\\"type\\\":\\\"attack_tool\\\",\\\"category\\\":\\\"attack_attempt\\\",\\\"confidence\\\":\\\"1\\\",\\\"module\\\":\\\"waf\\\",\\\"tool_name\\\":\\\"Arachni\\\",\\\"cwe\\\":\\\"200\\\",\\\"capec\\\":\\\"1000/118/169\\\"},\\\"on_match\\\":[]},\\\"rule_matches\\\":[{\\\"operator\\\":\\\"match_regex\\\",\\\"operator_value\\\":\\\"^Arachni\\\\\\\\/v\\\",\\\"parameters\\\":[{\\\"address\\\":\\\"server.request.headers.no_cookies\\\",\\\"key_path\\\":[\\\"user-agent\\\",\\\"0\\\"],\\\"value\\\":\\\"Arachni/v2\\\",\\\"highlight\\\":[\\\"Arachni/v\\\"]}]}]}\"]".to_string()),
+                ("_dd.origin".to_string(), "appsec".to_string()),
+                ("appsec.event".to_string(), "true".to_string()),
+                ("http.route".to_string(), "GET /httpapi/get".to_string()),
+                ("http.method".to_string(), "GET".to_string()),
+                ("http.request.headers.accept".to_string(), "*/*".to_string()),
+                ("http.request.headers.content-length".to_string(), "0".to_string()),
+                ("http.request.headers.host".to_string(), "x02yirxc7a.execute-api.sa-east-1.amazonaws.com".to_string()),
+                ("http.request.headers.user-agent".to_string(), "Arachni/v2".to_string()),
+                ("http.request.headers.x-amzn-trace-id".to_string(), "Root=1-613a52fb-4c43cfc95e0241c1471bfa05".to_string()),
+                ("http.request.headers.x-forwarded-for".to_string(), "38.122.226.210".to_string()),
+                ("http.url".to_string(), "/httpapi/get".to_string()),
+                ("network.client.ip".to_string(), "38.122.226.210".to_string()),
+                ("request_id".to_string(), "1".to_string()),
+            ])
+        );
+        assert_eq!(
+            context.invocation_span.metrics,
+            HashMap::from([
+                ("_dd.appsec.enabled".to_string(), 1f64),
+                (
+                    "_sampling_priority_v1".to_string(),
+                    2f64 /* USER_KEEP */
+                )
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_context_absorb_appsec_tags_no_event() {
+        let appsec = crate::appsec::processor::Processor::new(&crate::config::Config {
+            serverless_appsec_enabled: true,
+            ..crate::config::Config::default()
+        })
+        .expect("Failed to create appsec processor");
+
+        let ctx = appsec
+            .process_invocation_next(&Bytes::from_static(include_bytes!(
+                "../../../tests/payloads/api_gateway_http_event.json"
+            )))
+            .await
+            .expect("should have produced a security context");
+
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+        buffer.bind_security_context("1", ctx.clone());
+
+        let context = buffer
+            .get_mut("1")
+            .expect("should have a context for request 1");
+        context.absorb_appsec_tags();
+
+        assert_eq!(
+            context.invocation_span.meta,
+            HashMap::from([
+                (
+                    "_dd.appsec.fp.http.header".to_string(),
+                    "hdr-0000000010-47a6a72c-5-1e6648af".to_string()
+                ),
+                (
+                    "_dd.appsec.fp.http.network".to_string(),
+                    "net-1-1000000000".to_string()
+                ),
+                ("_dd.origin".to_string(), "appsec".to_string()),
+                ("http.method".to_string(), "GET".to_string()),
+                ("http.request.headers.accept".to_string(), "*/*".to_string()),
+                (
+                    "http.request.headers.user-agent".to_string(),
+                    "curl/7.64.1".to_string()
+                ),
+                (
+                    "http.request.headers.x-amzn-trace-id".to_string(),
+                    "Root=1-613a52fb-4c43cfc95e0241c1471bfa05".to_string()
+                ),
+                ("http.url".to_string(), "/httpapi/get".to_string()),
+                ("request_id".to_string(), "1".to_string()),
+            ])
+        );
+        assert_eq!(
+            context.invocation_span.metrics,
+            HashMap::from([("_dd.appsec.enabled".to_string(), 1f64)])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_context_absorb_appsec_tags_no_appsec_context() {
+        let mut buffer = ContextBuffer::with_capacity(3);
+        buffer.start_context("1", Span::default());
+
+        let context = buffer
+            .get_mut("1")
+            .expect("should have a context for request 1");
+        context.absorb_appsec_tags();
+
+        assert_eq!(
+            context.invocation_span.meta,
+            HashMap::from([("request_id".to_string(), "1".to_string()),])
+        );
+        assert!(context.invocation_span.metrics.is_empty());
     }
 }
