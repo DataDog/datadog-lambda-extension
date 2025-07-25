@@ -747,13 +747,13 @@ pub mod tests {
     fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT", "localhost:4138");
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                "localhost:4138",
+            );
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("otel".to_string())
-            );
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
             Ok(())
         });
     }
