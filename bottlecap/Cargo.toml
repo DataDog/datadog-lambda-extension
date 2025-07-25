@@ -45,6 +45,7 @@ serde-aux = { version = "4.7", default-features = false }
 opentelemetry-proto = { version = "0.29", features = ["trace", "with-serde", "gen-tonic"] }
 opentelemetry-semantic-conventions = { version = "0.29", features = ["semconv_experimental"] }
 rustls-native-certs = { version = "0.8.1", optional = true }
+axum = { version = "0.8.4", default-features = false, features = ["default"] }
 # If you are adding or updating a datadog-owned code dependency, please ensure
 # that it has a clippy.toml rule for disallowing the reqwest::Client::builder
 # method in favor of our
@@ -58,9 +59,7 @@ datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "8a
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "8a49c7df2d9cbf05118bfd5b85772676f71b34f2" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "8a49c7df2d9cbf05118bfd5b85772676f71b34f2"  }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
-datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
-axum = { version = "0.8.4", default-features = false, features = ["default"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }

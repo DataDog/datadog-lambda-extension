@@ -32,7 +32,6 @@ crc32fast,https://github.com/srijs/rust-crc32fast,MIT OR Apache-2.0,"Sam Rijs <s
 crypto-common,https://github.com/RustCrypto/traits,MIT OR Apache-2.0,RustCrypto Developers
 datadog-fips,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-fips Authors
 datadog-protos,https://github.com/DataDog/saluki,Apache-2.0,The datadog-protos Authors
-datadog-trace-agent,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-trace-agent Authors
 datadog-trace-normalization,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
 datadog-trace-obfuscation,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
 datadog-trace-protobuf,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
