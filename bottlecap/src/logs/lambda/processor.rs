@@ -6,7 +6,7 @@ use tracing::error;
 
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
-use crate::events::Event;
+use crate::event_bus::Event;
 use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
