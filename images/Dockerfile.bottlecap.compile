@@ -4,7 +4,7 @@ ARG PLATFORM
 ARG FIPS
 
 # Install dependencies
-RUN yum install -y curl clang make unzip cmake3 perl go
+RUN yum install -y curl clang compiler-rt make unzip cmake3 perl go
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
@@ -12,34 +12,34 @@ RUN chmod +x /install-protoc.sh && /install-protoc.sh
 
 # Install Rust Toolchain
 RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --profile minimal --default-toolchain stable-$PLATFORM-unknown-linux-gnu -y
+    sh -s -- --profile minimal \
+             --default-host $PLATFORM-unknown-linux-gnu \
+             --default-toolchain stable-$PLATFORM-unknown-linux-gnu \
+             --component rust-src \
+             -y
 ENV PATH=/root/.cargo/bin:$PATH
-RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-gnu
-
-# Copy source code
-RUN mkdir -p /tmp/dd
-COPY ./bottlecap/src /tmp/dd/bottlecap/src
-COPY ./bottlecap/build.rs /tmp/dd/bottlecap/build.rs
-COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
-COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 
 # Build the binary
-ENV RUSTFLAGS="-C panic=abort"
+ENV RUSTFLAGS="-Cpanic=abort"
 ENV AWS_LC_FIPS_SYS_CC=clang
 ENV AWS_LC_FIPS_SYS_CXX=clang++
 
 WORKDIR /tmp/dd/bottlecap
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=bind,source=.,target=/tmp/dd,rw \
+    --mount=type=cache,target=/tmp/dd/bottlecap/target \
     if [ "$FIPS" = "1" ]; then \
         export FEATURES=fips; \
     else \
         export FEATURES=default; \
     fi; \
-    cargo +stable build --no-default-features --features $FEATURES --release --target $PLATFORM-unknown-linux-gnu;
-RUN cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-gnu/release/bottlecap /tmp/dd/bottlecap/bottlecap
+    export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
+    cargo +stable build --verbose --locked --no-default-features --features $FEATURES --release && \
+    mkdir -p /tmp/out && cp /tmp/dd/bottlecap/target/release/bottlecap /tmp/out/bottlecap
 
 # Use smallest image possible
 FROM scratch
-COPY --from=compiler /tmp/dd/bottlecap/bottlecap /
+COPY --from=compiler /tmp/out/bottlecap /
 ENTRYPOINT ["/bottlecap"]
 

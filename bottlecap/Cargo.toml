@@ -61,6 +61,7 @@ dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d
 datadog-trace-agent = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a" }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
 axum = { version = "0.8.4", default-features = false, features = ["default"] }
+libddwaf = { version = "1.26.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "89c693078d392e344b594281c1e8f9f3f94685c0", default-features = false, features = ["serde", "static"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
@@ -78,6 +79,7 @@ name = "bottlecap"
 opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
+panic = "abort"
 
 [profile.release-alpine-arm64-fips]
 inherits = "release"
@@ -95,7 +97,22 @@ fips = [
     "datadog-trace-utils/fips",
     "dogstatsd/fips",
     "datadog-fips/fips",
+    "libddwaf/fips",
     "reqwest/rustls-tls-native-roots-no-provider",
     "rustls/fips",
     "rustls-native-certs",
 ]
+
+# libddwaf's bindgen uses `clang-sys` which by default dynamically opens
+# `libclang.so`; however this is not supported on Alpine Linux (the usual musl
+# target).
+# Enabling the `static` feature of `bindgen`/`clang-sys` creates additional
+# build requirements (`libLLVM.a`), which Alpine's `llvm-static` does not
+# provide (it has its content presented as many `libLLVM*.a` files). Disabling
+# statically linking to the C runtime alleviates this issue, but can result in
+# `proc-macro` not being usable; which notably causes doc tests to fail with
+# a big linker error.
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
