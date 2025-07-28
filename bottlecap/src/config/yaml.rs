@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
@@ -5,7 +6,8 @@ use crate::{
         Config, ConfigError, ConfigSource, ProcessingRule,
         additional_endpoints::deserialize_additional_endpoints,
         deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
-        deserialize_optional_bool_from_anything, deserialize_processing_rules,
+        deserialize_optional_bool_from_anything, deserialize_optional_duration_from_microseconds,
+        deserialize_optional_duration_from_seconds, deserialize_processing_rules,
         deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
@@ -91,6 +93,13 @@ pub struct YamlConfig {
     pub capture_lambda_payload_max_depth: Option<u32>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
+    pub appsec_rules: Option<String>,
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
+    pub appsec_waf_timeout: Option<Duration>,
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
+    pub api_security_sample_delay: Option<Duration>,
     pub extension_version: Option<String>,
 }
 
@@ -599,6 +608,9 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(config, yaml_config, capture_lambda_payload);
     merge_option_to_value!(config, yaml_config, capture_lambda_payload_max_depth);
     merge_option_to_value!(config, yaml_config, serverless_appsec_enabled);
+    merge_option!(config, yaml_config, appsec_rules);
+    merge_option_to_value!(config, yaml_config, appsec_waf_timeout);
+    merge_option_to_value!(config, yaml_config, api_security_sample_delay);
     merge_option!(config, yaml_config, extension_version);
 }
 
@@ -625,9 +637,11 @@ impl ConfigSource for YamlConfigSource {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+    use std::time::Duration;
 
     use crate::config::{flush_strategy::PeriodicStrategy, processing_rule::Kind};
 
@@ -758,6 +772,9 @@ lambda_proc_enhanced_metrics: false
 capture_lambda_payload: true
 capture_lambda_payload_max_depth: 5
 serverless_appsec_enabled: true
+appsec_rules: "/path/to/rules.json"
+appsec_waf_timeout: 1000000 # Microseconds
+api_security_sample_delay: 60 # Seconds
 extension_version: "compatibility"
 "#,
             )?;
@@ -880,7 +897,12 @@ extension_version: "compatibility"
                 lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
+
                 serverless_appsec_enabled: true,
+                appsec_rules: Some("/path/to/rules.json".to_string()),
+                appsec_waf_timeout: Duration::from_secs(1),
+                api_security_sample_delay: Duration::from_secs(60),
+
                 extension_version: Some("compatibility".to_string()),
             };
 

@@ -1,0 +1,381 @@
+use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::rc::Rc;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use datadog_trace_protobuf::pb::Span;
+use libddwaf::object::{WafMap, WafObject, WafOwned};
+use libddwaf::{Builder, Config as WafConfig, Handle};
+use tracing::{debug, info, warn};
+
+use crate::appsec::processor::context::Context;
+use crate::appsec::{is_enabled, is_standalone};
+use crate::config::Config;
+
+mod apisec;
+pub mod context;
+mod ruleset;
+
+pub struct Processor {
+    handle: Handle,
+    waf_timeout: Duration,
+    api_sec_sampler: Rc<Mutex<apisec::Sampler>>,
+    context_buffer: VecDeque<Context>,
+}
+impl Processor {
+    const CONTEXT_BUFFER_CAPACITY: usize = 5;
+
+    /// Creates a new [`Processor`] instance using the provided [`Config`].
+    ///
+    /// # Errors
+    /// - If [`Config::serverless_appsec_enabled`] is `false`;
+    /// - If the [`Config::appsec_rules`] points to a non-existent file;
+    /// - If the [`Config::appsec_rules`] points to a file that is not a valid JSON-encoded ruleset;
+    /// - If the in-app WAF fails to initialize, integrate the ruleset, or build the WAF instance.
+    pub fn new(cfg: &Config) -> Result<Self, Error> {
+        if !is_enabled(cfg) {
+            return Err(Error::FeatureDisabled);
+        }
+
+        debug!("aap: starting App & API Protection processor");
+        if is_standalone() {
+            info!(
+                "aap: starting App & API Protection in standalone mode. APM tracing will be disabled for this service."
+            );
+        }
+
+        let Some(mut builder) = Builder::new(&WafConfig::default()) else {
+            return Err(Error::WafBuilderCreationFailed);
+        };
+
+        let rules = Self::get_rules(cfg)?;
+        let mut diagnostics = WafOwned::<WafMap>::default();
+        if !builder.add_or_update_config("rules", &rules, Some(&mut diagnostics)) {
+            return Err(Error::WafRulesetLoadingError(diagnostics));
+        }
+        if let Some(version) = diagnostics.get(b"ruleset_version").and_then(|o| o.to_str()) {
+            debug!("aap: loaded ruleset version {version}");
+        }
+
+        let Some(handle) = builder.build() else {
+            return Err(Error::WafInitializationFailed);
+        };
+
+        Ok(Self {
+            handle,
+            waf_timeout: cfg.appsec_waf_timeout,
+            api_sec_sampler: Rc::new(Mutex::new(apisec::Sampler::with_interval(
+                cfg.api_security_sample_delay,
+            ))),
+            context_buffer: VecDeque::with_capacity(Self::CONTEXT_BUFFER_CAPACITY),
+        })
+    }
+
+    /// Process the intercepted payload for the next invocation.
+    pub fn process_invocation_next(&mut self, rid: &str, body: &dyn InvocationPayload) {
+        self.new_context(rid).run(body);
+    }
+
+    /// Process the intercepted payload for the result of an invocation.
+    pub fn process_invocation_result(&mut self, rid: &str, body: &dyn InvocationPayload) {
+        // Taking the sampler first, as it implies a temporary immutable borrow...
+        let sampler = self.api_sec_sampler.clone();
+        let Ok(mut sampler) = sampler.lock() else {
+            warn!(
+                "aap: API Security sampler was panic-poisoned, skipping API Security sampling decision..."
+            );
+            return;
+        };
+
+        let Some(ctx) = self.get_context_mut(rid) else {
+            // Nothing to do...
+            return;
+        };
+        ctx.run(body);
+
+        let (method, route, status_code) = ctx.endpoint_info();
+        if sampler.decision_for(&method, &route, &status_code) {
+            debug!(
+                "aap: extracing API Security schema for request <{method}, {route}, {status_code}>"
+            );
+            ctx.extract_schemas();
+        }
+    }
+
+    /// Processes an intercepted [`Span`].
+    pub fn process_span(&self, span: &mut Span) {
+        let Some(rid) = span.meta.get("request_id") else {
+            // Can't match this to a request ID, nothing to do...
+            return;
+        };
+        let Some(ctx) = self.get_context(rid) else {
+            // Nothing to do...
+            return;
+        };
+        ctx.process_span(span);
+    }
+
+    /// Parses the App & API Protection ruleset from the provided [`Config`], or
+    /// the default built-in ruleset if the [`Config::appsec_rules`] field is
+    /// [`None`].
+    fn get_rules(cfg: &Config) -> Result<WafMap, Error> {
+        if let Some(ref rules) = cfg.appsec_rules {
+            let file = File::open(rules).map_err(|e| Error::AppsecRulesError(rules.clone(), e))?;
+            serde_json::from_reader(file)
+        } else {
+            serde_json::from_reader(ruleset::default_recommended_ruleset())
+        }
+        .map_err(Error::WafRulesetParseError)
+    }
+
+    /// Creates a new [`Context`] for the given request ID, and tracks it in the
+    /// context buffer.
+    fn new_context(&mut self, rid: &str) -> &mut Context {
+        if let Some(idx) = self.context_buffer.iter().position(|c| c.rid == rid) {
+            // This request ID was already seen, remove it from the buffer...
+            self.context_buffer.remove(idx);
+        } else if self.context_buffer.len() == self.context_buffer.capacity() {
+            // We're at capacity, remove the oldest context before proceeding...
+            self.context_buffer.pop_front();
+        }
+
+        // Insert the new context at the back of the buffer.
+        self.context_buffer.push_back(Context::new(
+            rid.to_string(),
+            &mut self.handle,
+            self.waf_timeout,
+        ));
+        // Retrieve a mutable reference to it from the buffer.
+        self.context_buffer
+            .back_mut()
+            .expect("should have at least one element")
+    }
+
+    /// Retrieves the [`Context`] associated with the given request ID, if there
+    /// is one.
+    fn get_context(&self, rid: &str) -> Option<&Context> {
+        self.context_buffer.iter().find(|c| c.rid == rid)
+    }
+
+    /// Retrieves the [`Context`] associated with the given request ID, if there
+    /// is one.
+    fn get_context_mut(&mut self, rid: &str) -> Option<&mut Context> {
+        self.context_buffer.iter_mut().find(|c| c.rid == rid)
+    }
+}
+impl std::fmt::Debug for Processor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Processor")
+            .field("waf_timeout", &self.waf_timeout)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Error conditions that can arise from calling [`Processor::new`].
+#[derive(Debug)]
+pub enum Error {
+    /// The App & API Protection feature is not enabled
+    FeatureDisabled,
+    /// The WAF builder could not be created (unlikely)
+    WafBuilderCreationFailed,
+    /// The user-configured App & API Protection ruleset file could not be read
+    AppsecRulesError(String, std::io::Error),
+    /// The App & API Protection ruleset could not be parsed from JSON
+    WafRulesetParseError(serde_json::Error),
+    /// The App & API Protection ruleset could not be loaded into the WAF
+    WafRulesetLoadingError(WafOwned<WafMap>),
+    /// The WAF initialization produced a [`None`] handle (this happens when the
+    /// configured ruleset contains no active rule nor processor)
+    WafInitializationFailed,
+}
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FeatureDisabled => write!(f, "aap: feature is not enabled"),
+            Self::WafBuilderCreationFailed => write!(f, "aap: failed to create WAF builder"),
+            Self::AppsecRulesError(path, e) => {
+                write!(f, "aap: failed to open rules file {path:#?}: {e}")
+            }
+            Self::WafRulesetParseError(e) => write!(f, "aap: failed to parse ruleset: {e}"),
+            Self::WafRulesetLoadingError(diag) => {
+                write!(f, "aap: failed to load ruleset: {diag:?}")
+            }
+            Self::WafInitializationFailed => write!(
+                f,
+                "aap: failed to initialize WAF (is there any active rule or processor in the ruleset?)"
+            ),
+        }
+    }
+}
+impl std::error::Error for Error {}
+
+/// A trait representing the general payload of an invocation event. All
+/// fields are optional and default to [`None`] or empty [`HashMap`]s.
+pub trait InvocationPayload {
+    /// The raw URI of the request (query string excluded).
+    fn raw_uri(&self) -> Option<String> {
+        None
+    }
+    /// The HTTP method for the request (e.g. `GET`, `POST`, etc.).
+    fn method(&self) -> Option<String> {
+        None
+    }
+    /// The route for the request (e.g. `/api/v1/users/{id}`).
+    fn route(&self) -> Option<String> {
+        None
+    }
+    /// The Client IP for the request (e.g. `127.0.0.1`).
+    fn client_ip(&self) -> Option<String> {
+        None
+    }
+    /// The multi-value headers for the request, without the cookies.
+    fn request_headers_no_cookies(&self) -> HashMap<String, Vec<String>> {
+        HashMap::default()
+    }
+    /// The cookies for the request.
+    fn request_cookies(&self) -> HashMap<String, Vec<String>> {
+        HashMap::default()
+    }
+    /// The query string parameters for the request.
+    fn query_params(&self) -> HashMap<String, Vec<String>> {
+        HashMap::default()
+    }
+    /// The path parameters for the request.
+    fn path_params(&self) -> HashMap<String, String> {
+        HashMap::default()
+    }
+    /// The body payload of the request encoded as a [`WafObject`].
+    fn request_body(&self) -> Option<WafObject> {
+        None
+    }
+
+    /// The status code of the response (e.g, 200, 404, etc...).
+    fn response_status_code(&self) -> Option<i64> {
+        None
+    }
+    /// The headers for the response, without the cookies.
+    fn response_headers_no_cookies(&self) -> HashMap<String, Vec<String>> {
+        HashMap::default()
+    }
+    /// The body payload of the response encoded as a [`WafObject`].
+    fn response_body(&self) -> Option<WafObject> {
+        None
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+
+    use super::*;
+
+    #[test]
+    fn test_new_with_default_config() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let _ = Processor::new(&config).expect("Should not fail");
+    }
+
+    #[test]
+    fn test_new_disabled() {
+        let config = Config {
+            serverless_appsec_enabled: false, // Explicitly testing this condition
+            ..Config::default()
+        };
+        assert!(matches!(
+            Processor::new(&config),
+            Err(Error::FeatureDisabled)
+        ));
+    }
+
+    #[test]
+    fn test_new_with_invalid_config() {
+        let tmp = tempfile::NamedTempFile::new().expect("Failed to create tempfile");
+
+        let config = Config {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some(
+                tmp.path()
+                    .to_str()
+                    .expect("Failed to get tempfile path")
+                    .to_string(),
+            ),
+            ..Config::default()
+        };
+        assert!(matches!(
+            Processor::new(&config),
+            Err(Error::WafRulesetParseError(_))
+        ));
+    }
+
+    #[test]
+    fn test_new_with_no_rules_or_processors() {
+        let mut tmp = tempfile::NamedTempFile::new().expect("Failed to create tempfile");
+        tmp.write_all(
+            br#"{
+                "version": "2.2",
+                "metadata":{
+                    "ruleset_version": "0.0.0-blank"
+                },
+                "scanners":[{
+                    "id": "406f8606-52c4-4663-8db9-df70f9e8766c",
+                    "name": "ZIP Code",
+                    "key": {
+                        "operator": "match_regex",
+                        "parameters": {
+                            "regex": "\\b(?:zip|postal)\\b",
+                            "options": {
+                                "case_sensitive": false,
+                                "min_length": 3
+                            }
+                        }
+                    },
+                    "value": {
+                        "operator": "match_regex",
+                        "parameters": {
+                            "regex": "^[0-9]{5}(?:-[0-9]{4})?$",
+                            "options": {
+                                "case_sensitive": true,
+                                "min_length": 5
+                            }
+                        }
+                    },
+                    "tags": {
+                        "type": "zipcode",
+                        "category": "address"
+                    }
+                }]
+            }"#,
+        )
+        .expect("Failed to write to temp file");
+        tmp.flush().expect("Failed to flush temp file");
+
+        let config = Config {
+            serverless_appsec_enabled: true,
+            appsec_rules: Some(
+                tmp.path()
+                    .to_str()
+                    .expect("Failed to get tempfile path")
+                    .to_string(),
+            ),
+            ..Config::default()
+        };
+        let result = Processor::new(&config);
+        assert!(
+            matches!(
+                result,
+                Err(Error::WafInitializationFailed), // There is no rule nor processor in the ruleset
+            ),
+            concat!(
+                "should have failed with ",
+                stringify!(Error::WafCreationFailed),
+                " but was {:?}"
+            ),
+            result
+        );
+    }
+}
