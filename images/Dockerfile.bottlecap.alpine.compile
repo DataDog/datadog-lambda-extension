@@ -4,7 +4,7 @@ ARG PLATFORM
 ARG FIPS
 
 # Install dependencies
-RUN apk add --no-cache bash build-base clang-libclang curl go perl unzip
+RUN apk add --no-cache bash build-base clang-libclang cmake curl go perl unzip
 
 SHELL ["/bin/bash", "-c"]
 
