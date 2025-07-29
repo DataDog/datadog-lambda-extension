@@ -4,7 +4,8 @@ ARG PLATFORM
 ARG FIPS
 
 # Install dependencies
-RUN yum install -y curl clang compiler-rt make unzip cmake3 perl go
+RUN --mount=type=cache,target=/var/cache/yum \
+    yum install -y clang cmake3 compiler-rt curl go make perl unzip
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
@@ -13,11 +14,11 @@ RUN chmod +x /install-protoc.sh && /install-protoc.sh
 # Install Rust Toolchain
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal \
-             --default-host $PLATFORM-unknown-linux-gnu \
-             --default-toolchain stable-$PLATFORM-unknown-linux-gnu \
+             --default-host "${PLATFORM}-unknown-linux-gnu" \
+             --default-toolchain "stable-${PLATFORM}-unknown-linux-gnu" \
              --component rust-src \
              -y
-ENV PATH=/root/.cargo/bin:$PATH
+ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
 ENV RUSTFLAGS="-Cpanic=abort"
@@ -29,14 +30,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=bind,source=.,target=/tmp/dd,rw \
     --mount=type=cache,target=/tmp/dd/bottlecap/target \
-    if [ "$FIPS" = "1" ]; then \
+    if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
     else \
         export FEATURES=default; \
     fi; \
+    # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
+    # this is not presented to the linker by default on this platform, so we force it in.
     export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
-    cargo +stable build --verbose --locked --no-default-features --features $FEATURES --release && \
-    mkdir -p /tmp/out && cp /tmp/dd/bottlecap/target/release/bottlecap /tmp/out/bottlecap
+    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" --release && \
+    mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/release/bottlecap" /tmp/out/bottlecap
 
 # Use smallest image possible
 FROM scratch

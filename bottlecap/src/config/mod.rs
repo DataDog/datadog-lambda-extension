@@ -447,13 +447,6 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
         ));
     }
 
-    if config.serverless_appsec_enabled {
-        log_fallback_reason("appsec_enabled");
-        return Err(ConfigError::UnsupportedField(
-            "serverless_appsec_enabled".to_string(),
-        ));
-    }
-
     // OTLP
     let has_otlp_config = config
         .otlp_config_receiver_protocols_grpc_endpoint
@@ -657,10 +650,12 @@ pub mod tests {
 
     use super::*;
 
-    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
-    use crate::config::log_level::LogLevel;
-    use crate::config::processing_rule;
-    use crate::config::trace_propagation_style::TracePropagationStyle;
+    use crate::config::{
+        flush_strategy::{FlushStrategy, PeriodicStrategy},
+        log_level::LogLevel,
+        processing_rule::ProcessingRule,
+        trace_propagation_style::TracePropagationStyle,
+    };
 
     #[test]
     fn test_reject_on_opted_out() {
@@ -798,13 +793,13 @@ pub mod tests {
     fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                "localhost:4138",
+            );
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("serverless_appsec_enabled".to_string())
-            );
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
             Ok(())
         });
     }
