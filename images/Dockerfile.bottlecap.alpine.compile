@@ -16,15 +16,14 @@ RUN apk add --no-cache protoc
 RUN set -euo pipefail && \
     curl https://sh.rustup.rs -sSf | \
         sh -s -- --profile minimal \
-                 --default-host $PLATFORM-unknown-linux-musl \
-                 --default-toolchain stable-$PLATFORM-unknown-linux-musl \
+                 --default-host "${PLATFORM}-unknown-linux-musl" \
+                 --default-toolchain "stable-${PLATFORM}-unknown-linux-musl" \
                  --component rust-src \
                  -y
-ENV PATH=$PATH:/root/.cargo/bin
+ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
-# Added `-C link-arg=-lgcc` for alpine.
-ENV RUSTFLAGS="-C panic=abort -C link-arg=-lgcc"
+ENV RUSTFLAGS="-Cpanic=abort"
 # Added -Ctarget-feature=-crt-static for alpine: the default MUSL target is
 # configured to produce fully static binaries, hence incapable of dynamically
 # loading libraries. The libddwaf crate uses `bindgen` which by default
@@ -37,9 +36,9 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=bind,source=.,target=/tmp/dd,rw \
     --mount=type=cache,target=/tmp/dd/bottlecap/target \
-    if [ "$FIPS" = "1" ]; then \
+    if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
-        if [ "$PLATFORM" = "aarch64" ]; then \
+        if [ "${PLATFORM}" = "aarch64" ]; then \
             export PROFILE="release-alpine-arm64-fips"; \
         fi \
     else \
@@ -51,8 +50,11 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     # work with `-Ctarget-feature=-crt-runtime` being specified. There is
     # currently no way to set `RUSTFLAGS` for `build.rs` compilation if
     # `--target` is passed (see: https://github.com/rust-lang/cargo/issues/4423).
-    cargo +stable build --verbose --locked --no-default-features --features $FEATURES --release && \
-    mkdir -p /tmp/out && cp /tmp/dd/bottlecap/target/release/bottlecap /tmp/out/bottlecap
+    cargo +stable build --verbose --locked --no-default-features \
+        --features="${FEATURES}" \
+        --profile="${PROFILE:-release}" && \
+    mkdir -p /tmp/out && \
+    cp "/tmp/dd/bottlecap/target/${PROFILE:-release}/bottlecap" /tmp/out/bottlecap
 
 # Use the smallest image possible
 FROM scratch
