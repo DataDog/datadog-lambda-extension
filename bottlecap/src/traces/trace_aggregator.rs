@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 /// that the Datadog Trace API accepts. The value is 3.2 MB.
 ///
 /// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
-pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
+pub const MAX_CONTENT_SIZE_BYTES: usize = 3_200_000;
 
 // Bundle SendDataBuilder with payload size because SendDataBuilder doesn't
 // expose a getter for the size
