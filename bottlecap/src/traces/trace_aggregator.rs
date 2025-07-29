@@ -20,6 +20,7 @@ impl SendDataBuilderInfo {
     }
 }
 
+/// Takes in individual trace payloads and aggregates them into batches to be flushed to Datadog.
 #[allow(clippy::module_name_repetitions)]
 pub struct TraceAggregator {
     queue: VecDeque<SendDataBuilderInfo>,
@@ -48,10 +49,12 @@ impl TraceAggregator {
         }
     }
 
+    /// Takes in an individual trace payload.
     pub fn add(&mut self, payload_info: SendDataBuilderInfo) {
         self.queue.push_back(payload_info);
     }
 
+    /// Returns a batch of trace payloads, subject to the max content size.
     pub fn get_batch(&mut self) -> Vec<SendDataBuilder> {
         let mut batch_size = 0;
 

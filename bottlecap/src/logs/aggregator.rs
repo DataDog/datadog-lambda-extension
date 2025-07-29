@@ -3,6 +3,7 @@ use tracing::warn;
 
 use crate::logs::constants;
 
+/// Takes in log payloads and aggregates them into larger batches to be flushed to Datadog.
 #[derive(Debug, Clone)]
 pub struct Aggregator {
     messages: VecDeque<String>,
@@ -41,12 +42,14 @@ impl Aggregator {
         }
     }
 
+    /// Takes in a batch of log payloads.
     pub fn add_batch(&mut self, logs: Vec<String>) {
         for log in logs {
             self.messages.push_back(log);
         }
     }
 
+    /// Returns a batch of log payloads, subject to the max content size.
     pub fn get_batch(&mut self) -> Vec<u8> {
         self.buffer.extend(b"[");
 
