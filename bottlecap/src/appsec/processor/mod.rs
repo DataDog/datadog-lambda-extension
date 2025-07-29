@@ -1,17 +1,19 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
-use std::rc::Rc;
-use std::sync::Mutex;
+use std::io::Read;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use datadog_trace_protobuf::pb::Span;
-use libddwaf::object::{WafMap, WafObject, WafOwned};
+use itertools::Itertools;
+use libddwaf::object::{WafMap, WafOwned};
 use libddwaf::{Builder, Config as WafConfig, Handle};
 use tracing::{debug, info, warn};
 
 use crate::appsec::processor::context::Context;
 use crate::appsec::{is_enabled, is_standalone};
 use crate::config::Config;
+use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 
 mod apisec;
 pub mod context;
@@ -20,7 +22,7 @@ mod ruleset;
 pub struct Processor {
     handle: Handle,
     waf_timeout: Duration,
-    api_sec_sampler: Rc<Mutex<apisec::Sampler>>,
+    api_sec_sampler: Arc<Mutex<apisec::Sampler>>, // Must be [`Arc`] so [`Processor`] can be [`Send`].
     context_buffer: VecDeque<Context>,
 }
 impl Processor {
@@ -65,7 +67,7 @@ impl Processor {
         Ok(Self {
             handle,
             waf_timeout: cfg.appsec_waf_timeout,
-            api_sec_sampler: Rc::new(Mutex::new(apisec::Sampler::with_interval(
+            api_sec_sampler: Arc::new(Mutex::new(apisec::Sampler::with_interval(
                 cfg.api_security_sample_delay,
             ))),
             context_buffer: VecDeque::with_capacity(Self::CONTEXT_BUFFER_CAPACITY),
@@ -73,12 +75,12 @@ impl Processor {
     }
 
     /// Process the intercepted payload for the next invocation.
-    pub fn process_invocation_next(&mut self, rid: &str, body: &dyn InvocationPayload) {
+    pub fn process_invocation_next(&mut self, rid: &str, body: impl InvocationPayload) {
         self.new_context(rid).run(body);
     }
 
     /// Process the intercepted payload for the result of an invocation.
-    pub fn process_invocation_result(&mut self, rid: &str, body: &dyn InvocationPayload) {
+    pub fn process_invocation_result(&mut self, rid: &str, body: impl InvocationPayload) {
         // Taking the sampler first, as it implies a temporary immutable borrow...
         let sampler = self.api_sec_sampler.clone();
         let Ok(mut sampler) = sampler.lock() else {
@@ -246,7 +248,7 @@ pub trait InvocationPayload {
         HashMap::default()
     }
     /// The body payload of the request encoded as a [`WafObject`].
-    fn request_body(&self) -> Option<WafObject> {
+    fn request_body<'a>(&'a self) -> Option<Box<dyn Read + 'a>> {
         None
     }
 
@@ -259,8 +261,280 @@ pub trait InvocationPayload {
         HashMap::default()
     }
     /// The body payload of the response encoded as a [`WafObject`].
-    fn response_body(&self) -> Option<WafObject> {
+    fn response_body<'a>(&'a self) -> Option<Box<dyn Read + 'a>> {
         None
+    }
+}
+
+impl InvocationPayload for IdentifiedTrigger {
+    fn raw_uri(&self) -> Option<String> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => Some(
+                if t.request_context.stage.is_empty() || t.request_context.stage == "$default" {
+                    format!(
+                        "{domain}{path}",
+                        domain = t.request_context.domain_name,
+                        path = t.request_context.http.path
+                    )
+                } else {
+                    format!(
+                        "{domain}/${stage}{path}",
+                        domain = t.request_context.domain_name,
+                        stage = t.request_context.stage,
+                        path = t.request_context.http.path
+                    )
+                },
+            ),
+            Self::APIGatewayRestEvent(t) => Some(
+                if t.request_context.stage.is_empty() || t.request_context.stage == "$default" {
+                    format!(
+                        "{domain}{path}",
+                        domain = t.request_context.domain_name,
+                        path = t.request_context.path
+                    )
+                } else {
+                    format!(
+                        "{domain}/${stage}{path}",
+                        domain = t.request_context.domain_name,
+                        stage = t.request_context.stage,
+                        path = t.request_context.path
+                    )
+                },
+            ),
+            Self::APIGatewayWebSocketEvent(t) => Some(
+                if t.request_context.stage.is_empty() || t.request_context.stage == "$default" {
+                    format!(
+                        "{domain}{path}",
+                        domain = t.request_context.domain_name,
+                        path = t.path.as_ref().map_or("", |s| s.as_str())
+                    )
+                } else {
+                    format!(
+                        "{domain}/${stage}{path}",
+                        domain = t.request_context.domain_name,
+                        stage = t.request_context.stage,
+                        path = t.path.as_ref().map_or("", |s| s.as_str())
+                    )
+                },
+            ),
+
+            #[allow(clippy::match_same_arms)]
+            Self::ALBEvent(_) => None,
+            Self::LambdaFunctionUrlEvent(t) => Some(format!(
+                "{domain}{path}",
+                domain = t.request_context.domain_name,
+                path = t.request_context.http.path
+            )),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => None,
+        }
+    }
+    fn method(&self) -> Option<String> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => Some(t.request_context.http.method.clone()),
+            Self::APIGatewayRestEvent(t) => Some(t.request_context.method.clone()),
+            Self::APIGatewayWebSocketEvent(t) => t.request_context.http_method.clone(),
+            Self::ALBEvent(t) => Some(t.http_method.clone()),
+            Self::LambdaFunctionUrlEvent(t) => Some(t.request_context.http.method.clone()),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => None,
+        }
+    }
+    fn route(&self) -> Option<String> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => Some(t.route_key.clone()),
+            Self::APIGatewayRestEvent(t) => Some(format!(
+                "{method} {resource}",
+                method = t.request_context.method,
+                resource = t.request_context.resource_path
+            )),
+            Self::APIGatewayWebSocketEvent(t) => Some(t.request_context.route_key.clone()),
+            Self::ALBEvent(t) => Some(format!(
+                "{method} {path}",
+                method = t.http_method,
+                path = t.path.as_ref().map_or("", |s| s.as_str()),
+            )),
+            Self::LambdaFunctionUrlEvent(t) => Some(format!(
+                "{method} {path}",
+                method = t.request_context.http.method,
+                path = t.request_context.http.path
+            )),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => None,
+        }
+    }
+    fn client_ip(&self) -> Option<String> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => Some(t.request_context.http.source_ip.clone()),
+            Self::APIGatewayRestEvent(t) => Some(t.request_context.identity.source_ip.clone()),
+            Self::APIGatewayWebSocketEvent(t) => t.request_context.identity.source_ip.clone(),
+            #[allow(clippy::match_same_arms)]
+            Self::ALBEvent(_) => None, // TODO: Can we extract from the headers instead?
+            Self::LambdaFunctionUrlEvent(t) => Some(t.request_context.http.source_ip.clone()),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => None,
+        }
+    }
+    fn request_headers_no_cookies(&self) -> HashMap<String, Vec<String>> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => t
+                .headers
+                .iter()
+                .map(|(k, v)| (k.clone(), vec![v.clone()]))
+                .collect(),
+            Self::APIGatewayRestEvent(t) => todo!(),
+            Self::APIGatewayWebSocketEvent(t) => todo!(),
+            Self::ALBEvent(t) => todo!(),
+            Self::LambdaFunctionUrlEvent(t) => todo!(),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => HashMap::default(),
+        }
+    }
+    fn request_cookies(&self) -> HashMap<String, Vec<String>> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => t
+                .cookies
+                .as_ref()
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|c| c.split_once('='))
+                        .chunk_by(|(k, _)| (*k).to_string())
+                        .into_iter()
+                        .map(|(k, v)| (k, v.into_iter().map(|(_, v)| v.to_string()).collect()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            Self::APIGatewayRestEvent(t) => todo!(),
+            Self::APIGatewayWebSocketEvent(t) => todo!(),
+            Self::ALBEvent(t) => todo!(),
+            Self::LambdaFunctionUrlEvent(t) => todo!(),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => HashMap::default(),
+        }
+    }
+    fn query_params(&self) -> HashMap<String, Vec<String>> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => t
+                .query_string_parameters
+                .iter()
+                .map(|(k, v)| (k.clone(), v.split(',').map(str::to_string).collect()))
+                .collect(),
+            Self::APIGatewayRestEvent(t) => t.query_parameters.clone(),
+            Self::APIGatewayWebSocketEvent(t) => t.query_parameters.clone(),
+            Self::ALBEvent(t) => {
+                if t.multi_value_headers.is_empty() {
+                    t.headers
+                        .iter()
+                        .map(|(k, v)| (k.clone(), vec![v.clone()]))
+                        .collect()
+                } else {
+                    t.multi_value_headers.clone()
+                }
+            }
+            Self::LambdaFunctionUrlEvent(t) => t
+                .query_string_parameters
+                .iter()
+                .map(|(k, v)| (k.clone(), vec![v.clone()]))
+                .collect(),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => HashMap::default(),
+        }
+    }
+    fn path_params(&self) -> HashMap<String, String> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => t.path_parameters.clone(),
+            Self::APIGatewayRestEvent(t) => t.path_parameters.clone(),
+            Self::APIGatewayWebSocketEvent(t) => t.path_parameters.clone(),
+            #[allow(clippy::match_same_arms)]
+            Self::ALBEvent(_) => HashMap::default(),
+            #[allow(clippy::match_same_arms)]
+            Self::LambdaFunctionUrlEvent(_) => HashMap::default(),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => HashMap::default(),
+        }
+    }
+    fn request_body<'a>(&'a self) -> Option<Box<dyn Read + 'a>> {
+        match self {
+            Self::APIGatewayHttpEvent(t) => t.body.reader().ok().flatten(),
+            Self::APIGatewayRestEvent(t) => t.body.reader().ok().flatten(),
+            Self::APIGatewayWebSocketEvent(t) => t.body.reader().ok().flatten(),
+            Self::ALBEvent(t) => t.body.reader().ok().flatten(),
+            Self::LambdaFunctionUrlEvent(t) => t.body.reader().ok().flatten(),
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => None,
+        }
     }
 }
 
