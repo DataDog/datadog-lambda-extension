@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
+use std::num::NonZero;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -30,7 +31,7 @@ pub struct Processor {
     context_buffer: VecDeque<Context>,
 }
 impl Processor {
-    const CONTEXT_BUFFER_CAPACITY: usize = 5;
+    const CONTEXT_BUFFER_DEFAULT_CAPACITY: NonZero<usize> = unsafe { NonZero::new_unchecked(5) };
 
     /// Creates a new [`Processor`] instance using the provided [`Config`].
     ///
@@ -40,6 +41,17 @@ impl Processor {
     /// - If the [`Config::appsec_rules`] points to a file that is not a valid JSON-encoded ruleset;
     /// - If the in-app WAF fails to initialize, integrate the ruleset, or build the WAF instance.
     pub fn new(cfg: &Config) -> Result<Self, Error> {
+        Self::with_capacity(cfg, Self::CONTEXT_BUFFER_DEFAULT_CAPACITY)
+    }
+
+    /// Creates a new [`Processor`] instance using the provided [`Config`].
+    ///
+    /// # Errors
+    /// - If [`Config::serverless_appsec_enabled`] is `false`;
+    /// - If the [`Config::appsec_rules`] points to a non-existent file;
+    /// - If the [`Config::appsec_rules`] points to a file that is not a valid JSON-encoded ruleset;
+    /// - If the in-app WAF fails to initialize, integrate the ruleset, or build the WAF instance.
+    pub fn with_capacity(cfg: &Config, capacity: NonZero<usize>) -> Result<Self, Error> {
         if !is_enabled(cfg) {
             return Err(Error::FeatureDisabled);
         }
@@ -74,7 +86,7 @@ impl Processor {
             api_sec_sampler: Arc::new(Mutex::new(apisec::Sampler::with_interval(
                 cfg.api_security_sample_delay,
             ))),
-            context_buffer: VecDeque::with_capacity(Self::CONTEXT_BUFFER_CAPACITY),
+            context_buffer: VecDeque::with_capacity(capacity.get()),
         })
     }
 
@@ -289,38 +301,16 @@ impl InvocationPayload for IdentifiedTrigger {
 
     fn raw_uri(&self) -> Option<String> {
         match self {
-            Self::APIGatewayHttpEvent(t) => Some(
-                if t.request_context.stage.is_empty() || t.request_context.stage == "$default" {
-                    format!(
-                        "{domain}{path}",
-                        domain = t.request_context.domain_name,
-                        path = t.request_context.http.path
-                    )
-                } else {
-                    format!(
-                        "{domain}/${stage}{path}",
-                        domain = t.request_context.domain_name,
-                        stage = t.request_context.stage,
-                        path = t.request_context.http.path
-                    )
-                },
-            ),
-            Self::APIGatewayRestEvent(t) => Some(
-                if t.request_context.stage.is_empty() || t.request_context.stage == "$default" {
-                    format!(
-                        "{domain}{path}",
-                        domain = t.request_context.domain_name,
-                        path = t.request_context.path
-                    )
-                } else {
-                    format!(
-                        "{domain}/${stage}{path}",
-                        domain = t.request_context.domain_name,
-                        stage = t.request_context.stage,
-                        path = t.request_context.path
-                    )
-                },
-            ),
+            Self::APIGatewayHttpEvent(t) => Some(format!(
+                "{domain}{path}",
+                domain = t.request_context.domain_name,
+                path = t.request_context.http.path
+            )),
+            Self::APIGatewayRestEvent(t) => Some(format!(
+                "{domain}{path}",
+                domain = t.request_context.domain_name,
+                path = t.request_context.path
+            )),
             Self::APIGatewayWebSocketEvent(t) => Some(
                 if t.request_context.stage.is_empty() || t.request_context.stage == "$default" {
                     format!(
@@ -561,13 +551,13 @@ impl InvocationPayload for IdentifiedTrigger {
             Self::APIGatewayRestEvent(t) => t.query_parameters.clone(),
             Self::APIGatewayWebSocketEvent(t) => t.query_parameters.clone(),
             Self::ALBEvent(t) => {
-                if t.multi_value_headers.is_empty() {
-                    t.headers
+                if t.multi_value_query_parameters.is_empty() {
+                    t.query_parameters
                         .iter()
                         .map(|(k, v)| (k.clone(), vec![v.clone()]))
                         .collect()
                 } else {
-                    t.multi_value_headers.clone()
+                    t.multi_value_query_parameters.clone()
                 }
             }
             Self::LambdaFunctionUrlEvent(t) => t

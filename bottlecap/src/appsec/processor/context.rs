@@ -120,7 +120,14 @@ impl Context {
                     if !self.has_events {
                         continue;
                     }
-                    span.meta.insert(key.to_string(), value.to_string());
+                    match value {
+                        serde_json::Value::String(value) => {
+                            span.meta.insert(key.to_string(), value.clone());
+                        }
+                        value => {
+                            span.meta.insert(key.to_string(), value.to_string());
+                        }
+                    }
                 }
                 TagValue::Metric(value) => {
                     span.metrics.insert(key.to_string(), *value);
@@ -291,13 +298,17 @@ impl Context {
                         continue;
                     }
                 };
-                let value = match serde_json::to_string(item.inner()) {
-                    Ok(value) => value,
-                    Err(e) => {
-                        warn!(
-                            "aap: failed to convert attribute {name:#?} value to JSON, the attribute will be ignored: {e}\n{item:?}"
-                        );
-                        continue;
+                let value = if let Some(value) = item.to_str() {
+                    value.to_string()
+                } else {
+                    match serde_json::to_string(item.inner()) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            warn!(
+                                "aap: failed to convert attribute {name:#?} value to JSON, the attribute will be ignored: {e}\n{item:?}"
+                            );
+                            continue;
+                        }
                     }
                 };
                 debug!("aap: produced synthetic tag {name}:{value}");

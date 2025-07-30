@@ -1,0 +1,43 @@
+{
+    "version": "2.0",
+    "routeKey": "POST /httpapi/post",
+    "rawPath": "/httpapi/post",
+    "rawQueryString": "",
+    "headers": {
+        "Accept": "*/*",
+        "Content-Length": "19",
+        "Host": "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
+        "User-Agent": "Arachni/v2",
+        "X-amzn-trace-id": "Root=1-613a52fb-4c43cfc95e0241c1471bfa05",
+        "X-forwarded-for": "38.122.226.210",
+        "X-forwarded-port": "443",
+        "X-forwarded-proto": "https",
+        "X-datadog-trace-id": "12345",
+        "X-datadog-parent-id": "67890",
+        "X-datadog-sampling-priority": "2"
+    },
+    "cookies": [
+        "cookie1=value1",
+        "cookie2=value2"
+    ],
+    "requestContext": {
+        "accountId": "425362996713",
+        "apiId": "x02yirxc7a",
+        "domainName": "x02yirxc7a.execute-api.sa-east-1.amazonaws.com",
+        "domainPrefix": "x02yirxc7a",
+        "http": {
+            "method": "POST",
+            "path": "/httpapi/post",
+            "protocol": "HTTP/1.1",
+            "sourceIp": "38.122.226.210",
+            "userAgent": "Arachni/v2"
+        },
+        "requestId": "FaHnXjKCGjQEJ7A=",
+        "routeKey": "POST /httpapi/pos",
+        "stage": "$default",
+        "time": "09/Sep/2021:18:31:23 +0000",
+        "timeEpoch": 1631212283738
+    },
+    "body": "eyJoZWxsbyI6ICJ3b3JsZCJ9Cg==",
+    "isBase64Encoded": true
+}

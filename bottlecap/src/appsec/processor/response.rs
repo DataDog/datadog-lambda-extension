@@ -50,14 +50,15 @@ impl Default for ExpectedResponseFormat {
 #[serde(rename_all = "camelCase")]
 struct ApiGatewayResponse {
     status_code: i64,
-    #[serde(deserialize_with = "lowercase_key")]
+    #[serde(deserialize_with = "lowercase_key", default)]
     headers: HashMap<String, String>,
-    #[serde(deserialize_with = "lowercase_key")]
+    #[serde(deserialize_with = "lowercase_key", default)]
     multi_value_headers: HashMap<String, Vec<String>>,
     #[serde(flatten)]
     body: Body,
 }
 impl InvocationPayload for ApiGatewayResponse {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Only here to satisfy contract
     fn corresponding_response_format(&self) -> ExpectedResponseFormat {
         ExpectedResponseFormat::ApiGatewayResponse
     }
@@ -85,6 +86,7 @@ struct RawPayload {
     data: Vec<u8>,
 }
 impl InvocationPayload for RawPayload {
+    #[cfg_attr(coverage_nightly, coverage(off))] // Only here to satisfy contract
     fn corresponding_response_format(&self) -> ExpectedResponseFormat {
         ExpectedResponseFormat::Raw
     }
