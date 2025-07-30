@@ -11,12 +11,15 @@ use multipart::server::Multipart;
 use tracing::{debug, warn};
 
 use crate::appsec::processor::InvocationPayload;
+use crate::appsec::processor::response::ExpectedResponseFormat;
 
 /// Holds inforamtion gathered about an invocation.
 #[must_use]
 pub struct Context {
     /// The request ID of the invocation.
     pub(super) rid: String,
+    /// The expected response payload format
+    pub(super) expected_response_format: ExpectedResponseFormat,
     /// The [`WafContext`] for this invocation.
     waf: WafContext,
     /// The timeout for the WAF.
@@ -32,6 +35,7 @@ impl Context {
     pub(crate) fn new(rid: String, waf_handle: &mut Handle, waf_timeout: Duration) -> Self {
         Self {
             rid,
+            expected_response_format: ExpectedResponseFormat::default(),
             waf: waf_handle.new_context(),
             waf_timeout,
             has_events: false,
@@ -41,14 +45,29 @@ impl Context {
 
     /// Evaluate the WAF rules against the provided [`InvocationPayload`] and
     /// collect the relevant side effects.
-    pub(super) fn run(&mut self, payload: impl InvocationPayload) {
-        self.collect_span_tags(&payload);
+    pub(super) fn run(&mut self, payload: &dyn InvocationPayload) {
+        if self.waf_timeout.is_zero() {
+            warn!(
+                "aap: WAF execution time budget for this request is exhausted, skipping WAF ruleset evaluation (consider tweaking DD_APPSEC_WAF_TIMEOUT)"
+            );
+            return;
+        }
 
-        let Some(address_data) = to_address_data(&payload) else {
+        // Update the expected response payload format if we haven't identified one yet.
+        if self.expected_response_format.is_unknown() {
+            self.expected_response_format = payload.corresponding_response_format();
+        }
+
+        // Extract span tag information from the payload.
+        self.collect_span_tags(payload);
+
+        // Extract address data from the payload.
+        let Some(address_data) = to_address_data(payload) else {
             // Produced no address data, nothing more to do...
             return;
         };
 
+        // Evaluate the WAF ruleset and handle the result.
         match self.waf.run(Some(address_data), None, self.waf_timeout) {
             Ok(RunResult::Match(result) | RunResult::NoMatch(result)) => {
                 self.process_result(result);
@@ -176,7 +195,7 @@ impl Context {
 
     /// Collects the attributes from the provided [`InvocationPayload`] and
     /// keeps track of them on this [`Context`].
-    fn collect_span_tags(&mut self, payload: &impl InvocationPayload) {
+    fn collect_span_tags(&mut self, payload: &dyn InvocationPayload) {
         macro_rules! span_tag {
             // Simple tags
             ($field:ident on event => $name:expr) => {
@@ -390,7 +409,7 @@ impl std::fmt::Display for TagValue {
 
 /// Produces a [`WafMap`] from the provided [`InvocationPayload`], returning
 /// [`None`] if no address data is available.
-fn to_address_data(payload: &impl InvocationPayload) -> Option<WafMap> {
+fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
     let mut addresses = Vec::<Keyed<WafObject>>::with_capacity(10);
 
     macro_rules! address {

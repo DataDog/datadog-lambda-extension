@@ -13,12 +13,14 @@ use libddwaf::{Builder, Config as WafConfig, Handle};
 use tracing::{debug, info, warn};
 
 use crate::appsec::processor::context::Context;
+use crate::appsec::processor::response::ExpectedResponseFormat;
 use crate::appsec::{is_enabled, is_standalone};
 use crate::config::Config;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 
 mod apisec;
 pub mod context;
+pub mod response;
 mod ruleset;
 
 pub struct Processor {
@@ -77,12 +79,12 @@ impl Processor {
     }
 
     /// Process the intercepted payload for the next invocation.
-    pub fn process_invocation_next(&mut self, rid: &str, body: impl InvocationPayload) {
-        self.new_context(rid).run(body);
+    pub fn process_invocation_next(&mut self, rid: &str, payload: &impl InvocationPayload) {
+        self.new_context(rid).run(payload);
     }
 
     /// Process the intercepted payload for the result of an invocation.
-    pub fn process_invocation_result(&mut self, rid: &str, body: impl InvocationPayload) {
+    pub fn process_invocation_result(&mut self, rid: &str, payload: impl AsRef<[u8]>) {
         // Taking the sampler first, as it implies a temporary immutable borrow...
         let sampler = self.api_sec_sampler.clone();
         let Ok(mut sampler) = sampler.lock() else {
@@ -96,7 +98,12 @@ impl Processor {
             // Nothing to do...
             return;
         };
-        ctx.run(body);
+
+        match ctx.expected_response_format.parse(payload.as_ref()) {
+            Ok(Some(payload)) => ctx.run(payload.as_ref()),
+            Ok(None) => debug!("aap: no response payload available"),
+            Err(e) => warn!("aap: failed to parse invocation result payload: {e}"),
+        }
 
         let (method, route, status_code) = ctx.endpoint_info();
         if sampler.decision_for(&method, &route, &status_code) {
@@ -202,9 +209,11 @@ pub enum Error {
     WafInitializationFailed,
 }
 
-/// A trait representing the general payload of an invocation event. All
+/// A trait representing the general payload of an invocation event. Most
 /// fields are optional and default to [`None`] or empty [`HashMap`]s.
 pub trait InvocationPayload {
+    fn corresponding_response_format(&self) -> ExpectedResponseFormat;
+
     /// The raw URI of the request (query string excluded).
     fn raw_uri(&self) -> Option<String> {
         None
@@ -257,6 +266,27 @@ pub trait InvocationPayload {
 }
 
 impl InvocationPayload for IdentifiedTrigger {
+    fn corresponding_response_format(&self) -> ExpectedResponseFormat {
+        match self {
+            Self::APIGatewayHttpEvent(_)
+            | Self::APIGatewayRestEvent(_)
+            | Self::ALBEvent(_)
+            | Self::LambdaFunctionUrlEvent(_) => ExpectedResponseFormat::ApiGatewayResponse,
+            Self::APIGatewayWebSocketEvent(_) => ExpectedResponseFormat::Raw,
+
+            // Events that are not relevant to App & API Protection
+            Self::MSKEvent(_)
+            | Self::SqsRecord(_)
+            | Self::SnsRecord(_)
+            | Self::DynamoDbRecord(_)
+            | Self::S3Record(_)
+            | Self::EventBridgeEvent(_)
+            | Self::KinesisRecord(_)
+            | Self::StepFunctionEvent(_)
+            | Self::Unknown => ExpectedResponseFormat::Unknown,
+        }
+    }
+
     fn raw_uri(&self) -> Option<String> {
         match self {
             Self::APIGatewayHttpEvent(t) => Some(
