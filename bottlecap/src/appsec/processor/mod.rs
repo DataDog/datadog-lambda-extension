@@ -173,42 +173,30 @@ impl std::fmt::Debug for Processor {
 }
 
 /// Error conditions that can arise from calling [`Processor::new`].
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// The App & API Protection feature is not enabled
+    #[error("aap: feature is not enabled")]
     FeatureDisabled,
     /// The WAF builder could not be created (unlikely)
+    #[error("aap: WAF builder creation failed")]
     WafBuilderCreationFailed,
     /// The user-configured App & API Protection ruleset file could not be read
+    #[error("aap: failed to open WAF rules file {0:#?}: {1}")]
     AppsecRulesError(String, std::io::Error),
     /// The App & API Protection ruleset could not be parsed from JSON
+    #[error("aap: failed to parse WAF rulesset: {0}")]
     WafRulesetParseError(serde_json::Error),
     /// The App & API Protection ruleset could not be loaded into the WAF
+    #[error("aap: failed to load configured WAF ruleset: {0:?}")]
     WafRulesetLoadingError(WafOwned<WafMap>),
     /// The WAF initialization produced a [`None`] handle (this happens when the
     /// configured ruleset contains no active rule nor processor)
+    #[error(
+        "aap: WAF initialization failed (is there any active rule or processor in the ruleset?)"
+    )]
     WafInitializationFailed,
 }
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::FeatureDisabled => write!(f, "aap: feature is not enabled"),
-            Self::WafBuilderCreationFailed => write!(f, "aap: failed to create WAF builder"),
-            Self::AppsecRulesError(path, e) => {
-                write!(f, "aap: failed to open rules file {path:#?}: {e}")
-            }
-            Self::WafRulesetParseError(e) => write!(f, "aap: failed to parse ruleset: {e}"),
-            Self::WafRulesetLoadingError(diag) => {
-                write!(f, "aap: failed to load ruleset: {diag:?}")
-            }
-            Self::WafInitializationFailed => write!(
-                f,
-                "aap: failed to initialize WAF (is there any active rule or processor in the ruleset?)"
-            ),
-        }
-    }
-}
-impl std::error::Error for Error {}
 
 /// A trait representing the general payload of an invocation event. All
 /// fields are optional and default to [`None`] or empty [`HashMap`]s.

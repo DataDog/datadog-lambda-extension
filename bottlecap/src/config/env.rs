@@ -316,13 +316,11 @@ pub struct EnvConfig {
     /// @env `DD_APPSEC_WAF_TIMEOUT`
     ///
     /// The timeout for the WAF to process a request, in microseconds.
-    #[serde(default)]
     #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
     pub appsec_waf_timeout: Option<Duration>,
     /// @env `DD_API_SECURITY_SAMPLE_DELAY`
     ///
     /// The delay between two samples of the API Security schema collection, in seconds.
-    #[serde(default)]
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
     /// @env `DD_EXTENSION_VERSION`

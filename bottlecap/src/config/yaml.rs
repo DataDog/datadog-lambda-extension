@@ -94,10 +94,8 @@ pub struct YamlConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
     pub appsec_rules: Option<String>,
-    #[serde(default)]
     #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
     pub appsec_waf_timeout: Option<Duration>,
-    #[serde(default)]
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
     pub extension_version: Option<String>,
