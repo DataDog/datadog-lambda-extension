@@ -176,7 +176,7 @@ impl Agent {
 
         match trace_tx.send(send_data_builder).await {
             Ok(()) => {
-                debug!("OTLP | Successfully buffered traces to be flushed.");
+                debug!("OTLP | Successfully buffered traces to be aggregated.");
                 (
                     StatusCode::OK,
                     json!({"rate_by_service":{"service:,env:":1}}).to_string(),
@@ -184,10 +184,10 @@ impl Agent {
                     .into_response()
             }
             Err(err) => {
-                error!("OTLP | Error sending traces to the trace flusher: {err}");
+                error!("OTLP | Error sending traces to the trace aggregator: {err}");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({ "message": format!("Error sending traces to the trace flusher: {err}") }).to_string()
+                    json!({ "message": format!("Error sending traces to the trace aggregator: {err}") }).to_string()
                 ).into_response()
             }
         }
