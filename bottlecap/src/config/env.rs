@@ -1,6 +1,7 @@
 use figment::{Figment, providers::Env};
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::time::Duration;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 
@@ -10,7 +11,8 @@ use crate::{
         additional_endpoints::deserialize_additional_endpoints,
         apm_replace_rule::deserialize_apm_replace_rules,
         deserialize_array_from_comma_separated_string, deserialize_key_value_pairs,
-        deserialize_optional_bool_from_anything, deserialize_string_or_int,
+        deserialize_optional_bool_from_anything, deserialize_optional_duration_from_microseconds,
+        deserialize_optional_duration_from_seconds, deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
         logs_additional_endpoints::{
@@ -307,6 +309,20 @@ pub struct EnvConfig {
     /// Default is `false`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
+    /// @env `DD_APPSEC_RULES`
+    ///
+    /// The path to a user-configured App & API Protection ruleset (in JSON format).
+    pub appsec_rules: Option<String>,
+    /// @env `DD_APPSEC_WAF_TIMEOUT`
+    ///
+    /// The timeout for the WAF to process a request, in microseconds.
+    #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
+    pub appsec_waf_timeout: Option<Duration>,
+    /// @env `DD_API_SECURITY_SAMPLE_DELAY`
+    ///
+    /// The delay between two samples of the API Security schema collection, in seconds.
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
+    pub api_security_sample_delay: Option<Duration>,
     /// @env `DD_EXTENSION_VERSION`
     ///
     /// Used to decide which version of the Datadog Lambda Extension to use.
@@ -454,6 +470,9 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, capture_lambda_payload);
     merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
+    merge_option!(config, env_config, appsec_rules);
+    merge_option_to_value!(config, env_config, appsec_waf_timeout);
+    merge_option_to_value!(config, env_config, api_security_sample_delay);
     merge_option!(config, env_config, extension_version);
 }
 
@@ -480,8 +499,11 @@ impl ConfigSource for EnvConfigSource {
     }
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
     use crate::config::{
         Config,
@@ -627,6 +649,9 @@ mod tests {
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "true");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD_MAX_DEPTH", "5");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
+            jail.set_env("DD_APPSEC_RULES", "/path/to/rules.json");
+            jail.set_env("DD_APPSEC_WAF_TIMEOUT", "1000000"); // Microseconds
+            jail.set_env("DD_API_SECURITY_SAMPLE_DELAY", "60"); // Seconds
             jail.set_env("DD_EXTENSION_VERSION", "compatibility");
 
             let mut config = Config::default();
@@ -751,6 +776,9 @@ mod tests {
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 serverless_appsec_enabled: true,
+                appsec_rules: Some("/path/to/rules.json".to_string()),
+                appsec_waf_timeout: Duration::from_secs(1),
+                api_security_sample_delay: Duration::from_secs(60),
                 extension_version: Some("compatibility".to_string()),
             };
 

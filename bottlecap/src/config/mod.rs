@@ -18,6 +18,7 @@ use serde_aux::prelude::deserialize_bool_from_anything;
 use serde_json::Value;
 
 use std::path::Path;
+use std::time::Duration;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
@@ -327,7 +328,12 @@ pub struct Config {
     pub lambda_proc_enhanced_metrics: bool,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
+
     pub serverless_appsec_enabled: bool,
+    pub appsec_rules: Option<String>,
+    pub appsec_waf_timeout: Duration,
+    pub api_security_sample_delay: Duration,
+
     pub extension_version: Option<String>,
 }
 
@@ -411,7 +417,12 @@ impl Default for Config {
             lambda_proc_enhanced_metrics: true,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
+
             serverless_appsec_enabled: false,
+            appsec_rules: None,
+            appsec_waf_timeout: Duration::from_millis(5),
+            api_security_sample_delay: Duration::from_secs(30),
+
             extension_version: None,
         }
     }
@@ -598,6 +609,41 @@ where
     Ok(map)
 }
 
+pub fn deserialize_optional_duration_from_microseconds<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error> {
+    Ok(Option::<u64>::deserialize(deserializer)?.map(Duration::from_micros))
+}
+
+pub fn deserialize_optional_duration_from_seconds<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error> {
+    struct DurationVisitor;
+    impl serde::de::Visitor<'_> for DurationVisitor {
+        type Value = Option<Duration>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "a duration in seconds (integer or float)")
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(Some(Duration::from_secs(v)))
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            if v < 0 {
+                return Err(E::custom("negative durations are not allowed"));
+            }
+            self.visit_u64(u64::try_from(v).expect("positive i64 to u64 conversion never fails"))
+        }
+        fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            if v < 0f64 {
+                return Err(E::custom("negative durations are not allowed"));
+            }
+            Ok(Some(Duration::from_secs_f64(v)))
+        }
+    }
+    deserializer.deserialize_any(DurationVisitor)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 pub mod tests {
     use datadog_trace_obfuscation::replacer::parse_rules_from_string;
@@ -1212,5 +1258,63 @@ pub mod tests {
             assert_eq!(config.flush_timeout, 10);
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_parse_duration_from_microseconds() {
+        #[derive(Deserialize, Debug, PartialEq, Eq)]
+        struct Value {
+            #[serde(default)]
+            #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
+            duration: Option<Duration>,
+        }
+
+        assert_eq!(
+            serde_json::from_str::<Value>("{}").expect("failed to parse JSON"),
+            Value { duration: None }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1}"#)
+            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1000000}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_secs(1))
+            }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1.5}"#)
+            .expect_err("should have failed parsing");
+        serde_json::from_str::<Value>(r#"{"duration":1.5}"#)
+            .expect_err("should have failed parsing");
+    }
+
+    #[test]
+    fn test_parse_duration_from_seconds() {
+        #[derive(Deserialize, Debug, PartialEq, Eq)]
+        struct Value {
+            #[serde(default)]
+            #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
+            duration: Option<Duration>,
+        }
+
+        assert_eq!(
+            serde_json::from_str::<Value>("{}").expect("failed to parse JSON"),
+            Value { duration: None }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1}"#)
+            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_secs(1))
+            }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1.5}"#)
+            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1.5}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_millis(1500))
+            }
+        );
     }
 }
