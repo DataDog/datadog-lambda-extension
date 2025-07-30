@@ -102,6 +102,8 @@ jobserver,https://github.com/rust-lang/jobserver-rs,MIT OR Apache-2.0,Alex Crich
 js-sys,https://github.com/rustwasm/wasm-bindgen/tree/master/crates/js-sys,MIT OR Apache-2.0,The wasm-bindgen Developers
 lazy_static,https://github.com/rust-lang-nursery/lazy-static.rs,MIT OR Apache-2.0,Marvin Löbel <loebel.marvin@gmail.com>
 libc,https://github.com/rust-lang/libc,MIT OR Apache-2.0,The Rust Project Developers
+libddwaf,https://github.com/DataDog/libddwaf-rust,Apache-2.0,"DataDog, Inc. <support@datadoghq.com>"
+libddwaf-sys,https://github.com/DataDog/libddwaf-rust,Apache-2.0,"DataDog, Inc. <support@datadoghq.com>"
 linux-raw-sys,https://github.com/sunfishcode/linux-raw-sys,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Dan Gohman <dev@sunfishcode.online>
 litemap,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 log,https://github.com/rust-lang/log,MIT OR Apache-2.0,The Rust Project Developers
