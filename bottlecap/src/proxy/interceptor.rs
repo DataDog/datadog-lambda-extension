@@ -161,13 +161,16 @@ async fn invocation_next_proxy(
         };
 
     if let Some(appsec) = appsec_processor {
-        if let Some(rid) = intercepted_parts
+        if let Some(request_id) = intercepted_parts
             .headers
             .get("Lambda-Runtime-Aws-Request-Id")
             .and_then(|v| v.to_str().ok())
         {
             if let Ok(trigger) = IdentifiedTrigger::from_slice(&intercepted_bytes) {
-                appsec.lock().await.process_invocation_next(rid, &trigger);
+                appsec
+                    .lock()
+                    .await
+                    .process_invocation_next(request_id, &trigger);
             }
         }
     }

@@ -126,6 +126,14 @@ pub trait Trigger: ServiceNameResolver {
     }
 }
 
+/// A macro do define an enum for all the know trigger types.
+///
+/// It generates an enum with one variant for each named type.
+/// The variants are specified as `<data-type> => <variant-name>`.
+///
+/// It also creates `from_value` and `from_slice` methods that use the
+/// [`Trigger::is_match`] and [`Trigger::new`] methods to try and parse a
+/// payload; cases are matched in the order they are declared.
 macro_rules! identified_triggers {
     (
         $vis:vis enum $name:ident {
