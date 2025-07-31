@@ -19,7 +19,10 @@ static GLOBAL: Jemalloc = Jemalloc;
 use bottlecap::{
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
-    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT, base_url,
+    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
+    appsec::processor::Processor as AppSecProcessor,
+    base_url,
     config::{
         self, Config,
         aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
@@ -1189,5 +1192,15 @@ fn start_api_runtime_proxy(
     }
 
     let invocation_processor = invocation_processor.clone();
-    interceptor::start(aws_config, invocation_processor).ok()
+    let appsec_processor = match AppSecProcessor::new(config) {
+        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
+        Err(AppSecFeatureDisabled) => None,
+        Err(e) => {
+            error!(
+                "PROXY | aap | error creating App & API Protection processor, the feature will be disabled: {e}"
+            );
+            None
+        }
+    };
+    interceptor::start(aws_config, invocation_processor, appsec_processor).ok()
 }

@@ -6,6 +6,9 @@ use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 
+pub mod body;
+mod serde_utils;
+
 pub mod alb_event;
 pub mod api_gateway_http_event;
 pub mod api_gateway_rest_event;
@@ -122,6 +125,69 @@ pub trait Trigger: ServiceNameResolver {
             .to_string()
     }
 }
+
+/// A macro do define an enum for all the know trigger types.
+///
+/// It generates an enum with one variant for each named type.
+/// The variants are specified as `<data-type> => <variant-name>`.
+///
+/// It also creates `from_value` and `from_slice` methods that use the
+/// [`Trigger::is_match`] and [`Trigger::new`] methods to try and parse a
+/// payload; cases are matched in the order they are declared.
+macro_rules! identified_triggers {
+    (
+        $vis:vis enum $name:ident {
+            $($type:ty => $case:ident),+,
+            else => $default:ident,
+        }
+    ) => {
+        #[must_use]
+        #[non_exhaustive]
+        $vis enum $name {
+            $($case($type),)+
+            $default,
+        }
+        impl $name {
+            $vis fn from_value(payload: &Value) -> Self {
+                $(
+                if <$type>::is_match(payload) {
+                    return <$type>::new(payload.clone()).map_or(Self::$default, Self::$case);
+                }
+                )+
+                Self::$default
+            }
+
+            $vis fn from_slice(payload: &[u8]) -> serde_json::Result<Self> {
+                let value = serde_json::from_slice(payload)?;
+                Ok(Self::from_value(&value))
+            }
+        }
+        impl Default for $name {
+            fn default() -> Self {
+                Self::$default
+            }
+        }
+    };
+}
+
+identified_triggers!(
+    pub enum IdentifiedTrigger {
+        api_gateway_http_event::APIGatewayHttpEvent => APIGatewayHttpEvent,
+        api_gateway_rest_event::APIGatewayRestEvent => APIGatewayRestEvent,
+        api_gateway_websocket_event::APIGatewayWebSocketEvent => APIGatewayWebSocketEvent,
+        alb_event::ALBEvent => ALBEvent,
+        lambda_function_url_event::LambdaFunctionUrlEvent => LambdaFunctionUrlEvent,
+        msk_event::MSKEvent => MSKEvent,
+        sqs_event::SqsRecord => SqsRecord,
+        sns_event::SnsRecord => SnsRecord,
+        dynamodb_event::DynamoDbRecord => DynamoDbRecord,
+        s3_event::S3Record => S3Record,
+        event_bridge_event::EventBridgeEvent => EventBridgeEvent,
+        kinesis_event::KinesisRecord => KinesisRecord,
+        step_function_event::StepFunctionEvent => StepFunctionEvent,
+        else => Unknown,
+    }
+);
 
 /// Serialize a `HashMap` with lowercase keys
 ///

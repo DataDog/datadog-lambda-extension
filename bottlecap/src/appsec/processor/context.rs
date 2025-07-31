@@ -1,18 +1,25 @@
 use std::collections::HashMap;
+use std::io::{Read, read_to_string};
 use std::time::Duration;
 
+use bytes::{Buf, Bytes};
 use datadog_trace_protobuf::pb::Span;
 use libddwaf::object::{Keyed, WafMap, WafObject};
 use libddwaf::{Context as WafContext, Handle, RunError, RunOutput, RunResult, waf_map};
+use mime::Mime;
+use multipart::server::Multipart;
 use tracing::{debug, warn};
 
 use crate::appsec::processor::InvocationPayload;
+use crate::appsec::processor::response::ExpectedResponseFormat;
 
 /// Holds inforamtion gathered about an invocation.
 #[must_use]
 pub struct Context {
     /// The request ID of the invocation.
     pub(super) rid: String,
+    /// The expected response payload format
+    pub(super) expected_response_format: ExpectedResponseFormat,
     /// The [`WafContext`] for this invocation.
     waf: WafContext,
     /// The timeout for the WAF.
@@ -28,6 +35,7 @@ impl Context {
     pub(crate) fn new(rid: String, waf_handle: &mut Handle, waf_timeout: Duration) -> Self {
         Self {
             rid,
+            expected_response_format: ExpectedResponseFormat::default(),
             waf: waf_handle.new_context(),
             waf_timeout,
             has_events: false,
@@ -38,13 +46,28 @@ impl Context {
     /// Evaluate the WAF rules against the provided [`InvocationPayload`] and
     /// collect the relevant side effects.
     pub(super) fn run(&mut self, payload: &dyn InvocationPayload) {
+        if self.waf_timeout.is_zero() {
+            warn!(
+                "aap: WAF execution time budget for this request is exhausted, skipping WAF ruleset evaluation (consider tweaking DD_APPSEC_WAF_TIMEOUT)"
+            );
+            return;
+        }
+
+        // Update the expected response payload format if we haven't identified one yet.
+        if self.expected_response_format.is_unknown() {
+            self.expected_response_format = payload.corresponding_response_format();
+        }
+
+        // Extract span tag information from the payload.
         self.collect_span_tags(payload);
 
+        // Extract address data from the payload.
         let Some(address_data) = to_address_data(payload) else {
             // Produced no address data, nothing more to do...
             return;
         };
 
+        // Evaluate the WAF ruleset and handle the result.
         match self.waf.run(Some(address_data), None, self.waf_timeout) {
             Ok(RunResult::Match(result) | RunResult::NoMatch(result)) => {
                 self.process_result(result);
@@ -397,6 +420,21 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
             }
         };
 
+        // Bodies
+        ($field:ident mime from $headers:ident => $name:literal) => {
+            if let Some(body) = payload.$field() {
+                let $headers = payload.$headers();
+                // Note -- headers are case-normalized to lower case by the JSON parser...
+                let content_type = $headers.get("content-type").map(|mime|mime.last()).flatten().map_or("application/json", |mime|mime.as_str());
+                match try_parse_body(body, content_type) {
+                    Ok(value) => {
+                        addresses.push(($name, value).into());
+                    },
+                    Err(e) => warn!("aap: failed to parse body: {e}"),
+                }
+            }
+        };
+
         // Single-valued HashMap fields...
         ($field:ident[] => $name:literal) => {
             let value = payload.$field();
@@ -433,12 +471,12 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
     address!(request_cookies[][] => "server.request.cookies");
     address!(query_params[][] => "server.request.query");
     address!(path_params[] => "server.request.path_params");
-    address!(request_body => "server.request.body");
+    address!(request_body mime from request_headers_no_cookies => "server.request.body");
 
     // Response addresses
     address!(response_status_code => "server.response.status");
     address!(response_headers_no_cookies[][] => "server.response.headers.no_cookies");
-    address!(response_body => "server.response.body");
+    address!(response_body mime from response_headers_no_cookies => "server.response.body");
 
     if addresses.is_empty() {
         return None;
@@ -452,7 +490,147 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
     Some(result)
 }
 
+fn try_parse_body(
+    body: impl Read,
+    content_type: &str,
+) -> Result<WafObject, Box<dyn std::error::Error>> {
+    let mime_type: Mime = content_type.parse()?;
+    try_parse_body_with_mime(body, mime_type)
+}
+
+fn try_parse_body_with_mime(
+    body: impl Read,
+    mime_type: Mime,
+) -> Result<WafObject, Box<dyn std::error::Error>> {
+    match (mime_type.type_(), mime_type.subtype(), mime_type.suffix()) {
+        (typ, sub, suff)
+            if ((typ == mime::TEXT || typ == mime::APPLICATION)
+                && sub == mime::JSON
+                && suff.is_none())
+                || (typ == mime::APPLICATION && sub == "vnd.api" && suff == Some(mime::JSON)) =>
+        {
+            Ok(serde_json::from_reader(body)?)
+        }
+        (mime::APPLICATION, mime::WWW_FORM_URLENCODED, None) => {
+            let pairs: Vec<(String, String)> = serde_html_form::from_reader(body)?;
+            let mut res = WafMap::new(pairs.len() as u64);
+            for (i, (key, value)) in pairs.into_iter().enumerate() {
+                res[i] = (key.as_str(), value.as_str()).into();
+            }
+            Ok(res.into())
+        }
+        (mime::MULTIPART, mime::FORM_DATA, None) => {
+            let Some(boundary) = mime_type.get_param("boundary") else {
+                return Err(format!(
+                    "aap: cannot parse {mime_type} body: missing boundary parameter"
+                )
+                .into());
+            };
+            let mut multipart = Multipart::with_body(body, boundary.as_str());
+            let mut items = Vec::new();
+            loop {
+                match multipart.read_entry() {
+                    Ok(Some(mut entry)) => {
+                        let mime = entry.headers.content_type.unwrap_or(mime::TEXT_PLAIN);
+                        let mut data = Vec::new();
+                        let _ = entry.data.read_to_end(&mut data)?;
+                        let value = match try_parse_body_with_mime(Bytes::from(data).reader(), mime)
+                        {
+                            Ok(value) => value,
+                            Err(e) => {
+                                warn!(
+                                    "aap: failed to parse multipart body entry {name}: {e}",
+                                    name = entry.headers.name
+                                );
+                                WafObject::default()
+                            }
+                        };
+
+                        items.push((entry.headers.name.to_string(), value));
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        warn!("aap: failed to read multipart body entry: {e}");
+                        break;
+                    }
+                }
+            }
+            let mut res = WafMap::new(items.len() as u64);
+            for (idx, (name, value)) in items.into_iter().enumerate() {
+                res[idx] = (name.as_str(), value).into();
+            }
+            Ok(res.into())
+        }
+        (mime::TEXT, mime::PLAIN, None) => {
+            let body = read_to_string(body)?;
+            Ok(body.as_str().into())
+        }
+        _ => Err(
+            format!("aap: unsupported MIME type, the body will not be parsed: {mime_type}").into(),
+        ),
+    }
+}
+
 #[cold]
 fn log_waf_run_error(e: RunError) {
     warn!("aap: failed to evaluate WAF ruleset: {e}");
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
+#[cfg(test)]
+mod tests {
+    use std::io;
+
+    use libddwaf::waf_map;
+
+    use super::*;
+
+    #[test]
+    fn test_try_parse_body() {
+        let body = r#"--BOUNDARY
+Content-Disposition: form-data; name="json"
+Content-Type: application/json
+
+{"foo": "bar"}
+--BOUNDARY
+Content-Disposition: form-data; name="text"
+
+Hello, world!
+--BOUNDARY
+Content-Disposition: form-data; name="vnd.api+json"
+Content-Type: application/vnd.api+json; charset=utf-8
+
+{"baz": "qux"}
+
+--BOUNDARY
+Content-Disposition: form-data; name="invalid"
+Content-Type: text/json
+
+{invalid json}
+--BOUNDARY
+Content-Disposition: form-data; name="urlencoded"
+Content-Type: application/x-www-form-urlencoded
+
+key=value&space=%20
+--BOUNDARY--"#
+            .replace('\n', "\r\n"); // LF -> CRLF
+        let body = Bytes::from(body);
+        let parsed = try_parse_body(body.reader(), "multipart/form-data; boundary=BOUNDARY")
+            .expect("should have parsed successfully");
+        assert_eq!(
+            waf_map! {
+                ("json", waf_map!{ ("foo", "bar") }),
+                ("text", "Hello, world!"),
+                ("vnd.api+json", waf_map!{ ("baz", "qux") }),
+                ("invalid", WafObject::default()),
+                ("urlencoded", waf_map!{ ("key", "value"), ("space", " ") }),
+            },
+            parsed,
+        );
+    }
+
+    #[test]
+    fn test_try_parse_body_missing_boundary() {
+        try_parse_body(io::empty(), "multipart/form-data").expect_err("should have failed");
+    }
 }

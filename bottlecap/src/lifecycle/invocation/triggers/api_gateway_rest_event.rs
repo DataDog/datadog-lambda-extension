@@ -2,8 +2,8 @@ use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
-        FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger, lowercase_key,
-        parameterize_api_resource,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger, body::Body, lowercase_key,
+        parameterize_api_resource, serde_utils::nullable_map,
     },
 };
 use datadog_trace_protobuf::pb::Span;
@@ -13,27 +13,36 @@ use std::collections::HashMap;
 use tracing::debug;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct APIGatewayRestEvent {
     #[serde(deserialize_with = "lowercase_key")]
     pub headers: HashMap<String, String>,
-    #[serde(rename = "requestContext")]
+    #[serde(deserialize_with = "lowercase_key")]
+    pub multi_value_headers: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    #[serde(deserialize_with = "nullable_map")]
+    #[serde(rename = "multiValueQueryStringParameters")]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub query_parameters: HashMap<String, Vec<String>>,
+    #[serde(default)]
+    #[serde(deserialize_with = "nullable_map")]
+    pub path_parameters: HashMap<String, String>,
     pub request_context: RequestContext,
+    #[serde(flatten)]
+    pub body: Body,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct RequestContext {
     pub stage: String,
-    #[serde(rename = "requestId")]
     pub request_id: String,
-    #[serde(rename = "apiId")]
     pub api_id: String,
-    #[serde(rename = "domainName")]
     pub domain_name: String,
     #[serde(rename = "requestTimeEpoch")]
     pub time_epoch: i64,
     #[serde(rename = "httpMethod")]
     pub method: String,
-    #[serde(rename = "resourcePath")]
     pub resource_path: String,
     pub path: String,
     pub protocol: String,
@@ -41,10 +50,9 @@ pub struct RequestContext {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Identity {
-    #[serde(rename = "sourceIp")]
     pub source_ip: String,
-    #[serde(rename = "userAgent")]
     pub user_agent: String,
 }
 
@@ -242,6 +250,21 @@ mod tests {
                 ("header1".to_string(), "value1".to_string()),
                 ("header2".to_string(), "value2".to_string()),
             ]),
+            multi_value_headers: HashMap::from([
+                ("header1".to_string(), vec!["value1".to_string()]),
+                (
+                    "header2".to_string(),
+                    vec!["value1".to_string(), "value2".to_string()],
+                ),
+            ]),
+            query_parameters: HashMap::from([
+                (
+                    "parameter1".to_string(),
+                    vec!["value1".to_string(), "value2".to_string()],
+                ),
+                ("parameter2".to_string(), vec!["value".to_string()]),
+            ]),
+            path_parameters: HashMap::default(),
             request_context: RequestContext {
                 stage: "$default".to_string(),
                 request_id: "id=".to_string(),
@@ -256,6 +279,10 @@ mod tests {
                     source_ip: "IP".to_string(),
                     user_agent: "user-agent".to_string(),
                 },
+            },
+            body: Body {
+                body: Some("Hello from Lambda!".to_string()),
+                is_base64_encoded: false,
             },
         };
 
