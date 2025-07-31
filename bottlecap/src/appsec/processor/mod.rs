@@ -111,6 +111,9 @@ impl Processor {
             return;
         };
 
+        // At this point we had our chance to see the response, so we can finalize any span.
+        ctx.response_seen = true;
+
         match ctx.expected_response_format.parse(payload.as_ref()) {
             Ok(Some(payload)) => ctx.run(payload.as_ref()),
             Ok(None) => debug!("aap: no response payload available"),
@@ -127,16 +130,37 @@ impl Processor {
     }
 
     /// Processes an intercepted [`Span`].
-    pub fn process_span(&self, span: &mut Span) {
+    ///
+    /// # Returns
+    /// Returns [`true`] the span can already be finalized and sent to the
+    /// backend, meaning that if there was a security context, we have already
+    /// had a chance to see the response for the corresponding span already.
+    pub fn process_span(&self, span: &mut Span) -> bool {
         let Some(rid) = span.meta.get("request_id") else {
             // Can't match this to a request ID, nothing to do...
-            return;
+            debug!(
+                "aap | {} @ {} | no request_id found in span meta, nothing to do...",
+                span.name, span.span_id
+            );
+            return true;
         };
         let Some(ctx) = self.get_context(rid) else {
             // Nothing to do...
-            return;
+            debug!(
+                "aap | {} @ {} | no security context is associated with request {rid}, nothing to do...",
+                span.name, span.span_id
+            );
+            return true;
         };
+        debug!(
+            "aap | {} @ {} | processing span with for request {rid}",
+            span.name, span.span_id
+        );
         ctx.process_span(span);
+
+        // Span is finalized from a security standpoint if we've seen the
+        // response for it already.
+        ctx.response_seen
     }
 
     /// Parses the App & API Protection ruleset from the provided [`Config`], or

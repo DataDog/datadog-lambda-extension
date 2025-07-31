@@ -28,6 +28,8 @@ pub struct Context {
     has_events: bool,
     /// Trace tags to be applied for this invocation.
     trace_tags: HashMap<TagName, TagValue>,
+    /// Whether we have had a chance to see the response body or not.
+    pub(super) response_seen: bool,
 }
 impl Context {
     /// Creates a new [`Context`] for the provided request ID and configures it
@@ -40,6 +42,7 @@ impl Context {
             waf_timeout,
             has_events: false,
             trace_tags: HashMap::from([(TagName::AppsecEnabled, TagValue::Metric(1.0))]),
+            response_seen: false,
         }
     }
 

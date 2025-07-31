@@ -503,6 +503,17 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
     )));
+    // AppSec processor (if enabled)
+    let appsec_processor = match AppSecProcessor::new(config) {
+        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
+        Err(AppSecFeatureDisabled) => None,
+        Err(e) => {
+            error!(
+                "PROXY | aap | error creating App & API Protection processor, the feature will be disabled: {e}"
+            );
+            None
+        }
+    };
 
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (
@@ -517,11 +528,16 @@ async fn extension_loop_active(
         &api_key_factory,
         &tags_provider,
         Arc::clone(&invocation_processor),
+        appsec_processor.clone(),
         Arc::clone(&trace_aggregator),
     );
 
-    let api_runtime_proxy_shutdown_signal =
-        start_api_runtime_proxy(config, aws_config, &invocation_processor);
+    let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
+        config,
+        aws_config,
+        &invocation_processor,
+        appsec_processor.as_ref(),
+    );
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -1040,6 +1056,7 @@ fn start_trace_agent(
     api_key_factory: &Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
 ) -> (
     Sender<SendDataBuilderInfo>,
@@ -1096,6 +1113,7 @@ fn start_trace_agent(
         stats_processor,
         proxy_aggregator,
         invocation_processor,
+        appsec_processor,
         Arc::clone(tags_provider),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
@@ -1185,6 +1203,7 @@ fn start_api_runtime_proxy(
     config: &Arc<Config>,
     aws_config: Arc<AwsConfig>,
     invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
+    appsec_processor: Option<&Arc<TokioMutex<AppSecProcessor>>>,
 ) -> Option<CancellationToken> {
     if !should_start_proxy(config, Arc::clone(&aws_config)) {
         debug!("Skipping API runtime proxy, no LWA proxy or datadog wrapper found");
@@ -1192,15 +1211,6 @@ fn start_api_runtime_proxy(
     }
 
     let invocation_processor = invocation_processor.clone();
-    let appsec_processor = match AppSecProcessor::new(config) {
-        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
-        Err(AppSecFeatureDisabled) => None,
-        Err(e) => {
-            error!(
-                "PROXY | aap | error creating App & API Protection processor, the feature will be disabled: {e}"
-            );
-            None
-        }
-    };
+    let appsec_processor = appsec_processor.map(Arc::clone);
     interceptor::start(aws_config, invocation_processor, appsec_processor).ok()
 }
