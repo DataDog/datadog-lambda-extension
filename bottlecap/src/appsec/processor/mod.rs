@@ -26,6 +26,7 @@ mod ruleset;
 
 pub struct Processor {
     handle: Handle,
+    ruleset_version: String,
     waf_timeout: Duration,
     api_sec_sampler: Arc<Mutex<apisec::Sampler>>, // Must be [`Arc`] so [`Processor`] can be [`Send`].
     context_buffer: VecDeque<Context>,
@@ -72,9 +73,13 @@ impl Processor {
         if !builder.add_or_update_config("rules", &rules, Some(&mut diagnostics)) {
             return Err(Error::WafRulesetLoadingError(diagnostics));
         }
-        if let Some(version) = diagnostics.get(b"ruleset_version").and_then(|o| o.to_str()) {
-            debug!("aap: loaded ruleset version {version}");
-        }
+        let ruleset_version =
+            if let Some(version) = diagnostics.get(b"ruleset_version").and_then(|o| o.to_str()) {
+                debug!("aap: loaded ruleset version {version}");
+                version.to_string()
+            } else {
+                String::new()
+            };
 
         let Some(handle) = builder.build() else {
             return Err(Error::WafInitializationFailed);
@@ -82,6 +87,7 @@ impl Processor {
 
         Ok(Self {
             handle,
+            ruleset_version,
             waf_timeout: cfg.appsec_waf_timeout,
             api_sec_sampler: Arc::new(Mutex::new(apisec::Sampler::with_interval(
                 cfg.api_security_sample_delay,
@@ -114,17 +120,18 @@ impl Processor {
         // At this point we had our chance to see the response, so we can finalize any span.
         ctx.response_seen = true;
 
-        match ctx.expected_response_format.parse(payload.as_ref()) {
-            Ok(Some(payload)) => ctx.run(payload.as_ref()),
-            Ok(None) => debug!("aap: no response payload available"),
-            Err(e) => warn!("aap: failed to parse invocation result payload: {e}"),
-        }
-
         let (method, route, status_code) = ctx.endpoint_info();
         if sampler.decision_for(&method, &route, &status_code) {
             debug!(
                 "aap: extracing API Security schema for request <{method}, {route}, {status_code}>"
             );
+
+            match ctx.expected_response_format.parse(payload.as_ref()) {
+                Ok(Some(payload)) => ctx.run(payload.as_ref()),
+                Ok(None) => debug!("aap: no response payload available"),
+                Err(e) => warn!("aap: failed to parse invocation result payload: {e}"),
+            }
+
             ctx.extract_schemas();
         }
     }
@@ -191,6 +198,7 @@ impl Processor {
         self.context_buffer.push_back(Context::new(
             rid.to_string(),
             &mut self.handle,
+            &self.ruleset_version,
             self.waf_timeout,
         ));
         // Retrieve a mutable reference to it from the buffer.

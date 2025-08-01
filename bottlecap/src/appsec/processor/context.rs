@@ -24,6 +24,10 @@ pub struct Context {
     waf: WafContext,
     /// The timeout for the WAF.
     waf_timeout: Duration,
+    /// The total time spent on WAF runs.
+    waf_duration: Duration,
+    /// The number of times the WAF timed out during this request.
+    waf_timed_out_occurrences: usize,
     // Whether this context has events.
     has_events: bool,
     /// Trace tags to be applied for this invocation.
@@ -34,14 +38,35 @@ pub struct Context {
 impl Context {
     /// Creates a new [`Context`] for the provided request ID and configures it
     /// with the provided WAF timeout.
-    pub(crate) fn new(rid: String, waf_handle: &mut Handle, waf_timeout: Duration) -> Self {
+    pub(crate) fn new(
+        rid: String,
+        waf_handle: &mut Handle,
+        ruleset_version: &str,
+        waf_timeout: Duration,
+    ) -> Self {
+        let mut trace_tags = HashMap::from([
+            (TagName::AppsecEnabled, TagValue::Metric(1.0)),
+            (
+                TagName::AppsecWafVersion,
+                TagValue::Always(libddwaf::get_version().to_string_lossy().to_string()),
+            ),
+        ]);
+        if !ruleset_version.is_empty() {
+            trace_tags.insert(
+                TagName::AppsecEventRulesVersion,
+                TagValue::Always(ruleset_version.to_string()),
+            );
+        }
+
         Self {
             rid,
             expected_response_format: ExpectedResponseFormat::default(),
             waf: waf_handle.new_context(),
             waf_timeout,
+            waf_duration: Duration::ZERO,
+            waf_timed_out_occurrences: 0,
             has_events: false,
-            trace_tags: HashMap::from([(TagName::AppsecEnabled, TagValue::Metric(1.0))]),
+            trace_tags,
             response_seen: false,
         }
     }
@@ -117,26 +142,60 @@ impl Context {
         for (key, value) in &self.trace_tags {
             match value {
                 TagValue::Always(value) => {
+                    debug!("aap: setting span tag {key}:{value}");
                     span.meta.insert(key.to_string(), value.clone());
+                }
+                TagValue::AppSecEvents { triggers } => {
+                    span.meta.insert(
+                        key.to_string(),
+                        serde_json::Value::Object(serde_json::Map::from_iter([(
+                            "triggers".to_string(),
+                            serde_json::Value::Array(triggers.clone()),
+                        )]))
+                        .to_string(),
+                    );
                 }
                 TagValue::OnEvent(value) => {
                     if !self.has_events {
+                        debug!("aap: skipping tag {key} because no events were detected...");
                         continue;
                     }
                     match value {
                         serde_json::Value::String(value) => {
+                            debug!("aap: setting span tag {key}:{value}");
                             span.meta.insert(key.to_string(), value.clone());
                         }
                         value => {
+                            debug!("aap: setting span tag {key}:{value}");
                             span.meta.insert(key.to_string(), value.to_string());
                         }
                     }
                 }
                 TagValue::Metric(value) => {
+                    debug!("aap: setting span metric {key}:{value}");
                     span.metrics.insert(key.to_string(), *value);
                 }
             }
         }
+
+        debug!(
+            "aap: setting span metric {key}:{value:?}",
+            key = TagName::AppsecWafDuration,
+            value = self.waf_duration
+        );
+        span.metrics.insert(
+            TagName::AppsecWafDuration.to_string(),
+            self.waf_duration.as_micros() as f64,
+        );
+        debug!(
+            "aap: setting span metric {key}:{value}",
+            key = TagName::AppsecWafDuration,
+            value = self.waf_timed_out_occurrences
+        );
+        span.metrics.insert(
+            TagName::AppsecWafTimeouts.to_string(),
+            self.waf_timed_out_occurrences as f64,
+        );
     }
 
     /// Request headers that are always collected as long as AAP is enabled.
@@ -272,14 +331,16 @@ impl Context {
 
         let duration = result.duration();
         self.waf_timeout = self.waf_timeout.saturating_sub(duration);
+        self.waf_duration += duration;
         debug!(
-            "aap: WAF ruleset evaluation took {:?}, the remaining WAF budget is {:?}",
-            duration, self.waf_timeout
+            "aap: WAF ruleset evaluation took {:?}, the remaining WAF budget is {:?} (total time spent so far: {:?})",
+            duration, self.waf_timeout, self.waf_duration
         );
         if result.timeout() {
             warn!(
                 "aap: time out reached while evaluating the WAF ruleset; detections may be incomplete. Consider tuning DD_APPSEC_WAF_TIMEOUT"
             );
+            self.waf_timed_out_occurrences += 1;
         }
 
         if result.keep() {
@@ -326,29 +387,31 @@ impl Context {
                 self.trace_tags
                     .insert(TagName::AppsecEvent, TagValue::Always("true".to_string()));
                 self.has_events = true;
-            }
-            let entry = self
-                .trace_tags
-                .entry(TagName::AppsecJson)
-                .or_insert(TagValue::OnEvent(serde_json::Value::Array(Vec::new())));
-            let TagValue::OnEvent(serde_json::Value::Array(entry)) = entry else {
-                unreachable!(
-                    "the {} tag entry is always a serde_json::Value::Array(...)",
-                    TagName::AppsecJson
-                );
-            };
-            entry.reserve(events.len());
-            for event in events.iter() {
-                let value = match serde_json::to_value(event) {
-                    Ok(value) => value,
-                    Err(e) => {
-                        warn!(
-                            "aap: failed to convert event to JSON, the event will be dropped: {e}\n{event:?}"
-                        );
-                        continue;
-                    }
+                let entry =
+                    self.trace_tags
+                        .entry(TagName::AppsecJson)
+                        .or_insert(TagValue::AppSecEvents {
+                            triggers: Vec::with_capacity(events.len()),
+                        });
+                let TagValue::AppSecEvents { triggers } = entry else {
+                    unreachable!(
+                        "the {} tag entry is always a TagValue::AppSecEvents{{...}}",
+                        TagName::AppsecJson
+                    );
                 };
-                entry.push(value);
+                triggers.reserve(events.len());
+                for event in events.iter() {
+                    let value = match serde_json::to_value(event) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            warn!(
+                                "aap: failed to convert event to JSON, the event will be dropped: {e}\n{event:?}"
+                            );
+                            continue;
+                        }
+                    };
+                    triggers.push(value);
+                }
             }
         }
 
@@ -368,7 +431,11 @@ enum TagName {
     // AppSec tags
     AppsecEnabled,
     AppsecEvent,
+    AppsecEventRulesVersion,
     AppsecJson,
+    AppsecWafDuration,
+    AppsecWafTimeouts,
+    AppsecWafVersion,
     // General request tags
     HttpUrl,
     HttpMethod,
@@ -385,7 +452,11 @@ impl TagName {
         match self {
             Self::AppsecEnabled => "_dd.appsec.enabled",
             Self::AppsecEvent => "appsec.event",
+            Self::AppsecEventRulesVersion => "_dd.appsec.event_rules.version",
             Self::AppsecJson => "_dd.appsec.json",
+            Self::AppsecWafDuration => "_dd.appsec.waf.duration",
+            Self::AppsecWafTimeouts => "_dd.appsec.waf.timeouts",
+            Self::AppsecWafVersion => "_dd.appsec.waf.version",
             Self::HttpUrl => "http.url",
             Self::HttpMethod => "http.method",
             Self::HttpRoute => "http.route",
@@ -408,6 +479,8 @@ enum TagValue {
     Always(String),
     /// A tag value that is only emitted when an event is matched.
     OnEvent(serde_json::Value),
+    /// The special key used to encode AppSec events
+    AppSecEvents { triggers: Vec<serde_json::Value> },
     /// A tag value that actually is a metric value.
     Metric(f64),
 }
@@ -416,6 +489,11 @@ impl std::fmt::Display for TagValue {
         match self {
             Self::Always(str) => write!(f, "{str}"),
             Self::OnEvent(value) => write!(f, "{value}"),
+            Self::AppSecEvents { triggers } => write!(
+                f,
+                r#"{{ "triggers": {} }}"#,
+                serde_json::Value::Array(triggers.clone())
+            ),
             Self::Metric(value) => write!(f, "{value}"),
         }
     }
