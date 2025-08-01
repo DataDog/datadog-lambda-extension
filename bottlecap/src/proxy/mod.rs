@@ -3,6 +3,7 @@ use std::{env, sync::Arc};
 use crate::config::{Config, aws::AwsConfig};
 
 pub mod interceptor;
+pub mod tee_body;
 
 /// Returns true if the proxy should be started.
 ///
