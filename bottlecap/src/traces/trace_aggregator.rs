@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 /// that the Datadog Trace API accepts. The value is 3.2 MB.
 ///
 /// <https://github.com/DataDog/datadog-agent/blob/9d57c10a9eeb3916e661d35dbd23c6e36395a99d/pkg/trace/writer/trace.go#L27-L31>
-pub const MAX_CONTENT_SIZE_BYTES: usize = (32 * 1_024 * 1_024) / 10;
+pub const MAX_CONTENT_SIZE_BYTES: usize = 3_200_000;
 
 // Bundle SendDataBuilder with payload size because SendDataBuilder doesn't
 // expose a getter for the size
@@ -20,6 +20,7 @@ impl SendDataBuilderInfo {
     }
 }
 
+/// Takes in individual trace payloads and aggregates them into batches to be flushed to Datadog.
 #[allow(clippy::module_name_repetitions)]
 pub struct TraceAggregator {
     queue: VecDeque<SendDataBuilderInfo>,
@@ -48,10 +49,12 @@ impl TraceAggregator {
         }
     }
 
+    /// Takes in an individual trace payload.
     pub fn add(&mut self, payload_info: SendDataBuilderInfo) {
         self.queue.push_back(payload_info);
     }
 
+    /// Returns a batch of trace payloads, subject to the max content size.
     pub fn get_batch(&mut self) -> Vec<SendDataBuilder> {
         let mut batch_size = 0;
 
