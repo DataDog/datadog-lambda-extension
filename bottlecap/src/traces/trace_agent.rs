@@ -124,15 +124,13 @@ impl TraceAgent {
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
     ) -> TraceAgent {
-        // setup a channel to send processed traces to our flusher. tx is passed through each
+        // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
-        // processed trace payloads to our trace flusher.
+        // processed trace payloads to our trace aggregator.
         let (trace_tx, mut trace_rx): (Sender<SendDataBuilderInfo>, Receiver<SendDataBuilderInfo>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        // start our trace flusher. receives trace payloads and handles buffering + deciding when to
-        // flush to backend.
-
+        // Start the trace aggregator, which receives and buffers trace payloads to be consumed by the trace flusher.
         tokio::spawn(async move {
             while let Some(tracer_payload_info) = trace_rx.recv().await {
                 let mut aggregator = trace_aggregator.lock().await;
@@ -157,13 +155,13 @@ impl TraceAgent {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
-        // channels to send processed stats to our stats flusher.
+        // Set up a channel to send processed stats to our stats aggregator.
         let (stats_tx, mut stats_rx): (
             Sender<pb::ClientStatsPayload>,
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        // Receive stats payload and send it to the aggregator
+        // Start the stats aggregator, which receives and buffers stats payloads to be consumed by the stats flusher.
         let stats_aggregator = self.stats_aggregator.clone();
         tokio::spawn(async move {
             while let Some(stats_payload) = stats_rx.recv().await {
@@ -523,12 +521,12 @@ impl TraceAgent {
             )
             .await;
 
-        // send trace payload to our trace flusher
+        // send trace payload to our trace aggregator
         match trace_tx.send(send_data).await {
-            Ok(()) => success_response("Successfully buffered traces to be flushed."),
+            Ok(()) => success_response("Successfully buffered traces to be aggregated."),
             Err(err) => error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error sending traces to the trace flusher: {err}"),
+                format!("Error sending traces to the trace aggregator: {err}"),
             ),
         }
     }
