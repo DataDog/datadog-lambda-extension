@@ -21,6 +21,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
 use crate::{
+    appsec::processor::Processor as AppSecProcessor,
     config,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{
@@ -66,6 +67,7 @@ const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
+const LAMBDA_OPERATION_SPAN: &str = "aws.lambda";
 
 #[derive(Clone)]
 pub struct TraceState {
@@ -73,6 +75,7 @@ pub struct TraceState {
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     pub trace_tx: Sender<SendDataBuilderInfo>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    pub appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     pub tags_provider: Arc<provider::Provider>,
 }
 
@@ -96,6 +99,7 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
 }
@@ -117,6 +121,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
@@ -140,6 +145,7 @@ impl TraceAgent {
             stats_processor,
             proxy_aggregator,
             invocation_processor,
+            appsec_processor,
             tags_provider,
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
@@ -190,6 +196,7 @@ impl TraceAgent {
             trace_processor: Arc::clone(&self.trace_processor),
             trace_tx: self.tx.clone(),
             invocation_processor: Arc::clone(&self.invocation_processor),
+            appsec_processor: self.appsec_processor.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
         };
 
@@ -255,6 +262,7 @@ impl TraceAgent {
             state.trace_processor,
             state.trace_tx,
             state.invocation_processor,
+            state.appsec_processor,
             state.tags_provider,
             ApiVersion::V04,
         )
@@ -268,6 +276,7 @@ impl TraceAgent {
             state.trace_processor,
             state.trace_tx,
             state.invocation_processor,
+            state.appsec_processor,
             state.tags_provider,
             ApiVersion::V05,
         )
@@ -396,6 +405,7 @@ impl TraceAgent {
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendDataBuilderInfo>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
     ) -> Response {
@@ -466,6 +476,17 @@ impl TraceAgent {
                         invocation_processor.set_cold_start_span_trace_id(span.trace_id)
                     {
                         span.parent_id = cold_start_span_id;
+                    }
+                } else if span.name == LAMBDA_OPERATION_SPAN {
+                    if let Some(appsec_processor) = &appsec_processor {
+                        let finalized = appsec_processor.lock().await.process_span(span);
+                        if !finalized {
+                            todo!(
+                                "aap | {} @ {} | response for this span has not been seen yet... Span should be witheld!",
+                                span.name,
+                                span.span_id
+                            );
+                        }
                     }
                 }
 

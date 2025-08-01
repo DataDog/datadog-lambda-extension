@@ -96,6 +96,7 @@ pub struct YamlConfig {
     pub appsec_rules: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
     pub appsec_waf_timeout: Option<Duration>,
+    pub api_security_enabled: Option<bool>,
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
     pub extension_version: Option<String>,
@@ -608,6 +609,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(config, yaml_config, serverless_appsec_enabled);
     merge_option!(config, yaml_config, appsec_rules);
     merge_option_to_value!(config, yaml_config, appsec_waf_timeout);
+    merge_option_to_value!(config, yaml_config, api_security_enabled);
     merge_option_to_value!(config, yaml_config, api_security_sample_delay);
     merge_option!(config, yaml_config, extension_version);
 }
@@ -772,6 +774,7 @@ capture_lambda_payload_max_depth: 5
 serverless_appsec_enabled: true
 appsec_rules: "/path/to/rules.json"
 appsec_waf_timeout: 1000000 # Microseconds
+api_security_enabled: false
 api_security_sample_delay: 60 # Seconds
 extension_version: "compatibility"
 "#,
@@ -899,6 +902,7 @@ extension_version: "compatibility"
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
                 appsec_waf_timeout: Duration::from_secs(1),
+                api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
 
                 extension_version: Some("compatibility".to_string()),
