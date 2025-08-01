@@ -7,6 +7,7 @@ pub struct ProxyRequest {
     pub target_url: String,
 }
 
+/// Takes in individual proxy requests and aggregates them into batches to be flushed to Datadog.
 pub struct Aggregator {
     queue: Vec<ProxyRequest>,
 }
@@ -20,10 +21,12 @@ impl Default for Aggregator {
 }
 
 impl Aggregator {
+    /// Takes in an individual proxy request.
     pub fn add(&mut self, request: ProxyRequest) {
         self.queue.push(request);
     }
 
+    /// Returns a batch of proxy requests.
     pub fn get_batch(&mut self) -> Vec<ProxyRequest> {
         std::mem::take(&mut self.queue)
     }

@@ -93,18 +93,18 @@ impl StatsProcessor for ServerlessStatsProcessor {
             return Ok((StatusCode::INTERNAL_SERVER_ERROR, error_msg).into_response());
         };
 
-        // send trace payload to our trace flusher
+        // send trace stats payload to our stats aggregator
         match tx.send(stats).await {
             Ok(()) => {
-                debug!("Successfully buffered stats to be flushed.");
+                debug!("Successfully buffered stats to be aggregated.");
                 Ok((
                     StatusCode::ACCEPTED,
-                    "Successfully buffered stats to be flushed.",
+                    "Successfully buffered stats to be aggregated.",
                 )
                     .into_response())
             }
             Err(err) => {
-                let error_msg = format!("Error sending stats to the stats flusher: {err}");
+                let error_msg = format!("Error sending stats to the stats aggregator: {err}");
                 error!("{}", error_msg);
                 Ok((StatusCode::INTERNAL_SERVER_ERROR, error_msg).into_response())
             }

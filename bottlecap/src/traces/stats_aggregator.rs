@@ -34,6 +34,7 @@ impl Default for StatsAggregator {
     }
 }
 
+/// Takes in individual trace stats payloads and aggregates them into batches to be flushed to Datadog.
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
@@ -45,10 +46,12 @@ impl StatsAggregator {
         }
     }
 
+    /// Takes in an individual trace stats payload.
     pub fn add(&mut self, payload: ClientStatsPayload) {
         self.queue.push_back(payload);
     }
 
+    /// Returns a batch of trace stats payloads, subject to the max content size.
     pub fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
         let mut batch_size = 0;
 
