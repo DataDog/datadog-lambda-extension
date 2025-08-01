@@ -81,8 +81,11 @@ impl Trigger for APIGatewayRestEvent {
         );
         let start_time = (self.request_context.time_epoch as f64 * MS_TO_NS) as i64;
 
-        let service_name =
-            self.resolve_service_name(service_mapping, &self.request_context.domain_name);
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &self.request_context.domain_name,
+            "api_gateway_rest",
+        );
 
         span.name = "aws.apigateway".to_string();
         span.service = service_name;
@@ -437,7 +440,8 @@ mod tests {
         assert_eq!(
             event.resolve_service_name(
                 &specific_service_mapping,
-                &event.request_context.domain_name
+                &event.request_context.domain_name,
+                "api_gateway_rest"
             ),
             "specific-service"
         );
@@ -447,8 +451,11 @@ mod tests {
             "generic-service".to_string(),
         )]);
         assert_eq!(
-            event
-                .resolve_service_name(&generic_service_mapping, &event.request_context.domain_name),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.request_context.domain_name,
+                "api_gateway_rest"
+            ),
             "generic-service"
         );
     }

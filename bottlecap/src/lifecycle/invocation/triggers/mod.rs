@@ -113,13 +113,20 @@ pub trait Trigger: ServiceNameResolver {
     fn resolve_service_name(
         &self,
         service_mapping: &HashMap<String, String>,
+        instance_name: &str,
         fallback: &str,
     ) -> String {
         service_mapping
             .get(&self.get_specific_identifier())
             .or_else(|| service_mapping.get(self.get_generic_identifier()))
-            .unwrap_or(&fallback.to_string())
-            .to_string()
+            .cloned()
+            .unwrap_or_else(|| {
+                if instance_name.is_empty() {
+                    fallback.to_string()
+                } else {
+                    instance_name.to_string()
+                }
+            })
     }
 }
 
