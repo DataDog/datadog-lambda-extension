@@ -522,7 +522,6 @@ dependencies = [
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/)",
  "dogstatsd",
  "figment",
- "flate2",
  "fnv",
  "futures 0.3.31",
  "hex",

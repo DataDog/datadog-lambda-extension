@@ -28,7 +28,7 @@ pub struct Processor {
     handle: Handle,
     ruleset_version: String,
     waf_timeout: Duration,
-    api_sec_sampler: Arc<Mutex<apisec::Sampler>>, // Must be [`Arc`] so [`Processor`] can be [`Send`].
+    api_sec_sampler: Option<Arc<Mutex<apisec::Sampler>>>, // Must be [`Arc`] so [`Processor`] can be [`Send`].
     context_buffer: VecDeque<Context>,
 }
 impl Processor {
@@ -89,9 +89,13 @@ impl Processor {
             handle,
             ruleset_version,
             waf_timeout: cfg.appsec_waf_timeout,
-            api_sec_sampler: Arc::new(Mutex::new(apisec::Sampler::with_interval(
-                cfg.api_security_sample_delay,
-            ))),
+            api_sec_sampler: if cfg.api_security_enabled {
+                Some(Arc::new(Mutex::new(apisec::Sampler::with_interval(
+                    cfg.api_security_sample_delay,
+                ))))
+            } else {
+                None
+            },
             context_buffer: VecDeque::with_capacity(capacity.get()),
         })
     }
@@ -104,12 +108,18 @@ impl Processor {
     /// Process the intercepted payload for the result of an invocation.
     pub fn process_invocation_result(&mut self, rid: &str, payload: impl AsRef<[u8]>) {
         // Taking the sampler first, as it implies a temporary immutable borrow...
-        let sampler = self.api_sec_sampler.clone();
-        let Ok(mut sampler) = sampler.lock() else {
-            warn!(
-                "aap: API Security sampler was panic-poisoned, skipping API Security sampling decision..."
-            );
-            return;
+        let api_sec_sampler = self.api_sec_sampler.as_ref().map(Arc::clone);
+        let api_sec_sampler = if let Some(api_sec_sampler) = &api_sec_sampler {
+            if let Ok(api_sec_sampler) = api_sec_sampler.lock() {
+                Some(api_sec_sampler)
+            } else {
+                warn!(
+                    "aap: API Security sampler was panic-poisoned, skipping API Security sampling decision..."
+                );
+                None
+            }
+        } else {
+            None
         };
 
         let Some(ctx) = self.get_context_mut(rid) else {
@@ -121,7 +131,9 @@ impl Processor {
         ctx.response_seen = true;
 
         let (method, route, status_code) = ctx.endpoint_info();
-        if sampler.decision_for(&method, &route, &status_code) {
+        if api_sec_sampler
+            .is_some_and(|mut sampler| sampler.decision_for(&method, &route, &status_code))
+        {
             debug!(
                 "aap: extracing API Security schema for request <{method}, {route}, {status_code}>"
             );
@@ -142,8 +154,8 @@ impl Processor {
     /// Returns [`true`] the span can already be finalized and sent to the
     /// backend, meaning that if there was a security context, we have already
     /// had a chance to see the response for the corresponding span already.
-    pub fn process_span(&self, span: &mut Span) -> bool {
-        let Some(rid) = span.meta.get("request_id") else {
+    pub fn process_span(&mut self, span: &mut Span) -> bool {
+        let Some(rid) = span.meta.get("request_id").cloned() else {
             // Can't match this to a request ID, nothing to do...
             debug!(
                 "aap | {} @ {} | no request_id found in span meta, nothing to do...",
@@ -151,7 +163,7 @@ impl Processor {
             );
             return true;
         };
-        let Some(ctx) = self.get_context(rid) else {
+        let Some(ctx) = self.get_context(&rid) else {
             // Nothing to do...
             debug!(
                 "aap | {} @ {} | no security context is associated with request {rid}, nothing to do...",
@@ -167,7 +179,12 @@ impl Processor {
 
         // Span is finalized from a security standpoint if we've seen the
         // response for it already.
-        ctx.response_seen
+        if ctx.response_seen {
+            self.delete_context(&rid);
+            return true;
+        }
+
+        false
     }
 
     /// Parses the App & API Protection ruleset from the provided [`Config`], or
@@ -217,6 +234,14 @@ impl Processor {
     /// is one.
     fn get_context_mut(&mut self, rid: &str) -> Option<&mut Context> {
         self.context_buffer.iter_mut().find(|c| c.rid == rid)
+    }
+
+    /// Removes the [`Context`] associated with the given request ID from the
+    /// buffer, if there is one.
+    fn delete_context(&mut self, rid: &str) {
+        if let Some(idx) = self.context_buffer.iter().position(|c| c.rid == rid) {
+            self.context_buffer.remove(idx);
+        }
     }
 }
 impl std::fmt::Debug for Processor {

@@ -477,15 +477,7 @@ impl TraceAgent {
                     {
                         span.parent_id = cold_start_span_id;
                     }
-                }
-
-                if span.resource == INVOCATION_SPAN_RESOURCE {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    invocation_processor.add_tracer_span(span);
-                }
-                handle_reparenting(&mut reparenting_info, span);
-
-                if span.name == LAMBDA_OPERATION_SPAN {
+                } else if span.name == LAMBDA_OPERATION_SPAN {
                     if let Some(appsec_processor) = &appsec_processor {
                         let finalized = appsec_processor.lock().await.process_span(span);
                         if !finalized {
@@ -497,6 +489,12 @@ impl TraceAgent {
                         }
                     }
                 }
+
+                if span.resource == INVOCATION_SPAN_RESOURCE {
+                    let mut invocation_processor = invocation_processor.lock().await;
+                    invocation_processor.add_tracer_span(span);
+                }
+                handle_reparenting(&mut reparenting_info, span);
             }
         }
 

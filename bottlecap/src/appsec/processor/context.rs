@@ -196,6 +196,12 @@ impl Context {
             TagName::AppsecWafTimeouts.to_string(),
             self.waf_timed_out_occurrences as f64,
         );
+        #[allow(clippy::map_entry)] // We want to emit a debug log here...
+        if !span.meta.contains_key(&TagName::Origin.to_string()) {
+            debug!("aap: setting span tag {}:appsec", TagName::Origin);
+            span.meta
+                .insert(TagName::Origin.to_string(), "appsec".to_string());
+        }
     }
 
     /// Request headers that are always collected as long as AAP is enabled.
@@ -436,6 +442,8 @@ enum TagName {
     AppsecWafDuration,
     AppsecWafTimeouts,
     AppsecWafVersion,
+    // Hidden span tags of relevance
+    Origin,
     // General request tags
     HttpUrl,
     HttpMethod,
@@ -457,6 +465,7 @@ impl TagName {
             Self::AppsecWafDuration => "_dd.appsec.waf.duration",
             Self::AppsecWafTimeouts => "_dd.appsec.waf.timeouts",
             Self::AppsecWafVersion => "_dd.appsec.waf.version",
+            Self::Origin => "_dd.origin",
             Self::HttpUrl => "http.url",
             Self::HttpMethod => "http.method",
             Self::HttpRoute => "http.route",
@@ -479,7 +488,7 @@ enum TagValue {
     Always(String),
     /// A tag value that is only emitted when an event is matched.
     OnEvent(serde_json::Value),
-    /// The special key used to encode AppSec events
+    /// The special key used to encode AAP events
     AppSecEvents { triggers: Vec<serde_json::Value> },
     /// A tag value that actually is a metric value.
     Metric(f64),
