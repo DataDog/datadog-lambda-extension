@@ -202,7 +202,8 @@ async fn invocation_response_proxy(
     let (parts, body) = request.into_parts();
     let (outgoing_tee_body, outgoing_completion_receiver) = TeeBodyWithCompletion::new(body);
 
-    // This is where LWA will be processed
+    // The outgoing body is what the final user will see.
+    // Which is what AWS Lambda returns, in turn what we want to process.
     let mut join_set = tasks.lock().await;
     let aws_config_clone = aws_config.clone();
     join_set.spawn(async move {
