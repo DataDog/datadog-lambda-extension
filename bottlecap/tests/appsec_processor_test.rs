@@ -69,6 +69,7 @@ async fn test_processor() {
             "rid-5",
             request_payload!(LambdaFunctionUrlEvent = lambda_function_url_event),
         ),
+        ("rid-unknown", IdentifiedTrigger::Unknown),
     ] {
         let processor = subject.clone();
         tasks.spawn(async move {
@@ -100,7 +101,7 @@ async fn test_processor() {
         ),
         (
             "rid-5",
-            r#"{"statusCode": 300, "headers": {"Content-Type":"text/plain"}, "body": "Moved", "isBase64Encoded": false}"#,
+            r#"{"statusCode": 300, "headers": {"Content-Type":"application/json"}, "body": "{invalid}", "isBase64Encoded": false}"#,
         ),
     ] {
         let processor = subject.clone();
@@ -250,7 +251,7 @@ async fn test_processor() {
                     "_dd.appsec.fp.http.header": "hdr-0010100011-f97811a1-13-a19ef930",
                     "_dd.appsec.fp.http.network": "net-1-1000000000",
                     "_dd.appsec.s.req.headers": r#"[{"accept":[[[8]],{"len":1}],"accept-encoding":[[[8]],{"len":1}],"accept-language":[[[8]],{"len":1}],"cache-control":[[[8]],{"len":1}],"host":[[[8]],{"len":1}],"pragma":[[[8]],{"len":1}],"sec-ch-ua":[[[8]],{"len":1}],"sec-ch-ua-mobile":[[[8]],{"len":1}],"sec-ch-ua-platform":[[[8]],{"len":1}],"sec-fetch-dest":[[[8]],{"len":1}],"sec-fetch-mode":[[[8]],{"len":1}],"sec-fetch-site":[[[8]],{"len":1}],"sec-fetch-user":[[[8]],{"len":1}],"upgrade-insecure-requests":[[[8]],{"len":1}],"user-agent":[[[8]],{"len":1}],"x-amzn-trace-id":[[[8]],{"len":1}],"x-forwarded-for":[[[8]],{"len":1}],"x-forwarded-port":[[[8]],{"len":1}],"x-forwarded-proto":[[[8]],{"len":1}]}]"#,
-                    "_dd.appsec.s.res.body": r#"[8]"#,
+                    // No "_dd.appsec.s.res.body" because the body is invalid here...
                     "_dd.appsec.s.res.headers": r#"[{"content-type":[[[8]],{"len":1}]}]"#,
                     "_dd.appsec.waf.version": waf_version,
                     "_dd.origin": "appsec",
@@ -258,7 +259,7 @@ async fn test_processor() {
                     "http.request.headers.accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9",
                     "http.request.headers.user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/95.0.4638.69 Safari/537.36",
                     "http.request.headers.x-amzn-trace-id": "Root=1-61953929-1ec00c3011062a48477b169e",
-                    "http.response.headers.content-type": "text/plain",
+                    "http.response.headers.content-type": "application/json",
                     "http.status_code": "300",
                     "http.url": "a8hyhsshac.lambda-url.eu-south-1.amazonaws.com/",
                 }
@@ -342,15 +343,24 @@ fn assert_span_matches(expected: Span, actual: Span) {
             // The schemas are JSON objects that may have different key orders...
             let expected_value = serde_json::from_str::<serde_json::Value>(value)
                 .expect("failed to parse expected value as JSON");
-            let actual_value = serde_json::from_str::<serde_json::Value>(&actual.meta[key])
-                .expect("failed to parse actual value as JSON");
+            let actual_value = serde_json::from_str::<serde_json::Value>(
+                actual
+                    .meta
+                    .get(key)
+                    .unwrap_or_else(|| panic!("missing span tag {key}")),
+            )
+            .expect("failed to parse actual value as JSON");
             assert_eq!(
                 expected_value, actual_value,
                 "mismatched span tag value for {key}={actual_value} (expected {expected_value})"
             );
         } else {
             assert_eq!(
-                value, &actual.meta[key],
+                value,
+                actual
+                    .meta
+                    .get(key)
+                    .unwrap_or_else(|| panic!("missing span tag {key}")),
                 "mismatched span tag value for {key}"
             );
         }
@@ -358,12 +368,22 @@ fn assert_span_matches(expected: Span, actual: Span) {
     for (key, value) in &expected.metrics {
         if value.is_nan() {
             assert!(
-                actual.metrics[key] > 0.0,
+                actual
+                    .metrics
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| panic!("missing span metric {key}"))
+                    > 0.0,
                 "missing required span span metric {key} (any positive value is fine)"
             );
         } else {
             assert_eq!(
-                *value, actual.metrics[key],
+                *value,
+                actual
+                    .metrics
+                    .get(key)
+                    .cloned()
+                    .unwrap_or_else(|| panic!("missing span metric {key}")),
                 "mismatched value for span metric {key}"
             );
         }

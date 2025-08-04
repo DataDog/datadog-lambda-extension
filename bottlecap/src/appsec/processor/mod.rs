@@ -105,9 +105,12 @@ impl Processor {
     pub fn process_invocation_next(
         &mut self,
         rid: &str,
-        payload: &impl InvocationPayload,
+        payload: &IdentifiedTrigger,
         tasks: &mut JoinSet<()>,
     ) {
+        if payload.is_unknown() {
+            return;
+        }
         self.new_context(rid, tasks).run(payload);
     }
 

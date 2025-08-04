@@ -141,10 +141,12 @@ macro_rules! identified_triggers {
             else => $default:ident,
         }
     ) => {
+        #[derive(Debug, Default)]
         #[must_use]
         #[non_exhaustive]
         $vis enum $name {
             $($case($type),)+
+            #[default]
             $default,
         }
         impl $name {
@@ -161,10 +163,11 @@ macro_rules! identified_triggers {
                 let value = serde_json::from_slice(payload)?;
                 Ok(Self::from_value(&value))
             }
-        }
-        impl Default for $name {
-            fn default() -> Self {
-                Self::$default
+
+            #[doc = concat!("Returns `true` if this trigger is [`Self::", stringify!($default), "`].")]
+            #[must_use]
+            $vis const fn is_unknown(&self) -> bool {
+                matches!(self, Self::$default)
             }
         }
     };
