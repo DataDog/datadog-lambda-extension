@@ -72,8 +72,10 @@ async fn test_processor() {
     ] {
         let processor = subject.clone();
         tasks.spawn(async move {
+            let mut tasks = JoinSet::new();
             let mut processor = processor.lock().await;
-            processor.process_invocation_next(rid, &payload)
+            processor.process_invocation_next(rid, &payload, &mut tasks);
+            tasks.join_all().await;
         });
     }
     // Make sure all the tasks are completed
@@ -104,7 +106,7 @@ async fn test_processor() {
         let processor = subject.clone();
         tasks.spawn(async move {
             let mut processor = processor.lock().await;
-            processor.process_invocation_result(rid, payload);
+            processor.process_invocation_result(rid, payload).await;
         });
     }
     // Make sure all the tasks are completed
@@ -281,14 +283,18 @@ async fn test_processor() {
 
     ////////////////////////////////////////////////////////////////////////////
     // Now testing with security activity
+    let mut tasks = JoinSet::new();
     subject.lock().await.process_invocation_next(
         "rid-event",
         &request_payload!(APIGatewayHttpEvent = api_gateway_http_event_appsec),
+        &mut tasks,
     );
+    tasks.join_all().await;
     subject
         .lock()
         .await
-        .process_invocation_result("rid-event", br#"{"statusCode": 200}"#);
+        .process_invocation_result("rid-event", br#"{"statusCode": 200}"#)
+        .await;
     let mut span = span! { meta { "request_id": "rid-event" } };
     subject.lock().await.process_span(&mut span);
     assert_span_matches(
