@@ -68,14 +68,12 @@ const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
-const LAMBDA_OPERATION_SPAN: &str = "aws.lambda";
 
 #[derive(Clone)]
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    pub appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     pub tags_provider: Arc<provider::Provider>,
 }
 
@@ -194,11 +192,11 @@ impl TraceAgent {
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
             trace_sender: Arc::new(SendingTraceProcessor {
+                appsec: self.appsec_processor.clone(),
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
             }),
             invocation_processor: Arc::clone(&self.invocation_processor),
-            appsec_processor: self.appsec_processor.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
         };
 
@@ -263,7 +261,6 @@ impl TraceAgent {
             request,
             state.trace_sender,
             state.invocation_processor,
-            state.appsec_processor,
             state.tags_provider,
             ApiVersion::V04,
         )
@@ -276,7 +273,6 @@ impl TraceAgent {
             request,
             state.trace_sender,
             state.invocation_processor,
-            state.appsec_processor,
             state.tags_provider,
             ApiVersion::V05,
         )
@@ -404,7 +400,6 @@ impl TraceAgent {
         request: Request,
         trace_sender: Arc<SendingTraceProcessor>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-        appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
     ) -> Response {
@@ -475,17 +470,6 @@ impl TraceAgent {
                         invocation_processor.set_cold_start_span_trace_id(span.trace_id)
                     {
                         span.parent_id = cold_start_span_id;
-                    }
-                } else if span.name == LAMBDA_OPERATION_SPAN {
-                    if let Some(appsec_processor) = &appsec_processor {
-                        let finalized = appsec_processor.lock().await.process_span(span);
-                        if !finalized {
-                            todo!(
-                                "aap | {} @ {} | response for this span has not been seen yet... Span should be witheld!",
-                                span.name,
-                                span.span_id
-                            );
-                        }
                     }
                 }
 

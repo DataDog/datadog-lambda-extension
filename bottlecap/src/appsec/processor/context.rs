@@ -1,17 +1,23 @@
 use std::collections::HashMap;
 use std::io::{Read, read_to_string};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::{Buf, Bytes};
 use datadog_trace_protobuf::pb::Span;
+use datadog_trace_utils::tracer_header_tags;
 use libddwaf::object::{Keyed, WafMap, WafObject};
 use libddwaf::{Context as WafContext, Handle, RunError, RunOutput, RunResult, waf_map};
 use mime::Mime;
 use multipart::server::Multipart;
 use tracing::{debug, warn};
 
-use crate::appsec::processor::InvocationPayload;
 use crate::appsec::processor::response::ExpectedResponseFormat;
+use crate::appsec::processor::{InvocationPayload, Processor};
+use crate::config::Config;
+use crate::tags::provider::Provider;
+use crate::traces::span_pointers::SpanPointer;
+use crate::traces::trace_processor::SendingTraceProcessor;
 
 /// Holds inforamtion gathered about an invocation.
 #[must_use]
@@ -33,7 +39,9 @@ pub struct Context {
     /// Trace tags to be applied for this invocation.
     trace_tags: HashMap<TagName, TagValue>,
     /// Whether we have had a chance to see the response body or not.
-    pub(super) response_seen: bool,
+    response_seen: bool,
+    /// Holds a trace for sending once the response is seen.
+    on_response_seen: Option<(Vec<Span>, SendingTraceProcessor, HoldArguments)>,
 }
 impl Context {
     /// Creates a new [`Context`] for the provided request ID and configures it
@@ -68,7 +76,78 @@ impl Context {
             has_events: false,
             trace_tags,
             response_seen: false,
+            on_response_seen: None,
         }
+    }
+
+    /// Returns [`true`] if the response for this request was not seen yet and
+    /// it might still be occurring.
+    pub(crate) const fn is_pending_response(&self) -> bool {
+        !self.response_seen
+    }
+
+    /// Marks the response of this request as having been seen.
+    pub(super) async fn set_response_seen(&mut self) {
+        if let Some((mut trace, sender, args)) = self.on_response_seen.take() {
+            if let Some(span) = Processor::service_entry_span_mut(&mut trace) {
+                // Debug-sanity check that we're holding the right trace.
+                debug_assert_eq!(
+                    span.meta.get("request_id").map(String::as_str),
+                    Some(self.rid.as_str())
+                );
+                debug!(
+                    "aap: processing trace for request {} now that the response was seen",
+                    self.rid
+                );
+                self.process_span(span);
+            }
+
+            debug!("aap: flushing out trace for request {}", self.rid);
+            match sender
+                .send_processed_traces(
+                    args.config,
+                    args.tags_provider,
+                    tracer_header_tags::TracerHeaderTags {
+                        lang: &args.tracer_header_tags_lang,
+                        lang_version: &args.tracer_header_tags_lang_version,
+                        lang_interpreter: &args.tracer_header_tags_lang_interpreter,
+                        lang_vendor: &args.tracer_header_tags_lang_vendor,
+                        tracer_version: &args.tracer_header_tags_tracer_version,
+                        container_id: &args.tracer_header_tags_container_id,
+                        client_computed_top_level: args
+                            .tracer_header_tags_client_computed_top_level,
+                        client_computed_stats: args.tracer_header_tags_client_computed_stats,
+                        dropped_p0_traces: args.tracer_header_tags_dropped_p0_traces,
+                        dropped_p0_spans: args.tracer_header_tags_dropped_p0_spans,
+                    },
+                    vec![trace],
+                    args.body_size,
+                    args.span_pointers,
+                )
+                .await
+            {
+                Ok(()) => debug!("aap: successfully sent trace to aggregator buffer"),
+                Err(e) => warn!("aap: failed to send trace to aggregator buffer: {e}"),
+            }
+        }
+
+        self.response_seen = true;
+    }
+
+    /// Holds a trace for future processing once the response is seen.
+    ///
+    /// # Panics
+    /// If called after [`Self::is_pending_response`] returns `false`.
+    pub(crate) fn hold_trace(
+        &mut self,
+        trace: Vec<Span>,
+        sender: SendingTraceProcessor,
+        args: HoldArguments,
+    ) {
+        if !self.is_pending_response() {
+            unreachable!("Context::hold_trace called after response was seen!");
+        }
+        self.on_response_seen = Some((trace, sender, args));
     }
 
     /// Evaluate the WAF rules against the provided [`InvocationPayload`] and
@@ -429,6 +508,24 @@ impl Context {
             }
         }
     }
+}
+
+pub struct HoldArguments {
+    pub config: Arc<Config>,
+    pub tags_provider: Arc<Provider>,
+    pub body_size: usize,
+    pub span_pointers: Option<Vec<SpanPointer>>,
+
+    pub tracer_header_tags_lang: String,
+    pub tracer_header_tags_lang_version: String,
+    pub tracer_header_tags_lang_interpreter: String,
+    pub tracer_header_tags_lang_vendor: String,
+    pub tracer_header_tags_tracer_version: String,
+    pub tracer_header_tags_container_id: String,
+    pub tracer_header_tags_client_computed_top_level: bool,
+    pub tracer_header_tags_client_computed_stats: bool,
+    pub tracer_header_tags_dropped_p0_traces: usize,
+    pub tracer_header_tags_dropped_p0_spans: usize,
 }
 
 /// Names of tags that can be emitted by the WAF.

@@ -11,6 +11,7 @@ use datadog_trace_protobuf::pb::Span;
 use itertools::Itertools;
 use libddwaf::object::{WafMap, WafOwned};
 use libddwaf::{Builder, Config as WafConfig, Handle};
+use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
 
 use crate::appsec::processor::context::Context;
@@ -101,12 +102,17 @@ impl Processor {
     }
 
     /// Process the intercepted payload for the next invocation.
-    pub fn process_invocation_next(&mut self, rid: &str, payload: &impl InvocationPayload) {
-        self.new_context(rid).run(payload);
+    pub fn process_invocation_next(
+        &mut self,
+        rid: &str,
+        payload: &impl InvocationPayload,
+        tasks: &mut JoinSet<()>,
+    ) {
+        self.new_context(rid, tasks).run(payload);
     }
 
     /// Process the intercepted payload for the result of an invocation.
-    pub fn process_invocation_result(&mut self, rid: &str, payload: impl AsRef<[u8]>) {
+    pub async fn process_invocation_result(&mut self, rid: &str, payload: impl AsRef<[u8]>) {
         // Taking the sampler first, as it implies a temporary immutable borrow...
         let api_sec_sampler = self.api_sec_sampler.as_ref().map(Arc::clone);
         let api_sec_sampler = if let Some(api_sec_sampler) = &api_sec_sampler {
@@ -127,9 +133,6 @@ impl Processor {
             return;
         };
 
-        // At this point we had our chance to see the response, so we can finalize any span.
-        ctx.response_seen = true;
-
         let (method, route, status_code) = ctx.endpoint_info();
         if api_sec_sampler
             .is_some_and(|mut sampler| sampler.decision_for(&method, &route, &status_code))
@@ -146,6 +149,18 @@ impl Processor {
 
             ctx.extract_schemas();
         }
+
+        // Finally, mark the response as having been seen.
+        ctx.set_response_seen().await;
+    }
+
+    /// Returns the first `aws.lambda` span from the provided trace, if one
+    /// exists.
+    ///
+    /// # Returns
+    /// The span on which security information will be attached.
+    pub fn service_entry_span_mut(trace: &mut [Span]) -> Option<&mut Span> {
+        trace.iter_mut().find(|span| span.name == "aws.lambda")
     }
 
     /// Processes an intercepted [`Span`].
@@ -154,14 +169,16 @@ impl Processor {
     /// Returns [`true`] the span can already be finalized and sent to the
     /// backend, meaning that if there was a security context, we have already
     /// had a chance to see the response for the corresponding span already.
-    pub fn process_span(&mut self, span: &mut Span) -> bool {
+    /// Otherwise, returns false, and an optional [`Context`] that can be used
+    /// to defer some processing to when the response becomes available.
+    pub fn process_span(&mut self, span: &mut Span) -> (bool, Option<&mut Context>) {
         let Some(rid) = span.meta.get("request_id").cloned() else {
             // Can't match this to a request ID, nothing to do...
             debug!(
                 "aap | {} @ {} | no request_id found in span meta, nothing to do...",
                 span.name, span.span_id
             );
-            return true;
+            return (true, None);
         };
         let Some(ctx) = self.get_context(&rid) else {
             // Nothing to do...
@@ -169,7 +186,7 @@ impl Processor {
                 "aap | {} @ {} | no security context is associated with request {rid}, nothing to do...",
                 span.name, span.span_id
             );
-            return true;
+            return (true, None);
         };
         debug!(
             "aap | {} @ {} | processing span with for request {rid}",
@@ -179,12 +196,13 @@ impl Processor {
 
         // Span is finalized from a security standpoint if we've seen the
         // response for it already.
-        if ctx.response_seen {
+        if !ctx.is_pending_response() {
             self.delete_context(&rid);
-            return true;
+            return (true, None);
         }
 
-        false
+        // Fetch the context again here, as otherwise the borrow checker yells.
+        (false, self.get_context_mut(&rid))
     }
 
     /// Parses the App & API Protection ruleset from the provided [`Config`], or
@@ -202,13 +220,19 @@ impl Processor {
 
     /// Creates a new [`Context`] for the given request ID, and tracks it in the
     /// context buffer.
-    fn new_context(&mut self, rid: &str) -> &mut Context {
-        if let Some(idx) = self.context_buffer.iter().position(|c| c.rid == rid) {
+    fn new_context(&mut self, rid: &str, tasks: &mut JoinSet<()>) -> &mut Context {
+        let dropped = if let Some(idx) = self.context_buffer.iter().position(|c| c.rid == rid) {
             // This request ID was already seen, remove it from the buffer...
-            self.context_buffer.remove(idx);
+            self.context_buffer.remove(idx)
         } else if self.context_buffer.len() == self.context_buffer.capacity() {
             // We're at capacity, remove the oldest context before proceeding...
-            self.context_buffer.pop_front();
+            self.context_buffer.pop_front()
+        } else {
+            None
+        };
+        if let Some(mut ctx) = dropped {
+            // Ensure any pending trace is flushed out before continuing...
+            tasks.spawn(async move { ctx.set_response_seen().await });
         }
 
         // Insert the new context at the back of the buffer.

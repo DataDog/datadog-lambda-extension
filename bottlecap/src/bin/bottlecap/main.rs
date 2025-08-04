@@ -590,7 +590,7 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                 break 'flush_end;
                             }
@@ -722,7 +722,7 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
                         let mut locked_metrics = metrics_flushers.lock().await;
@@ -760,7 +760,7 @@ async fn extension_loop_active(
                             debug!("Received tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
@@ -831,6 +831,7 @@ async fn blocking_flush_all(
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
@@ -880,6 +881,7 @@ async fn handle_event_bus_event(
                         status,
                         tags_provider.clone(),
                         Arc::new(SendingTraceProcessor {
+                            appsec: appsec_processor.clone(),
                             processor: trace_processor.clone(),
                             trace_tx: trace_agent_channel.clone(),
                         }),

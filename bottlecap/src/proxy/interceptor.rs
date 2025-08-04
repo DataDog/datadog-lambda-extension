@@ -167,10 +167,11 @@ async fn invocation_next_proxy(
             .and_then(|v| v.to_str().ok())
         {
             if let Ok(trigger) = IdentifiedTrigger::from_slice(&intercepted_bytes) {
+                let mut tasks = tasks.lock().await;
                 appsec
                     .lock()
                     .await
-                    .process_invocation_next(request_id, &trigger);
+                    .process_invocation_next(request_id, &trigger, &mut tasks);
             }
         }
     }
@@ -229,7 +230,8 @@ async fn invocation_response_proxy(
         appsec
             .lock()
             .await
-            .process_invocation_result(&request_id, body_bytes.clone());
+            .process_invocation_result(&request_id, body_bytes.clone())
+            .await;
     }
 
     if aws_config.aws_lwa_proxy_lambda_runtime_api.is_some() {
