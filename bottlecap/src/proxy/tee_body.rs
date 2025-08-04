@@ -37,19 +37,18 @@ impl<B> TeeBodyWithCompletion<B> {
         let sender = self.completion_sender.clone();
 
         tokio::spawn(async move {
-            if let Ok(mut sender_guard) = sender.try_lock() {
-                if let Some(sender) = sender_guard.take() {
-                    let collected_data = {
-                        let buffer_guard = buffer.lock().await;
-                        let data = buffer_guard.clone();
-                        Bytes::from(data)
-                    };
+            let mut sender_guard = sender.lock().await;
+            if let Some(sender) = sender_guard.take() {
+                let collected_data = {
+                    let buffer_guard = buffer.lock().await;
+                    let data = buffer_guard.clone();
+                    Bytes::from(data)
+                };
 
-                    if sender.send(collected_data).is_err() {
-                        error!(
-                            "PROXY | tee_body | unable to send completion signal, proxied payload won't be processed"
-                        );
-                    }
+                if sender.send(collected_data).is_err() {
+                    error!(
+                        "PROXY | tee_body | unable to send completion signal, proxied payload won't be processed"
+                    );
                 }
             }
         });
@@ -69,7 +68,11 @@ where
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
     ) -> Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        // Use unsafe to access the inner body while maintaining pinning
+        // SAFETY: This is safe because:
+        // 1. We're only accessing the `inner` field, which is the only field that needs pinning
+        // 2. The `inner` field implements `http_body::Body` which has proper pinning guarantees
+        // 3. We're not moving or dropping the pinned data, just calling methods on it
+        // 4. The `Arc<Mutex<...>>` fields don't require pinning as they're shared references
         let inner = unsafe { self.as_mut().map_unchecked_mut(|s| &mut s.inner) };
 
         match inner.poll_frame(cx) {
@@ -78,6 +81,8 @@ where
                     let buffer = self.buffer.clone();
                     let data_bytes = data.as_ref().to_vec();
 
+                    // Use try_lock here since we're in a sync context and don't want to block
+                    // If it fails, we'll just skip this chunk of data rather than blocking
                     if let Ok(mut buf) = buffer.try_lock() {
                         buf.extend_from_slice(&data_bytes);
                     }
