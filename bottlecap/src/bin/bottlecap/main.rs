@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::traces::trace_processor::SendingTraceProcessor;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -878,8 +879,10 @@ async fn handle_event_bus_event(
                         metrics,
                         status,
                         tags_provider.clone(),
-                        trace_processor.clone(),
-                        trace_agent_channel.clone(),
+                        Arc::new(SendingTraceProcessor {
+                            processor: trace_processor.clone(),
+                            trace_tx: trace_agent_channel.clone(),
+                        }),
                         event.time.timestamp(),
                     )
                     .await;

@@ -23,6 +23,8 @@ use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadColl
 use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::SendError;
 use tracing::error;
 
 use super::trace_aggregator::SendDataBuilderInfo;
@@ -182,6 +184,36 @@ impl TraceProcessor for ServerlessTraceProcessor {
             ));
 
         SendDataBuilderInfo::new(builder, body_size)
+    }
+}
+
+#[derive(Clone)]
+pub struct SendingTraceProcessor {
+    pub processor: Arc<dyn TraceProcessor + Send + Sync>,
+    pub trace_tx: Sender<SendDataBuilderInfo>,
+}
+impl SendingTraceProcessor {
+    pub async fn send_processed_traces(
+        &self,
+        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
+        traces: Vec<Vec<pb::Span>>,
+        body_size: usize,
+        span_pointers: Option<Vec<SpanPointer>>,
+    ) -> Result<(), SendError<SendDataBuilderInfo>> {
+        let payload = self
+            .processor
+            .process_traces(
+                config,
+                tags_provider,
+                header_tags,
+                traces,
+                body_size,
+                span_pointers,
+            )
+            .await;
+        self.trace_tx.send(payload).await
     }
 }
 
