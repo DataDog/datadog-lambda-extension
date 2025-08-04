@@ -509,6 +509,21 @@ impl Context {
         }
     }
 }
+impl Drop for Context {
+    fn drop(&mut self) {
+        // First off, gentle log nudge -- we should have marked the context's response as seen before this can drop...
+        if !self.response_seen {
+            debug!(
+                "aap: Context being dropped without the response being marked as seen, this may cause traces to be dropped"
+            );
+        }
+        // In debug assertions mode, hard-crash if it means we're effectively dropping a trace.
+        debug_assert!(
+            self.response_seen || self.on_response_seen.is_none(),
+            "aap: Context is being dropped without the response being marked as seen. A trace will be dropped!"
+        );
+    }
+}
 
 pub struct HoldArguments {
     pub config: Arc<Config>,
