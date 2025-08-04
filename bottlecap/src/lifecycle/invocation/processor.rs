@@ -283,6 +283,7 @@ impl Processor {
         request_id: &String,
         metrics: RuntimeDoneMetrics,
         status: Status,
+        error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         trace_agent_tx: Sender<SendDataBuilderInfo>,
@@ -299,6 +300,10 @@ impl Processor {
             // Increment the error type metric
             if status == Status::Timeout {
                 self.enhanced_metrics.increment_timeout_metric(timestamp);
+            }
+
+            if status == Status::Error && error_type == Some("Runtime.OutOfMemory".to_string())  {
+                self.enhanced_metrics.increment_oom_metric(timestamp);
             }
         }
 

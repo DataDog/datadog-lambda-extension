@@ -35,22 +35,6 @@ pub struct LambdaProcessor {
     logs_enabled: bool,
 }
 
-const OOM_ERRORS: [&str; 7] = [
-    "fatal error: runtime: out of memory",       // Go
-    "java.lang.OutOfMemoryError",                // Java
-    "JavaScript heap out of memory",             // Node
-    "Runtime exited with error: signal: killed", // Node
-    "MemoryError",                               // Python
-    "failed to allocate memory (NoMemoryError)", // Ruby
-    "OutOfMemoryException",                      // .NET
-];
-
-fn is_oom_error(error_msg: &str) -> bool {
-    OOM_ERRORS
-        .iter()
-        .any(|&oom_str| error_msg.contains(oom_str))
-}
-
 impl Processor<IntakeLog> for LambdaProcessor {}
 
 impl LambdaProcessor {
@@ -92,12 +76,6 @@ impl LambdaProcessor {
                 };
 
                 if let Some(message) = message {
-                    if is_oom_error(&message) {
-                        if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
-                            error!("Failed to send OOM event to the main event bus: {e}");
-                        }
-                    }
-
                     return Ok(Message::new(
                         message,
                         None,
