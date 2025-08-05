@@ -17,40 +17,46 @@ if [ -z "$ARCHITECTURE" ]; then
     exit 1
 fi
 
-FILE_SUFFIX=$ARCHITECTURE
+FILE_SUFFIX="${ARCHITECTURE}"
 
 PLATFORM="aarch64"
-if [ "$ARCHITECTURE" == "amd64" ]; then
+if [ "${ARCHITECTURE}" == "amd64" ]; then
     PLATFORM="x86_64"
 fi
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-ROOT_DIR=$SCRIPTS_DIR/..
-cd $ROOT_DIR
+ROOT_DIR="${SCRIPTS_DIR}/.."
+cd "${ROOT_DIR}"
 
 LAYERS_DIR=".layers"
-BUILD_DIR=$ROOT_DIR/$LAYERS_DIR
+BUILD_DIR="${ROOT_DIR}/${LAYERS_DIR}"
 EXTENSION_PATH=$BUILD_DIR/datadog_extension-$FILE_SUFFIX
 
-mkdir -p $LAYERS_DIR
-rm -rf ${EXTENSION_PATH} 2>/dev/null
+mkdir -p "${LAYERS_DIR}"
+rm -rf "${EXTENSION_PATH}" 2>/dev/null
 
-cd $ROOT_DIR
+cd "${ROOT_DIR}"
 
-ALPINE=${ALPINE:-0} \
-ARCHITECTURE=$ARCHITECTURE \
-FILE_SUFFIX=$FILE_SUFFIX \
-PLATFORM=$PLATFORM \
-PROFILE=${PROFILE:-release} \
+ALPINE="${ALPINE:-0}" \
+ARCHITECTURE="${ARCHITECTURE}" \
+FILE_SUFFIX="${FILE_SUFFIX}" \
+PLATFORM="${PLATFORM}" \
+PROFILE="${PROFILE:-release}" \
 .gitlab/scripts/compile_bottlecap.sh
 
-docker buildx build --platform linux/${ARCHITECTURE} \
-    -t datadog/build-bottlecap-${FILE_SUFFIX} \
+extra_args=()
+if [ -n "${UBUNTU_IMAGE}" ]; then
+    extra_args+=(--build-arg=UBUNTU_IMAGE="${UBUNTU_IMAGE}")
+fi
+
+docker buildx build --platform "linux/${ARCHITECTURE}" \
+    -t "datadog/build-bottlecap-${FILE_SUFFIX}" \
     -f ./images/Dockerfile.bottlecap.dev \
-    --build-arg FILE_SUFFIX=$FILE_SUFFIX \
-    . -o $EXTENSION_PATH
+    --build-arg FILE_SUFFIX="${FILE_SUFFIX}" \
+    "${extra_args[@]}" \
+    . -o "${EXTENSION_PATH}"
 
-cp $EXTENSION_PATH/datadog_extension.zip $EXTENSION_PATH.zip
+cp "${EXTENSION_PATH}/datadog_extension.zip" "${EXTENSION_PATH}.zip"
 
-unzip $EXTENSION_PATH/datadog_extension.zip -d $EXTENSION_PATH
-rm -rf $EXTENSION_PATH/datadog_extension.zip
+unzip "${EXTENSION_PATH}/datadog_extension.zip" -d "${EXTENSION_PATH}"
+rm -rf "${EXTENSION_PATH}/datadog_extension.zip"

@@ -66,9 +66,14 @@ docker_build() {
         printf "Overridden profile: %s\n" "${PROFILE}"
         extra_args+=(--build-arg=PROFILE="${PROFILE}")
     fi
-    if [ "$ALPINE" = "1" ] && [ -n "${ALPINE_IMAGE}" ]; then
-        printf "Overridden Alpine image: %s\n" "${ALPINE_IMAGE}"
-        extra_args+=(--build-arg=ALPINE_IMAGE="${ALPINE_IMAGE}")
+    if [ "$ALPINE" = "1" ]; then
+        if [ -n "${ALPINE_IMAGE}" ]; then
+            printf "Overridden Alpine image: %s\n" "${ALPINE_IMAGE}"
+            extra_args+=(--build-arg=ALPINE_IMAGE="${ALPINE_IMAGE}")
+        fi
+    elif [ -n "${UBUNTU_IMAGE}" ]; then
+        printf "Overridden Ubuntu image: %s\n" "${UBUNTU_IMAGE}"
+        extra_args+=(--build-arg=UBUNTU_IMAGE="${UBUNTU_IMAGE}")
     fi
 
     docker buildx build --platform "linux/${arch}" \
