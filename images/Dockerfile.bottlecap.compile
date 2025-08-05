@@ -12,10 +12,13 @@ COPY ./scripts/install-protoc.sh /
 RUN chmod +x /install-protoc.sh && /install-protoc.sh
 
 # Install Rust Toolchain
-RUN curl https://sh.rustup.rs -sSf | \
+RUN --mount=type=bind,source=.,target=/tmp/dd \
+    set -euo pipefail && \
+    version=$(grep 'channel =' < /tmp/dd/rust-toolchain.toml | tr -d ' ' | cut -d '=' -f 2 | tr -d '"') && \
+    curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal \
              --default-host "${PLATFORM}-unknown-linux-gnu" \
-             --default-toolchain "stable-${PLATFORM}-unknown-linux-gnu" \
+             --default-toolchain "${version}-${PLATFORM}-unknown-linux-gnu" \
              --component rust-src \
              -y
 ENV PATH="${PATH}:/root/.cargo/bin"
