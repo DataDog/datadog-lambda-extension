@@ -226,10 +226,10 @@ impl Context {
 
     /// Add tags and metrics to a [`Span`].
     pub(super) fn process_span(&self, span: &mut Span) {
+        debug!("aap: setting up to {} span tags/metrics on span {}", self.trace_tags.len(), span.span_id);
         for (key, value) in &self.trace_tags {
             match value {
                 TagValue::Always(value) => {
-                    debug!("aap: setting span tag {key}:{value}");
                     span.meta.insert(key.to_string(), value.clone());
                 }
                 TagValue::AppSecEvents { triggers } => {
@@ -244,40 +244,26 @@ impl Context {
                 }
                 TagValue::OnEvent(value) => {
                     if !self.has_events {
-                        debug!("aap: skipping tag {key} because no events were detected...");
                         continue;
                     }
                     match value {
                         serde_json::Value::String(value) => {
-                            debug!("aap: setting span tag {key}:{value}");
                             span.meta.insert(key.to_string(), value.clone());
                         }
                         value => {
-                            debug!("aap: setting span tag {key}:{value}");
                             span.meta.insert(key.to_string(), value.to_string());
                         }
                     }
                 }
                 TagValue::Metric(value) => {
-                    debug!("aap: setting span metric {key}:{value}");
                     span.metrics.insert(key.to_string(), *value);
                 }
             }
         }
 
-        debug!(
-            "aap: setting span metric {key}:{value:?}",
-            key = TagName::AppsecWafDuration,
-            value = self.waf_duration
-        );
         span.metrics.insert(
             TagName::AppsecWafDuration.to_string(),
             self.waf_duration.as_micros() as f64,
-        );
-        debug!(
-            "aap: setting span metric {key}:{value}",
-            key = TagName::AppsecWafDuration,
-            value = self.waf_timed_out_occurrences
         );
         span.metrics.insert(
             TagName::AppsecWafTimeouts.to_string(),
