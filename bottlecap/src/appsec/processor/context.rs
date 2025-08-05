@@ -226,7 +226,11 @@ impl Context {
 
     /// Add tags and metrics to a [`Span`].
     pub(super) fn process_span(&self, span: &mut Span) {
-        debug!("aap: setting up to {} span tags/metrics on span {}", self.trace_tags.len(), span.span_id);
+        debug!(
+            "aap: setting up to {} span tags/metrics on span {}",
+            self.trace_tags.len(),
+            span.span_id
+        );
         for (key, value) in &self.trace_tags {
             match value {
                 TagValue::Always(value) => {

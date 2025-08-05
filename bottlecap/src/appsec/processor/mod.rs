@@ -202,7 +202,10 @@ impl Processor {
         // Span is finalized from a security standpoint if we've seen the
         // response for it already.
         if !ctx.is_pending_response() {
-            debug!("aap | {} @ {} | span is finalized, deleting context", span.name, span.span_id);
+            debug!(
+                "aap | {} @ {} | span is finalized, deleting context",
+                span.name, span.span_id
+            );
             self.delete_context(&rid);
             return (true, None);
         }
