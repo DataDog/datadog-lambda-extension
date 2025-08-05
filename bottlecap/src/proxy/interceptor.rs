@@ -304,6 +304,12 @@ fn build_forward_response(
 
     if let Some(h) = forward_response.headers_mut() {
         *h = parts.headers;
+
+        // Since the body has been already collected, we can set the content-length header instead.
+        if h.contains_key("transfer-encoding") {
+            h.remove("transfer-encoding");
+            h.insert("content-length", body_bytes.len().to_string().parse()?);
+        }
     }
 
     let forward_response = forward_response.body(Body::from(body_bytes))?;
@@ -333,6 +339,12 @@ fn build_proxy_request(
 
     if let Some(h) = request.headers_mut() {
         *h = parts.headers.clone();
+
+        // Since the body has been already collected, we can set the content-length header instead.
+        if h.contains_key("transfer-encoding") {
+            h.remove("transfer-encoding");
+            h.insert("content-length", body_bytes.len().to_string().parse()?);
+        }
     }
 
     let request = request.body(Body::from(body_bytes))?;

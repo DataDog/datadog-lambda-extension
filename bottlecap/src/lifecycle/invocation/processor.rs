@@ -156,6 +156,7 @@ impl Processor {
 
         // Increment the invocation metric
         self.enhanced_metrics.increment_invocation_metric(timestamp);
+        self.enhanced_metrics.set_invoked_received();
 
         // If `UniversalInstrumentationStart` event happened first, process it
         if let Some((headers, payload)) = self.context_buffer.pair_invoke_event(&request_id) {
@@ -577,6 +578,8 @@ impl Processor {
             .as_secs();
         self.enhanced_metrics
             .set_shutdown_metric(i64::try_from(now).expect("can't convert now to i64"));
+        self.enhanced_metrics
+            .set_unused_init_metric(i64::try_from(now).expect("can't convert now to i64"));
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented
@@ -1175,6 +1178,37 @@ mod tests {
                 .get("http.status_code")
                 .expect("Status code not parsed!"),
             "200"
+        );
+    }
+
+    #[test]
+    fn test_on_shutdown_event_creates_unused_init_metrics() {
+        let mut processor = setup();
+
+        let now1 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
+        let ts1 = (now1 / 10) * 10;
+        processor.on_shutdown_event();
+        let now2 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
+        let ts2 = (now2 / 10) * 10;
+
+        let aggregator = processor.enhanced_metrics.aggregator.lock().unwrap();
+
+        assert!(
+            aggregator
+                .get_entry_by_id(
+                    crate::metrics::enhanced::constants::UNUSED_INIT.into(),
+                    &None,
+                    ts1
+                )
+                .is_some()
+                || aggregator
+                    .get_entry_by_id(
+                        crate::metrics::enhanced::constants::UNUSED_INIT.into(),
+                        &None,
+                        ts2
+                    )
+                    .is_some(),
+            "UNUSED_INIT metric should be created when invoked_received=false"
         );
     }
 }
