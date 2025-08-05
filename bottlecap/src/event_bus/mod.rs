@@ -7,6 +7,7 @@ mod constants;
 #[derive(Debug)]
 pub enum Event {
     Telemetry(TelemetryEvent),
+    OutOfMemory(i64),
 }
 
 #[allow(clippy::module_name_repetitions)]

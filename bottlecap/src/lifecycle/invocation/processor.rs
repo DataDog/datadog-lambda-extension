@@ -302,7 +302,9 @@ impl Processor {
                 self.enhanced_metrics.increment_timeout_metric(timestamp);
             }
 
+            debug!("Invocation Processor | error_type: {:?}", error_type);
             if status == Status::Error && error_type == Some("Runtime.OutOfMemory".to_string())  {
+                debug!("Invocation Processor | on_platform_runtime_done() | incrementing oom metric");
                 self.enhanced_metrics.increment_oom_metric(timestamp);
             }
         }
@@ -551,6 +553,7 @@ impl Processor {
         request_id: &String,
         metrics: ReportMetrics,
         timestamp: i64,
+        error_type: Option<String>,
     ) {
         // Set the report log metrics
         self.enhanced_metrics
@@ -572,6 +575,12 @@ impl Processor {
                 self.enhanced_metrics
                     .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
             }
+
+        }
+
+        if error_type == Some("Runtime.OutOfMemory".to_string())  {
+            debug!("Invocation Processor | on_platform_report() | incrementing oom metric");
+            self.enhanced_metrics.increment_oom_metric(timestamp);
         }
     }
 

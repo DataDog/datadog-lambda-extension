@@ -816,6 +816,11 @@ async fn handle_event_bus_event(
     trace_agent_channel: Sender<SendDataBuilderInfo>,
 ) -> Option<TelemetryEvent> {
     match event {
+        Event::OutOfMemory(event_timestamp) => {
+            let mut p = invocation_processor.lock().await;
+            p.on_out_of_memory_error(event_timestamp);
+            drop(p);
+        }
         Event::Telemetry(event) => {
             debug!("Telemetry event received: {:?}", event);
             match event.record {
@@ -849,6 +854,7 @@ async fn handle_event_bus_event(
                     ref error_type,
                     ..
                 } => {
+                    debug!("Handling Telemetry Record | PlatformRuntimeDone");
                     let mut p = invocation_processor.lock().await;
                     p.on_platform_runtime_done(
                         request_id,
@@ -867,10 +873,11 @@ async fn handle_event_bus_event(
                 TelemetryRecord::PlatformReport {
                     ref request_id,
                     metrics,
+                    ref error_type,
                     ..
                 } => {
                     let mut p = invocation_processor.lock().await;
-                    p.on_platform_report(request_id, metrics, event.time.timestamp());
+                    p.on_platform_report(request_id, metrics, event.time.timestamp(), error_type.clone());
                     drop(p);
                     return Some(event);
                 }

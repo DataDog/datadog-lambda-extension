@@ -2,7 +2,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
@@ -33,6 +33,22 @@ pub struct LambdaProcessor {
     event_bus: Sender<Event>,
     // Logs enabled
     logs_enabled: bool,
+}
+
+const OOM_ERRORS: [&str; 7] = [
+    "fatal error: runtime: out of memory",       // Go
+    "java.lang.OutOfMemoryError",                // Java
+    "JavaScript heap out of memory",             // Node
+    "Runtime exited with error: signal: killed", // Node
+    "MemoryError",                               // Python
+    "failed to allocate memory (NoMemoryError)", // Ruby
+    "OutOfMemoryException",                      // .NET
+];
+
+fn is_oom_error(error_msg: &str) -> bool {
+    OOM_ERRORS
+        .iter()
+        .any(|&oom_str| error_msg.contains(oom_str))
 }
 
 impl Processor<IntakeLog> for LambdaProcessor {}
@@ -76,6 +92,11 @@ impl LambdaProcessor {
                 };
 
                 if let Some(message) = message {
+                    if is_oom_error(&message) {
+                        if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
+                            error!("Failed to send OOM event to the main event bus: {e}");
+                        }
+                    }
                     return Ok(Message::new(
                         message,
                         None,
@@ -140,6 +161,7 @@ impl LambdaProcessor {
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
+                debug!("Lambda Processor | Sent PlatformRuntimeDone to the main event bus");
 
                 let mut message = format!("END RequestId: {request_id}"); 
                 let mut result_status = "info".to_string();
@@ -203,7 +225,10 @@ impl LambdaProcessor {
             // TODO: PlatformExtension
             // TODO: PlatformTelemetrySubscription
             // TODO: PlatformLogsDropped
-            _ => Err("Unsupported event type".into()),
+            _ => {
+                debug!("Lambda Processor | unsupported event: {:?}", event);
+                Err("Unsupported event type".into())
+            },
         }
     }
 
