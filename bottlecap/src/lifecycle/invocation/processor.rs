@@ -574,7 +574,6 @@ impl Processor {
                 self.enhanced_metrics
                     .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
             }
-
         }
     }
 
