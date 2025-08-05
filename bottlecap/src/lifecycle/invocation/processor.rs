@@ -576,11 +576,6 @@ impl Processor {
             }
 
         }
-
-        if error_type == Some("Runtime.OutOfMemory".to_string())  {
-            debug!("Invocation Processor | PlatformReport | Got Runtime.OutOfMemory. Incrementing OOM metric.");
-            self.enhanced_metrics.increment_oom_metric(timestamp);
-        }
     }
 
     pub fn on_shutdown_event(&mut self) {
