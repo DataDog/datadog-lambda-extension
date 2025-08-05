@@ -872,11 +872,10 @@ async fn handle_event_bus_event(
                 TelemetryRecord::PlatformReport {
                     ref request_id,
                     metrics,
-                    ref error_type,
                     ..
                 } => {
                     let mut p = invocation_processor.lock().await;
-                    p.on_platform_report(request_id, metrics, event.time.timestamp(), error_type.clone());
+                    p.on_platform_report(request_id, metrics, event.time.timestamp());
                     drop(p);
                     return Some(event);
                 }

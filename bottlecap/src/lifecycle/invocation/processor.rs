@@ -302,8 +302,10 @@ impl Processor {
                 self.enhanced_metrics.increment_timeout_metric(timestamp);
             }
 
-            if status == Status::Error && error_type == Some("Runtime.OutOfMemory".to_string())  {
-                debug!("Invocation Processor | PlatformRuntimeDone | Got Runtime.OutOfMemory. Incrementing OOM metric.");
+            if status == Status::Error && error_type == Some("Runtime.OutOfMemory".to_string()) {
+                debug!(
+                    "Invocation Processor | PlatformRuntimeDone | Got Runtime.OutOfMemory. Incrementing OOM metric."
+                );
                 self.enhanced_metrics.increment_oom_metric(timestamp);
             }
         }
@@ -552,7 +554,6 @@ impl Processor {
         request_id: &String,
         metrics: ReportMetrics,
         timestamp: i64,
-        error_type: Option<String>,
     ) {
         // Set the report log metrics
         self.enhanced_metrics
