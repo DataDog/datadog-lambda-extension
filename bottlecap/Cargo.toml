@@ -89,6 +89,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+[profile.release-with-debug-assertions]
+inherits = "release"
+debug-assertions = true
+
 [profile.release-alpine-arm64-fips]
 inherits = "release"
 # Unfortunately opt-level "z" does not work for building aws-lc-fips-sys on

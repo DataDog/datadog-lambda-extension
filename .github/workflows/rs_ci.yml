@@ -182,7 +182,7 @@ jobs:
           ALPINE: ${{ matrix.alpine && '1' || '0' }}
           FIPS: ${{ matrix.fips && '1' || '0' }}
           ARCHITECTURE: ${{ matrix.arch }}
-          PROFILE: dev
+          PROFILE: release-with-debug-assertions
           # Overriding base images as registry.ddbuild.io is not reachable from GitHub Actions
           ALPINE_IMAGE: alpine@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715 # 3.22.0
           UBUNTU_IMAGE: ubuntu@sha256:9a0bdde4188b896a372804be2384015e90e3f84906b750c1a53539b585fbbe7f # 22.04
