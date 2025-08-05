@@ -1,6 +1,6 @@
 FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
-
+ARG PROFILE="release"
 ARG FIPS
 
 # Install dependencies
@@ -30,6 +30,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=bind,source=.,target=/tmp/dd,rw \
     --mount=type=cache,target=/tmp/dd/bottlecap/target \
+    if [ "${PROFILE}" == "release" ]; then \
+        export PROFILE_OUT="release"; \
+    else \
+        export PROFILE_OUT="debug"; \
+    fi; \
     if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
     else \
@@ -38,8 +43,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.
     export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
-    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" --release && \
-    mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/release/bottlecap" /tmp/out/bottlecap
+    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" --profile="${PROFILE}" && \
+    mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/${PROFILE_OUT}/bottlecap" /tmp/out/bottlecap
 
 # Use smallest image possible
 FROM scratch

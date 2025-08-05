@@ -1,6 +1,6 @@
 FROM registry.ddbuild.io/images/mirror/alpine:3.22.0 AS compiler
 ARG PLATFORM
-
+ARG PROFILE="release"
 ARG FIPS
 
 # Install dependencies
@@ -36,9 +36,14 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=bind,source=.,target=/tmp/dd,rw \
     --mount=type=cache,target=/tmp/dd/bottlecap/target \
+    if [ "${PROFILE}" == "release" ]; then \
+        export PROFILE_OUT="release"; \
+    else \
+        export PROFILE_OUT="debug"; \
+    fi; \
     if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
-        if [ "${PLATFORM}" = "aarch64" ]; then \
+        if [ "${PLATFORM}" = "aarch64" ] && [ "${PROFILE}" == "release" ]; then \
             export PROFILE="release-alpine-arm64-fips"; \
         fi \
     else \
@@ -52,9 +57,9 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     # `--target` is passed (see: https://github.com/rust-lang/cargo/issues/4423).
     cargo +stable build --verbose --locked --no-default-features \
         --features="${FEATURES}" \
-        --profile="${PROFILE:-release}" && \
+        --profile="${PROFILE}" && \
     mkdir -p /tmp/out && \
-    cp "/tmp/dd/bottlecap/target/${PROFILE:-release}/bottlecap" /tmp/out/bottlecap
+    cp "/tmp/dd/bottlecap/target/${PROFILE_OUT}/bottlecap" /tmp/out/bottlecap
 
 # Use the smallest image possible
 FROM scratch

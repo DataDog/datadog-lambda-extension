@@ -7,22 +7,16 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   PB_VERSION: 25.3
   PB_URL: https://github.com/protocolbuffers/protobuf/releases/download
   PB_TARGET: linux-x86_64
 
 jobs:
-  cancel-previous:
-    name: Cancel Previous Jobs
-    runs-on: ubuntu-22.04
-    timeout-minutes: 3
-    steps:
-      - uses: styfle/cancel-workflow-action@0.12.1
-        with:
-          access_token: ${{ secrets.GITHUB_TOKEN }}
-          all_but_latest: true # can cancel workflows scheduled later
-
   check:
     name: Check
     runs-on: ubuntu-22.04
@@ -167,3 +161,36 @@ jobs:
       - run: cargo install dd-rust-license-tool --locked
       - run: dd-rust-license-tool check
         working-directory: bottlecap
+
+  layers:
+    name: Build Preview Bottlecap Layers (${{ matrix.arch }}${{ matrix.alpine && '-alpine' || '' }}${{ matrix.fips && '-fips' || ''}})
+    strategy:
+      matrix:
+        alpine: [true, false]
+        arch: [arm64, amd64]
+        fips: [true, false]
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-22.04-arm64' }}
+    steps:
+      - uses: actions/checkout@v4
+      # Install protobuf compiler for linux. The versions bundled with Ubuntu
+      # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
+      # so we need to download a protoc binary instead.
+      - run: sudo apt-get update && sudo apt-get install -y unzip
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.13.0
+        with:
+          cache: false
+      - if: matrix.alpine
+        run: |-
+          docker pull alpine@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715 && \
+          docker tag alpine@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715 registry.ddbuild.io/images/mirror/alpine:3.22.0
+      - run: ./scripts/build_bottlecap_layer.sh
+        env:
+          ALPINE: ${{ matrix.alpine && '1' }}
+          FIPS: ${{ matrix.fips && '1' }}
+          ARCHITECTURE: ${{ matrix.arch }}
+          PROFILE: dev
+      - uses: actions/upload-artifact@v4
+        with:
+          name: layer-${{ matrix.arch }}${{ matrix.alpine && '-alpine' || '' }}${{ matrix.fips && '-fips' || ''}}
+          path: .layers/datadog_extension-${{ matrix.arch }}.zip
+          if-no-files-found: error

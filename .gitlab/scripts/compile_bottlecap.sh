@@ -67,6 +67,7 @@ docker_build() {
         -f ./images/${file} \
         --build-arg PLATFORM=$PLATFORM \
         --build-arg FIPS="${FIPS}" \
+        --build-arg PROFILE="${PROFILE:-release}" \
         . -o $BINARY_PATH
 
     # Copy the compiled binary to the target directory with the expected name
