@@ -854,7 +854,6 @@ async fn handle_event_bus_event(
                     ref error_type,
                     ..
                 } => {
-                    debug!("Handling Telemetry Record | PlatformRuntimeDone");
                     let mut p = invocation_processor.lock().await;
                     p.on_platform_runtime_done(
                         request_id,

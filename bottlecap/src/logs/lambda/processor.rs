@@ -93,10 +93,12 @@ impl LambdaProcessor {
 
                 if let Some(message) = message {
                     if is_oom_error(&message) {
+                        debug!("Lambda Processor | Got a runtime-specific OOM error. Incrementing OOM metric.");
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
                             error!("Failed to send OOM event to the main event bus: {e}");
                         }
                     }
+
                     return Ok(Message::new(
                         message,
                         None,
@@ -161,7 +163,6 @@ impl LambdaProcessor {
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
                 }
-                debug!("Lambda Processor | Sent PlatformRuntimeDone to the main event bus");
 
                 let mut message = format!("END RequestId: {request_id}"); 
                 let mut result_status = "info".to_string();
@@ -225,10 +226,7 @@ impl LambdaProcessor {
             // TODO: PlatformExtension
             // TODO: PlatformTelemetrySubscription
             // TODO: PlatformLogsDropped
-            _ => {
-                debug!("Lambda Processor | unsupported event: {:?}", event);
-                Err("Unsupported event type".into())
-            },
+            _ => Err("Unsupported event type".into()),
         }
     }
 

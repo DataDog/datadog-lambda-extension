@@ -302,9 +302,8 @@ impl Processor {
                 self.enhanced_metrics.increment_timeout_metric(timestamp);
             }
 
-            debug!("Invocation Processor | error_type: {:?}", error_type);
             if status == Status::Error && error_type == Some("Runtime.OutOfMemory".to_string())  {
-                debug!("Invocation Processor | on_platform_runtime_done() | incrementing oom metric");
+                debug!("Invocation Processor | PlatformRuntimeDone | Got Runtime.OutOfMemory. Incrementing OOM metric.");
                 self.enhanced_metrics.increment_oom_metric(timestamp);
             }
         }
@@ -579,7 +578,7 @@ impl Processor {
         }
 
         if error_type == Some("Runtime.OutOfMemory".to_string())  {
-            debug!("Invocation Processor | on_platform_report() | incrementing oom metric");
+            debug!("Invocation Processor | PlatformReport | Got Runtime.OutOfMemory. Incrementing OOM metric.");
             self.enhanced_metrics.increment_oom_metric(timestamp);
         }
     }
