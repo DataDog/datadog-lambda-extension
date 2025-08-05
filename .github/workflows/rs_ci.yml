@@ -169,7 +169,7 @@ jobs:
         alpine: [true, false]
         arch: [arm64, amd64]
         fips: [true, false]
-    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-22.04-arm64' }}
+    runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-22.04-arm' }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
