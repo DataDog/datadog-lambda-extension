@@ -136,6 +136,15 @@ impl Processor {
             return;
         };
 
+        match ctx.expected_response_format.parse(payload.as_ref()) {
+            Ok(Some(payload)) => {
+                debug!("aap: successfully parsed response payload, evaluating ruleset...");
+                ctx.run(payload.as_ref());
+            }
+            Ok(None) => debug!("aap: no response payload available"),
+            Err(e) => warn!("aap: failed to parse invocation result payload: {e}"),
+        }
+
         let (method, route, status_code) = ctx.endpoint_info();
         if api_sec_sampler
             .is_some_and(|mut sampler| sampler.decision_for(&method, &route, &status_code))
@@ -143,13 +152,6 @@ impl Processor {
             debug!(
                 "aap: extracing API Security schema for request <{method}, {route}, {status_code}>"
             );
-
-            match ctx.expected_response_format.parse(payload.as_ref()) {
-                Ok(Some(payload)) => ctx.run(payload.as_ref()),
-                Ok(None) => debug!("aap: no response payload available"),
-                Err(e) => warn!("aap: failed to parse invocation result payload: {e}"),
-            }
-
             ctx.extract_schemas();
         }
 
