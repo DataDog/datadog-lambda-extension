@@ -1,4 +1,6 @@
-FROM registry.ddbuild.io/images/mirror/ubuntu:22.04 AS compresser
+ARG UBUNTU_IMAGE=registry.ddbuild.io/images/mirror/ubuntu:22.04
+
+FROM ${UBUNTU_IMAGE} AS compresser
 ARG FILE_SUFFIX
 
 RUN apt-get update && apt-get install -y zip binutils

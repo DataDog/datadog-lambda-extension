@@ -1,4 +1,6 @@
-FROM registry.ddbuild.io/images/mirror/alpine:3.22.0 AS compiler
+ARG ALPINE_IMAGE=registry.ddbuild.io/images/mirror/alpine:3.22.0
+
+FROM ${ALPINE_IMAGE} AS compiler
 ARG PLATFORM
 ARG PROFILE="release"
 ARG FIPS

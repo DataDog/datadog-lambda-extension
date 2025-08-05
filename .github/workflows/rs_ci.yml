@@ -171,25 +171,23 @@ jobs:
         fips: [true, false]
     runs-on: ${{ matrix.arch == 'amd64' && 'ubuntu-latest' || 'ubuntu-22.04-arm64' }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out
+        uses: actions/checkout@v4
       # Install protobuf compiler for linux. The versions bundled with Ubuntu
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
       # so we need to download a protoc binary instead.
-      - run: sudo apt-get update && sudo apt-get install -y unzip
-      - uses: actions-rust-lang/setup-rust-toolchain@v1.13.0
-        with:
-          cache: false
-      - if: matrix.alpine
-        run: |-
-          docker pull alpine@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715 && \
-          docker tag alpine@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715 registry.ddbuild.io/images/mirror/alpine:3.22.0
-      - run: ./scripts/build_bottlecap_layer.sh
+      - name: Build Layer
+        run: ./scripts/build_bottlecap_layer.sh
         env:
-          ALPINE: ${{ matrix.alpine && '1' }}
-          FIPS: ${{ matrix.fips && '1' }}
+          ALPINE: ${{ matrix.alpine && '1' || '0' }}
+          FIPS: ${{ matrix.fips && '1' || '0' }}
           ARCHITECTURE: ${{ matrix.arch }}
           PROFILE: dev
-      - uses: actions/upload-artifact@v4
+          # Overriding base images as registry.ddbuild.io is not reachable from GitHub Actions
+          ALPINE_IMAGE: alpine@sha256:8a1f59ffb675680d47db6337b49d22281a139e9d709335b492be023728e11715 # 3.22.0
+          UBUNTU_IMAGE: ubuntu@sha256:9a0bdde4188b896a372804be2384015e90e3f84906b750c1a53539b585fbbe7f # 22.04
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: layer-${{ matrix.arch }}${{ matrix.alpine && '-alpine' || '' }}${{ matrix.fips && '-fips' || ''}}
           path: .layers/datadog_extension-${{ matrix.arch }}.zip

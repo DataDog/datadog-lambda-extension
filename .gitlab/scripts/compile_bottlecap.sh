@@ -41,38 +41,48 @@ fi
 
 # Move into the root directory, so this script can be called from any directory
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-ROOT_DIR=$SCRIPTS_DIR/../..
-cd $ROOT_DIR
+ROOT_DIR="${SCRIPTS_DIR}/../.."
+cd "${ROOT_DIR}"
 
 BINARY_DIR=".binaries"
-TARGET_DIR=$(pwd)/$BINARY_DIR
-BINARY_PATH=$TARGET_DIR/compiled-bottlecap-$FILE_SUFFIX
+TARGET_DIR="$(pwd)/$BINARY_DIR"
+BINARY_PATH="${TARGET_DIR}/compiled-bottlecap-${FILE_SUFFIX}"
 
-mkdir -p $BINARY_DIR
+mkdir -p "${BINARY_DIR}"
 
-cd $ROOT_DIR
+cd "${ROOT_DIR}"
 
 docker_build() {
     local arch=$1
     local file=$2
-    if [ "$arch" == "amd64" ]; then
+    if [ "${arch}" == "amd64" ]; then
         PLATFORM="x86_64"
     else
         PLATFORM="aarch64"
     fi
 
-    docker buildx build --platform linux/${arch} \
+    local extra_args=()
+    if [ -n "${PROFILE}" ]; then
+        printf "Overridden profile: %s\n" "${PROFILE}"
+        extra_args+=(--build-arg=PROFILE="${PROFILE}")
+    fi
+    if [ "$ALPINE" = "1" ] && [ -n "${ALPINE_IMAGE}" ]; then
+        printf "Overridden Alpine image: %s\n" "${ALPINE_IMAGE}"
+        extra_args+=(--build-arg=ALPINE_IMAGE="${ALPINE_IMAGE}")
+    fi
+
+    docker buildx build --platform "linux/${arch}" \
         --progress plain \
         -t datadog/compile-bottlecap \
-        -f ./images/${file} \
-        --build-arg PLATFORM=$PLATFORM \
+        -f "./images/${file}" \
+        --build-arg PLATFORM="${PLATFORM}" \
         --build-arg FIPS="${FIPS}" \
-        --build-arg PROFILE="${PROFILE:-release}" \
-        . -o $BINARY_PATH
+        "${extra_args[@]}" \
+        . -o "${BINARY_PATH}"
 
     # Copy the compiled binary to the target directory with the expected name
     # If it already exist, it will be replaced
-    cp $BINARY_PATH/bottlecap $TARGET_DIR/bottlecap-$FILE_SUFFIX
+    cp "${BINARY_PATH}/bottlecap" "${TARGET_DIR}/bottlecap-${FILE_SUFFIX}"
 }
 
-docker_build $ARCHITECTURE $COMPILE_IMAGE
+docker_build "${ARCHITECTURE}" "${COMPILE_IMAGE}"
