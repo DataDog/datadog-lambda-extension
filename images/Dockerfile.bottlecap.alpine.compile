@@ -47,8 +47,8 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     fi; \
     if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
-        if [ "${PLATFORM}" = "aarch64" ] && [ "${PROFILE}" == "release" ]; then \
-            export PROFILE="release-alpine-arm64-fips"; \
+        if [ "${PLATFORM}" = "aarch64" ]; then \
+            export PROFILE="${PROFILE}-alpine-arm64-fips"; \
         fi \
     else \
         export FEATURES=default; \

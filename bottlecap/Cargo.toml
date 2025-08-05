@@ -99,6 +99,13 @@ inherits = "release"
 # Alpine for ARM with FIPS enabled.
 opt-level = 3
 
+[profile.release-with-debug-assertions-alpine-arm64-fips]
+inherits = "release"
+debug-assertions = true
+# Unfortunately opt-level "z" does not work for building aws-lc-fips-sys on
+# Alpine for ARM with FIPS enabled.
+opt-level = 3
+
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = "0.5"
 

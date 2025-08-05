@@ -88,6 +88,10 @@ impl Context {
 
     /// Marks the response of this request as having been seen.
     pub(super) async fn set_response_seen(&mut self) {
+        if self.response_seen {
+            return;
+        }
+
         if let Some((mut trace, sender, args)) = self.on_response_seen.take() {
             if let Some(span) = Processor::service_entry_span_mut(&mut trace) {
                 // Debug-sanity check that we're holding the right trace.
@@ -131,6 +135,10 @@ impl Context {
             }
         }
 
+        debug!(
+            "aap: marking security context for {} as having seen the response...",
+            self.rid
+        );
         self.response_seen = true;
     }
 
