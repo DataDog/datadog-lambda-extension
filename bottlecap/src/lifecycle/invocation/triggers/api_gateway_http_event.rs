@@ -81,7 +81,7 @@ impl Trigger for APIGatewayHttpEvent {
         let service_name = self.resolve_service_name(
             service_mapping,
             &self.request_context.domain_name,
-            "api_gateway_http",
+            &self.request_context.domain_name,
         );
 
         span.name = "aws.httpapi".to_string();

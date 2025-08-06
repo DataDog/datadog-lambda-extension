@@ -84,7 +84,7 @@ impl Trigger for APIGatewayRestEvent {
         let service_name = self.resolve_service_name(
             service_mapping,
             &self.request_context.domain_name,
-            "api_gateway_rest",
+            &self.request_context.domain_name,
         );
 
         span.name = "aws.apigateway".to_string();

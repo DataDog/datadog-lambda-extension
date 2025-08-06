@@ -366,7 +366,7 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.request_context.domain_name,
-                "api_gateway_websocket"
+                &event.request_context.domain_name,
             ),
             "specific-service"
         );

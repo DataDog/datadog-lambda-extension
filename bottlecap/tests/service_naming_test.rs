@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use bottlecap::lifecycle::invocation::triggers::{
-    dynamodb_event::DynamoDbRecord, kinesis_event::KinesisRecord,
+    Trigger, dynamodb_event::DynamoDbRecord, kinesis_event::KinesisRecord,
     lambda_function_url_event::LambdaFunctionUrlEvent, msk_event::MSKEvent, s3_event::S3Record,
-    sns_event::SnsRecord, sqs_event::SqsRecord, Trigger,
+    sns_event::SnsRecord, sqs_event::SqsRecord,
 };
 
 use bottlecap::lifecycle::invocation::triggers::ServiceNameResolver;

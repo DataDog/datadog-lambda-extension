@@ -80,7 +80,7 @@ impl Trigger for LambdaFunctionUrlEvent {
         let service_name = self.resolve_service_name(
             service_mapping,
             &self.request_context.domain_name,
-            "lambda_url",
+            &self.request_context.domain_name,
         );
 
         span.name = String::from("aws.lambda.url");
