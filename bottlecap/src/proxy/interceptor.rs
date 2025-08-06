@@ -91,7 +91,7 @@ fn make_router(state: InterceptorState) -> Router {
         )
         .route(
             "/{api_version}/runtime/invocation/{request_id}/error",
-            post(passthrough_proxy),
+            post(invocation_error_proxy),
         )
         .fallback(passthrough_proxy)
         .with_state(state)
@@ -268,6 +268,27 @@ async fn invocation_response_proxy(
                 .into_response()
         }
     }
+}
+
+async fn invocation_error_proxy(
+    Path((api_version, request_id)): Path<(String, String)>,
+    state: State<InterceptorState>,
+    request: Request,
+) -> Response {
+    debug!(
+        "PROXY | invocation_error_proxy | api_version: {api_version}, request_id: {request_id}"
+    );
+    let State((_, _, _, appsec_processor, _)) = &state;
+    if let Some(appsec) = appsec_processor {
+        // Marking any outstanding security context as finalized by sending a blank response.
+        appsec
+            .lock()
+            .await
+            .process_invocation_result(&request_id, Bytes::from("{}"))
+            .await;
+    }
+
+    passthrough_proxy(state, request).await
 }
 
 async fn passthrough_proxy(
