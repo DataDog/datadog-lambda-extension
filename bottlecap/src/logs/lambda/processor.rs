@@ -37,7 +37,7 @@ pub struct LambdaProcessor {
 
 const OOM_ERRORS: [&str; 7] = [
     "fatal error: runtime: out of memory",       // Go
-    "java.lang.OutOfMemoryError",                // Java
+    "Java heap space: java.lang.OutOfMemoryError", // Java
     "JavaScript heap out of memory",             // Node
     "Runtime exited with error: signal: killed", // Node
     "MemoryError",                               // Python
