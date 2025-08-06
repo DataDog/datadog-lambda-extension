@@ -4,7 +4,7 @@ use std::env::consts::ARCH;
 use std::fs;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{debug, error};
+use tracing::{debug, warn};
 
 // Environment variables for the Lambda execution environment info
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
@@ -193,7 +193,7 @@ pub fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &st
                 )
         })
         .unwrap_or_else(|| {
-            error!("Failed to read os-release file or extract runtime");
+            warn!("Failed to read os-release file or extract runtime");
             "unknown".to_string()
         });
 
