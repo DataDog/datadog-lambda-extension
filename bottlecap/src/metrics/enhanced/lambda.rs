@@ -23,6 +23,7 @@ pub struct Lambda {
     pub config: Arc<crate::config::Config>,
     // Dynamic value tags are the ones we cannot obtain statically from the sandbox
     dynamic_value_tags: HashMap<String, String>,
+    invoked_received: bool,
 }
 
 impl Lambda {
@@ -32,6 +33,7 @@ impl Lambda {
             aggregator,
             config,
             dynamic_value_tags: HashMap::new(),
+            invoked_received: false,
         }
     }
 
@@ -114,6 +116,10 @@ impl Lambda {
         }
     }
 
+    pub fn set_invoked_received(&mut self) {
+        self.invoked_received = true;
+    }
+
     fn increment_metric(&self, metric_name: &str, timestamp: i64) {
         if !self.config.enhanced_metrics {
             return;
@@ -178,6 +184,12 @@ impl Lambda {
             return;
         }
         self.increment_metric(constants::SHUTDOWNS_METRIC, timestamp);
+    }
+
+    pub fn set_unused_init_metric(&self, timestamp: i64) {
+        if !self.invoked_received {
+            self.increment_metric(constants::UNUSED_INIT, timestamp);
+        }
     }
 
     pub fn set_post_runtime_duration_metric(&self, duration_ms: f64, timestamp: i64) {
