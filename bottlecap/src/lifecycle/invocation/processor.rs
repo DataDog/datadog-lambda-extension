@@ -190,7 +190,10 @@ impl Processor {
 
             // Resolve runtime only once
             let runtime = resolve_runtime_from_proc(PROC_PATH, ETC_PATH);
-            debug!("Invocation Processor | Cold start | Resolved runtime: {:?}", runtime);
+            debug!(
+                "Invocation Processor | Cold start | Resolved runtime: {:?}",
+                runtime
+            );
             self.runtime = Some(runtime);
         }
 
@@ -565,8 +568,12 @@ impl Processor {
         // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
         // We don't do this for other runtimes to avoid double counting.
         if let Some(runtime) = &self.runtime {
-            if runtime.starts_with("provided.al") && metrics.max_memory_used_mb == metrics.memory_size_mb {
-                debug!("Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric.");
+            if runtime.starts_with("provided.al")
+                && metrics.max_memory_used_mb == metrics.memory_size_mb
+            {
+                debug!(
+                    "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
+                );
                 self.enhanced_metrics.increment_oom_metric(timestamp);
             }
         }
