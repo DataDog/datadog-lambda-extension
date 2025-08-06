@@ -7,9 +7,9 @@ use std::collections::VecDeque;
 /// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
 // const MAX_BATCH_ENTRIES_SIZE: usize = 4000;
 
-/// Aproximate size an entry in a stat payload occupies
-///
-/// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L33-L35>
+// Aproximate size an entry in a stat payload occupies
+//
+// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L33-L35>
 // const MAX_ENTRY_SIZE_BYTES: usize = 375;
 
 /// Maximum content size per payload in compressed bytes,
@@ -34,6 +34,7 @@ impl Default for StatsAggregator {
     }
 }
 
+/// Takes in individual trace stats payloads and aggregates them into batches to be flushed to Datadog.
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
@@ -45,10 +46,12 @@ impl StatsAggregator {
         }
     }
 
+    /// Takes in an individual trace stats payload.
     pub fn add(&mut self, payload: ClientStatsPayload) {
         self.queue.push_back(payload);
     }
 
+    /// Returns a batch of trace stats payloads, subject to the max content size.
     pub fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
         let mut batch_size = 0;
 

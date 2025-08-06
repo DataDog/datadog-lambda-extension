@@ -40,7 +40,7 @@ mod tests {
             let config = get_config(Path::new("")).expect("should parse config");
 
             // Since the default for traces is `true`, we don't need to set it.
-            assert_eq!(should_enable_otlp_agent(&Arc::new(config)), true);
+            assert!(should_enable_otlp_agent(&Arc::new(config)));
 
             Ok(())
         });
@@ -58,7 +58,7 @@ mod tests {
             let config = get_config(Path::new("")).expect("should parse config");
 
             // Since the default for traces is `true`, we don't need to set it.
-            assert_eq!(should_enable_otlp_agent(&Arc::new(config)), true);
+            assert!(should_enable_otlp_agent(&Arc::new(config)));
 
             Ok(())
         });
@@ -76,7 +76,7 @@ mod tests {
 
             let config = get_config(Path::new("")).expect("should parse config");
 
-            assert_eq!(should_enable_otlp_agent(&Arc::new(config)), false);
+            assert!(!should_enable_otlp_agent(&Arc::new(config)));
 
             Ok(())
         });

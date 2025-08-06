@@ -316,11 +316,11 @@ mod tests {
             version: Some("1.0.0".to_string()),
             ..Config::default()
         });
-        std::env::set_var(MEMORY_SIZE_VAR, "128");
-        std::env::set_var(RUNTIME_VAR, "AWS_Lambda_java8");
+        unsafe { std::env::set_var(MEMORY_SIZE_VAR, "128") };
+        unsafe { std::env::set_var(RUNTIME_VAR, "AWS_Lambda_java8") };
         let tags = Lambda::new_from_config(config, &metadata);
-        std::env::remove_var(MEMORY_SIZE_VAR);
-        std::env::remove_var(RUNTIME_VAR);
+        unsafe { std::env::remove_var(MEMORY_SIZE_VAR) };
+        unsafe { std::env::remove_var(RUNTIME_VAR) };
         assert_eq!(tags.tags_map.get(ENV_KEY).unwrap(), "test");
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");

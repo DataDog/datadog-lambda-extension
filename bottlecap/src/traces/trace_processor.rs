@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::config;
+use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::tags::provider;
-use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
+use crate::traces::span_pointers::{SpanPointer, attach_span_pointers_to_meta};
 use crate::traces::{
     AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
     DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
@@ -170,7 +171,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 .expect("can't parse trace intake URL, exiting"),
             // Will be set at flush time
             api_key: None,
-            timeout_ms: config.flush_timeout * 1_000,
+            timeout_ms: config.flush_timeout * S_TO_MS,
             test_token: None,
         };
 
@@ -196,7 +197,7 @@ mod tests {
 
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
 
-    use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
+    use crate::{LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider};
 
     use super::*;
 

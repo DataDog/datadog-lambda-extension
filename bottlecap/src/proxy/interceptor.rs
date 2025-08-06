@@ -1,18 +1,18 @@
 use crate::{
-    config::aws::AwsConfig, http::extract_request_body,
-    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa, EXTENSION_HOST,
+    EXTENSION_HOST, config::aws::AwsConfig, http::extract_request_body,
+    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa,
 };
 use axum::{
+    Router,
     body::{Body, Bytes},
     extract::{Path, Request, State},
     http::{self, Request as HttpRequest, StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use http_body_util::BodyExt;
 use hyper_util::{
-    client::legacy::{connect::HttpConnector, Client},
+    client::legacy::{Client, connect::HttpConnector},
     rt::TokioExecutor,
 };
 use std::{net::SocketAddr, sync::Arc};
@@ -37,7 +37,7 @@ pub fn start(
     aws_config: Arc<AwsConfig>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
-    let socket = get_proxy_socket_address(&aws_config.aws_lwa_proxy_lambda_runtime_api);
+    let socket = get_proxy_socket_address(aws_config.aws_lwa_proxy_lambda_runtime_api.as_ref());
     let shutdown_token = CancellationToken::new();
 
     let mut connector = HttpConnector::new();
@@ -110,11 +110,8 @@ async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: Cance
 /// If the LWA proxy lambda runtime API is not provided, the default Extension
 /// host and port will be used.
 ///
-// TODO (Yiming): Fix this lint
-#[allow(clippy::ref_option)]
-fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: &Option<String>) -> SocketAddr {
+fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: Option<&String>) -> SocketAddr {
     if let Some(socket_addr) = aws_lwa_proxy_lambda_runtime_api
-        .as_ref()
         .and_then(|uri_str| lwa::get_lwa_proxy_socket_address(uri_str).ok())
     {
         debug!("PROXY | get_proxy_socket_address | LWA proxy detected");
@@ -307,6 +304,12 @@ fn build_forward_response(
 
     if let Some(h) = forward_response.headers_mut() {
         *h = parts.headers;
+
+        // Since the body has been already collected, we can set the content-length header instead.
+        if h.contains_key("transfer-encoding") {
+            h.remove("transfer-encoding");
+            h.insert("content-length", body_bytes.len().to_string().parse()?);
+        }
     }
 
     let forward_response = forward_response.body(Body::from(body_bytes))?;
@@ -336,6 +339,12 @@ fn build_proxy_request(
 
     if let Some(h) = request.headers_mut() {
         *h = parts.headers.clone();
+
+        // Since the body has been already collected, we can set the content-length header instead.
+        if h.contains_key("transfer-encoding") {
+            h.remove("transfer-encoding");
+            h.insert("content-length", body_bytes.len().to_string().parse()?);
+        }
     }
 
     let request = request.body(Body::from(body_bytes))?;
@@ -357,7 +366,7 @@ mod tests {
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
 
-    use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
+    use crate::{LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider};
 
     use super::*;
 
@@ -387,7 +396,7 @@ mod tests {
                     }),
                 )
                 .await
-                .unwrap();
+                .expect("failed to serve HTTP connection");
         });
 
         let config = Arc::new(Config::default());
@@ -397,7 +406,7 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
         let metrics_aggregator = Arc::new(Mutex::new(
-            MetricsAggregator::new(EMPTY_TAGS, 1024).unwrap(),
+            MetricsAggregator::new(EMPTY_TAGS, 1024).expect("failed to create metrics aggregator"),
         ));
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
@@ -422,32 +431,30 @@ mod tests {
 
         let uri_with_schema = format!("http://{aws_lwa_lambda_runtime_api}");
         let mut ask_proxy = client
-            .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+            .get(Uri::try_from(uri_with_schema.clone()).expect("failed to parse URI"))
             .await;
 
-        while ask_proxy.is_err() {
-            error!(
-                "Retrying request to proxy, err: {}",
-                ask_proxy.err().unwrap()
-            );
+        while let Err(err) = ask_proxy {
+            error!("Retrying request to proxy, err: {err}");
             tokio::time::sleep(Duration::from_millis(50)).await;
             ask_proxy = client
-                .get(Uri::try_from(uri_with_schema.clone()).unwrap())
+                .get(Uri::try_from(uri_with_schema.clone()).expect("failed to parse URI"))
                 .await;
         }
 
         let body_bytes = ask_proxy
-            .unwrap()
+            .expect("failed to retrieve response")
             .into_body()
             .collect()
             .await
-            .unwrap()
+            .expect("failed to collect response body")
             .to_bytes();
 
-        let bytes = String::from_utf8(body_bytes.to_vec()).unwrap();
+        let bytes =
+            String::from_utf8(body_bytes.to_vec()).expect("failed to convert bytes to String");
         assert_eq!(bytes, "Response from AWS LAMBDA RUNTIME API");
         // Send shutdown signal to the proxy server
-        let _ = proxy_handle.cancel();
+        proxy_handle.cancel();
         final_destination.abort();
     }
 }

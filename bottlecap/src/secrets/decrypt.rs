@@ -1,14 +1,14 @@
 use crate::config::{
-    aws::{AwsConfig, AwsCredentials},
     Config,
+    aws::{AwsConfig, AwsCredentials},
 };
 use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use hmac::{Hmac, Mac};
-use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::Error;
@@ -281,7 +281,8 @@ fn build_get_secret_signed_headers(
     let canonical_querystring = "";
     let canonical_headers = format!(
         "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:{}",
-        host, amz_date, aws_credentials.aws_session_token, header_values.x_amz_target);
+        host, amz_date, aws_credentials.aws_session_token, header_values.x_amz_target
+    );
     let signed_headers = "content-type;host;x-amz-date;x-amz-security-token;x-amz-target";
 
     let payload_hash = Sha256::digest(header_values.body.to_string().as_bytes());

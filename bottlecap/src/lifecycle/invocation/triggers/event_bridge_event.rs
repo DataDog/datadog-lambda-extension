@@ -8,7 +8,7 @@ use tracing::debug;
 use crate::lifecycle::invocation::{
     processor::{MS_TO_NS, S_TO_NS},
     triggers::{
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
     },
 };
 

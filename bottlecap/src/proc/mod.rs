@@ -76,13 +76,13 @@ fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
                     return Ok(NetworkData {
                         rx_bytes: rx_val,
                         tx_bytes: tx_val,
-                    })
+                    });
                 }
                 (_, _) => {
                     return Err(io::Error::new(
                         io::ErrorKind::NotFound,
                         "Network data not found",
-                    ))
+                    ));
                 }
             }
         }
@@ -144,7 +144,7 @@ fn get_cpu_data_from_path(path: &str) -> Result<CPUData, io::Error> {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
                             "Failed to parse CPU data",
-                        ))
+                        ));
                     }
                 }
             } else if label.starts_with("cpu") {
@@ -163,7 +163,7 @@ fn get_cpu_data_from_path(path: &str) -> Result<CPUData, io::Error> {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
                             "Failed to parse per-core CPU data",
-                        ))
+                        ));
                     }
                 }
             }
@@ -259,8 +259,7 @@ fn get_fd_use_data_from_path(path: &str, pids: &[i64]) -> f64 {
         let Ok(files) = fs::read_dir(&fd_path) else {
             trace!(
                 "File descriptor use data not found in path {} with pid {}",
-                fd_path,
-                pid
+                fd_path, pid
             );
             continue;
         };

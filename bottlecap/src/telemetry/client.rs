@@ -4,7 +4,7 @@ use serde_json;
 use std::error::Error;
 use tracing::{debug, error};
 
-use crate::{base_url, EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE};
+use crate::{EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE, base_url};
 
 #[allow(clippy::module_name_repetitions)]
 pub struct TelemetryApiClient {

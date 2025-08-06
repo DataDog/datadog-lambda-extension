@@ -3,14 +3,14 @@ use datadog_trace_protobuf::pb::Span as DatadogSpan;
 use hex;
 use lazy_static::lazy_static;
 use opentelemetry_proto::tonic::common::v1::{
-    any_value, AnyValue, InstrumentationScope as OtelInstrumentationScope, KeyValue,
+    AnyValue, InstrumentationScope as OtelInstrumentationScope, KeyValue, any_value,
 };
 use opentelemetry_proto::tonic::resource::v1::Resource as OtelResource;
 use opentelemetry_proto::tonic::trace::v1::ResourceSpans;
 use opentelemetry_proto::tonic::trace::v1::{
+    Span as OtelSpan,
     span::{Event, Link, SpanKind},
     status::StatusCode,
-    Span as OtelSpan,
 };
 use opentelemetry_semantic_conventions::attribute::{
     DB_QUERY_TEXT, DB_STATEMENT, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT,
@@ -1164,6 +1164,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_otel_value_to_string_double_value() {
         let value = Value::DoubleValue(3.14);
         assert_eq!(otel_value_to_string(&value), "3.14");
@@ -1229,8 +1230,8 @@ mod tests {
         // Note: The order of keys in a JSON object is not guaranteed
         assert!(result.contains("\"key1\":\"value1\""));
         assert!(result.contains("\"key2\":\"42\""));
-        assert!(result.starts_with("{"));
-        assert!(result.ends_with("}"));
+        assert!(result.starts_with('{'));
+        assert!(result.ends_with('}'));
     }
 
     #[test]

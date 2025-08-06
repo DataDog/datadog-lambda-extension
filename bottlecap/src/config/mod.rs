@@ -27,7 +27,7 @@ use crate::config::{
     flush_strategy::FlushStrategy,
     log_level::LogLevel,
     logs_additional_endpoints::LogsAdditionalEndpoint,
-    processing_rule::{deserialize_processing_rules, ProcessingRule},
+    processing_rule::{ProcessingRule, deserialize_processing_rules},
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
@@ -240,6 +240,7 @@ pub struct Config {
     pub api_key: String,
     pub log_level: LogLevel,
 
+    // Timeout for the request to flush data to Datadog endpoint
     pub flush_timeout: u64,
 
     // Proxy
@@ -273,7 +274,9 @@ pub struct Config {
     pub apm_replace_tags: Option<Vec<ReplaceRule>>,
     pub apm_config_obfuscation_http_remove_query_string: bool,
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
+    pub apm_config_compression_level: i32,
     pub apm_features: Vec<String>,
+    pub apm_additional_endpoints: HashMap<String, Vec<String>>,
     //
     // Trace Propagation
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -365,7 +368,9 @@ impl Default for Config {
             apm_replace_tags: None,
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
+            apm_config_compression_level: 6,
             apm_features: vec![],
+            apm_additional_endpoints: HashMap::new(),
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
@@ -1181,10 +1186,10 @@ pub mod tests {
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "TRUE");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "0");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(config.serverless_logs_enabled, true);
-            assert_eq!(config.enhanced_metrics, true);
-            assert_eq!(config.logs_config_use_compression, true);
-            assert_eq!(config.capture_lambda_payload, false);
+            assert!(config.serverless_logs_enabled);
+            assert!(config.enhanced_metrics);
+            assert!(config.logs_config_use_compression);
+            assert!(!config.capture_lambda_payload);
             Ok(())
         });
     }

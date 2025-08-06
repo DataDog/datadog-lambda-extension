@@ -2,6 +2,7 @@ use std::{collections::HashMap, path::PathBuf};
 
 use crate::{
     config::{
+        Config, ConfigError, ConfigSource, ProcessingRule,
         additional_endpoints::deserialize_additional_endpoints,
         deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
         deserialize_optional_bool_from_anything, deserialize_processing_rules,
@@ -10,15 +11,14 @@ use crate::{
         log_level::LogLevel,
         logs_additional_endpoints::LogsAdditionalEndpoint,
         service_mapping::deserialize_service_mapping,
-        trace_propagation_style::{deserialize_trace_propagation_style, TracePropagationStyle},
-        Config, ConfigError, ConfigSource, ProcessingRule,
+        trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
 use datadog_trace_obfuscation::replacer::ReplaceRule;
 use figment::{
-    providers::{Format, Yaml},
     Figment,
+    providers::{Format, Yaml},
 };
 use serde::Deserialize;
 
@@ -132,7 +132,10 @@ pub struct ApmConfig {
     #[serde(deserialize_with = "deserialize_apm_replace_rules")]
     pub replace_tags: Option<Vec<ReplaceRule>>,
     pub obfuscation: Option<ApmObfuscation>,
+    pub compression_level: Option<i32>,
     pub features: Vec<String>,
+    #[serde(deserialize_with = "deserialize_additional_endpoints")]
+    pub additional_endpoints: HashMap<String, Vec<String>>,
 }
 
 impl ApmConfig {
@@ -410,6 +413,18 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         yaml_config.apm_config,
         replace_tags
     );
+    merge_option_to_value!(
+        config,
+        apm_config_compression_level,
+        yaml_config.apm_config,
+        compression_level
+    );
+    merge_hashmap!(
+        config,
+        apm_additional_endpoints,
+        yaml_config.apm_config,
+        additional_endpoints
+    );
 
     // Not using the macro here because we need to call a method on the struct
     if let Some(remove_query_string) = yaml_config
@@ -619,6 +634,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn test_merge_config_overrides_with_yaml_file() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
@@ -641,8 +657,8 @@ http_protocol: "http1"
 # Endpoints
 additional_endpoints:
   "https://app.datadoghq.com":
-    - "apikey2"
-    - "apikey3"
+    - apikey2
+    - apikey3
   "https://app.datadoghq.eu":
     - apikey4
 
@@ -677,9 +693,16 @@ apm_config:
     http:
       remove_query_string: true
       remove_paths_with_digits: true
+  compression_level: 3
   features:
     - "enable_otlp_compute_top_level_by_span_kind"
     - "enable_stats_by_span_kind"
+  additional_endpoints:
+    "https://trace.agent.datadoghq.com":
+        - apikey2
+        - apikey3
+    "https://trace.agent.datadoghq.eu":
+        - apikey4
 
 service_mapping: old-service:new-service
 
@@ -756,7 +779,7 @@ extension_version: "compatibility"
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
                 dd_url: "https://metrics.datadoghq.com".to_string(),
-                url: "".to_string(), // doesnt exist in yaml
+                url: String::new(), // doesnt exist in yaml
                 additional_endpoints: HashMap::from([
                     (
                         "https://app.datadoghq.com".to_string(),
@@ -797,10 +820,21 @@ extension_version: "compatibility"
                 apm_replace_tags: Some(vec![]),
                 apm_config_obfuscation_http_remove_query_string: true,
                 apm_config_obfuscation_http_remove_paths_with_digits: true,
+                apm_config_compression_level: 3,
                 apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
                 ],
+                apm_additional_endpoints: HashMap::from([
+                    (
+                        "https://trace.agent.datadoghq.com".to_string(),
+                        vec!["apikey2".to_string(), "apikey3".to_string()],
+                    ),
+                    (
+                        "https://trace.agent.datadoghq.eu".to_string(),
+                        vec!["apikey4".to_string()],
+                    ),
+                ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,

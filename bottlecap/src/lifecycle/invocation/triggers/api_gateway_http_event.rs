@@ -2,8 +2,8 @@ use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
-        lowercase_key, parameterize_api_resource, ServiceNameResolver, Trigger,
-        FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger, lowercase_key,
+        parameterize_api_resource,
     },
 };
 use datadog_trace_protobuf::pb::Span;
@@ -60,7 +60,7 @@ impl Trigger for APIGatewayHttpEvent {
 
         version.is_some_and(|v| v == "2.0")
             && payload.get("rawQueryString").is_some()
-            && domain_name.is_some_and(|d| d.as_str().map_or(true, |s| !s.contains("lambda-url")))
+            && domain_name.is_some_and(|d| d.as_str().is_none_or(|s| !s.contains("lambda-url")))
     }
 
     #[allow(clippy::cast_possible_truncation)]
