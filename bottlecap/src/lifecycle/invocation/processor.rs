@@ -1224,15 +1224,15 @@ mod tests {
     fn test_service_name_env_var_false_returns_aws_lambda() {
         const VAR: &str = "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED";
         let original = std::env::var(VAR).ok();
-        std::env::set_var(VAR, "false");
+        unsafe { std::env::set_var(VAR, "false") };
 
         let p = setup();
         assert_eq!(p.service, "aws.lambda");
 
         if let Some(v) = original {
-            std::env::set_var(VAR, v);
+            unsafe { std::env::set_var(VAR, v) };
         } else {
-            std::env::remove_var(VAR);
+            unsafe { std::env::remove_var(VAR) };
         }
     }
 
@@ -1241,13 +1241,13 @@ mod tests {
     fn test_service_name_env_var_unset_uses_config_service() {
         const VAR: &str = "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED";
         let original = std::env::var(VAR).ok();
-        std::env::remove_var(VAR);
+        unsafe { std::env::remove_var(VAR) };
 
         let p = setup();
         assert_eq!(p.service, "test-service");
 
         if let Some(v) = original {
-            std::env::set_var(VAR, v);
+            unsafe { std::env::set_var(VAR, v) };
         }
     }
 }
