@@ -509,7 +509,7 @@ async fn extension_loop_active(
         Err(AppSecFeatureDisabled) => None,
         Err(e) => {
             error!(
-                "PROXY | aap | error creating App & API Protection processor, the feature will be disabled: {e}"
+                "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
             );
             None
         }

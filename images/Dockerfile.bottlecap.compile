@@ -33,15 +33,15 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=bind,source=.,target=/tmp/dd,rw \
     --mount=type=cache,target=/tmp/dd/bottlecap/target \
-    if [ "${PROFILE}" == "dev" ]; then \
-        export PROFILE_OUT="debug"; \
-    else \
-        export PROFILE_OUT="${PROFILE}"; \
-    fi; \
     if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
     else \
         export FEATURES=default; \
+    fi; \
+    if [ "${PROFILE}" == "dev" ]; then \
+        export PROFILE_OUT="debug"; \
+    else \
+        export PROFILE_OUT="${PROFILE}"; \
     fi; \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.

@@ -190,13 +190,27 @@ impl TraceProcessor for ServerlessTraceProcessor {
     }
 }
 
+/// A utility that is used to process, then send traces to the trace aggregator.
+///
+/// This applies [`AppSecProcessor::process_span`] on the `aws.lambda` span
+/// contained in the traces (if any), and may buffer the traces if the
+/// [`AppSecProcessor`] has not yet seen the corresponding response payload.
+///
+/// Once ready to flush, the traces are submitted to the provided [`Sender`].
 #[derive(Clone)]
 pub struct SendingTraceProcessor {
+    /// The [`AppSecProcessor`] to use for security-processing the traces, if
+    /// configured.
     pub appsec: Option<Arc<Mutex<AppSecProcessor>>>,
+    /// The [`TraceProcessor`]  to use for transforming raw traces into
+    /// [`SendDataBuilderInfo`]s before flushing.
     pub processor: Arc<dyn TraceProcessor + Send + Sync>,
+    /// The [`Sender`] to use for flushing the traces to the trace aggregator.
     pub trace_tx: Sender<SendDataBuilderInfo>,
 }
 impl SendingTraceProcessor {
+    /// Processes the provided traces, then flushes them to the trace aggregator
+    /// for sending to the backend.
     pub async fn send_processed_traces(
         &self,
         config: Arc<config::Config>,

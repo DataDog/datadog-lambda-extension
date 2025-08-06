@@ -41,7 +41,7 @@ pub struct Context {
     /// Whether we have had a chance to see the response body or not.
     response_seen: bool,
     /// Holds a trace for sending once the response is seen.
-    on_response_seen: Option<(Vec<Span>, SendingTraceProcessor, HoldArguments)>,
+    held_trace: Option<(Vec<Span>, SendingTraceProcessor, HoldArguments)>,
 }
 impl Context {
     /// Creates a new [`Context`] for the provided request ID and configures it
@@ -76,7 +76,7 @@ impl Context {
             has_events: false,
             trace_tags,
             response_seen: false,
-            on_response_seen: None,
+            held_trace: None,
         }
     }
 
@@ -87,12 +87,17 @@ impl Context {
     }
 
     /// Marks the response of this request as having been seen.
+    ///
+    /// This implies the receiving [`Context`] has collected all possible
+    /// security information about the corresponding request, and [`Span`]s sent
+    /// through [`Self::process_span`] can be considered finalized and ready to
+    /// flush to the trace aggregator.
     pub(super) async fn set_response_seen(&mut self) {
         if self.response_seen {
             return;
         }
 
-        if let Some((mut trace, sender, args)) = self.on_response_seen.take() {
+        if let Some((mut trace, sender, args)) = self.held_trace.take() {
             if let Some(span) = Processor::service_entry_span_mut(&mut trace) {
                 // Debug-sanity check that we're holding the right trace.
                 debug_assert_eq!(
@@ -143,9 +148,6 @@ impl Context {
     }
 
     /// Holds a trace for future processing once the response is seen.
-    ///
-    /// # Panics
-    /// If called after [`Self::is_pending_response`] returns `false`.
     pub(crate) fn hold_trace(
         &mut self,
         trace: Vec<Span>,
@@ -153,14 +155,19 @@ impl Context {
         args: HoldArguments,
     ) {
         if !self.is_pending_response() {
-            unreachable!("Context::hold_trace called after response was seen!");
+            unreachable_warn("Context::hold_trace called after response was seen!");
+            return;
         }
-        self.on_response_seen = Some((trace, sender, args));
+        self.held_trace = Some((trace, sender, args));
     }
 
     /// Evaluate the WAF rules against the provided [`InvocationPayload`] and
     /// collect the relevant side effects.
     pub(super) fn run(&mut self, payload: &dyn InvocationPayload) {
+        if self.response_seen {
+            unreachable_warn("aap: Context::run called after response was seen!");
+        }
+
         if self.waf_timeout.is_zero() {
             warn!(
                 "aap: WAF execution time budget for this request is exhausted, skipping WAF ruleset evaluation (consider tweaking DD_APPSEC_WAF_TIMEOUT)"
@@ -226,10 +233,14 @@ impl Context {
 
     /// Add tags and metrics to a [`Span`].
     pub(super) fn process_span(&self, span: &mut Span) {
+        debug!(
+            "aap: setting up to {} span tags/metrics on span {}",
+            self.trace_tags.len(),
+            span.span_id
+        );
         for (key, value) in &self.trace_tags {
             match value {
                 TagValue::Always(value) => {
-                    debug!("aap: setting span tag {key}:{value}");
                     span.meta.insert(key.to_string(), value.clone());
                 }
                 TagValue::AppSecEvents { triggers } => {
@@ -244,40 +255,26 @@ impl Context {
                 }
                 TagValue::OnEvent(value) => {
                     if !self.has_events {
-                        debug!("aap: skipping tag {key} because no events were detected...");
                         continue;
                     }
                     match value {
                         serde_json::Value::String(value) => {
-                            debug!("aap: setting span tag {key}:{value}");
                             span.meta.insert(key.to_string(), value.clone());
                         }
                         value => {
-                            debug!("aap: setting span tag {key}:{value}");
                             span.meta.insert(key.to_string(), value.to_string());
                         }
                     }
                 }
                 TagValue::Metric(value) => {
-                    debug!("aap: setting span metric {key}:{value}");
                     span.metrics.insert(key.to_string(), *value);
                 }
             }
         }
 
-        debug!(
-            "aap: setting span metric {key}:{value:?}",
-            key = TagName::AppsecWafDuration,
-            value = self.waf_duration
-        );
         span.metrics.insert(
             TagName::AppsecWafDuration.to_string(),
             self.waf_duration.as_micros() as f64,
-        );
-        debug!(
-            "aap: setting span metric {key}:{value}",
-            key = TagName::AppsecWafDuration,
-            value = self.waf_timed_out_occurrences
         );
         span.metrics.insert(
             TagName::AppsecWafTimeouts.to_string(),
@@ -527,7 +524,7 @@ impl Drop for Context {
         }
         // In debug assertions mode, hard-crash if it means we're effectively dropping a trace.
         debug_assert!(
-            self.response_seen || self.on_response_seen.is_none(),
+            self.response_seen || self.held_trace.is_none(),
             "aap: Context is being dropped without the response being marked as seen. A trace will be dropped!"
         );
     }
@@ -792,9 +789,34 @@ fn try_parse_body_with_mime(
     }
 }
 
+/// Logs a WAF run error.
+///
+/// This function is marked as `#[cold]` because it is almost certainly never
+/// going to get called, and hence needs not be placed to optimize for a
+/// near-jump.
 #[cold]
 fn log_waf_run_error(e: RunError) {
     warn!("aap: failed to evaluate WAF ruleset: {e}");
+}
+
+/// Depending on the `debug-assertions` setting, either calls `unreachable!` or
+/// `warn!` with the specified message.
+///
+/// This function is marked as `#[cold]` because it is almost certainly never
+/// going to get called, and hence needs not be placed to optimize for a
+/// near-jump.
+///
+/// # Panics
+/// If (and only if) `debug-assertions` are enabled in this build (not the case
+/// for `release` builds, by default).
+#[cold]
+#[track_caller]
+fn unreachable_warn(msg: &'static str) {
+    if cfg!(debug_assertions) {
+        unreachable!("{msg}");
+    } else {
+        warn!("{msg}");
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
