@@ -353,13 +353,13 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_service_name() {
+    fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("api_gateway_websocket_connect_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = APIGatewayWebSocketEvent::new(payload)
             .expect("Failed to deserialize APIGatewayWebSocketEvent");
 
-        // Priority is given to the specific key
+        // Test 1: Specific mapping takes priority
         let specific_service_mapping = HashMap::from([
             ("85fj5nw29d".to_string(), "specific-service".to_string()),
             (
@@ -373,11 +373,12 @@ mod tests {
                 &specific_service_mapping,
                 &event.request_context.domain_name,
                 &event.request_context.domain_name,
-                true
+                true // aws_service_representation_enabled
             ),
             "specific-service"
         );
 
+        // Test 2: Generic mapping is used when specific not found
         let generic_service_mapping = HashMap::from([(
             "lambda_api_gateway".to_string(),
             "generic-service".to_string(),
@@ -387,10 +388,77 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.request_context.domain_name,
-                "api_gateway_websocket",
-                true
+                &event.request_context.domain_name,
+                true // aws_service_representation_enabled
             ),
             "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses instance name (domain_name)
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.request_context.domain_name,
+                &event.request_context.domain_name,
+                true // aws_service_representation_enabled
+            ),
+            event.request_context.domain_name // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("api_gateway_websocket_connect_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = APIGatewayWebSocketEvent::new(payload)
+            .expect("Failed to deserialize APIGatewayWebSocketEvent");
+
+        // Test 1: With specific mapping - still respects mapping
+        let specific_service_mapping = HashMap::from([
+            ("85fj5nw29d".to_string(), "specific-service".to_string()),
+            (
+                "lambda_api_gateway".to_string(),
+                "generic-service".to_string(),
+            ),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.request_context.domain_name,
+                &event.request_context.domain_name,
+                false // aws_service_representation_enabled = false
+            ),
+            "specific-service"
+        );
+
+        // Test 2: With generic mapping - still respects mapping
+        let generic_service_mapping = HashMap::from([(
+            "lambda_api_gateway".to_string(),
+            "generic-service".to_string(),
+        )]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.request_context.domain_name,
+                &event.request_context.domain_name,
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses fallback value (domain_name)
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.request_context.domain_name,
+                &event.request_context.domain_name,
+                false // aws_service_representation_enabled = false
+            ),
+            event.request_context.domain_name // fallback value
         );
     }
 }

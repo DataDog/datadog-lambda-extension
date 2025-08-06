@@ -332,13 +332,13 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_service_name() {
+    fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("lambda_function_url_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = LambdaFunctionUrlEvent::new(payload)
             .expect("Failed to deserialize LambdaFunctionUrlEvent");
 
-        // Priority is given to the specific key
+        // Test 1: Specific mapping takes priority
         let specific_service_mapping = HashMap::from([
             ("a8hyhsshac".to_string(), "specific-service".to_string()),
             ("lambda_url".to_string(), "generic-service".to_string()),
@@ -349,16 +349,83 @@ mod tests {
                 &specific_service_mapping,
                 "domain-name",
                 "lambda_url",
-                true
+                true // aws_service_representation_enabled
             ),
             "specific-service"
         );
 
+        // Test 2: Generic mapping is used when specific not found
         let generic_service_mapping =
             HashMap::from([("lambda_url".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "domain-name", "lambda_url", true),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                "domain-name",
+                "lambda_url",
+                true // aws_service_representation_enabled
+            ),
             "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses instance name
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                "domain-name",
+                "lambda_url",
+                true // aws_service_representation_enabled
+            ),
+            "domain-name" // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("lambda_function_url_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = LambdaFunctionUrlEvent::new(payload)
+            .expect("Failed to deserialize LambdaFunctionUrlEvent");
+
+        // Test 1: With specific mapping - still respects mapping
+        let specific_service_mapping = HashMap::from([
+            ("a8hyhsshac".to_string(), "specific-service".to_string()),
+            ("lambda_url".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                "domain-name",
+                "lambda_url",
+                false // aws_service_representation_enabled = false
+            ),
+            "specific-service"
+        );
+
+        // Test 2: With generic mapping - still respects mapping
+        let generic_service_mapping =
+            HashMap::from([("lambda_url".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                "domain-name",
+                "lambda_url",
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                "domain-name",
+                "lambda_url",
+                false // aws_service_representation_enabled = false
+            ),
+            "lambda_url" // fallback value
         );
     }
 }

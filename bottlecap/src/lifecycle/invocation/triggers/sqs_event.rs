@@ -503,12 +503,12 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_service_name() {
+    fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
 
-        // Priority is given to the specific key
+        // Test 1: Specific mapping takes priority
         let specific_service_mapping = HashMap::from([
             ("MyQueue".to_string(), "specific-service".to_string()),
             ("lambda_sqs".to_string(), "generic-service".to_string()),
@@ -519,11 +519,12 @@ mod tests {
                 &specific_service_mapping,
                 &event.get_specific_identifier(),
                 "sqs",
-                true
+                true // aws_service_representation_enabled
             ),
             "specific-service"
         );
 
+        // Test 2: Generic mapping is used when specific not found
         let generic_service_mapping =
             HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
         assert_eq!(
@@ -531,9 +532,69 @@ mod tests {
                 &generic_service_mapping,
                 &event.get_specific_identifier(),
                 "sqs",
-                true
+                true // aws_service_representation_enabled
             ),
             "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses instance name (queue name)
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                true // aws_service_representation_enabled
+            ),
+            event.get_specific_identifier() // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+
+        // Test 1: With specific mapping - still respects mapping
+        let specific_service_mapping = HashMap::from([
+            ("MyQueue".to_string(), "specific-service".to_string()),
+            ("lambda_sqs".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                false // aws_service_representation_enabled = false
+            ),
+            "specific-service"
+        );
+
+        // Test 2: With generic mapping - still respects mapping
+        let generic_service_mapping =
+            HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                false // aws_service_representation_enabled = false
+            ),
+            "sqs" // fallback value
         );
     }
 

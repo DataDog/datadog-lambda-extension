@@ -265,12 +265,12 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_service_name() {
+    fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("s3_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
 
-        // Priority is given to the specific key
+        // Test 1: Specific mapping takes priority
         let specific_service_mapping = HashMap::from([
             ("example-bucket".to_string(), "specific-service".to_string()),
             ("lambda_s3".to_string(), "generic-service".to_string()),
@@ -280,19 +280,72 @@ mod tests {
             &specific_service_mapping,
             &event.get_specific_identifier(),
             "s3",
-            true,
+            true, // aws_service_representation_enabled
         );
         assert_eq!(service, "specific-service");
 
+        // Test 2: Generic mapping is used when specific not found
         let generic_service_mapping =
             HashMap::from([("lambda_s3".to_string(), "generic-service".to_string())]);
         let service = event.resolve_service_name(
             &generic_service_mapping,
             &event.get_specific_identifier(),
             "s3",
-            true,
+            true, // aws_service_representation_enabled
         );
         assert_eq!(service, "generic-service");
+
+        // Test 3: When no mapping exists, uses instance name (bucket name)
+        let empty_mapping = HashMap::new();
+        let service = event.resolve_service_name(
+            &empty_mapping,
+            &event.get_specific_identifier(),
+            "s3",
+            true, // aws_service_representation_enabled
+        );
+        assert_eq!(service, event.get_specific_identifier()); // instance name
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("s3_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
+
+        // Test 1: With specific mapping - still respects mapping
+        let specific_service_mapping = HashMap::from([
+            ("example-bucket".to_string(), "specific-service".to_string()),
+            ("lambda_s3".to_string(), "generic-service".to_string()),
+        ]);
+
+        let service = event.resolve_service_name(
+            &specific_service_mapping,
+            &event.get_specific_identifier(),
+            "s3",
+            false, // aws_service_representation_enabled = false
+        );
+        assert_eq!(service, "specific-service");
+
+        // Test 2: With generic mapping - still respects mapping
+        let generic_service_mapping =
+            HashMap::from([("lambda_s3".to_string(), "generic-service".to_string())]);
+        let service = event.resolve_service_name(
+            &generic_service_mapping,
+            &event.get_specific_identifier(),
+            "s3",
+            false, // aws_service_representation_enabled = false
+        );
+        assert_eq!(service, "generic-service");
+
+        // Test 3: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        let service = event.resolve_service_name(
+            &empty_mapping,
+            &event.get_specific_identifier(),
+            "s3",
+            false, // aws_service_representation_enabled = false
+        );
+        assert_eq!(service, "s3"); // fallback value
     }
 
     #[test]
