@@ -72,7 +72,6 @@ pub struct Processor {
     /// from the proc filesystem, it's not possible to know the
     /// runtime before the first invocation.
     runtime: Option<String>,
-    runtime_from_init: Option<String>,
     config: Arc<config::Config>,
     service: String,
     resource: String,
@@ -105,7 +104,6 @@ impl Processor {
             aws_config,
             tracer_detected: false,
             runtime: None,
-            runtime_from_init: None,
             config: Arc::clone(&config),
             service,
             resource,
@@ -219,7 +217,7 @@ impl Processor {
     ///
     /// This is used to create a cold start span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the cold start.
-    pub fn on_platform_init_start(&mut self, time: DateTime<Utc>, runtime: Option<String>) {
+    pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -243,8 +241,6 @@ impl Processor {
         cold_start_span.start = start_time;
 
         context.cold_start_span = Some(cold_start_span);
-
-        self.runtime_from_init = runtime;
     }
 
     /// Given the duration of the platform init report, set the init duration metric.
@@ -565,9 +561,8 @@ impl Processor {
         self.enhanced_metrics
             .set_report_log_metrics(&metrics, timestamp);
 
-        if let Some(runtime) = &self.runtime_from_init {
-            // TODO: do this check earlier to avoid doing it multiple times
-            if (runtime.starts_with("provided:al2.") || runtime.starts_with("provided:al2023")) && metrics.max_memory_used_mb == metrics.memory_size_mb {
+        if let Some(runtime) = &self.runtime {
+            if (runtime.starts_with("provided.al")) && metrics.max_memory_used_mb == metrics.memory_size_mb {
                 debug!("Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric.");
                 self.enhanced_metrics.increment_oom_metric(timestamp);
             }

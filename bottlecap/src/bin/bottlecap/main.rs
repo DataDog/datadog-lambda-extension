@@ -824,9 +824,9 @@ async fn handle_event_bus_event(
         Event::Telemetry(event) => {
             debug!("Telemetry event received: {:?}", event);
             match event.record {
-                TelemetryRecord::PlatformInitStart { runtime_version, .. } => {
+                TelemetryRecord::PlatformInitStart { .. } => {
                     let mut p = invocation_processor.lock().await;
-                    p.on_platform_init_start(event.time, runtime_version);
+                    p.on_platform_init_start(event.time);
                     drop(p);
                 }
                 TelemetryRecord::PlatformInitReport {
