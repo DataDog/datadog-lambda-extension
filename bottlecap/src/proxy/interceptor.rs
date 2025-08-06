@@ -275,9 +275,7 @@ async fn invocation_error_proxy(
     state: State<InterceptorState>,
     request: Request,
 ) -> Response {
-    debug!(
-        "PROXY | invocation_error_proxy | api_version: {api_version}, request_id: {request_id}"
-    );
+    debug!("PROXY | invocation_error_proxy | api_version: {api_version}, request_id: {request_id}");
     let State((_, _, _, appsec_processor, _)) = &state;
     if let Some(appsec) = appsec_processor {
         // Marking any outstanding security context as finalized by sending a blank response.
