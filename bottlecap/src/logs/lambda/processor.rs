@@ -2,7 +2,7 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
@@ -93,6 +93,7 @@ impl LambdaProcessor {
 
                 if let Some(message) = message {
                     if is_oom_error(&message) {
+                        debug!("Lambda Processor | Got a runtime-specific OOM error. Incrementing OOM metric.");
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
                             error!("Failed to send OOM event to the main event bus: {e}");
                         }
