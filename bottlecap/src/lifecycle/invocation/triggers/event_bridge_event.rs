@@ -51,7 +51,12 @@ impl Trigger for EventBridgeEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         // EventBridge events have a timestamp resolution in seconds
         let start_time_seconds = self
             .time
@@ -69,6 +74,7 @@ impl Trigger for EventBridgeEvent {
             service_mapping,
             &self.get_specific_identifier(),
             "eventbridge",
+            aws_service_representation_enabled,
         );
 
         span.name = String::from("aws.eventbridge");
@@ -185,7 +191,7 @@ mod tests {
 
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
 
         let expected = serde_json::from_str(&read_json_file("eventbridge_span.json"))
             .expect("Failed to deserialize into Span");
@@ -201,7 +207,7 @@ mod tests {
 
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
 
         assert_eq!(span.resource, "my.event");
     }
@@ -215,7 +221,7 @@ mod tests {
 
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
 
         assert_eq!(span.resource, "testBus");
         // Seconds resolution
@@ -278,7 +284,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.get_specific_identifier(),
-                "eventbridge"
+                "eventbridge",
+                true
             ),
             "specific-service"
         );
@@ -291,7 +298,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.get_specific_identifier(),
-                "eventbridge"
+                "eventbridge",
+                true
             ),
             "generic-service"
         );

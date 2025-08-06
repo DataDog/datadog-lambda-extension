@@ -99,7 +99,12 @@ impl Trigger for SqsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for an SQS Event");
         let resource = self.get_specific_identifier();
         let start_time = (self
@@ -109,8 +114,12 @@ impl Trigger for SqsRecord {
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
 
-        let service_name =
-            self.resolve_service_name(service_mapping, &self.get_specific_identifier(), "sqs");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &self.get_specific_identifier(),
+            "sqs",
+            aws_service_representation_enabled,
+        );
 
         span.name = "aws.sqs".to_string();
         span.service = service_name.to_string();
@@ -327,7 +336,7 @@ mod tests {
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.sqs");
         assert_eq!(span.service, "MyQueue");
         assert_eq!(span.resource, "MyQueue");
@@ -509,7 +518,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.get_specific_identifier(),
-                "sqs"
+                "sqs",
+                true
             ),
             "specific-service"
         );
@@ -520,7 +530,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.get_specific_identifier(),
-                "sqs"
+                "sqs",
+                true
             ),
             "generic-service"
         );

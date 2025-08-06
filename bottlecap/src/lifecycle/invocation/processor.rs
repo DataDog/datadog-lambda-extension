@@ -39,6 +39,8 @@ use crate::{
     },
 };
 
+use crate::lifecycle::invocation::triggers::get_default_service_name;
+
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
@@ -93,15 +95,19 @@ impl Processor {
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
 
-        let service = match std::env::var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED") {
-            Ok(val) if val.eq_ignore_ascii_case("false") => String::from("aws.lambda"),
-            _ => config.service.clone().unwrap_or(resource.clone()),
-        };
+        let service = get_default_service_name(
+            &config.service.clone().unwrap_or(resource.clone()),
+            "aws.lambda",
+            config.trace_aws_service_representation_enabled,
+        );
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
             context_buffer: ContextBuffer::default(),
-            inferrer: SpanInferrer::new(config.service_mapping.clone()),
+            inferrer: SpanInferrer::new(
+                config.service_mapping.clone(),
+                config.trace_aws_service_representation_enabled,
+            ),
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config,
@@ -976,7 +982,6 @@ mod tests {
     use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
-    use serial_test::serial;
 
     fn setup() -> Processor {
         let aws_config = Arc::new(AwsConfig {
@@ -1217,37 +1222,5 @@ mod tests {
                     .is_some(),
             "UNUSED_INIT metric should be created when invoked_received=false"
         );
-    }
-
-    #[test]
-    #[serial]
-    fn test_service_name_env_var_false_returns_aws_lambda() {
-        const VAR: &str = "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED";
-        let original = std::env::var(VAR).ok();
-        unsafe { std::env::set_var(VAR, "false") };
-
-        let p = setup();
-        assert_eq!(p.service, "aws.lambda");
-
-        if let Some(v) = original {
-            unsafe { std::env::set_var(VAR, v) };
-        } else {
-            unsafe { std::env::remove_var(VAR) };
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn test_service_name_env_var_unset_uses_config_service() {
-        const VAR: &str = "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED";
-        let original = std::env::var(VAR).ok();
-        unsafe { std::env::remove_var(VAR) };
-
-        let p = setup();
-        assert_eq!(p.service, "test-service");
-
-        if let Some(v) = original {
-            unsafe { std::env::set_var(VAR, v) };
-        }
     }
 }

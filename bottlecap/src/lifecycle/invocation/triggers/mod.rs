@@ -96,6 +96,19 @@ pub fn parameterize_api_resource(resource: String) -> String {
     result.join("/")
 }
 
+#[must_use]
+pub fn get_default_service_name(
+    instance_name: &str,
+    fallback: &str,
+    aws_service_representation_enabled: bool,
+) -> String {
+    if !aws_service_representation_enabled {
+        return fallback.to_string();
+    }
+
+    instance_name.to_string()
+}
+
 pub trait Trigger: ServiceNameResolver {
     fn new(payload: Value) -> Option<Self>
     where
@@ -103,7 +116,12 @@ pub trait Trigger: ServiceNameResolver {
     fn is_match(payload: &Value) -> bool
     where
         Self: Sized;
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>);
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    );
     fn get_tags(&self) -> HashMap<String, String>;
     fn get_arn(&self, region: &str) -> String;
     fn get_carrier(&self) -> HashMap<String, String>;
@@ -115,26 +133,18 @@ pub trait Trigger: ServiceNameResolver {
         service_mapping: &HashMap<String, String>,
         instance_name: &str,
         fallback: &str,
+        aws_service_representation_enabled: bool,
     ) -> String {
-        // If DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED is explicitly set to "false",
-        // always use the fallback value (typically "aws.lambda").
-        if std::env::var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED")
-            .map(|v| v.eq_ignore_ascii_case("false"))
-            .unwrap_or(false)
-        {
-            return fallback.to_string();
-        }
-
         service_mapping
             .get(&self.get_specific_identifier())
             .or_else(|| service_mapping.get(self.get_generic_identifier()))
             .cloned()
             .unwrap_or_else(|| {
-                if instance_name.is_empty() {
-                    fallback.to_string()
-                } else {
-                    instance_name.to_string()
-                }
+                get_default_service_name(
+                    instance_name,
+                    fallback,
+                    aws_service_representation_enabled,
+                )
             })
     }
 }

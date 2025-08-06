@@ -100,14 +100,24 @@ impl Trigger for DynamoDbRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for a DynamoDB event");
         let table_name = self.get_specific_identifier();
         let resource = format!("{} {}", self.event_name.clone(), table_name);
 
         let start_time = (self.dynamodb.approximate_creation_date_time * S_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(service_mapping, &table_name, "dynamodb");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &table_name,
+            "dynamodb",
+            aws_service_representation_enabled,
+        );
 
         span.name = String::from("aws.dynamodb");
         span.service = service_name.to_string();
@@ -278,7 +288,7 @@ mod tests {
         let event = DynamoDbRecord::new(payload).expect("Failed to deserialize DynamoDbRecord");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.dynamodb");
         assert_eq!(span.service, "ExampleTableWithStream");
         assert_eq!(span.resource, "INSERT ExampleTableWithStream");
@@ -359,7 +369,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.get_specific_identifier(),
-                "dynamodb"
+                "dynamodb",
+                true
             ),
             "specific-service"
         );
@@ -370,7 +381,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.get_specific_identifier(),
-                "dynamodb"
+                "dynamodb",
+                true
             ),
             "generic-service"
         );

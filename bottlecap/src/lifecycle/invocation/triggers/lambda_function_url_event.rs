@@ -63,7 +63,12 @@ impl Trigger for LambdaFunctionUrlEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         let resource = format!(
             "{} {}",
             self.request_context.http.method, self.request_context.http.path
@@ -81,6 +86,7 @@ impl Trigger for LambdaFunctionUrlEvent {
             service_mapping,
             &self.request_context.domain_name,
             &self.request_context.domain_name,
+            aws_service_representation_enabled,
         );
 
         span.name = String::from("aws.lambda.url");
@@ -270,7 +276,7 @@ mod tests {
             .expect("Failed to deserialize LambdaFunctionUrlEvent");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.lambda.url");
         assert_eq!(
             span.service,
@@ -339,14 +345,19 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "domain-name", "lambda_url"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                "domain-name",
+                "lambda_url",
+                true
+            ),
             "specific-service"
         );
 
         let generic_service_mapping =
             HashMap::from([("lambda_url".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "domain-name", "lambda_url"),
+            event.resolve_service_name(&generic_service_mapping, "domain-name", "lambda_url", true),
             "generic-service"
         );
     }

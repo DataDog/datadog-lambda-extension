@@ -59,12 +59,21 @@ impl Trigger for MSKEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for an MSK event");
 
         span.name = String::from("aws.msk");
-        span.service =
-            self.resolve_service_name(service_mapping, &self.get_specific_identifier(), "msk");
+        span.service = self.resolve_service_name(
+            service_mapping,
+            &self.get_specific_identifier(),
+            "msk",
+            aws_service_representation_enabled,
+        );
         span.r#type = String::from("web");
 
         let first_value = self.records.values().find_map(|arr| arr.first());
@@ -170,7 +179,7 @@ mod tests {
         let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
 
         assert_eq!(span.name, "aws.msk");
         assert_eq!(span.service, "demo-cluster");
@@ -247,7 +256,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.get_specific_identifier(),
-                "msk"
+                "msk",
+                true
             ),
             "specific-service"
         );
@@ -258,7 +268,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.get_specific_identifier(),
-                "msk"
+                "msk",
+                true
             ),
             "generic-service"
         );

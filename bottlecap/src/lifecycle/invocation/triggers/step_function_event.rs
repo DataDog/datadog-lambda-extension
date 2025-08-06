@@ -116,6 +116,7 @@ impl Trigger for StepFunctionEvent {
         &self,
         _span: &mut datadog_trace_protobuf::pb::Span,
         _service_mapping: &HashMap<String, String>,
+        _aws_service_representation_enabled: bool,
     ) {
     }
 

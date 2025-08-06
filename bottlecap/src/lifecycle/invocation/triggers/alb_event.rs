@@ -47,7 +47,13 @@ impl Trigger for ALBEvent {
         target_group_arn.is_some()
     }
 
-    fn enrich_span(&self, _span: &mut Span, _service_mapping: &HashMap<String, String>) {}
+    fn enrich_span(
+        &self,
+        _span: &mut Span,
+        _service_mapping: &HashMap<String, String>,
+        _aws_service_representation_enabled: bool,
+    ) {
+    }
 
     fn get_tags(&self) -> HashMap<String, String> {
         HashMap::from([
@@ -231,7 +237,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer"
+                "lambda_application_load_balancer",
+                true
             ),
             "specific-service"
         );
@@ -244,7 +251,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.request_context.elb.target_group_arn,
-                "lambda_application_load_balancer"
+                "lambda_application_load_balancer",
+                true
             ),
             "generic-service"
         );

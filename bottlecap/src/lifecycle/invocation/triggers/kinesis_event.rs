@@ -70,10 +70,20 @@ impl Trigger for KinesisRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         let stream_name = self.get_specific_identifier();
         let shard_id = self.event_id.split(':').next().unwrap_or_default();
-        let service_name = self.resolve_service_name(service_mapping, &stream_name, "kinesis");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &stream_name,
+            "kinesis",
+            aws_service_representation_enabled,
+        );
 
         span.name = String::from("aws.kinesis");
         span.service = service_name;
@@ -190,7 +200,7 @@ mod tests {
         let event = KinesisRecord::new(payload).expect("Failed to deserialize S3Record");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.kinesis");
         assert_eq!(span.service, "kinesisStream");
         assert_eq!(span.resource, "kinesisStream");
@@ -282,7 +292,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.get_specific_identifier(),
-                "kinesis"
+                "kinesis",
+                true
             ),
             "specific-service"
         );
@@ -293,7 +304,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.get_specific_identifier(),
-                "kinesis"
+                "kinesis",
+                true
             ),
             "generic-service"
         );

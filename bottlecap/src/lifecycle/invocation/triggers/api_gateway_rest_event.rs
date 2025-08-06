@@ -67,7 +67,12 @@ impl Trigger for APIGatewayRestEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for an API Gateway REST Event");
         let resource = format!(
             "{http_method} {path}",
@@ -85,6 +90,7 @@ impl Trigger for APIGatewayRestEvent {
             service_mapping,
             &self.request_context.domain_name,
             &self.request_context.domain_name,
+            aws_service_representation_enabled,
         );
 
         span.name = "aws.apigateway".to_string();
@@ -290,7 +296,7 @@ mod tests {
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
         assert_eq!(span.resource, "GET /my/path");
@@ -349,7 +355,7 @@ mod tests {
             APIGatewayRestEvent::new(payload).expect("Failed to deserialize APIGatewayRestEvent");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(
             span.service,
@@ -441,7 +447,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.request_context.domain_name,
-                "api_gateway_rest"
+                "api_gateway_rest",
+                true
             ),
             "specific-service"
         );
@@ -454,7 +461,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.request_context.domain_name,
-                "api_gateway_rest"
+                "api_gateway_rest",
+                true
             ),
             "generic-service"
         );

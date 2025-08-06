@@ -82,7 +82,12 @@ impl Trigger for SnsRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for an SNS Event");
         let resource_name = self.get_specific_identifier();
 
@@ -92,8 +97,12 @@ impl Trigger for SnsRecord {
             .timestamp_nanos_opt()
             .unwrap_or((self.sns.timestamp.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-        let service_name =
-            self.resolve_service_name(service_mapping, &self.get_specific_identifier(), "sns");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &self.get_specific_identifier(),
+            "sns",
+            aws_service_representation_enabled,
+        );
 
         span.name = "aws.sns".to_string();
         span.service = service_name.to_string();
@@ -235,7 +244,7 @@ mod tests {
         let event = SnsRecord::new(payload).expect("Failed to deserialize SnsRecord");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.sns");
         assert_eq!(span.service, "serverlessTracingTopicPy");
         assert_eq!(span.resource, "serverlessTracingTopicPy");
@@ -372,7 +381,8 @@ mod tests {
             event.resolve_service_name(
                 &specific_service_mapping,
                 &event.get_specific_identifier(),
-                "sns"
+                "sns",
+                true
             ),
             "specific-service"
         );
@@ -383,7 +393,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.get_specific_identifier(),
-                "sns"
+                "sns",
+                true
             ),
             "generic-service"
         );

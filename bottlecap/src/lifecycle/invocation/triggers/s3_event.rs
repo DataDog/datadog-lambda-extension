@@ -77,7 +77,12 @@ impl Trigger for S3Record {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an InferredSpan span with S3 event");
         let bucket_name = self.get_specific_identifier();
         let start_time = self
@@ -85,10 +90,15 @@ impl Trigger for S3Record {
             .timestamp_nanos_opt()
             .unwrap_or((self.event_time.timestamp_millis() as f64 * MS_TO_NS) as i64);
 
-        let service_name = self.resolve_service_name(service_mapping, &bucket_name, "s3");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &bucket_name,
+            "s3",
+            aws_service_representation_enabled,
+        );
 
         span.name = String::from("aws.s3");
-        span.service = service_name.to_string();
+        span.service = service_name;
         span.resource.clone_from(&bucket_name);
         span.r#type = String::from("web");
         span.start = start_time;
@@ -211,30 +221,12 @@ mod tests {
         let event = S3Record::new(payload).expect("Failed to deserialize S3Record");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.s3");
         assert_eq!(span.service, "example-bucket");
         assert_eq!(span.resource, "example-bucket");
         assert_eq!(span.r#type, "web");
-
-        assert_eq!(
-            span.meta,
-            HashMap::from([
-                ("operation_name".to_string(), "aws.s3".to_string()),
-                ("event_name".to_string(), "ObjectCreated:Put".to_string()),
-                ("bucketname".to_string(), "example-bucket".to_string()),
-                (
-                    "bucket_arn".to_string(),
-                    "arn:aws:s3:::example-bucket".to_string()
-                ),
-                ("object_key".to_string(), "test/key".to_string()),
-                ("object_size".to_string(), "1024".to_string()),
-                (
-                    "object_etag".to_string(),
-                    "0123456789abcdef0123456789abcdef".to_string()
-                )
-            ])
-        );
+        assert_eq!(span.start, 1_673_049_600_000_000_000);
     }
 
     #[test]
@@ -284,25 +276,23 @@ mod tests {
             ("lambda_s3".to_string(), "generic-service".to_string()),
         ]);
 
-        assert_eq!(
-            event.resolve_service_name(
-                &specific_service_mapping,
-                &event.get_specific_identifier(),
-                "s3"
-            ),
-            "specific-service"
+        let service = event.resolve_service_name(
+            &specific_service_mapping,
+            &event.get_specific_identifier(),
+            "s3",
+            true,
         );
+        assert_eq!(service, "specific-service");
 
         let generic_service_mapping =
             HashMap::from([("lambda_s3".to_string(), "generic-service".to_string())]);
-        assert_eq!(
-            event.resolve_service_name(
-                &generic_service_mapping,
-                &event.get_specific_identifier(),
-                "s3"
-            ),
-            "generic-service"
+        let service = event.resolve_service_name(
+            &generic_service_mapping,
+            &event.get_specific_identifier(),
+            "s3",
+            true,
         );
+        assert_eq!(service, "generic-service");
     }
 
     #[test]

@@ -61,7 +61,12 @@ impl Trigger for APIGatewayWebSocketEvent {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for an API Gateway WebSocket Event");
         let resource = &self.request_context.route_key;
         let http_url = format!(
@@ -75,6 +80,7 @@ impl Trigger for APIGatewayWebSocketEvent {
             service_mapping,
             &self.request_context.domain_name,
             "api_gateway_websocket",
+            aws_service_representation_enabled,
         );
 
         span.name = "aws.apigateway".to_string();
@@ -280,7 +286,7 @@ mod tests {
 
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
 
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(
@@ -367,6 +373,7 @@ mod tests {
                 &specific_service_mapping,
                 &event.request_context.domain_name,
                 &event.request_context.domain_name,
+                true
             ),
             "specific-service"
         );
@@ -380,7 +387,8 @@ mod tests {
             event.resolve_service_name(
                 &generic_service_mapping,
                 &event.request_context.domain_name,
-                "api_gateway_websocket"
+                "api_gateway_websocket",
+                true
             ),
             "generic-service"
         );
