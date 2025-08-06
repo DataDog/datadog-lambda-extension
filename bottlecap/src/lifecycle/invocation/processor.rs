@@ -93,7 +93,10 @@ impl Processor {
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
 
-        let service = config.service.clone().unwrap_or(resource.clone());
+        let service = match std::env::var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED") {
+            Ok(val) if val.eq_ignore_ascii_case("false") => String::from("aws.lambda"),
+            _ => config.service.clone().unwrap_or(resource.clone()),
+        };
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
@@ -968,6 +971,7 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
+    use serial_test::serial;
 
     fn setup() -> Processor {
         let aws_config = Arc::new(AwsConfig {
@@ -1173,5 +1177,37 @@ mod tests {
                 .expect("Status code not parsed!"),
             "200"
         );
+    }
+
+    #[test]
+    #[serial]
+    fn test_service_name_env_var_false_returns_aws_lambda() {
+        const VAR: &str = "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED";
+        let original = std::env::var(VAR).ok();
+        std::env::set_var(VAR, "false");
+
+        let p = setup();
+        assert_eq!(p.service, "aws.lambda");
+
+        if let Some(v) = original {
+            std::env::set_var(VAR, v);
+        } else {
+            std::env::remove_var(VAR);
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_service_name_env_var_unset_uses_config_service() {
+        const VAR: &str = "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED";
+        let original = std::env::var(VAR).ok();
+        std::env::remove_var(VAR);
+
+        let p = setup();
+        assert_eq!(p.service, "test-service");
+
+        if let Some(v) = original {
+            std::env::set_var(VAR, v);
+        }
     }
 }

@@ -116,6 +116,15 @@ pub trait Trigger: ServiceNameResolver {
         instance_name: &str,
         fallback: &str,
     ) -> String {
+        // If DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED is explicitly set to "false",
+        // always use the fallback value (typically "aws.lambda").
+        if std::env::var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED")
+            .map(|v| v.eq_ignore_ascii_case("false"))
+            .unwrap_or(false)
+        {
+            return fallback.to_string();
+        }
+
         service_mapping
             .get(&self.get_specific_identifier())
             .or_else(|| service_mapping.get(self.get_generic_identifier()))

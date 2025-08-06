@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use bottlecap::lifecycle::invocation::triggers::{
-    dynamodb_event::DynamoDbRecord, kinesis_event::KinesisRecord, msk_event::MSKEvent,
-    s3_event::S3Record, sns_event::SnsRecord, sqs_event::SqsRecord, Trigger,
+    dynamodb_event::DynamoDbRecord, kinesis_event::KinesisRecord,
+    lambda_function_url_event::LambdaFunctionUrlEvent, msk_event::MSKEvent, s3_event::S3Record,
+    sns_event::SnsRecord, sqs_event::SqsRecord, Trigger,
 };
 
 use bottlecap::lifecycle::invocation::triggers::ServiceNameResolver;
@@ -22,7 +23,9 @@ fn read_json_file(file_name: &str) -> String {
 }
 
 #[test]
+#[serial]
 fn test_dynamodb_service_name_instance_fallback() {
+    std::env::remove_var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED");
     let json = read_json_file("dynamodb_event.json");
     let payload = serde_json::from_str(&json).expect("Failed to deserialize");
     let event = DynamoDbRecord::new(payload).expect("deserialize DynamoDbRecord");
@@ -32,7 +35,9 @@ fn test_dynamodb_service_name_instance_fallback() {
 }
 
 #[test]
+#[serial]
 fn test_s3_service_name_instance_fallback() {
+    std::env::remove_var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED");
     let json = read_json_file("s3_event.json");
     let payload = serde_json::from_str(&json).expect("Failed to deserialize");
     let event = S3Record::new(payload).expect("deserialize S3Record");
@@ -42,7 +47,9 @@ fn test_s3_service_name_instance_fallback() {
 }
 
 #[test]
+#[serial]
 fn test_sqs_service_name_instance_fallback() {
+    std::env::remove_var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED");
     let json = read_json_file("sqs_event.json");
     let payload = serde_json::from_str(&json).expect("Failed to deserialize");
     let event = SqsRecord::new(payload).expect("deserialize SqsRecord");
@@ -52,7 +59,9 @@ fn test_sqs_service_name_instance_fallback() {
 }
 
 #[test]
+#[serial]
 fn test_kinesis_service_name_instance_fallback() {
+    std::env::remove_var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED");
     let json = read_json_file("kinesis_event.json");
     let payload = serde_json::from_str(&json).expect("Failed to deserialize");
     let event = KinesisRecord::new(payload).expect("deserialize KinesisRecord");
@@ -62,7 +71,9 @@ fn test_kinesis_service_name_instance_fallback() {
 }
 
 #[test]
+#[serial]
 fn test_msk_service_name_instance_fallback() {
+    std::env::remove_var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED");
     let json = read_json_file("msk_event.json");
     let payload = serde_json::from_str(&json).expect("Failed to deserialize");
     let event = MSKEvent::new(payload).expect("deserialize MSKEvent");
@@ -72,11 +83,69 @@ fn test_msk_service_name_instance_fallback() {
 }
 
 #[test]
+#[serial]
 fn test_sns_service_name_instance_fallback() {
+    std::env::remove_var("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED");
     let json = read_json_file("sns_event.json");
     let payload = serde_json::from_str(&json).expect("Failed to deserialize");
     let event = SnsRecord::new(payload).expect("deserialize SnsRecord");
     let topic_name = event.get_specific_identifier();
     let service = event.resolve_service_name(&HashMap::new(), &topic_name, "sns");
     assert_eq!(service, "serverlessTracingTopicPy");
+}
+
+use serial_test::serial;
+use std::env;
+
+fn with_env_var<F: FnOnce()>(f: F) {
+    // Helper to set env var to "false" and restore original value after running closure
+    const VAR: &str = "DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED";
+    let original = env::var(VAR).ok();
+    env::set_var(VAR, "false");
+    f();
+    if let Some(val) = original {
+        env::set_var(VAR, val);
+    } else {
+        env::remove_var(VAR);
+    }
+}
+
+#[test]
+#[serial]
+fn test_dynamodb_service_name_env_var_false_uses_fallback() {
+    with_env_var(|| {
+        let json = read_json_file("dynamodb_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize");
+        let event = DynamoDbRecord::new(payload).expect("deserialize DynamoDbRecord");
+        let table_name = event.get_specific_identifier();
+        let service = event.resolve_service_name(&HashMap::new(), &table_name, "dynamodb");
+        assert_eq!(service, "dynamodb");
+    });
+}
+
+#[test]
+#[serial]
+fn test_s3_service_name_env_var_false_uses_fallback() {
+    with_env_var(|| {
+        let json = read_json_file("s3_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize");
+        let event = S3Record::new(payload).expect("deserialize S3Record");
+        let bucket_name = event.get_specific_identifier();
+        let service = event.resolve_service_name(&HashMap::new(), &bucket_name, "s3");
+        assert_eq!(service, "s3");
+    });
+}
+
+#[test]
+#[serial]
+fn test_lambda_url_service_name_env_var_false_uses_fallback() {
+    with_env_var(|| {
+        let json = read_json_file("lambda_function_url_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize");
+        let event =
+            LambdaFunctionUrlEvent::new(payload).expect("deserialize LambdaFunctionUrlEvent");
+        let domain = event.get_specific_identifier();
+        let service = event.resolve_service_name(&HashMap::new(), &domain, "lambda_url");
+        assert_eq!(service, "lambda_url");
+    });
 }
