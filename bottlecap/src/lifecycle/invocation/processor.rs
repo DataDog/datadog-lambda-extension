@@ -248,10 +248,6 @@ impl Processor {
         );
         cold_start_span.span_id = generate_span_id();
         cold_start_span.start = start_time;
-        cold_start_span
-            .meta
-            .insert("span.kind".to_string(), "server".to_string());
-
         context.cold_start_span = Some(cold_start_span);
     }
 
@@ -410,11 +406,6 @@ impl Processor {
             .invocation_span
             .meta
             .extend(self.dynamic_tags.clone());
-
-        context
-            .invocation_span
-            .meta
-            .insert("span.kind".to_string(), "server".to_string());
 
         if let Some(trigger_tags) = self.inferrer.get_trigger_tags() {
             context.invocation_span.meta.extend(trigger_tags);
