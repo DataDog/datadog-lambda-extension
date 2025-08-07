@@ -190,10 +190,6 @@ impl Processor {
 
             // Resolve runtime only once
             let runtime = resolve_runtime_from_proc(PROC_PATH, ETC_PATH);
-            debug!(
-                "Invocation Processor | Cold start | Resolved runtime: {:?}",
-                runtime
-            );
             self.runtime = Some(runtime);
         }
 
