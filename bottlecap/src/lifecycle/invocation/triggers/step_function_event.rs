@@ -116,6 +116,7 @@ impl Trigger for StepFunctionEvent {
         &self,
         _span: &mut datadog_trace_protobuf::pb::Span,
         _service_mapping: &HashMap<String, String>,
+        _aws_service_representation_enabled: bool,
     ) {
     }
 
@@ -636,5 +637,77 @@ mod tests {
         assert_eq!(hi_tid, 1_807_349_139_850_867_390);
 
         assert_eq!(hex_tid, "1914fe7789eb32be");
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_enabled() {
+        let json = read_json_file("step_function_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
+
+        // Test 1: Generic mapping is used for Step Functions
+        let generic_service_mapping = HashMap::from([(
+            "lambda_stepfunction".to_string(),
+            "generic-service".to_string(),
+        )]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                "stepfunction",
+                "stepfunction",
+                true // aws_service_representation_enabled
+            ),
+            "generic-service"
+        );
+
+        // Test 2: When no mapping exists, uses instance name
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                "stepfunction",
+                "stepfunction",
+                true // aws_service_representation_enabled
+            ),
+            "stepfunction" // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("step_function_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
+
+        // Test 1: With generic mapping - still respects mapping
+        let generic_service_mapping = HashMap::from([(
+            "lambda_stepfunction".to_string(),
+            "generic-service".to_string(),
+        )]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                "stepfunction",
+                "stepfunction",
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 2: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                "stepfunction",
+                "stepfunction",
+                false // aws_service_representation_enabled = false
+            ),
+            "stepfunction" // fallback value
+        );
     }
 }
