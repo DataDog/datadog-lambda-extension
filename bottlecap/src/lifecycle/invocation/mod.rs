@@ -32,13 +32,19 @@ pub fn base64_to_string(base64_string: &str) -> Result<String, DecodeError> {
 }
 
 fn create_empty_span(name: String, resource: &str, service: &str) -> Span {
-    Span {
+    let mut span = Span {
         name,
         resource: resource.to_string(),
         service: service.to_string(),
         r#type: String::from("serverless"),
         ..Default::default()
-    }
+    };
+
+    // Add span.kind to the span to enable other server based features for serverless
+    span.meta
+        .insert("span.kind".to_string(), "server".to_string());
+
+    span
 }
 
 #[must_use]

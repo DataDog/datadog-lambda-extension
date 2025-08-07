@@ -39,6 +39,8 @@ use crate::{
     },
 };
 
+use crate::lifecycle::invocation::triggers::get_default_service_name;
+
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
@@ -89,16 +91,23 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
     ) -> Self {
-        let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
 
+        let service = get_default_service_name(
+            &config.service.clone().unwrap_or(resource.clone()),
+            "aws.lambda",
+            config.trace_aws_service_representation_enabled,
+        );
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
             context_buffer: ContextBuffer::default(),
-            inferrer: SpanInferrer::new(config.service_mapping.clone()),
+            inferrer: SpanInferrer::new(
+                config.service_mapping.clone(),
+                config.trace_aws_service_representation_enabled,
+            ),
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config,
@@ -195,6 +204,7 @@ impl Processor {
 
         self.dynamic_tags
             .insert(String::from("cold_start"), cold_start.to_string());
+
         if proactive_initialization {
             self.dynamic_tags.insert(
                 String::from("proactive_initialization"),
@@ -238,7 +248,6 @@ impl Processor {
         );
         cold_start_span.span_id = generate_span_id();
         cold_start_span.start = start_time;
-
         context.cold_start_span = Some(cold_start_span);
     }
 
