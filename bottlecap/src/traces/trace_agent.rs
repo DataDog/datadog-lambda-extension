@@ -53,6 +53,7 @@ const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
 
 // Intake endpoints
 const DSM_INTAKE_PATH: &str = "/api/v0.1/pipeline_stats";
@@ -61,6 +62,7 @@ const LLM_OBS_EVAL_METRIC_INTAKE_PATH: &str = "/api/intake/llm-obs/v1/eval-metri
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2: &str = "/api/intake/llm-obs/v2/eval-metric";
 const PROFILING_INTAKE_PATH: &str = "/api/v2/profile";
 const DEBUGGER_LOGS_INTAKE_PATH: &str = "/api/v2/logs";
+const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
 
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -231,6 +233,10 @@ impl TraceAgent {
             )
             .route(LLM_OBS_SPANS_ENDPOINT_PATH, post(Self::llm_obs_spans_proxy))
             .route(DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
+            .route(
+                INSTRUMENTATION_ENDPOINT_PATH,
+                post(Self::instrumentation_proxy),
+            )
             .with_state(proxy_state);
 
         let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
@@ -362,6 +368,18 @@ impl TraceAgent {
             "http-intake.logs",
             DEBUGGER_LOGS_INTAKE_PATH,
             "debugger_logs",
+        )
+        .await
+    }
+
+    async fn instrumentation_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        Self::handle_proxy(
+            state.config,
+            state.proxy_aggregator,
+            request,
+            "instrumentation-telemetry-intake",
+            INSTRUMENTATION_INTAKE_PATH,
+            "instrumentation",
         )
         .await
     }
