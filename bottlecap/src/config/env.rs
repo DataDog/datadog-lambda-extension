@@ -180,6 +180,11 @@ pub struct EnvConfig {
     /// <https://docs.datadoghq.com/agent/configuration/dual-shipping/?tab=helm#environment-variable-configuration-1>
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
     pub apm_additional_endpoints: HashMap<String, Vec<String>>,
+    /// @env `DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED`
+    ///
+    /// Enable the new AWS-resource naming logic in the tracer.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub trace_aws_service_representation_enabled: Option<bool>,
     //
     // Trace Propagation
     /// @env `DD_TRACE_PROPAGATION_STYLE`
@@ -383,6 +388,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, apm_config_compression_level);
     merge_vec!(config, env_config, apm_features);
     merge_hashmap!(config, env_config, apm_additional_endpoints);
+    merge_option_to_value!(config, env_config, trace_aws_service_representation_enabled);
 
     // Trace Propagation
     merge_vec!(config, env_config, trace_propagation_style);
@@ -588,6 +594,7 @@ mod tests {
             jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "b3");
             jail.set_env("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true");
             jail.set_env("DD_TRACE_PROPAGATION_HTTP_BAGGAGE_ENABLED", "true");
+            jail.set_env("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", "true");
 
             // OTLP
             jail.set_env("DD_OTLP_CONFIG_TRACES_ENABLED", "false");
@@ -741,6 +748,7 @@ mod tests {
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
+                trace_aws_service_representation_enabled: true,
                 otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,
                 otlp_config_traces_span_name_remappings: HashMap::from([(

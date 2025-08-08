@@ -66,6 +66,8 @@ pub struct YamlConfig {
     pub apm_config: ApmConfig,
     #[serde(deserialize_with = "deserialize_service_mapping")]
     pub service_mapping: HashMap<String, String>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub trace_aws_service_representation_enabled: Option<bool>,
     // Trace Propagation
     #[serde(deserialize_with = "deserialize_trace_propagation_style")]
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -459,6 +461,11 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_vec!(config, yaml_config, trace_propagation_style_extract);
     merge_option_to_value!(config, yaml_config, trace_propagation_extract_first);
     merge_option_to_value!(config, yaml_config, trace_propagation_http_baggage_enabled);
+    merge_option_to_value!(
+        config,
+        yaml_config,
+        trace_aws_service_representation_enabled
+    );
 
     // OTLP
     if let Some(otlp_config) = &yaml_config.otlp_config {
@@ -725,6 +732,7 @@ trace_propagation_style: "datadog"
 trace_propagation_style_extract: "b3"
 trace_propagation_extract_first: true
 trace_propagation_http_baggage_enabled: true
+trace_aws_service_representation_enabled: true
 
 # OTLP
 otlp_config:
@@ -857,6 +865,7 @@ extension_version: "compatibility"
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
+                trace_aws_service_representation_enabled: true,
                 otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,
                 otlp_config_traces_span_name_remappings: HashMap::from([(

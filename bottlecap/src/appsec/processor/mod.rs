@@ -6,12 +6,12 @@ use std::num::NonZero;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bytes::Bytes;
 use cookie::Cookie;
 use datadog_trace_protobuf::pb::Span;
 use itertools::Itertools;
 use libddwaf::object::{WafMap, WafOwned};
 use libddwaf::{Builder, Config as WafConfig, Handle};
-use tokio::task::JoinSet;
 use tracing::{debug, info, warn};
 
 use crate::appsec::processor::context::Context;
@@ -102,20 +102,15 @@ impl Processor {
     }
 
     /// Process the intercepted payload for the next invocation.
-    pub fn process_invocation_next(
-        &mut self,
-        rid: &str,
-        payload: &IdentifiedTrigger,
-        tasks: &mut JoinSet<()>,
-    ) {
+    pub async fn process_invocation_next(&mut self, rid: &str, payload: &IdentifiedTrigger) {
         if payload.is_unknown() {
             return;
         }
-        self.new_context(rid, tasks).run(payload);
+        self.new_context(rid).await.run(payload);
     }
 
     /// Process the intercepted payload for the result of an invocation.
-    pub async fn process_invocation_result(&mut self, rid: &str, payload: impl AsRef<[u8]>) {
+    pub async fn process_invocation_result(&mut self, rid: &str, payload: &Bytes) {
         // Taking the sampler first, as it implies a temporary immutable borrow...
         let api_sec_sampler = self.api_sec_sampler.as_ref().map(Arc::clone);
         let api_sec_sampler = if let Some(api_sec_sampler) = &api_sec_sampler {
@@ -229,7 +224,7 @@ impl Processor {
 
     /// Creates a new [`Context`] for the given request ID, and tracks it in the
     /// context buffer.
-    fn new_context(&mut self, rid: &str, tasks: &mut JoinSet<()>) -> &mut Context {
+    async fn new_context(&mut self, rid: &str) -> &mut Context {
         let dropped = if let Some(idx) = self.context_buffer.iter().position(|c| c.rid == rid) {
             // This request ID was already seen, remove it from the buffer...
             self.context_buffer.remove(idx)
@@ -241,7 +236,7 @@ impl Processor {
         };
         if let Some(mut ctx) = dropped {
             // Ensure any pending trace is flushed out before continuing...
-            tasks.spawn(async move { ctx.set_response_seen().await });
+            ctx.set_response_seen().await;
         }
 
         // Insert the new context at the back of the buffer.

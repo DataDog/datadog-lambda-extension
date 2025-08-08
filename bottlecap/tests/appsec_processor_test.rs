@@ -7,6 +7,7 @@ use std::time::Duration;
 use bottlecap::appsec::processor::Processor;
 use bottlecap::config::Config;
 use bottlecap::lifecycle::invocation::triggers::IdentifiedTrigger;
+use bytes::Bytes;
 use datadog_trace_protobuf::pb::Span;
 use itertools::Itertools;
 use tokio::sync::Mutex;
@@ -73,10 +74,8 @@ async fn test_processor() {
     ] {
         let processor = subject.clone();
         tasks.spawn(async move {
-            let mut tasks = JoinSet::new();
             let mut processor = processor.lock().await;
-            processor.process_invocation_next(rid, &payload, &mut tasks);
-            tasks.join_all().await;
+            processor.process_invocation_next(rid, &payload).await;
         });
     }
     // Make sure all the tasks are completed
@@ -107,7 +106,9 @@ async fn test_processor() {
         let processor = subject.clone();
         tasks.spawn(async move {
             let mut processor = processor.lock().await;
-            processor.process_invocation_result(rid, payload).await;
+            processor
+                .process_invocation_result(rid, &Bytes::from(payload))
+                .await;
         });
     }
     // Make sure all the tasks are completed
@@ -284,17 +285,18 @@ async fn test_processor() {
 
     ////////////////////////////////////////////////////////////////////////////
     // Now testing with security activity
-    let mut tasks = JoinSet::new();
-    subject.lock().await.process_invocation_next(
-        "rid-event",
-        &request_payload!(APIGatewayHttpEvent = api_gateway_http_event_appsec),
-        &mut tasks,
-    );
-    tasks.join_all().await;
     subject
         .lock()
         .await
-        .process_invocation_result("rid-event", br#"{"statusCode": 200}"#)
+        .process_invocation_next(
+            "rid-event",
+            &request_payload!(APIGatewayHttpEvent = api_gateway_http_event_appsec),
+        )
+        .await;
+    subject
+        .lock()
+        .await
+        .process_invocation_result("rid-event", &Bytes::from(r#"{"statusCode": 200}"#))
         .await;
     let mut span = span! { meta { "request_id": "rid-event" } };
     subject.lock().await.process_span(&mut span);

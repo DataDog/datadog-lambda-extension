@@ -12,13 +12,9 @@ cookie = { version = "0.18", default-features = false }
 figment = { version = "0.10", default-features = false, features = ["yaml", "env"] }
 fnv = { version = "1.0", default-features = false }
 hyper = { version = "1.6", default-features = false, features = ["server"] }
-hyper-util = { version = "0.1.10", features = [
-    "http1",
-    "client",
-    "client-legacy",
-] }
-http-body = "0.1"
-http-body-util = "0.1"
+hyper-util = { version = "0.1.16", features = ["http1", "client", "client-legacy"] }
+http-body = { version = "1", default-features = false }
+http-body-util = { version = "0.1", default-features = false }
 itertools = { version = "0.14", default-features = false, features = ["use_std"] }
 lazy_static = { version = "1.5", default-features = false }
 log = { version = "0.4", default-features = false }
@@ -32,7 +28,7 @@ reqwest = { version = "0.12.11", features = ["json", "http2"], default-features 
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 thiserror = { version = "1.0", default-features = false }
-tokio = { version = "1.37", default-features = false, features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread"] }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-core = { version = "0.1", default-features = false }

@@ -872,6 +872,7 @@ async fn handle_event_bus_event(
                     ref request_id,
                     metrics: Some(metrics),
                     status,
+                    ref error_type,
                     ..
                 } => {
                     let mut p = invocation_processor.lock().await;
@@ -879,6 +880,7 @@ async fn handle_event_bus_event(
                         request_id,
                         metrics,
                         status,
+                        error_type.clone(),
                         tags_provider.clone(),
                         Arc::new(SendingTraceProcessor {
                             appsec: appsec_processor.clone(),

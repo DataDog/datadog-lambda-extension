@@ -58,6 +58,9 @@ impl TraceChunkProcessor for ChunkProcessor {
                 }
             }
 
+            // Remove the _dd.base_service tag for unintentional service name override
+            span.meta.remove("_dd.base_service");
+
             self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                 span.meta.insert(k.clone(), v.clone());
             });

@@ -23,6 +23,7 @@ use crate::{
 #[derive(Default)]
 pub struct SpanInferrer {
     service_mapping: HashMap<String, String>,
+    aws_service_representation_enabled: bool,
     // Span inferred from the Lambda incoming request payload
     pub inferred_span: Option<Span>,
     // Nested span inferred from the Lambda incoming request payload
@@ -41,9 +42,13 @@ pub struct SpanInferrer {
 
 impl SpanInferrer {
     #[must_use]
-    pub fn new(service_mapping: HashMap<String, String>) -> Self {
+    pub fn new(
+        service_mapping: HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) -> Self {
         Self {
             service_mapping,
+            aws_service_representation_enabled,
             inferred_span: None,
             wrapped_inferred_span: None,
             is_async_span: false,
@@ -78,15 +83,27 @@ impl SpanInferrer {
 
         match IdentifiedTrigger::from_value(payload_value) {
             IdentifiedTrigger::APIGatewayHttpEvent(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::APIGatewayRestEvent(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::APIGatewayWebSocketEvent(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::ALBEvent(t) => {
@@ -94,15 +111,27 @@ impl SpanInferrer {
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::LambdaFunctionUrlEvent(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::MSKEvent(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::SqsRecord(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 self.generated_span_context = extract_trace_context_from_aws_trace_header(
                     t.attributes.aws_trace_header.clone(),
@@ -120,7 +149,11 @@ impl SpanInferrer {
                         sns: sns_entity,
                         event_subscription_arn: None,
                     };
-                    wt.enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
+                    wt.enrich_span(
+                        &mut wrapped_inferred_span,
+                        &self.service_mapping,
+                        self.aws_service_representation_enabled,
+                    );
                     inferred_span.meta.extend(wt.get_tags());
 
                     wrapped_inferred_span.duration =
@@ -135,8 +168,11 @@ impl SpanInferrer {
                         ..Default::default()
                     };
 
-                    event_bridge_entity
-                        .enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
+                    event_bridge_entity.enrich_span(
+                        &mut wrapped_inferred_span,
+                        &self.service_mapping,
+                        self.aws_service_representation_enabled,
+                    );
                     inferred_span.meta.extend(event_bridge_entity.get_tags());
 
                     wrapped_inferred_span.duration =
@@ -148,7 +184,11 @@ impl SpanInferrer {
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::SnsRecord(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 if let Some(message) = &t.sns.message {
                     if let Ok(event_bridge_wrapper_message) =
@@ -159,8 +199,11 @@ impl SpanInferrer {
                             ..Default::default()
                         };
 
-                        event_bridge_wrapper_message
-                            .enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
+                        event_bridge_wrapper_message.enrich_span(
+                            &mut wrapped_inferred_span,
+                            &self.service_mapping,
+                            self.aws_service_representation_enabled,
+                        );
                         inferred_span
                             .meta
                             .extend(event_bridge_wrapper_message.get_tags());
@@ -175,22 +218,37 @@ impl SpanInferrer {
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::DynamoDbRecord(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 self.span_pointers = t.get_span_pointers();
-
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::S3Record(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 self.span_pointers = t.get_span_pointers();
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::EventBridgeEvent(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::KinesisRecord(t) => {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 trigger = Some(Box::new(t));
             }
             IdentifiedTrigger::StepFunctionEvent(t) => {
@@ -201,7 +259,7 @@ impl SpanInferrer {
             IdentifiedTrigger::Unknown => {
                 debug!("Unable to infer span from payload: no matching trigger found");
             }
-        }
+        };
 
         // Inferred a trigger
         if let Some(t) = trigger {
@@ -254,6 +312,7 @@ impl SpanInferrer {
                 String::from("peer.service"),
                 invocation_span.service.clone(),
             );
+            s.meta.insert("span.kind".to_string(), "server".to_string());
 
             if let Some(ws) = &mut self.wrapped_inferred_span {
                 ws.trace_id = invocation_span.trace_id;

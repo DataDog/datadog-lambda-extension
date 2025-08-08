@@ -284,6 +284,7 @@ pub struct Config {
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
+    pub trace_aws_service_representation_enabled: bool,
 
     // OTLP
     //
@@ -378,6 +379,7 @@ impl Default for Config {
             apm_config_compression_level: 6,
             apm_features: vec![],
             apm_additional_endpoints: HashMap::new(),
+            trace_aws_service_representation_enabled: true,
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
