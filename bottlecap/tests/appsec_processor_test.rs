@@ -7,6 +7,7 @@ use std::time::Duration;
 use bottlecap::appsec::processor::Processor;
 use bottlecap::config::Config;
 use bottlecap::lifecycle::invocation::triggers::IdentifiedTrigger;
+use bytes::Bytes;
 use datadog_trace_protobuf::pb::Span;
 use itertools::Itertools;
 use tokio::sync::Mutex;
@@ -104,7 +105,7 @@ async fn test_processor() {
         let processor = subject.clone();
         tasks.spawn(async move {
             let mut processor = processor.lock().await;
-            processor.process_invocation_result(rid, payload);
+            processor.process_invocation_result(rid, &Bytes::from(payload));
         });
     }
     // Make sure all the tasks are completed
@@ -250,7 +251,7 @@ async fn test_processor() {
     subject
         .lock()
         .await
-        .process_invocation_result("rid-event", br#"{"statusCode": 200}"#);
+        .process_invocation_result("rid-event", &Bytes::from(r#"{"statusCode": 200}"#));
     let mut span = span! { meta { "request_id": "rid-event" } };
     subject.lock().await.process_span(&mut span);
     assert_span_matches(

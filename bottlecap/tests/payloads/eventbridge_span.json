@@ -1,5 +1,5 @@
 {
-  "service": "eventbridge",
+  "service": "testBus",
   "name": "aws.eventbridge",
   "resource": "testBus",
   "trace_id": 0,

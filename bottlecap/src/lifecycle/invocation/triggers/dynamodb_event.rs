@@ -100,14 +100,24 @@ impl Trigger for DynamoDbRecord {
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for a DynamoDB event");
         let table_name = self.get_specific_identifier();
         let resource = format!("{} {}", self.event_name.clone(), table_name);
 
         let start_time = (self.dynamodb.approximate_creation_date_time * S_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(service_mapping, "dynamodb");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &table_name,
+            "dynamodb",
+            aws_service_representation_enabled,
+        );
 
         span.name = String::from("aws.dynamodb");
         span.service = service_name.to_string();
@@ -278,9 +288,9 @@ mod tests {
         let event = DynamoDbRecord::new(payload).expect("Failed to deserialize DynamoDbRecord");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.dynamodb");
-        assert_eq!(span.service, "dynamodb");
+        assert_eq!(span.service, "ExampleTableWithStream");
         assert_eq!(span.resource, "INSERT ExampleTableWithStream");
         assert_eq!(span.r#type, "web");
 
@@ -341,12 +351,12 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_service_name() {
+    fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("dynamodb_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = DynamoDbRecord::new(payload).expect("Failed to deserialize DynamoDbRecord");
 
-        // Priority is given to the specific key
+        // Test 1: Specific mapping takes priority
         let specific_service_mapping = HashMap::from([
             (
                 "ExampleTableWithStream".to_string(),
@@ -356,15 +366,89 @@ mod tests {
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "dynamodb"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb",
+                true // aws_service_representation_enabled
+            ),
             "specific-service"
         );
 
+        // Test 2: Generic mapping is used when specific not found
         let generic_service_mapping =
             HashMap::from([("lambda_dynamodb".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "dynamodb"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb",
+                true // aws_service_representation_enabled
+            ),
             "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses instance name (table name)
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb",
+                true // aws_service_representation_enabled
+            ),
+            event.get_specific_identifier() // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("dynamodb_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = DynamoDbRecord::new(payload).expect("Failed to deserialize DynamoDbRecord");
+
+        // Test 1: With specific mapping - still respects mapping
+        let specific_service_mapping = HashMap::from([
+            (
+                "ExampleTableWithStream".to_string(),
+                "specific-service".to_string(),
+            ),
+            ("lambda_dynamodb".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb",
+                false // aws_service_representation_enabled = false
+            ),
+            "specific-service"
+        );
+
+        // Test 2: With generic mapping - still respects mapping
+        let generic_service_mapping =
+            HashMap::from([("lambda_dynamodb".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb",
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "dynamodb",
+                false // aws_service_representation_enabled = false
+            ),
+            "dynamodb" // fallback value
         );
     }
 

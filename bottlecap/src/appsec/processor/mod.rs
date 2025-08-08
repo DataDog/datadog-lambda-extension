@@ -6,6 +6,7 @@ use std::num::NonZero;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bytes::Bytes;
 use cookie::Cookie;
 use datadog_trace_protobuf::pb::Span;
 use itertools::Itertools;
@@ -96,7 +97,7 @@ impl Processor {
     }
 
     /// Process the intercepted payload for the result of an invocation.
-    pub fn process_invocation_result(&mut self, rid: &str, payload: impl AsRef<[u8]>) {
+    pub fn process_invocation_result(&mut self, rid: &str, payload: &Bytes) {
         // Taking the sampler first, as it implies a temporary immutable borrow...
         let sampler = self.api_sec_sampler.clone();
         let Ok(mut sampler) = sampler.lock() else {
