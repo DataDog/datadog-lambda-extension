@@ -2,7 +2,7 @@ use std::io;
 
 use zstd::Decoder;
 
-/// The ruleset is embedded as a gzipped JSON file (it takes ~10 times less space this way).
+/// The ruleset is embedded as a ZSTD-compressed JSON file (it takes ~10 times less space this way).
 const DEFAULT_RECOMMENDED_RULES: &[u8] = include_bytes!("default-recommended-ruleset.json.zst");
 
 /// Returns a reader for the recommended default ruleset's JSON document.

@@ -1,7 +1,8 @@
 FROM registry.ddbuild.io/images/docker:24.0.5
 
 RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends \
-  curl gcc gnupg g++ make cmake unzip openssl g++ uuid-runtime libclang-dev
+  curl gcc gnupg g++ make cmake unzip openssl g++ uuid-runtime libclang-dev \
+  clang llvm-dev
 
 # Install AWS CLI
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -17,6 +18,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
 
 RUN source=$HOME/.cargo/env
 ENV PATH=$PATH:/root/.cargo/bin/
+
+ENV LIBCLANG_PATH=/usr/lib/x86_64-linux-gnu
 
 RUN rustup component add rust-src --toolchain stable
 

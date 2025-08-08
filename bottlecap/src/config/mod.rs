@@ -333,6 +333,7 @@ pub struct Config {
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
     pub appsec_waf_timeout: Duration,
+    pub api_security_enabled: bool,
     pub api_security_sample_delay: Duration,
 
     pub extension_version: Option<String>,
@@ -423,6 +424,7 @@ impl Default for Config {
             serverless_appsec_enabled: false,
             appsec_rules: None,
             appsec_waf_timeout: Duration::from_millis(5),
+            api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
 
             extension_version: None,
