@@ -4,7 +4,7 @@ use datadog_trace_protobuf::pb::Span;
 use serde_json::Value;
 use tracing::debug;
 
-use crate::lifecycle::invocation::triggers::alb_event::ALBEvent;
+use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::span_pointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
 use crate::{
@@ -13,18 +13,9 @@ use crate::{
         generate_span_id,
         triggers::{
             FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG, Trigger,
-            api_gateway_http_event::APIGatewayHttpEvent,
-            api_gateway_rest_event::APIGatewayRestEvent,
-            api_gateway_websocket_event::APIGatewayWebSocketEvent,
-            dynamodb_event::DynamoDbRecord,
             event_bridge_event::EventBridgeEvent,
-            kinesis_event::KinesisRecord,
-            lambda_function_url_event::LambdaFunctionUrlEvent,
-            msk_event::MSKEvent,
-            s3_event::S3Record,
             sns_event::{SnsEntity, SnsRecord},
-            sqs_event::{SqsRecord, extract_trace_context_from_aws_trace_header},
-            step_function_event::StepFunctionEvent,
+            sqs_event::extract_trace_context_from_aws_trace_header,
         },
     },
 };
@@ -90,63 +81,52 @@ impl SpanInferrer {
         let mut is_step_function = false;
         let mut is_alb_event = false;
 
-        if APIGatewayHttpEvent::is_match(payload_value) {
-            if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
+        match IdentifiedTrigger::from_value(payload_value) {
+            IdentifiedTrigger::APIGatewayHttpEvent(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
-
                 trigger = Some(Box::new(t));
             }
-        } else if APIGatewayRestEvent::is_match(payload_value) {
-            if let Some(t) = APIGatewayRestEvent::new(payload_value.clone()) {
+            IdentifiedTrigger::APIGatewayRestEvent(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
-
                 trigger = Some(Box::new(t));
             }
-        } else if APIGatewayWebSocketEvent::is_match(payload_value) {
-            if let Some(t) = APIGatewayWebSocketEvent::new(payload_value.clone()) {
+            IdentifiedTrigger::APIGatewayWebSocketEvent(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
-
                 trigger = Some(Box::new(t));
             }
-        } else if ALBEvent::is_match(payload_value) {
-            if let Some(t) = ALBEvent::new(payload_value.clone()) {
-                trigger = Some(Box::new(t));
+            IdentifiedTrigger::ALBEvent(t) => {
                 is_alb_event = true;
+                trigger = Some(Box::new(t));
             }
-        } else if LambdaFunctionUrlEvent::is_match(payload_value) {
-            if let Some(t) = LambdaFunctionUrlEvent::new(payload_value.clone()) {
+            IdentifiedTrigger::LambdaFunctionUrlEvent(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
-
                 trigger = Some(Box::new(t));
             }
-        } else if MSKEvent::is_match(payload_value) {
-            if let Some(t) = MSKEvent::new(payload_value.clone()) {
+            IdentifiedTrigger::MSKEvent(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
-
                 trigger = Some(Box::new(t));
             }
-        } else if SqsRecord::is_match(payload_value) {
-            if let Some(t) = SqsRecord::new(payload_value.clone()) {
+            IdentifiedTrigger::SqsRecord(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
@@ -203,8 +183,7 @@ impl SpanInferrer {
 
                 trigger = Some(Box::new(t));
             }
-        } else if SnsRecord::is_match(payload_value) {
-            if let Some(t) = SnsRecord::new(payload_value.clone()) {
+            IdentifiedTrigger::SnsRecord(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
@@ -238,57 +217,49 @@ impl SpanInferrer {
 
                 trigger = Some(Box::new(t));
             }
-        } else if DynamoDbRecord::is_match(payload_value) {
-            if let Some(t) = DynamoDbRecord::new(payload_value.clone()) {
+            IdentifiedTrigger::DynamoDbRecord(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
                 self.span_pointers = t.get_span_pointers();
-
                 trigger = Some(Box::new(t));
             }
-        } else if S3Record::is_match(payload_value) {
-            if let Some(t) = S3Record::new(payload_value.clone()) {
+            IdentifiedTrigger::S3Record(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
                 self.span_pointers = t.get_span_pointers();
-
                 trigger = Some(Box::new(t));
             }
-        } else if EventBridgeEvent::is_match(payload_value) {
-            if let Some(t) = EventBridgeEvent::new(payload_value.clone()) {
+            IdentifiedTrigger::EventBridgeEvent(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
-
                 trigger = Some(Box::new(t));
             }
-        } else if KinesisRecord::is_match(payload_value) {
-            if let Some(t) = KinesisRecord::new(payload_value.clone()) {
+            IdentifiedTrigger::KinesisRecord(t) => {
                 t.enrich_span(
                     &mut inferred_span,
                     &self.service_mapping,
                     self.aws_service_representation_enabled,
                 );
-
                 trigger = Some(Box::new(t));
             }
-        } else if StepFunctionEvent::is_match(payload_value) {
-            if let Some(t) = StepFunctionEvent::new(payload_value.clone()) {
+            IdentifiedTrigger::StepFunctionEvent(t) => {
                 self.generated_span_context = Some(t.get_span_context());
                 trigger = Some(Box::new(t));
                 is_step_function = true;
             }
-        } else {
-            debug!("Unable to infer span from payload: no matching trigger found");
-        }
+            IdentifiedTrigger::Unknown => {
+                debug!("Unable to infer span from payload: no matching trigger found");
+            }
+        };
 
         // Inferred a trigger
         if let Some(t) = trigger {

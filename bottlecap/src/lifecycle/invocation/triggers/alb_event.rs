@@ -1,5 +1,7 @@
 use super::ServiceNameResolver;
-use crate::lifecycle::invocation::triggers::{FUNCTION_TRIGGER_EVENT_SOURCE_TAG, Trigger};
+use crate::lifecycle::invocation::triggers::{
+    FUNCTION_TRIGGER_EVENT_SOURCE_TAG, Trigger, body::Body,
+};
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,23 +11,39 @@ use tracing::debug;
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ALBEvent {
-    request_context: RequestContext,
-    http_method: String,
+    pub request_context: RequestContext,
+    pub http_method: String,
+    pub path: Option<String>,
+
+    // Either one OR the other is present, not both
     #[serde(default)]
-    headers: HashMap<String, String>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
     #[serde(default)]
-    multi_value_headers: HashMap<String, Vec<String>>,
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub multi_value_headers: HashMap<String, Vec<String>>,
+
+    // Either one OR the other is present, not both
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub query_parameters: HashMap<String, String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "HashMap::is_empty")]
+    pub multi_value_query_parameters: HashMap<String, Vec<String>>,
+
+    #[serde(flatten)]
+    pub body: Body,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct RequestContext {
-    elb: Elb,
+    pub elb: Elb,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct Elb {
-    #[serde(rename = "targetGroupArn")]
-    target_group_arn: String,
+    pub target_group_arn: String,
 }
 
 impl Trigger for ALBEvent {
@@ -120,6 +138,7 @@ mod tests {
                 }
             },
             http_method: "GET".to_string(),
+            path: Some("/".to_string()),
             headers: HashMap::from([
                 ("accept".to_string(), "*/*".to_string()),
                 ("accept-encoding".to_string(), "gzip, deflate".to_string()),
@@ -140,6 +159,12 @@ mod tests {
                 ("x-forwarded-proto".to_string(), "http".to_string()),
             ]),
             multi_value_headers: HashMap::default(),
+            query_parameters: HashMap::default(),
+            multi_value_query_parameters: HashMap::default(),
+            body: Body {
+                body: Some(String::new()),
+                is_base64_encoded: false,
+            }
         };
 
         assert_eq!(result, expected);
