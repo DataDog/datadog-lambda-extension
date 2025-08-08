@@ -84,6 +84,12 @@ impl Lambda {
         self.increment_metric(constants::TIMEOUTS_METRIC, timestamp);
     }
 
+    // This function is called in three cases:
+    // 1. Runtime-specific OOM error (can happen in .NET, Node.js and Java as far as we know)
+    // 2. PlatformRuntimeDone event reports "error_type: Runtime.OutOfMemory" (can happen in Ruby and Python as far as we know)
+    // 3. PlatformReport event reports "max_memory_used_mb == memory_size_mb" (can happen in many runtimes, but
+    //    we only call increment_oom_metric() for provided.al runtimes)
+    // This is our best effort to cover different cases without double counting. We can adjust this if we find more cases.
     pub fn increment_oom_metric(&self, timestamp: i64) {
         self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
     }
