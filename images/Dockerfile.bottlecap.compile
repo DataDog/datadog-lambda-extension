@@ -1,6 +1,6 @@
 FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
-
+ARG PROFILE="release"
 ARG FIPS
 
 # Install dependencies
@@ -12,10 +12,13 @@ COPY ./scripts/install-protoc.sh /
 RUN chmod +x /install-protoc.sh && /install-protoc.sh
 
 # Install Rust Toolchain
-RUN curl https://sh.rustup.rs -sSf | \
+RUN --mount=type=bind,source=.,target=/tmp/dd \
+    set -euo pipefail && \
+    version=$(grep 'channel =' < /tmp/dd/rust-toolchain.toml | tr -d ' ' | cut -d '=' -f 2 | tr -d '"') && \
+    curl https://sh.rustup.rs -sSf | \
     sh -s -- --profile minimal \
              --default-host "${PLATFORM}-unknown-linux-gnu" \
-             --default-toolchain "stable-${PLATFORM}-unknown-linux-gnu" \
+             --default-toolchain "${version}-${PLATFORM}-unknown-linux-gnu" \
              --component rust-src \
              -y
 ENV PATH="${PATH}:/root/.cargo/bin"
@@ -35,11 +38,16 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     else \
         export FEATURES=default; \
     fi; \
+    if [ "${PROFILE}" == "dev" ]; then \
+        export PROFILE_OUT="debug"; \
+    else \
+        export PROFILE_OUT="${PROFILE}"; \
+    fi; \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.
     export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
-    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" --release && \
-    mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/release/bottlecap" /tmp/out/bottlecap
+    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" --profile="${PROFILE}" && \
+    mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/${PROFILE_OUT}/bottlecap" /tmp/out/bottlecap
 
 # Use smallest image possible
 FROM scratch

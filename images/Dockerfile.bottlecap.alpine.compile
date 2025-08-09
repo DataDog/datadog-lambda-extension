@@ -1,6 +1,8 @@
-FROM registry.ddbuild.io/images/mirror/alpine:3.22.0 AS compiler
-ARG PLATFORM
+ARG ALPINE_IMAGE=registry.ddbuild.io/images/mirror/alpine:3.22.0
 
+FROM ${ALPINE_IMAGE} AS compiler
+ARG PLATFORM
+ARG PROFILE="release"
 ARG FIPS
 
 # Install dependencies
@@ -13,11 +15,13 @@ SHELL ["/bin/bash", "-c"]
 RUN apk add --no-cache protoc
 
 # Install Rust Toolchain
-RUN set -euo pipefail && \
+RUN --mount=type=bind,source=.,target=/tmp/dd \
+    set -euo pipefail && \
+    version=$(grep 'channel =' < /tmp/dd/rust-toolchain.toml | tr -d ' ' | cut -d '=' -f 2 | tr -d '"') && \
     curl https://sh.rustup.rs -sSf | \
         sh -s -- --profile minimal \
                  --default-host "${PLATFORM}-unknown-linux-musl" \
-                 --default-toolchain "stable-${PLATFORM}-unknown-linux-musl" \
+                 --default-toolchain "${version}-${PLATFORM}-unknown-linux-musl" \
                  --component rust-src \
                  -y
 ENV PATH="${PATH}:/root/.cargo/bin"
@@ -39,10 +43,15 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
         if [ "${PLATFORM}" = "aarch64" ]; then \
-            export PROFILE="release-alpine-arm64-fips"; \
-        fi \
+            export PROFILE="${PROFILE}-alpine-arm64-fips"; \
+        fi; \
     else \
         export FEATURES=default; \
+    fi; \
+    if [ "${PROFILE}" == "dev" ]; then \
+        export PROFILE_OUT="debug"; \
+    else \
+        export PROFILE_OUT="${PROFILE}"; \
     fi; \
     # Explicitly NOT passing `--target` as this makes the `RUSTFLAGS` (from any
     # source) not apply to `build.rs` compilation, which in turns means
@@ -52,9 +61,9 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     # `--target` is passed (see: https://github.com/rust-lang/cargo/issues/4423).
     cargo +stable build --verbose --locked --no-default-features \
         --features="${FEATURES}" \
-        --profile="${PROFILE:-release}" && \
+        --profile="${PROFILE}" && \
     mkdir -p /tmp/out && \
-    cp "/tmp/dd/bottlecap/target/${PROFILE:-release}/bottlecap" /tmp/out/bottlecap
+    cp "/tmp/dd/bottlecap/target/${PROFILE_OUT}/bottlecap" /tmp/out/bottlecap
 
 # Use the smallest image possible
 FROM scratch
