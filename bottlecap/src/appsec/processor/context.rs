@@ -1,17 +1,23 @@
 use std::collections::HashMap;
 use std::io::{Read, read_to_string};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::{Buf, Bytes};
 use datadog_trace_protobuf::pb::Span;
+use datadog_trace_utils::tracer_header_tags;
 use libddwaf::object::{Keyed, WafMap, WafObject};
 use libddwaf::{Context as WafContext, Handle, RunError, RunOutput, RunResult, waf_map};
 use mime::Mime;
 use multipart::server::Multipart;
 use tracing::{debug, warn};
 
-use crate::appsec::processor::InvocationPayload;
 use crate::appsec::processor::response::ExpectedResponseFormat;
+use crate::appsec::processor::{InvocationPayload, Processor};
+use crate::config::Config;
+use crate::tags::provider::Provider;
+use crate::traces::span_pointers::SpanPointer;
+use crate::traces::trace_processor::SendingTraceProcessor;
 
 /// Holds inforamtion gathered about an invocation.
 #[must_use]
@@ -24,28 +30,144 @@ pub struct Context {
     waf: WafContext,
     /// The timeout for the WAF.
     waf_timeout: Duration,
+    /// The total time spent on WAF runs.
+    waf_duration: Duration,
+    /// The number of times the WAF timed out during this request.
+    waf_timed_out_occurrences: usize,
     // Whether this context has events.
     has_events: bool,
     /// Trace tags to be applied for this invocation.
     trace_tags: HashMap<TagName, TagValue>,
+    /// Whether we have had a chance to see the response body or not.
+    response_seen: bool,
+    /// Holds a trace for sending once the response is seen.
+    held_trace: Option<(Vec<Span>, SendingTraceProcessor, HoldArguments)>,
 }
 impl Context {
     /// Creates a new [`Context`] for the provided request ID and configures it
     /// with the provided WAF timeout.
-    pub(crate) fn new(rid: String, waf_handle: &mut Handle, waf_timeout: Duration) -> Self {
+    pub(crate) fn new(
+        rid: String,
+        waf_handle: &mut Handle,
+        ruleset_version: &str,
+        waf_timeout: Duration,
+    ) -> Self {
+        let mut trace_tags = HashMap::from([
+            (TagName::AppsecEnabled, TagValue::Metric(1.0)),
+            (
+                TagName::AppsecWafVersion,
+                TagValue::Always(libddwaf::get_version().to_string_lossy().to_string()),
+            ),
+        ]);
+        if !ruleset_version.is_empty() {
+            trace_tags.insert(
+                TagName::AppsecEventRulesVersion,
+                TagValue::Always(ruleset_version.to_string()),
+            );
+        }
+
         Self {
             rid,
             expected_response_format: ExpectedResponseFormat::default(),
             waf: waf_handle.new_context(),
             waf_timeout,
+            waf_duration: Duration::ZERO,
+            waf_timed_out_occurrences: 0,
             has_events: false,
-            trace_tags: HashMap::from([(TagName::AppsecEnabled, TagValue::Metric(1.0))]),
+            trace_tags,
+            response_seen: false,
+            held_trace: None,
         }
+    }
+
+    /// Returns [`true`] if the response for this request was not seen yet and
+    /// it might still be occurring.
+    pub(crate) const fn is_pending_response(&self) -> bool {
+        !self.response_seen
+    }
+
+    /// Marks the response of this request as having been seen.
+    ///
+    /// This implies the receiving [`Context`] has collected all possible
+    /// security information about the corresponding request, and [`Span`]s sent
+    /// through [`Self::process_span`] can be considered finalized and ready to
+    /// flush to the trace aggregator.
+    pub(super) async fn set_response_seen(&mut self) {
+        if self.response_seen {
+            return;
+        }
+
+        if let Some((mut trace, sender, args)) = self.held_trace.take() {
+            if let Some(span) = Processor::service_entry_span_mut(&mut trace) {
+                // Debug-sanity check that we're holding the right trace.
+                debug_assert_eq!(
+                    span.meta.get("request_id").map(String::as_str),
+                    Some(self.rid.as_str())
+                );
+                debug!(
+                    "aap: processing trace for request {} now that the response was seen",
+                    self.rid
+                );
+                self.process_span(span);
+            }
+
+            debug!("aap: flushing out trace for request {}", self.rid);
+            match sender
+                .send_processed_traces(
+                    args.config,
+                    args.tags_provider,
+                    tracer_header_tags::TracerHeaderTags {
+                        lang: &args.tracer_header_tags_lang,
+                        lang_version: &args.tracer_header_tags_lang_version,
+                        lang_interpreter: &args.tracer_header_tags_lang_interpreter,
+                        lang_vendor: &args.tracer_header_tags_lang_vendor,
+                        tracer_version: &args.tracer_header_tags_tracer_version,
+                        container_id: &args.tracer_header_tags_container_id,
+                        client_computed_top_level: args
+                            .tracer_header_tags_client_computed_top_level,
+                        client_computed_stats: args.tracer_header_tags_client_computed_stats,
+                        dropped_p0_traces: args.tracer_header_tags_dropped_p0_traces,
+                        dropped_p0_spans: args.tracer_header_tags_dropped_p0_spans,
+                    },
+                    vec![trace],
+                    args.body_size,
+                    args.span_pointers,
+                )
+                .await
+            {
+                Ok(()) => debug!("aap: successfully sent trace to aggregator buffer"),
+                Err(e) => warn!("aap: failed to send trace to aggregator buffer: {e}"),
+            }
+        }
+
+        debug!(
+            "aap: marking security context for {} as having seen the response...",
+            self.rid
+        );
+        self.response_seen = true;
+    }
+
+    /// Holds a trace for future processing once the response is seen.
+    pub(crate) fn hold_trace(
+        &mut self,
+        trace: Vec<Span>,
+        sender: SendingTraceProcessor,
+        args: HoldArguments,
+    ) {
+        if !self.is_pending_response() {
+            unreachable_warn("Context::hold_trace called after response was seen!");
+            return;
+        }
+        self.held_trace = Some((trace, sender, args));
     }
 
     /// Evaluate the WAF rules against the provided [`InvocationPayload`] and
     /// collect the relevant side effects.
     pub(super) fn run(&mut self, payload: &dyn InvocationPayload) {
+        if self.response_seen {
+            unreachable_warn("aap: Context::run called after response was seen!");
+        }
+
         if self.waf_timeout.is_zero() {
             warn!(
                 "aap: WAF execution time budget for this request is exhausted, skipping WAF ruleset evaluation (consider tweaking DD_APPSEC_WAF_TIMEOUT)"
@@ -111,10 +233,25 @@ impl Context {
 
     /// Add tags and metrics to a [`Span`].
     pub(super) fn process_span(&self, span: &mut Span) {
+        debug!(
+            "aap: setting up to {} span tags/metrics on span {}",
+            self.trace_tags.len(),
+            span.span_id
+        );
         for (key, value) in &self.trace_tags {
             match value {
                 TagValue::Always(value) => {
                     span.meta.insert(key.to_string(), value.clone());
+                }
+                TagValue::AppSecEvents { triggers } => {
+                    span.meta.insert(
+                        key.to_string(),
+                        serde_json::Value::Object(serde_json::Map::from_iter([(
+                            "triggers".to_string(),
+                            serde_json::Value::Array(triggers.clone()),
+                        )]))
+                        .to_string(),
+                    );
                 }
                 TagValue::OnEvent(value) => {
                     if !self.has_events {
@@ -133,6 +270,21 @@ impl Context {
                     span.metrics.insert(key.to_string(), *value);
                 }
             }
+        }
+
+        span.metrics.insert(
+            TagName::AppsecWafDuration.to_string(),
+            self.waf_duration.as_micros() as f64,
+        );
+        span.metrics.insert(
+            TagName::AppsecWafTimeouts.to_string(),
+            self.waf_timed_out_occurrences as f64,
+        );
+        #[allow(clippy::map_entry)] // We want to emit a debug log here...
+        if !span.meta.contains_key(&TagName::Origin.to_string()) {
+            debug!("aap: setting span tag {}:appsec", TagName::Origin);
+            span.meta
+                .insert(TagName::Origin.to_string(), "appsec".to_string());
         }
     }
 
@@ -269,14 +421,16 @@ impl Context {
 
         let duration = result.duration();
         self.waf_timeout = self.waf_timeout.saturating_sub(duration);
+        self.waf_duration += duration;
         debug!(
-            "aap: WAF ruleset evaluation took {:?}, the remaining WAF budget is {:?}",
-            duration, self.waf_timeout
+            "aap: WAF ruleset evaluation took {:?}, the remaining WAF budget is {:?} (total time spent so far: {:?})",
+            duration, self.waf_timeout, self.waf_duration
         );
         if result.timeout() {
             warn!(
                 "aap: time out reached while evaluating the WAF ruleset; detections may be incomplete. Consider tuning DD_APPSEC_WAF_TIMEOUT"
             );
+            self.waf_timed_out_occurrences += 1;
         }
 
         if result.keep() {
@@ -323,29 +477,31 @@ impl Context {
                 self.trace_tags
                     .insert(TagName::AppsecEvent, TagValue::Always("true".to_string()));
                 self.has_events = true;
-            }
-            let entry = self
-                .trace_tags
-                .entry(TagName::AppsecJson)
-                .or_insert(TagValue::OnEvent(serde_json::Value::Array(Vec::new())));
-            let TagValue::OnEvent(serde_json::Value::Array(entry)) = entry else {
-                unreachable!(
-                    "the {} tag entry is always a serde_json::Value::Array(...)",
-                    TagName::AppsecJson
-                );
-            };
-            entry.reserve(events.len());
-            for event in events.iter() {
-                let value = match serde_json::to_value(event) {
-                    Ok(value) => value,
-                    Err(e) => {
-                        warn!(
-                            "aap: failed to convert event to JSON, the event will be dropped: {e}\n{event:?}"
-                        );
-                        continue;
-                    }
+                let entry =
+                    self.trace_tags
+                        .entry(TagName::AppsecJson)
+                        .or_insert(TagValue::AppSecEvents {
+                            triggers: Vec::with_capacity(events.len()),
+                        });
+                let TagValue::AppSecEvents { triggers } = entry else {
+                    unreachable!(
+                        "the {} tag entry is always a TagValue::AppSecEvents{{...}}",
+                        TagName::AppsecJson
+                    );
                 };
-                entry.push(value);
+                triggers.reserve(events.len());
+                for event in events.iter() {
+                    let value = match serde_json::to_value(event) {
+                        Ok(value) => value,
+                        Err(e) => {
+                            warn!(
+                                "aap: failed to convert event to JSON, the event will be dropped: {e}\n{event:?}"
+                            );
+                            continue;
+                        }
+                    };
+                    triggers.push(value);
+                }
             }
         }
 
@@ -358,6 +514,39 @@ impl Context {
         }
     }
 }
+impl Drop for Context {
+    fn drop(&mut self) {
+        // First off, gentle log nudge -- we should have marked the context's response as seen before this can drop...
+        if !self.response_seen {
+            debug!(
+                "aap: Context being dropped without the response being marked as seen, this may cause traces to be dropped"
+            );
+        }
+        // In debug assertions mode, hard-crash if it means we're effectively dropping a trace.
+        debug_assert!(
+            self.response_seen || self.held_trace.is_none(),
+            "aap: Context is being dropped without the response being marked as seen. A trace will be dropped!"
+        );
+    }
+}
+
+pub struct HoldArguments {
+    pub config: Arc<Config>,
+    pub tags_provider: Arc<Provider>,
+    pub body_size: usize,
+    pub span_pointers: Option<Vec<SpanPointer>>,
+
+    pub tracer_header_tags_lang: String,
+    pub tracer_header_tags_lang_version: String,
+    pub tracer_header_tags_lang_interpreter: String,
+    pub tracer_header_tags_lang_vendor: String,
+    pub tracer_header_tags_tracer_version: String,
+    pub tracer_header_tags_container_id: String,
+    pub tracer_header_tags_client_computed_top_level: bool,
+    pub tracer_header_tags_client_computed_stats: bool,
+    pub tracer_header_tags_dropped_p0_traces: usize,
+    pub tracer_header_tags_dropped_p0_spans: usize,
+}
 
 /// Names of tags that can be emitted by the WAF.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -365,7 +554,13 @@ enum TagName {
     // AppSec tags
     AppsecEnabled,
     AppsecEvent,
+    AppsecEventRulesVersion,
     AppsecJson,
+    AppsecWafDuration,
+    AppsecWafTimeouts,
+    AppsecWafVersion,
+    // Hidden span tags of relevance
+    Origin,
     // General request tags
     HttpUrl,
     HttpMethod,
@@ -382,7 +577,12 @@ impl TagName {
         match self {
             Self::AppsecEnabled => "_dd.appsec.enabled",
             Self::AppsecEvent => "appsec.event",
+            Self::AppsecEventRulesVersion => "_dd.appsec.event_rules.version",
             Self::AppsecJson => "_dd.appsec.json",
+            Self::AppsecWafDuration => "_dd.appsec.waf.duration",
+            Self::AppsecWafTimeouts => "_dd.appsec.waf.timeouts",
+            Self::AppsecWafVersion => "_dd.appsec.waf.version",
+            Self::Origin => "_dd.origin",
             Self::HttpUrl => "http.url",
             Self::HttpMethod => "http.method",
             Self::HttpRoute => "http.route",
@@ -405,6 +605,8 @@ enum TagValue {
     Always(String),
     /// A tag value that is only emitted when an event is matched.
     OnEvent(serde_json::Value),
+    /// The special key used to encode AAP events
+    AppSecEvents { triggers: Vec<serde_json::Value> },
     /// A tag value that actually is a metric value.
     Metric(f64),
 }
@@ -413,6 +615,11 @@ impl std::fmt::Display for TagValue {
         match self {
             Self::Always(str) => write!(f, "{str}"),
             Self::OnEvent(value) => write!(f, "{value}"),
+            Self::AppSecEvents { triggers } => write!(
+                f,
+                r#"{{ "triggers": {} }}"#,
+                serde_json::Value::Array(triggers.clone())
+            ),
             Self::Metric(value) => write!(f, "{value}"),
         }
     }
@@ -582,9 +789,34 @@ fn try_parse_body_with_mime(
     }
 }
 
+/// Logs a WAF run error.
+///
+/// This function is marked as `#[cold]` because it is almost certainly never
+/// going to get called, and hence needs not be placed to optimize for a
+/// near-jump.
 #[cold]
 fn log_waf_run_error(e: RunError) {
     warn!("aap: failed to evaluate WAF ruleset: {e}");
+}
+
+/// Depending on the `debug-assertions` setting, either calls `unreachable!` or
+/// `warn!` with the specified message.
+///
+/// This function is marked as `#[cold]` because it is almost certainly never
+/// going to get called, and hence needs not be placed to optimize for a
+/// near-jump.
+///
+/// # Panics
+/// If (and only if) `debug-assertions` are enabled in this build (not the case
+/// for `release` builds, by default).
+#[cold]
+#[track_caller]
+fn unreachable_warn(msg: &'static str) {
+    if cfg!(debug_assertions) {
+        unreachable!("{msg}");
+    } else {
+        warn!("{msg}");
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics

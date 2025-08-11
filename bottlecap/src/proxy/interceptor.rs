@@ -185,7 +185,8 @@ async fn invocation_next_proxy(
                             appsec_processor
                                 .lock()
                                 .await
-                                .process_invocation_next(request_id, &trigger);
+                                .process_invocation_next(request_id, &trigger)
+                                .await;
                         }
                     }
                 }
@@ -239,7 +240,8 @@ async fn invocation_response_proxy(
                 appsec_processor
                     .lock()
                     .await
-                    .process_invocation_result(&request_id, &body);
+                    .process_invocation_result(&request_id, &body)
+                    .await;
             }
 
             if aws_config_clone.aws_lwa_proxy_lambda_runtime_api.is_some() {
@@ -303,7 +305,8 @@ async fn invocation_error_proxy(
         appsec_processor
             .lock()
             .await
-            .process_invocation_result(&request_id, &Bytes::from("{}"));
+            .process_invocation_result(&request_id, &Bytes::from("{}"))
+            .await;
     }
 
     passthrough_proxy(state, request).await

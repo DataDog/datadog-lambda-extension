@@ -9,7 +9,7 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{Value, json};
-use tokio::sync::{mpsc::Sender, watch};
+use tokio::sync::watch;
 use tracing::{debug, warn};
 
 use crate::{
@@ -34,8 +34,7 @@ use crate::{
                 DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
             },
         },
-        trace_aggregator::SendDataBuilderInfo,
-        trace_processor::{self, TraceProcessor},
+        trace_processor::SendingTraceProcessor,
     },
 };
 
@@ -295,8 +294,7 @@ impl Processor {
         status: Status,
         error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_agent_tx: Sender<SendDataBuilderInfo>,
+        trace_sender: Arc<SendingTraceProcessor>,
         timestamp: i64,
     ) {
         // Set the runtime duration metric
@@ -331,14 +329,8 @@ impl Processor {
             self.process_on_universal_instrumentation_end(request_id.clone(), headers, payload);
         }
 
-        self.process_on_platform_runtime_done(
-            request_id,
-            status,
-            tags_provider,
-            trace_processor,
-            trace_agent_tx,
-        )
-        .await;
+        self.process_on_platform_runtime_done(request_id, status, tags_provider, trace_sender)
+            .await;
     }
 
     async fn process_on_platform_runtime_done(
@@ -346,20 +338,19 @@ impl Processor {
         request_id: &String,
         status: Status,
         tags_provider: Arc<provider::Provider>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_agent_tx: Sender<SendDataBuilderInfo>,
+        trace_sender: Arc<SendingTraceProcessor>,
     ) {
         let context = self.enrich_ctx_at_platform_done(request_id, status);
 
         if self.tracer_detected {
             if let Some(ctx) = context {
                 if ctx.invocation_span.trace_id != 0 && ctx.invocation_span.span_id != 0 {
-                    self.send_ctx_spans(&tags_provider, &trace_processor, &trace_agent_tx, ctx)
+                    self.send_ctx_spans(&tags_provider, &trace_sender, ctx)
                         .await;
                 }
             }
         } else {
-            self.send_cold_start_span(&tags_provider, &trace_processor, &trace_agent_tx)
+            self.send_cold_start_span(&tags_provider, &trace_sender)
                 .await;
         }
     }
@@ -435,8 +426,7 @@ impl Processor {
     pub async fn send_ctx_spans(
         &mut self,
         tags_provider: &Arc<provider::Provider>,
-        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendDataBuilderInfo>,
+        trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) {
         let mut body_size = std::mem::size_of_val(&context.invocation_span);
@@ -457,14 +447,8 @@ impl Processor {
             traces.push(cold_start_span.clone());
         }
 
-        self.send_spans(
-            traces,
-            body_size,
-            tags_provider,
-            trace_processor,
-            trace_agent_tx,
-        )
-        .await;
+        self.send_spans(traces, body_size, tags_provider, trace_sender)
+            .await;
     }
 
     /// For Node/Python: Updates the cold start span with the given trace ID.
@@ -487,8 +471,7 @@ impl Processor {
     async fn send_cold_start_span(
         &mut self,
         tags_provider: &Arc<provider::Provider>,
-        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendDataBuilderInfo>,
+        trace_sender: &Arc<SendingTraceProcessor>,
     ) {
         if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
             if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
@@ -500,14 +483,8 @@ impl Processor {
                 let traces = vec![cold_start_span.clone()];
                 let body_size = size_of_val(cold_start_span);
 
-                self.send_spans(
-                    traces,
-                    body_size,
-                    tags_provider,
-                    trace_processor,
-                    trace_agent_tx,
-                )
-                .await;
+                self.send_spans(traces, body_size, tags_provider, trace_sender)
+                    .await;
             }
         }
     }
@@ -520,8 +497,7 @@ impl Processor {
         traces: Vec<Span>,
         body_size: usize,
         tags_provider: &Arc<provider::Provider>,
-        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendDataBuilderInfo>,
+        trace_sender: &Arc<SendingTraceProcessor>,
     ) {
         // todo: figure out what to do here
         let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -537,8 +513,8 @@ impl Processor {
             dropped_p0_spans: 0,
         };
 
-        let send_data_builder_info: SendDataBuilderInfo = trace_processor
-            .process_traces(
+        if let Err(e) = trace_sender
+            .send_processed_traces(
                 self.config.clone(),
                 tags_provider.clone(),
                 header_tags,
@@ -546,9 +522,8 @@ impl Processor {
                 body_size,
                 self.inferrer.span_pointers.clone(),
             )
-            .await;
-
-        if let Err(e) = trace_agent_tx.send(send_data_builder_info).await {
+            .await
+        {
             debug!("Failed to send context spans to agent: {e}");
         }
     }

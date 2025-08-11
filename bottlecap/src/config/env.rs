@@ -323,6 +323,11 @@ pub struct EnvConfig {
     /// The timeout for the WAF to process a request, in microseconds.
     #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
     pub appsec_waf_timeout: Option<Duration>,
+    /// @env `DD_API_SECURITY_ENABLED`
+    ///
+    /// Enable API Security for AWS Lambda.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub api_security_enabled: Option<bool>,
     /// @env `DD_API_SECURITY_SAMPLE_DELAY`
     ///
     /// The delay between two samples of the API Security schema collection, in seconds.
@@ -478,6 +483,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
     merge_option!(config, env_config, appsec_rules);
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
+    merge_option_to_value!(config, env_config, api_security_enabled);
     merge_option_to_value!(config, env_config, api_security_sample_delay);
     merge_option!(config, env_config, extension_version);
 }
@@ -658,6 +664,7 @@ mod tests {
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
             jail.set_env("DD_APPSEC_RULES", "/path/to/rules.json");
             jail.set_env("DD_APPSEC_WAF_TIMEOUT", "1000000"); // Microseconds
+            jail.set_env("DD_API_SECURITY_ENABLED", "0"); // Seconds
             jail.set_env("DD_API_SECURITY_SAMPLE_DELAY", "60"); // Seconds
             jail.set_env("DD_EXTENSION_VERSION", "compatibility");
 
@@ -786,6 +793,7 @@ mod tests {
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
                 appsec_waf_timeout: Duration::from_secs(1),
+                api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
                 extension_version: Some("compatibility".to_string()),
             };
