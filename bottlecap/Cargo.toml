@@ -56,11 +56,11 @@ axum = { version = "0.8.4", default-features = false, features = ["default"] }
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "c89b58e5784b985819baf11f13f7d35876741222"}
 ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
-ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "f8a01a563f3cacbc825cb5bff5d5611b2ac88f55" }
-datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "f8a01a563f3cacbc825cb5bff5d5611b2ac88f55"  }
-datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "f8a01a563f3cacbc825cb5bff5d5611b2ac88f55" , features = ["mini_agent"] }
-datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "f8a01a563f3cacbc825cb5bff5d5611b2ac88f55" }
-datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "f8a01a563f3cacbc825cb5bff5d5611b2ac88f55"  }
+ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" }
+datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50"  }
+datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" , features = ["mini_agent"] }
+datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" }
+datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50"  }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
 libddwaf = { version = "1.26.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "89c693078d392e344b594281c1e8f9f3f94685c0", default-features = false, features = ["serde", "static"] }
