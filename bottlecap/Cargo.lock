@@ -491,7 +491,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
- "datadog-fips",
+ "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=d131de8419c191ce21c91bb30b5915c4d8a2cc5a)",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
@@ -721,6 +721,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "datadog-fips"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=d29f834134a7daf4bb547526c2071975eb1ac417#d29f834134a7daf4bb547526c2071975eb1ac417"
+dependencies = [
+ "reqwest",
+ "rustls",
+ "rustls-native-certs",
+ "tracing",
+]
+
+[[package]]
 name = "datadog-protos"
 version = "0.1.0"
 source = "git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222#c89b58e5784b985819baf11f13f7d35876741222"
@@ -932,9 +943,9 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=d131de8419c191ce21c91bb30b5915c4d8a2cc5a#d131de8419c191ce21c91bb30b5915c4d8a2cc5a"
+source = "git+https://github.com/DataDog/serverless-components?rev=d29f834134a7daf4bb547526c2071975eb1ac417#d29f834134a7daf4bb547526c2071975eb1ac417"
 dependencies = [
- "datadog-fips",
+ "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=d29f834134a7daf4bb547526c2071975eb1ac417)",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "derive_more",

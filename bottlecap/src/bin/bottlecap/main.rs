@@ -62,7 +62,6 @@ use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
 use dogstatsd::{
-    aggregator::Aggregator as MetricsAggregator,
     api_key::ApiKeyFactory,
     constants::CONTEXTS,
     datadog::{
@@ -70,6 +69,7 @@ use dogstatsd::{
         RetryStrategy as DsdRetryStrategy, Series, Site as MetricsSite,
     },
     dogstatsd::{DogStatsD, DogStatsDConfig},
+    double_buffered_aggregator::DoubleBufferedAggregator,
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
 };
@@ -83,7 +83,7 @@ use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
@@ -479,13 +479,13 @@ async fn extension_loop_active(
         event_bus.get_sender_copy(),
     );
 
-    let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::new(
+    let metrics_aggr = Arc::new(
+        DoubleBufferedAggregator::new(
             SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
             CONTEXTS,
         )
         .expect("failed to create aggregator"),
-    ));
+    );
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
@@ -609,16 +609,16 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
-                let tf = trace_flusher.clone();
+                //let tf = trace_flusher.clone();
                 // Await any previous flush handles. This
-                last_continuous_flush_error = pending_flush_handles
-                    .await_flush_handles(
-                        &logs_flusher.clone(),
-                        &tf,
-                        &metrics_flushers,
-                        &proxy_flusher,
-                    )
-                    .await;
+                //last_continuous_flush_error = pending_flush_handles
+                //    .await_flush_handles(
+                //        &logs_flusher.clone(),
+                //        &tf,
+                //        &metrics_flushers,
+                //        &proxy_flusher,
+                //    )
+                //    .await;
 
                 let lf = logs_flusher.clone();
                 pending_flush_handles
@@ -630,14 +630,9 @@ async fn extension_loop_active(
                     .push_back(tokio::spawn(async move {
                         tf.flush(None).await.unwrap_or_default()
                     }));
-                let (metrics_flushers_copy, series, sketches) = {
+                let (metrics_flushers_copy, (series, sketches)) = {
                     let locked_metrics = metrics_flushers.lock().await;
-                    let mut aggregator = metrics_aggr.lock().expect("lock poisoned");
-                    (
-                        locked_metrics.clone(),
-                        aggregator.consume_metrics(),
-                        aggregator.consume_distributions(),
-                    )
+                    (locked_metrics.clone(), metrics_aggr.flush())
                 };
                 for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
                     let series_clone = series.clone();
@@ -784,15 +779,9 @@ async fn blocking_flush_all(
     stats_flusher: &impl StatsFlusher,
     proxy_flusher: &ProxyFlusher,
     race_flush_interval: &mut tokio::time::Interval,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
+    metrics_aggr: &Arc<DoubleBufferedAggregator>,
 ) {
-    let (series, sketches) = {
-        let mut aggregator = metrics_aggr.lock().expect("lock poisoned");
-        (
-            aggregator.consume_metrics(),
-            aggregator.consume_distributions(),
-        )
-    };
+    let (series, sketches) = metrics_aggr.flush();
     let metrics_futures: Vec<_> = metrics_flushers
         .iter_mut()
         .map(|f| f.flush_metrics(series.clone(), sketches.clone()))
@@ -966,7 +955,7 @@ fn start_logs_agent(
 
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
+    metrics_aggr: &Arc<DoubleBufferedAggregator>,
     config: &Arc<Config>,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
@@ -1113,7 +1102,7 @@ fn start_trace_agent(
     )
 }
 
-async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {
+async fn start_dogstatsd(metrics_aggr: &Arc<DoubleBufferedAggregator>) -> CancellationToken {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
