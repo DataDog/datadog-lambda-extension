@@ -11,6 +11,7 @@ use std::{
     io::Write,
     sync::{Arc, Mutex},
 };
+use http::StatusCode;
 use thiserror::Error as ThisError;
 use tokio::sync::OnceCell;
 use tokio::task::JoinSet;
@@ -126,6 +127,10 @@ impl Flusher {
                 Ok(resp) => {
                     let status = resp.status();
                     _ = resp.text().await;
+                    if status == StatusCode::FORBIDDEN {
+                        error!("No more retries as the access was rejected");
+                        return Ok(());
+                    }
                     if status == 202 {
                         return Ok(());
                     }
