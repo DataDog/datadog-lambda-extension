@@ -1,13 +1,12 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
-use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{Value, json};
 use tokio::sync::watch;
 use tracing::{debug, warn};
@@ -88,7 +87,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
+        metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
