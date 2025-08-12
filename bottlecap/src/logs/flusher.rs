@@ -4,6 +4,7 @@ use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
+use hyper::StatusCode;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
@@ -11,7 +12,6 @@ use std::{
     io::Write,
     sync::{Arc, Mutex},
 };
-use hyper::StatusCode;
 use thiserror::Error as ThisError;
 use tokio::sync::OnceCell;
 use tokio::task::JoinSet;
