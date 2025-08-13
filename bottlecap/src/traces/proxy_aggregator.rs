@@ -30,4 +30,9 @@ impl Aggregator {
     pub fn get_batch(&mut self) -> Vec<ProxyRequest> {
         std::mem::take(&mut self.queue)
     }
+
+    /// Flush the queue.
+    pub fn flush(&mut self) {
+        self.queue.clear();
+    }
 }
