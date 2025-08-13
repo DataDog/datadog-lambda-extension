@@ -4,6 +4,7 @@ use crate::http::get_client;
 use crate::logs::aggregator::Aggregator;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
+use hyper::StatusCode;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
@@ -126,6 +127,10 @@ impl Flusher {
                 Ok(resp) => {
                     let status = resp.status();
                     _ = resp.text().await;
+                    if status == StatusCode::FORBIDDEN {
+                        error!("No more retries as the access was rejected");
+                        return Ok(());
+                    }
                     if status == 202 {
                         return Ok(());
                     }
