@@ -82,7 +82,9 @@ impl Flusher {
         retry_requests: Option<Vec<reqwest::RequestBuilder>>,
     ) -> Option<Vec<reqwest::RequestBuilder>> {
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
-            error!("Skipping flush in proxy flusher: Failed to resolve API key.");
+            error!(
+                "Purging the aggregated data and skipping flush in proxy flusher: Failed to resolve API key."
+            );
             {
                 let mut aggregator = self.aggregator.lock().await;
                 aggregator.clear();
