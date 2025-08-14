@@ -377,7 +377,7 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             error!("Extension loop failed: {e:?}, Calling /next without Datadog instrumentation");
-            extension_loop_idle(&client, &r).await
+            Err(e)
         }
     }
 }
@@ -438,20 +438,6 @@ fn create_api_key_factory(
 
         Box::pin(async move { resolve_secrets(config, aws_config, aws_credentials).await })
     })))
-}
-
-async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
-    loop {
-        match next_event(client, &r.extension_id).await {
-            Ok(_) => {
-                debug!("Extension is idle, skipping next event");
-            }
-            Err(e) => {
-                error!("Error getting next event: {e:?}");
-                return Err(e);
-            }
-        };
-    }
 }
 
 #[allow(clippy::too_many_lines)]
