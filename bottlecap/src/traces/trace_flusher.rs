@@ -86,7 +86,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
-            error!("Skipping flushing traces: Failed to resolve API key");
+            error!(
+                "Purging the aggregated data and skipping flushing traces: Failed to resolve API key"
+            );
+            {
+                let mut guard = self.aggregator.lock().await;
+                guard.clear();
+            }
             return None;
         };
 

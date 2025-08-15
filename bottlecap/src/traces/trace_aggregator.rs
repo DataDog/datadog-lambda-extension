@@ -78,6 +78,11 @@ impl TraceAggregator {
 
         std::mem::take(&mut self.buffer)
     }
+
+    /// Flush the queue.
+    pub fn clear(&mut self) {
+        self.queue.clear();
+    }
 }
 
 #[cfg(test)]
