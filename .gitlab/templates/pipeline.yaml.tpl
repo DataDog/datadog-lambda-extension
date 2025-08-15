@@ -227,6 +227,34 @@ publish layer sandbox [us-east-1] ({{ $flavor.name }}):
   script:
     - .gitlab/scripts/publish_layers.sh
 
+publish layer sandbox [us-west-2] ({{ $flavor.name }}):
+  stage: self-monitoring
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - when: manual
+      allow_failure: true
+
+  needs:
+    - layer ({{ $flavor.name }})
+
+  dependencies:
+    - layer ({{ $flavor.name }})
+
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  variables:
+    LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
+    REGION: us-west-2
+    ARCHITECTURE: {{ $flavor.arch }}
+    LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
+    ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
+    AUTOMATICALLY_BUMP_VERSION: {{ $environment.automatically_bump_version }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  {{ end }}
+  script:
+    - .gitlab/scripts/publish_layers.sh
+
 {{ end }} # end needs_layer_publish
 
 {{ end }}  # end flavors
