@@ -91,7 +91,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             );
             {
                 let mut guard = self.aggregator.lock().await;
-                guard.clear()
+                guard.clear();
             }
             return None;
         };
