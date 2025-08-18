@@ -420,10 +420,12 @@ impl Default for Config {
 }
 
 fn log_fallback_reason(reason: &str) {
-    println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
+    error!("Fallback support for {} is no longer available.", reason);
 }
 
 fn fallback(config: &Config) -> Result<(), ConfigError> {
+    debug!("LTN in fallback");
+
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match config.extension_version.as_deref() {
         Some("compatibility") => true,
@@ -433,16 +435,12 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 
     if opted_out {
         log_fallback_reason("extension_version");
-        return Err(ConfigError::UnsupportedField(
-            "extension_version".to_string(),
-        ));
+        return Ok(());
     }
 
     if config.serverless_appsec_enabled {
         log_fallback_reason("appsec_enabled");
-        return Err(ConfigError::UnsupportedField(
-            "serverless_appsec_enabled".to_string(),
-        ));
+        return Ok(());
     }
 
     // OTLP
@@ -477,7 +475,7 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 
     if has_otlp_config {
         log_fallback_reason("otel");
-        return Err(ConfigError::UnsupportedField("otel".to_string()));
+        return Ok(());
     }
 
     Ok(())
@@ -485,6 +483,7 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 
 #[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
+    debug!("LTN get_config");
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
     let mut config_builder = ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))

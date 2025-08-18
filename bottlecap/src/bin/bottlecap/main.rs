@@ -331,6 +331,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
+    debug!("LTN main before load_configs");
     let (aws_config, aws_credentials, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
@@ -388,6 +389,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>)
     let aws_credentials = AwsCredentials::from_env();
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    debug!("LTN load_configs");
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
