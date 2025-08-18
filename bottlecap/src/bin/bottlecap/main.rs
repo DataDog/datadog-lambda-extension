@@ -331,7 +331,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
-    let (aws_config, aws_credentials, config) = load_configs(start_time);
+    let (aws_config, aws_credentials, config, config_errors) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -368,6 +368,7 @@ async fn main() -> Result<()> {
         &r,
         Arc::clone(&api_key_factory),
         start_time,
+        config_errors,
     )
     .await
     {
@@ -382,22 +383,28 @@ async fn main() -> Result<()> {
     }
 }
 
-fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>, Vec<String>) {
     // First load the AWS configuration
     let aws_config = AwsConfig::from_env(start_time);
     let aws_credentials = AwsCredentials::from_env();
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let mut config_errors: Vec<String> = Vec::new();
     let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => Arc::new(config),
-        Err(_e) => {
+        Ok((config, fallback_reasons)) => {
+            // Add fallback reasons to config_errors
+            config_errors.extend(fallback_reasons);
+            Arc::new(config)
+        }
+        Err(e) => {
             debug!("Launch compatibility agent");
+            config_errors.push(format!("Config load failed: {e:?}"));
             let err = Command::new("/opt/datadog-agent-go").exec();
             panic!("Error starting the extension: {err:?}");
         }
     };
 
-    (aws_config, aws_credentials, config)
+    (aws_config, aws_credentials, config, config_errors)
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
@@ -463,6 +470,7 @@ async fn extension_loop_active(
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
+    config_errors: Vec<String>,
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
@@ -493,6 +501,18 @@ async fn extension_loop_active(
         &metrics_aggr,
         config,
     )));
+
+    // Send config error metrics if config loading failed
+    if !config_errors.is_empty() {
+        send_config_failure_metric(
+            &config_errors,
+            config,
+            Arc::clone(&api_key_factory),
+            &tags_provider,
+        )
+        .await;
+    }
+
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -1112,6 +1132,75 @@ fn start_trace_agent(
         proxy_flusher,
         shutdown_token,
     )
+}
+
+/// Sends metrics indicating that config loading failed.
+///
+/// This function creates a separate metrics aggregator and flusher to ensure the
+/// config failure metrics are sent even when the main config loading process fails.
+/// Each error message is sent as a separate metric with the error included as a tag.
+///
+/// # Arguments
+/// * `config_errors` - Vector of error messages describing why config loading failed
+/// * `config` - The config instance (from fallback compatibility agent)
+/// * `api_key_factory` - Factory for creating API keys for metric submission
+/// * `tags_provider` - Provider for getting standard tags to include with the metrics
+async fn send_config_failure_metric(
+    config_errors: &[String],
+    config: &Arc<Config>,
+    api_key_factory: Arc<ApiKeyFactory>,
+    tags_provider: &Arc<TagProvider>,
+) {
+    use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
+
+    // Create a separate aggregator for config error metrics
+    let config_error_aggr = Arc::new(Mutex::new(
+        MetricsAggregator::new(
+            SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
+            CONTEXTS,
+        )
+        .expect("failed to create config error aggregator"),
+    ));
+
+    let lambda_enhanced_metrics =
+        enhanced_metrics::new(Arc::clone(&config_error_aggr), Arc::clone(config));
+    let now = std::time::UNIX_EPOCH
+        .elapsed()
+        .expect("can't poll clock")
+        .as_secs()
+        .try_into()
+        .unwrap_or_default();
+
+    // Emit a separate metric for each config error
+    for config_error in config_errors {
+        lambda_enhanced_metrics.emit_config_load_issue_metric(now, config_error);
+    }
+
+    // TODO: Refactor it
+    // Create flusher config similar to start_metrics_flushers
+    let metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else if !config.url.is_empty() {
+        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else {
+        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+    };
+
+    let flusher_config = MetricsFlusherConfig {
+        api_key_factory,
+        aggregator: config_error_aggr,
+        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
+        https_proxy: config.proxy_https.clone(),
+        timeout: Duration::from_secs(config.flush_timeout),
+        retry_strategy: DsdRetryStrategy::Immediate(1),
+    };
+    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
+    let _ = metrics_flusher.flush().await;
 }
 
 async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {

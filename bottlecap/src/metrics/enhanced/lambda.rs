@@ -60,16 +60,27 @@ impl Lambda {
             .insert(String::from("runtime"), runtime.to_string());
     }
 
-    fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
-        let vec_tags: Vec<String> = self
-            .dynamic_value_tags
-            .iter()
-            .map(|(k, v)| format!("{k}:{v}"))
-            .collect();
+    fn tags_to_sorted_tags(tags: &HashMap<String, String>) -> Option<SortedTags> {
+        let vec_tags: Vec<String> = tags.iter().map(|(k, v)| format!("{k}:{v}")).collect();
 
         let string_tags = vec_tags.join(",");
 
         SortedTags::parse(&string_tags).ok()
+    }
+
+    fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
+        Self::tags_to_sorted_tags(&self.dynamic_value_tags)
+    }
+
+    fn get_combined_tags(&self, additional_tags: &HashMap<String, String>) -> Option<SortedTags> {
+        if additional_tags.is_empty() {
+            return self.get_dynamic_value_tags();
+        }
+
+        let mut combined_tags = self.dynamic_value_tags.clone();
+        combined_tags.extend(additional_tags.iter().map(|(k, v)| (k.clone(), v.clone())));
+
+        Self::tags_to_sorted_tags(&combined_tags)
     }
 
     pub fn increment_invocation_metric(&self, timestamp: i64) {
@@ -92,6 +103,32 @@ impl Lambda {
     // This is our best effort to cover different cases without double counting. We can adjust this if we find more cases.
     pub fn increment_oom_metric(&self, timestamp: i64) {
         self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
+    }
+
+    /// Emits a metric tracking configuration load issue with details
+    pub fn emit_config_load_issue_metric(&self, timestamp: i64, error_msg: &str) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        let dynamic_tags = self.get_combined_tags(&HashMap::from([(
+            "error".to_string(),
+            error_msg.to_string(),
+        )]));
+
+        let metric = Metric::new(
+            constants::CONFIG_ISSUE_DD_SLVS_EXTENSION_FAILOVER.into(),
+            MetricValue::distribution(1f64),
+            dynamic_tags,
+            Some(timestamp),
+        );
+        if let Err(e) = self
+            .aggregator
+            .lock()
+            .expect("lock poisoned")
+            .insert(metric)
+        {
+            error!("failed to insert config load issue metric: {}", e);
+        }
     }
 
     pub fn set_init_duration_metric(
