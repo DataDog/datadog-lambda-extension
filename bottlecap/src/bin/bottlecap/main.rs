@@ -391,6 +391,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>)
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
+            debug!("Launch compatibility agent");
             let err = Command::new("/opt/datadog-agent-go").exec();
             panic!("Error starting the extension: {err:?}");
         }

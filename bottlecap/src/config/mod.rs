@@ -420,7 +420,7 @@ impl Default for Config {
 }
 
 fn log_fallback_reason(reason: &str) {
-    println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
+    println!("Fallback support for {} is no longer available.", reason);
 }
 
 fn fallback(config: &Config) -> Result<(), ConfigError> {
@@ -433,16 +433,12 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 
     if opted_out {
         log_fallback_reason("extension_version");
-        return Err(ConfigError::UnsupportedField(
-            "extension_version".to_string(),
-        ));
+        return Ok(());
     }
 
     if config.serverless_appsec_enabled {
         log_fallback_reason("appsec_enabled");
-        return Err(ConfigError::UnsupportedField(
-            "serverless_appsec_enabled".to_string(),
-        ));
+        return Ok(());
     }
 
     // OTLP
@@ -477,7 +473,6 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 
     if has_otlp_config {
         log_fallback_reason("otel");
-        return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
 
     Ok(())
@@ -623,11 +618,8 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_EXTENSION_VERSION", "compatibility");
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("extension_version".to_string())
-            );
+            let config = get_config(Path::new(""));
+            assert!(config.is_ok());
             Ok(())
         });
     }
@@ -641,8 +633,8 @@ pub mod tests {
                 "localhost:4138",
             );
 
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            let config = get_config(Path::new(""));
+            assert!(config.is_ok());
             Ok(())
         });
     }
@@ -662,8 +654,8 @@ pub mod tests {
             ",
             )?;
 
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
+            let config = get_config(Path::new(""));
+            assert!(config.is_ok());
             Ok(())
         });
     }
@@ -756,11 +748,8 @@ pub mod tests {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
 
-            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("serverless_appsec_enabled".to_string())
-            );
+            let config = get_config(Path::new(""));
+            assert!(config.is_ok());
             Ok(())
         });
     }
