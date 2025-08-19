@@ -665,14 +665,26 @@ async fn extension_loop_active(
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
-                    .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                    .push_back(tokio::spawn(async move {
+                        tokio::task::spawn_blocking(move || {
+                            tokio::runtime::Handle::current().block_on(lf.flush(None))
+                        })
+                        .await
+                        .unwrap_or_default()
+                    }));
 
                 // Spawn trace flush
                 let tf = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
                     .push_back(tokio::spawn(async move {
-                        tf.flush(None).await.unwrap_or_default()
+                        tokio::task::spawn_blocking(move || {
+                            tokio::runtime::Handle::current()
+                                .block_on(tf.flush(None))
+                                .unwrap_or_default()
+                        })
+                        .await
+                        .unwrap_or_default()
                     }));
 
                 // Spawn the metrics aggregator flush and metric flushes as a background task
@@ -683,10 +695,13 @@ async fn extension_loop_active(
                     // Get metrics data from aggregator (this is the blocking part)
                     let (metrics_flushers_copy, series, sketches) = {
                         let locked_metrics = metrics_flushers_clone.lock().await;
-                        let flush_response = metrics_aggr_handle_clone
-                            .flush()
-                            .await
-                            .expect("can't flush metrics handle");
+                        let flush_response = tokio::task::spawn_blocking(move || {
+                            tokio::runtime::Handle::current()
+                                .block_on(metrics_aggr_handle_clone.flush())
+                                .expect("can't flush metrics handle")
+                        })
+                        .await
+                        .expect("spawn_blocking failed");
                         (
                             locked_metrics.clone(),
                             flush_response.series,
@@ -700,8 +715,14 @@ async fn extension_loop_active(
                         let series_clone = series.clone();
                         let sketches_clone = sketches.clone();
                         let handle = tokio::spawn(async move {
-                            let (retry_series, retry_sketches) = flusher
-                                .flush_metrics(series_clone, sketches_clone)
+                            let (retry_series, retry_sketches) =
+                                tokio::task::spawn_blocking(move || {
+                                    tokio::runtime::Handle::current()
+                                        .block_on(
+                                            flusher.flush_metrics(series_clone, sketches_clone),
+                                        )
+                                        .unwrap_or_default()
+                                })
                                 .await
                                 .unwrap_or_default();
                             MetricsRetryBatch {
@@ -753,7 +774,13 @@ async fn extension_loop_active(
                 pending_flush_handles
                     .proxy_flush_handles
                     .push_back(tokio::spawn(async move {
-                        pf.flush(None).await.unwrap_or_default()
+                        tokio::task::spawn_blocking(move || {
+                            tokio::runtime::Handle::current()
+                                .block_on(pf.flush(None))
+                                .unwrap_or_default()
+                        })
+                        .await
+                        .unwrap_or_default()
                     }));
 
                 race_flush_interval.reset();
@@ -789,7 +816,8 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        tokio::task::yield_now().await;
                     }
                     // Completely removed race_flush_interval.tick() arm to prevent any delays
                 }
