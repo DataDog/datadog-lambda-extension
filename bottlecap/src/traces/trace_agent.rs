@@ -171,7 +171,25 @@ impl TraceAgent {
             }
         });
 
+        stats_tx.clone().send(pb::ClientStatsPayload {
+            hostname: "hostname".to_string(),
+            env: "dev".to_string(),
+            version: "version".to_string(),
+            lang: "rust".to_string(),
+            tracer_version: "tracer.version".to_string(),
+            runtime_id: "runtime_id".to_string(),
+            sequence: 1,
+            agent_aggregation: "aggregation".to_string(),
+            service: "service".to_string(),
+            container_id: "container_id".to_string(),
+            tags: vec![],
+            git_commit_sha: "git_commit_sha".to_string(),
+            image_tag: "image_tag".to_string(),
+            stats: vec![],
+        }).await?;
+
         let router = self.make_router(stats_tx);
+
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
@@ -287,6 +305,7 @@ impl TraceAgent {
     }
 
     async fn stats(State(state): State<StatsState>, request: Request) -> Response {
+        debug!("Trace Agent | stats()");
         match state
             .stats_processor
             .process_stats(request, state.stats_tx)
