@@ -134,7 +134,7 @@ impl Default for ContextBuffer {
     /// Creates a new `ContextBuffer` with a default capacity of 5.
     ///
     fn default() -> Self {
-        ContextBuffer::with_capacity(5)
+        ContextBuffer::with_capacity(5000)
     }
 }
 
