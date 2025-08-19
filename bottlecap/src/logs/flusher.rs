@@ -129,7 +129,9 @@ impl Flusher {
                     _ = resp.text().await;
                     if status == StatusCode::FORBIDDEN {
                         // Access denied. Stop retrying.
-                        error!("Failed to send logs to datadog because access was rejected. Is the API key invalid?");
+                        error!(
+                            "Failed to send logs to Datadog: Access denied. Please verify that your API key is valid."
+                        );
                         return Ok(());
                     }
                     if status == 202 {
