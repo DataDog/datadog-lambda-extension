@@ -166,6 +166,7 @@ impl TraceAgent {
         tokio::spawn(async move {
             while let Some(stats_payload) = stats_rx.recv().await {
                 let mut aggregator = stats_aggregator.lock().await;
+                debug!("Trace Agent | adding stats payload to aggregator: {stats_payload:?}");
                 aggregator.add(stats_payload);
             }
         });
