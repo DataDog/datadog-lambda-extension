@@ -384,6 +384,8 @@ async fn main() -> Result<()> {
     }
 }
 
+// Ustr initialization can take 10+ ms.
+// Start it early in a separate thread so it won't become a bottleneck later when SortedTags::parse() is called.
 fn init_ustr() {
     tokio::spawn(async {
         Ustr::from("");
@@ -487,6 +489,7 @@ async fn extension_loop_active(
         event_bus.get_sender_copy(),
     );
 
+    let metrics_aggr_init_start_time = Instant::now();
     let metrics_aggr = Arc::new(Mutex::new(
         MetricsAggregator::new(
             SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
@@ -494,6 +497,7 @@ async fn extension_loop_active(
         )
         .expect("failed to create aggregator"),
     ));
+    debug!("Metrics aggregator created in {:} ms", metrics_aggr_init_start_time.elapsed().as_millis().to_string());
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
