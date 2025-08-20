@@ -2,16 +2,16 @@ use std::error::Error;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 
-use tracing::error;
+use tracing::{debug, error};
 
+use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
-use crate::events::Event;
+use crate::event_bus::Event;
 use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
 use crate::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
-use crate::LAMBDA_RUNTIME_SLUG;
 
 use crate::logs::lambda::{IntakeLog, Message};
 
@@ -93,6 +93,7 @@ impl LambdaProcessor {
 
                 if let Some(message) = message {
                     if is_oom_error(&message) {
+                        debug!("Lambda Processor | Got a runtime-specific OOM error. Incrementing OOM metric.");
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
                             error!("Failed to send OOM event to the main event bus: {e}");
                         }
@@ -590,10 +591,12 @@ mod tests {
 
         let result = processor.get_message(event).await;
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Unable to parse log"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Unable to parse log")
+        );
     }
 
     // get_intake_log

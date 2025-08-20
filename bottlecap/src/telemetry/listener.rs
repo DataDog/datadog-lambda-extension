@@ -1,15 +1,16 @@
 use crate::{
     http::{extract_request_body, handler_not_found},
-    telemetry::events::TelemetryEvent,
+    telemetry::events::{TelemetryEvent, TelemetryRecord},
 };
 
 use axum::{
+    Router,
     extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
-    Router,
 };
+use chrono::Utc;
 use std::net::SocketAddr;
 use tokio::{net::TcpListener, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
@@ -46,13 +47,17 @@ impl TelemetryListener {
         let router = self.make_router();
 
         let cancel_token_clone = self.cancel_token();
+        let event_bus_clone = self.event_bus.clone();
         tokio::spawn(async move {
             let listener = TcpListener::bind(&socket)
                 .await
                 .expect("Failed to bind socket");
             debug!("Telemetry API | Starting listener on {}", socket);
             axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
+                .with_graceful_shutdown(Self::graceful_shutdown(
+                    cancel_token_clone,
+                    event_bus_clone,
+                ))
                 .await
                 .expect("Failed to start telemetry listener");
         });
@@ -69,9 +74,21 @@ impl TelemetryListener {
             .with_state(event_bus)
     }
 
-    async fn graceful_shutdown(cancel_token: CancellationToken) {
+    async fn graceful_shutdown(cancel_token: CancellationToken, event_bus: Sender<TelemetryEvent>) {
         cancel_token.cancelled().await;
-        debug!("Telemetry API | Shutdown signal received, shutting down");
+        debug!("Telemetry API | Shutdown signal received, sending tombstone event");
+
+        // Send tombstone event to signal shutdown
+        let tombstone_event = TelemetryEvent {
+            time: Utc::now(),
+            record: TelemetryRecord::PlatformTombstone,
+        };
+
+        if let Err(e) = event_bus.send(tombstone_event).await {
+            debug!("Failed to send tombstone event: {:?}", e);
+        }
+
+        debug!("Telemetry API | Shutting down");
     }
 
     async fn handle(State(event_bus): State<Sender<TelemetryEvent>>, request: Request) -> Response {

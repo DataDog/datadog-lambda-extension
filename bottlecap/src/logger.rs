@@ -1,8 +1,8 @@
 use std::fmt;
 use tracing_core::{Event, Subscriber};
 use tracing_subscriber::fmt::{
-    format::{self, FormatEvent, FormatFields},
     FmtContext, FormattedFields,
+    format::{self, FormatEvent, FormatFields},
 };
 use tracing_subscriber::registry::LookupSpan;
 

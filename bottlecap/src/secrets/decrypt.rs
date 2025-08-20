@@ -1,26 +1,27 @@
 use crate::config::{
-    aws::{AwsConfig, AwsCredentials},
     Config,
+    aws::{AwsConfig, AwsCredentials},
 };
 use crate::fips::compute_aws_api_host;
 use base64::prelude::*;
 use chrono::{DateTime, Utc};
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use hmac::{Hmac, Mac};
-use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Client;
+use reqwest::header::{HeaderMap, HeaderValue};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::Error;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::RwLock;
 use tracing::debug;
 use tracing::error;
 
 pub async fn resolve_secrets(
     config: Arc<Config>,
-    aws_config: &AwsConfig,
-    aws_credentials: &mut AwsCredentials,
+    aws_config: Arc<AwsConfig>,
+    aws_credentials: Arc<RwLock<AwsCredentials>>,
 ) -> Option<String> {
     let api_key_candidate =
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
@@ -42,30 +43,36 @@ pub async fn resolve_secrets(
                 }
             };
 
-            if aws_credentials.aws_secret_access_key.is_empty()
-                && aws_credentials.aws_access_key_id.is_empty()
-                && !aws_credentials
+            let aws_credentials_read = aws_credentials.read().await;
+
+            if aws_credentials_read.aws_secret_access_key.is_empty()
+                && aws_credentials_read.aws_access_key_id.is_empty()
+                && !aws_credentials_read
                     .aws_container_credentials_full_uri
                     .is_empty()
-                && !aws_credentials.aws_container_authorization_token.is_empty()
+                && !aws_credentials_read
+                    .aws_container_authorization_token
+                    .is_empty()
             {
                 // We're in Snap Start
-                let credentials = match get_snapstart_credentials(aws_credentials, &client).await {
-                    Ok(credentials) => credentials,
-                    Err(err) => {
-                        error!("Error getting Snap Start credentials: {}", err);
-                        return None;
-                    }
-                };
-                aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
+                let credentials =
+                    match get_snapstart_credentials(&aws_credentials_read, &client).await {
+                        Ok(credentials) => credentials,
+                        Err(err) => {
+                            error!("Error getting Snap Start credentials: {}", err);
+                            return None;
+                        }
+                    };
+                let mut aws_credentials_write = aws_credentials.write().await;
+                aws_credentials_write.aws_access_key_id = credentials["AccessKeyId"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
+                aws_credentials_write.aws_secret_access_key = credentials["SecretAccessKey"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                aws_credentials.aws_session_token = credentials["Token"]
+                aws_credentials_write.aws_session_token = credentials["Token"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
@@ -76,7 +83,7 @@ pub async fn resolve_secrets(
                     &client,
                     config.api_key_secret_arn.clone(),
                     aws_config,
-                    aws_credentials,
+                    &aws_credentials_read,
                 )
                 .await
             } else {
@@ -84,7 +91,7 @@ pub async fn resolve_secrets(
                     &client,
                     config.kms_api_key.clone(),
                     aws_config,
-                    aws_credentials,
+                    &aws_credentials_read,
                 )
                 .await
             };
@@ -126,9 +133,9 @@ struct RequestArgs<'a> {
 async fn decrypt_aws_kms(
     client: &Client,
     kms_key: String,
-    aws_config: &AwsConfig,
+    aws_config: Arc<AwsConfig>,
     aws_credentials: &AwsCredentials,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     // When the API key is encrypted using the AWS console, the function name is added as an
     // encryption context. When the API key is encrypted using the AWS CLI, no encryption context
     // is added. We need to try decrypting the API key both with and without the encryption context.
@@ -138,7 +145,7 @@ async fn decrypt_aws_kms(
     });
 
     let headers = build_get_secret_signed_headers(
-        aws_config,
+        Arc::clone(&aws_config),
         aws_credentials,
         aws_config.region.clone(),
         RequestArgs {
@@ -157,11 +164,11 @@ async fn decrypt_aws_kms(
     } else {
         let json_body = &serde_json::json!({
             "CiphertextBlob": kms_key,
-            "encryptionContext": { "LambdaFunctionName": aws_config.function_name }}
-        );
+            "encryptionContext": { "LambdaFunctionName": aws_config.function_name }
+        });
 
         let headers = build_get_secret_signed_headers(
-            aws_config,
+            Arc::clone(&aws_config),
             aws_credentials,
             aws_config.region.clone(),
             RequestArgs {
@@ -186,9 +193,9 @@ async fn decrypt_aws_kms(
 async fn decrypt_aws_sm(
     client: &Client,
     secret_arn: String,
-    aws_config: &AwsConfig,
+    aws_config: Arc<AwsConfig>,
     aws_credentials: &AwsCredentials,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let json_body = &serde_json::json!({ "SecretId": secret_arn});
     // Supports cross-region secrets
     let secret_region = secret_arn
@@ -220,7 +227,7 @@ async fn decrypt_aws_sm(
 async fn get_snapstart_credentials(
     aws_credentials: &AwsCredentials,
     client: &Client,
-) -> Result<Value, Box<dyn std::error::Error>> {
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let mut headers = HeaderMap::new();
     headers.insert(
         "Authorization",
@@ -239,7 +246,7 @@ async fn request(
     json_body: &Value,
     headers: HeaderMap,
     client: &Client,
-) -> Result<Value, Box<dyn std::error::Error>> {
+) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let host_header = &headers["host"]
         .to_str()
         .map_err(|err| Error::new(std::io::ErrorKind::InvalidInput, err.to_string()))?;
@@ -254,11 +261,11 @@ async fn request(
 }
 
 fn build_get_secret_signed_headers(
-    aws_config: &AwsConfig,
+    aws_config: Arc<AwsConfig>,
     aws_credentials: &AwsCredentials,
     region: String,
     header_values: RequestArgs,
-) -> Result<HeaderMap, Box<dyn std::error::Error>> {
+) -> Result<HeaderMap, Box<dyn std::error::Error + Send + Sync>> {
     let amz_date = header_values.time.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = header_values.time.format("%Y%m%d").to_string();
 
@@ -274,7 +281,8 @@ fn build_get_secret_signed_headers(
     let canonical_querystring = "";
     let canonical_headers = format!(
         "content-type:application/x-amz-json-1.1\nhost:{}\nx-amz-date:{}\nx-amz-security-token:{}\nx-amz-target:{}",
-        host, amz_date, aws_credentials.aws_session_token, header_values.x_amz_target);
+        host, amz_date, aws_credentials.aws_session_token, header_values.x_amz_target
+    );
     let signed_headers = "content-type;host;x-amz-date;x-amz-security-token;x-amz-target";
 
     let payload_hash = Sha256::digest(header_values.body.to_string().as_bytes());
@@ -331,7 +339,7 @@ fn build_get_secret_signed_headers(
     Ok(headers)
 }
 
-fn sign(key: &[u8], msg: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+fn sign(key: &[u8], msg: &str) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let mut mac = Hmac::<Sha256>::new_from_slice(key).map_err(|err| {
         Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -347,7 +355,7 @@ fn get_aws4_signature_key(
     date_stamp: &str,
     region_name: &str,
     service_name: &str,
-) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
     let k_date = sign(format!("AWS4{key}").as_bytes(), date_stamp)?;
     let k_region = sign(&k_date, region_name)?;
     let k_service = sign(&k_region, service_name)?;
@@ -374,14 +382,14 @@ mod tests {
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         let headers = build_get_secret_signed_headers(
-            &AwsConfig {
+            Arc::new(AwsConfig {
                 region: "us-east-1".to_string(),
                 aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
                 runtime_api: String::new(),
                 exec_wrapper: None,
-            },
+            }),
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
@@ -433,14 +441,14 @@ mod tests {
             &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
         );
         let headers = build_get_secret_signed_headers(
-            &AwsConfig {
+            Arc::new(AwsConfig {
                 region: "us-east-1".to_string(),
                 aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
                 function_name: "arn:some-function".to_string(),
                 sandbox_init_time: Instant::now(),
                 runtime_api: String::new(),
                 exec_wrapper: None,
-            },
+            }),
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
                 aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),

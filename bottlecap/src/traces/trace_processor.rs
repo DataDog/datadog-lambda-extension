@@ -2,18 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use crate::config;
+use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::tags::provider;
-use crate::traces::span_pointers::{attach_span_pointers_to_meta, SpanPointer};
+use crate::traces::span_pointers::{SpanPointer, attach_span_pointers_to_meta};
 use crate::traces::{
     AWS_XRAY_DAEMON_ADDRESS_URL_PREFIX, DNS_LOCAL_HOST_ADDRESS_URL_PREFIX,
     DNS_NON_ROUTABLE_ADDRESS_URL_PREFIX, INVOCATION_SPAN_RESOURCE, LAMBDA_EXTENSION_URL_PREFIX,
     LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
 };
+use async_trait::async_trait;
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::send_data::{Compression, SendData, SendDataBuilder};
+use datadog_trace_utils::send_data::{Compression, SendDataBuilder};
 use datadog_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
@@ -23,11 +25,12 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tracing::error;
 
+use super::trace_aggregator::SendDataBuilderInfo;
+
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceProcessor {
     pub obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
-    pub resolved_api_key: String,
 }
 
 struct ChunkProcessor {
@@ -49,6 +52,9 @@ impl TraceChunkProcessor for ChunkProcessor {
                     span.service.clone_from(service);
                 }
             }
+
+            // Remove the _dd.base_service tag for unintentional service name override
+            span.meta.remove("_dd.base_service");
 
             self.tags_provider.get_tags_map().iter().for_each(|(k, v)| {
                 span.meta.insert(k.clone(), v.clone());
@@ -115,28 +121,30 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
 
 #[allow(clippy::module_name_repetitions)]
 #[allow(clippy::too_many_arguments)]
+#[async_trait]
 pub trait TraceProcessor {
-    fn process_traces(
+    async fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        header_tags: tracer_header_tags::TracerHeaderTags,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendData;
+    ) -> SendDataBuilderInfo;
 }
 
+#[async_trait]
 impl TraceProcessor for ServerlessTraceProcessor {
-    fn process_traces(
+    async fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
-        header_tags: tracer_header_tags::TracerHeaderTags,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendData {
+    ) -> SendDataBuilderInfo {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -161,22 +169,22 @@ impl TraceProcessor for ServerlessTraceProcessor {
         let endpoint = Endpoint {
             url: hyper::Uri::from_str(&config.apm_dd_url)
                 .expect("can't parse trace intake URL, exiting"),
-            api_key: Some(self.resolved_api_key.clone().into()),
-            timeout_ms: config.flush_timeout * 1_000,
+            // Will be set at flush time
+            api_key: None,
+            timeout_ms: config.flush_timeout * S_TO_MS,
             test_token: None,
         };
 
-        let send_data_builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint);
-        let mut send_data = send_data_builder
+        let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
             .with_compression(Compression::Zstd(6))
-            .build();
-        send_data.set_retry_strategy(RetryStrategy::new(
-            1,
-            100,
-            RetryBackoffType::Exponential,
-            None,
-        ));
-        send_data
+            .with_retry_strategy(RetryStrategy::new(
+                1,
+                100,
+                RetryBackoffType::Exponential,
+                None,
+            ));
+
+        SendDataBuilderInfo::new(builder, body_size)
     }
 }
 
@@ -189,7 +197,7 @@ mod tests {
 
     use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
 
-    use crate::{config::Config, tags::provider::Provider, LAMBDA_RUNTIME_SLUG};
+    use crate::{LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider};
 
     use super::*;
 
@@ -292,7 +300,6 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            resolved_api_key: "foo".to_string(),
             obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
         };
         let config = create_test_config();
@@ -325,12 +332,13 @@ mod tests {
             app_version: String::new(),
         };
 
-        let received_payload =
-            if let TracerPayloadCollection::V07(payload) = tracer_payload.get_payloads() {
-                Some(payload[0].clone())
-            } else {
-                None
-            };
+        let received_payload = if let TracerPayloadCollection::V07(payload) =
+            tracer_payload.await.builder.build().get_payloads()
+        {
+            Some(payload[0].clone())
+        } else {
+            None
+        };
 
         assert_eq!(
             expected_tracer_payload,

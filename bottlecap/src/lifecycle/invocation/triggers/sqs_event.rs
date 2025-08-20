@@ -2,9 +2,9 @@ use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::{
     processor::MS_TO_NS,
     triggers::{
+        DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
         event_bridge_event::EventBridgeEvent,
         sns_event::{SnsEntity, SnsRecord},
-        ServiceNameResolver, Trigger, DATADOG_CARRIER_KEY, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
     },
 };
 use crate::traces::context::{Sampling, SpanContext};
@@ -88,19 +88,23 @@ impl Trigger for SqsRecord {
             .get("Records")
             .and_then(Value::as_array)
             .and_then(|r| r.first())
-            .take()
         {
             first_record
                 .get("eventSource")
                 .and_then(Value::as_str)
-                .map_or(false, |s| s == "aws:sqs")
+                .is_some_and(|s| s == "aws:sqs")
         } else {
             false
         }
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for an SQS Event");
         let resource = self.get_specific_identifier();
         let start_time = (self
@@ -110,7 +114,12 @@ impl Trigger for SqsRecord {
             .unwrap_or_default() as f64
             * MS_TO_NS) as i64;
 
-        let service_name = self.resolve_service_name(service_mapping, "sqs");
+        let service_name = self.resolve_service_name(
+            service_mapping,
+            &self.get_specific_identifier(),
+            "sqs",
+            aws_service_representation_enabled,
+        );
 
         span.name = "aws.sqs".to_string();
         span.service = service_name.to_string();
@@ -327,9 +336,9 @@ mod tests {
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
         assert_eq!(span.name, "aws.sqs");
-        assert_eq!(span.service, "sqs");
+        assert_eq!(span.service, "MyQueue");
         assert_eq!(span.resource, "MyQueue");
         assert_eq!(span.r#type, "web");
 
@@ -494,27 +503,98 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_service_name() {
+    fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("sqs_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
 
-        // Priority is given to the specific key
+        // Test 1: Specific mapping takes priority
         let specific_service_mapping = HashMap::from([
             ("MyQueue".to_string(), "specific-service".to_string()),
             ("lambda_sqs".to_string(), "generic-service".to_string()),
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "sqs"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                true // aws_service_representation_enabled
+            ),
             "specific-service"
         );
 
+        // Test 2: Generic mapping is used when specific not found
         let generic_service_mapping =
             HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "sqs"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                true // aws_service_representation_enabled
+            ),
             "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses instance name (queue name)
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                true // aws_service_representation_enabled
+            ),
+            event.get_specific_identifier() // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("sqs_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = SqsRecord::new(payload).expect("Failed to deserialize SqsRecord");
+
+        // Test 1: With specific mapping - still respects mapping
+        let specific_service_mapping = HashMap::from([
+            ("MyQueue".to_string(), "specific-service".to_string()),
+            ("lambda_sqs".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                false // aws_service_representation_enabled = false
+            ),
+            "specific-service"
+        );
+
+        // Test 2: With generic mapping - still respects mapping
+        let generic_service_mapping =
+            HashMap::from([("lambda_sqs".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "sqs",
+                false // aws_service_representation_enabled = false
+            ),
+            "sqs" // fallback value
         );
     }
 

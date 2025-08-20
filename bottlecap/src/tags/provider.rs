@@ -1,5 +1,5 @@
 use crate::tags::lambda::tags::Lambda;
-use crate::{config, LAMBDA_RUNTIME_SLUG};
+use crate::{LAMBDA_RUNTIME_SLUG, config};
 use std::collections::hash_map;
 use std::sync::Arc;
 
@@ -106,8 +106,8 @@ impl GetTags for TagProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
     use crate::LAMBDA_RUNTIME_SLUG;
+    use crate::config::Config;
     use std::collections::hash_map::HashMap;
 
     #[test]

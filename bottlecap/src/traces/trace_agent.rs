@@ -2,54 +2,68 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use axum::{
+    Router,
     extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{any, post},
-    Router,
 };
-use reqwest;
 use serde_json::json;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc::{self, Receiver, Sender};
-use tokio::sync::Mutex;
+use tokio::sync::{
+    Mutex,
+    mpsc::{self, Receiver, Sender},
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
-use crate::config;
-use crate::http::{extract_request_body, get_client, handler_not_found};
-use crate::lifecycle::invocation::context::ReparentingInfo;
-use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
-use crate::tags::provider;
-use crate::traces::{
-    stats_aggregator, stats_processor, trace_aggregator, trace_processor, INVOCATION_SPAN_RESOURCE,
+use crate::{
+    config,
+    http::{extract_request_body, handler_not_found},
+    lifecycle::invocation::{
+        context::ReparentingInfo, processor::Processor as InvocationProcessor,
+    },
+    tags::provider,
+    traces::{
+        INVOCATION_SPAN_RESOURCE,
+        proxy_aggregator::{self, ProxyRequest},
+        stats_aggregator, stats_processor,
+        trace_aggregator::{self, SendDataBuilderInfo},
+        trace_processor,
+    },
 };
 use datadog_trace_protobuf::pb;
-use datadog_trace_utils::trace_utils::{self, SendData};
+use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
 const TRACE_AGENT_PORT: usize = 8126;
+
+// Agent endpoints
 const V4_TRACE_ENDPOINT_PATH: &str = "/v0.4/traces";
 const V5_TRACE_ENDPOINT_PATH: &str = "/v0.5/traces";
 const STATS_ENDPOINT_PATH: &str = "/v0.6/stats";
-const DSM_ENDPOINT_PATH: &str = "/api/v0.1/pipeline_stats";
 const DSM_AGENT_PATH: &str = "/v0.1/pipeline_stats";
 const PROFILING_ENDPOINT_PATH: &str = "/profiling/v1/input";
-const PROFILING_BACKEND_PATH: &str = "/api/v2/profile";
-const LLM_OBS_SPANS_INTAKE_PATH: &str = "/api/v2/llmobs";
-const LLM_OBS_EVAL_METRIC_INTAKE_PATH: &str = "/api/intake/llm-obs/v1/eval-metric";
-const LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2: &str = "/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/intake/llm-obs/v1/eval-metric";
 const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
     "/evp_proxy/v2/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
-const DD_ADDITIONAL_TAGS_HEADER: &str = "X-Datadog-Additional-Tags";
 const INFO_ENDPOINT_PATH: &str = "/info";
 const DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
+
+// Intake endpoints
+const DSM_INTAKE_PATH: &str = "/api/v0.1/pipeline_stats";
+const LLM_OBS_SPANS_INTAKE_PATH: &str = "/api/v2/llmobs";
+const LLM_OBS_EVAL_METRIC_INTAKE_PATH: &str = "/api/intake/llm-obs/v1/eval-metric";
+const LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2: &str = "/api/intake/llm-obs/v2/eval-metric";
+const PROFILING_INTAKE_PATH: &str = "/api/v2/profile";
 const DEBUGGER_LOGS_INTAKE_PATH: &str = "/api/v2/logs";
+const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
+
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
@@ -59,7 +73,7 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub trace_tx: Sender<SendData>,
+    pub trace_tx: Sender<SendDataBuilderInfo>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
 }
@@ -73,9 +87,7 @@ pub struct StatsState {
 #[derive(Clone)]
 pub struct ProxyState {
     pub config: Arc<config::Config>,
-    pub tags_provider: Arc<provider::Provider>,
-    pub http_client: reqwest::Client,
-    pub api_key: String,
+    pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
 }
 
 pub struct TraceAgent {
@@ -83,12 +95,11 @@ pub struct TraceAgent {
     pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     pub stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
+    pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    http_client: reqwest::Client,
-    api_key: String,
-    tx: Sender<SendData>,
     shutdown_token: CancellationToken,
+    tx: Sender<SendDataBuilderInfo>,
 }
 
 #[derive(Clone, Copy)]
@@ -106,23 +117,21 @@ impl TraceAgent {
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
+        proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
-        resolved_api_key: String,
     ) -> TraceAgent {
-        // setup a channel to send processed traces to our flusher. tx is passed through each
+        // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
-        // processed trace payloads to our trace flusher.
-        let (trace_tx, mut trace_rx): (Sender<SendData>, Receiver<SendData>) =
+        // processed trace payloads to our trace aggregator.
+        let (trace_tx, mut trace_rx): (Sender<SendDataBuilderInfo>, Receiver<SendDataBuilderInfo>) =
             mpsc::channel(TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        // start our trace flusher. receives trace payloads and handles buffering + deciding when to
-        // flush to backend.
-
+        // Start the trace aggregator, which receives and buffers trace payloads to be consumed by the trace flusher.
         tokio::spawn(async move {
-            while let Some(tracer_payload) = trace_rx.recv().await {
+            while let Some(tracer_payload_info) = trace_rx.recv().await {
                 let mut aggregator = trace_aggregator.lock().await;
-                aggregator.add(tracer_payload);
+                aggregator.add(tracer_payload_info);
             }
         });
 
@@ -131,11 +140,10 @@ impl TraceAgent {
             trace_processor,
             stats_aggregator,
             stats_processor,
+            proxy_aggregator,
             invocation_processor,
             tags_provider,
-            http_client: get_client(config),
             tx: trace_tx,
-            api_key: resolved_api_key,
             shutdown_token: CancellationToken::new(),
         }
     }
@@ -143,13 +151,13 @@ impl TraceAgent {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
-        // channels to send processed stats to our stats flusher.
+        // Set up a channel to send processed stats to our stats aggregator.
         let (stats_tx, mut stats_rx): (
             Sender<pb::ClientStatsPayload>,
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        // Receive stats payload and send it to the aggregator
+        // Start the stats aggregator, which receives and buffers stats payloads to be consumed by the stats flusher.
         let stats_aggregator = self.stats_aggregator.clone();
         tokio::spawn(async move {
             while let Some(stats_payload) = stats_rx.recv().await {
@@ -194,9 +202,7 @@ impl TraceAgent {
 
         let proxy_state = ProxyState {
             config: Arc::clone(&self.config),
-            tags_provider: Arc::clone(&self.tags_provider),
-            http_client: self.http_client.clone(),
-            api_key: self.api_key.clone(),
+            proxy_aggregator: Arc::clone(&self.proxy_aggregator),
         };
 
         let trace_router = Router::new()
@@ -227,6 +233,10 @@ impl TraceAgent {
             )
             .route(LLM_OBS_SPANS_ENDPOINT_PATH, post(Self::llm_obs_spans_proxy))
             .route(DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
+            .route(
+                INSTRUMENTATION_ENDPOINT_PATH,
+                post(Self::instrumentation_proxy),
+            )
             .with_state(proxy_state);
 
         let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
@@ -287,12 +297,10 @@ impl TraceAgent {
     async fn dsm_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
             state.config,
-            state.http_client,
-            state.api_key,
-            state.tags_provider,
+            state.proxy_aggregator,
             request,
             "trace.agent",
-            DSM_ENDPOINT_PATH,
+            DSM_INTAKE_PATH,
             "DSM",
         )
         .await
@@ -301,12 +309,10 @@ impl TraceAgent {
     async fn profiling_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
             state.config,
-            state.http_client,
-            state.api_key,
-            state.tags_provider,
+            state.proxy_aggregator,
             request,
             "intake.profile",
-            PROFILING_BACKEND_PATH,
+            PROFILING_INTAKE_PATH,
             "profiling",
         )
         .await
@@ -318,9 +324,7 @@ impl TraceAgent {
     ) -> Response {
         Self::handle_proxy(
             state.config,
-            state.http_client,
-            state.api_key,
-            state.tags_provider,
+            state.proxy_aggregator,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH,
@@ -335,9 +339,7 @@ impl TraceAgent {
     ) -> Response {
         Self::handle_proxy(
             state.config,
-            state.http_client,
-            state.api_key,
-            state.tags_provider,
+            state.proxy_aggregator,
             request,
             "api",
             LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2,
@@ -349,9 +351,7 @@ impl TraceAgent {
     async fn llm_obs_spans_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
             state.config,
-            state.http_client,
-            state.api_key,
-            state.tags_provider,
+            state.proxy_aggregator,
             request,
             "llmobs-intake",
             LLM_OBS_SPANS_INTAKE_PATH,
@@ -363,13 +363,23 @@ impl TraceAgent {
     async fn debugger_logs_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
             state.config,
-            state.http_client,
-            state.api_key,
-            state.tags_provider,
+            state.proxy_aggregator,
             request,
             "http-intake.logs",
             DEBUGGER_LOGS_INTAKE_PATH,
             "debugger_logs",
+        )
+        .await
+    }
+
+    async fn instrumentation_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        Self::handle_proxy(
+            state.config,
+            state.proxy_aggregator,
+            request,
+            "instrumentation-telemetry-intake",
+            INSTRUMENTATION_INTAKE_PATH,
+            "instrumentation",
         )
         .await
     }
@@ -396,11 +406,13 @@ impl TraceAgent {
         (StatusCode::OK, response_json.to_string()).into_response()
     }
 
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     async fn handle_traces(
         config: Arc<config::Config>,
         request: Request,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendData>,
+        trace_tx: Sender<SendDataBuilderInfo>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -493,21 +505,23 @@ impl TraceAgent {
             }
         }
 
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        );
+        let send_data = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
 
-        // send trace payload to our trace flusher
+        // send trace payload to our trace aggregator
         match trace_tx.send(send_data).await {
-            Ok(()) => success_response("Successfully buffered traces to be flushed."),
+            Ok(()) => success_response("Successfully buffered traces to be aggregated."),
             Err(err) => error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error sending traces to the trace flusher: {err}"),
+                format!("Error sending traces to the trace aggregator: {err}"),
             ),
         }
     }
@@ -515,88 +529,37 @@ impl TraceAgent {
     #[allow(clippy::too_many_arguments)]
     async fn handle_proxy(
         config: Arc<config::Config>,
-        client: reqwest::Client,
-        api_key: String,
-        tags_provider: Arc<provider::Provider>,
+        proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         request: Request,
         backend_domain: &str,
         backend_path: &str,
-        error_context: &str,
+        context: &str,
     ) -> Response {
+        debug!("Trace Agent | Proxied request for {context}");
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
         };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
-        let mut request_builder = client.post(&target_url);
-
-        for (name, value) in &parts.headers {
-            if name.as_str().to_lowercase() != "host"
-                && name.as_str().to_lowercase() != "content-length"
-            {
-                if let Ok(header_value) =
-                    reqwest::header::HeaderValue::from_str(value.to_str().unwrap_or_default())
-                {
-                    request_builder = request_builder.header(name.as_str(), header_value);
-                }
-            }
-        }
-        request_builder = request_builder.header("DD-API-KEY", api_key);
-        request_builder = request_builder.header(
-            DD_ADDITIONAL_TAGS_HEADER,
-            format!(
-                "_dd.origin:lambda;functionname:{}",
-                tags_provider
-                    .get_canonical_resource_name()
-                    .unwrap_or_default()
-            ),
-        );
-
-        let response = match request_builder.body(body).send().await {
-            Ok(resp) => resp,
-            Err(err) => {
-                return error_response(
-                    StatusCode::BAD_GATEWAY,
-                    format!("Error sending request to {error_context} backend: {err}"),
-                );
-            }
+        let proxy_request = ProxyRequest {
+            headers: parts.headers,
+            body,
+            target_url,
         };
 
-        let status = StatusCode::from_u16(response.status().as_u16())
-            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+        let mut proxy_aggregator = proxy_aggregator.lock().await;
+        proxy_aggregator.add(proxy_request);
 
-        let mut builder = axum::response::Response::builder().status(status);
-
-        for (name, value) in response.headers() {
-            if let Ok(header_value) =
-                axum::http::HeaderValue::from_str(value.to_str().unwrap_or_default())
-            {
-                builder = builder.header(name.as_str(), header_value);
-            }
-        }
-
-        let response_body = match response.bytes().await {
-            Ok(bytes) => bytes,
-            Err(err) => {
-                return error_response(
-                    StatusCode::BAD_GATEWAY,
-                    format!("Error reading response from {error_context} backend: {err}"),
-                );
-            }
-        };
-
-        match builder.body(axum::body::Body::from(response_body)) {
-            Ok(response) => response.into_response(),
-            Err(err) => error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error building response: {err}"),
-            ),
-        }
+        (
+            StatusCode::OK,
+            format!("Acknowledged request for {context}"),
+        )
+            .into_response()
     }
 
     #[must_use]
-    pub fn get_sender_copy(&self) -> Sender<SendData> {
+    pub fn get_sender_copy(&self) -> Sender<SendDataBuilderInfo> {
         self.tx.clone()
     }
 

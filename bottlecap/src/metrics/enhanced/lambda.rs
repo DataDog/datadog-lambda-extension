@@ -23,6 +23,7 @@ pub struct Lambda {
     pub config: Arc<crate::config::Config>,
     // Dynamic value tags are the ones we cannot obtain statically from the sandbox
     dynamic_value_tags: HashMap<String, String>,
+    invoked_received: bool,
 }
 
 impl Lambda {
@@ -32,6 +33,7 @@ impl Lambda {
             aggregator,
             config,
             dynamic_value_tags: HashMap::new(),
+            invoked_received: false,
         }
     }
 
@@ -82,6 +84,12 @@ impl Lambda {
         self.increment_metric(constants::TIMEOUTS_METRIC, timestamp);
     }
 
+    // This function is called in three cases:
+    // 1. Runtime-specific OOM error (can happen in .NET, Node.js and Java as far as we know)
+    // 2. PlatformRuntimeDone event reports "error_type: Runtime.OutOfMemory" (can happen in Ruby and Python as far as we know)
+    // 3. PlatformReport event reports "max_memory_used_mb == memory_size_mb" (can happen in many runtimes, but
+    //    we only call increment_oom_metric() for provided.al runtimes)
+    // This is our best effort to cover different cases without double counting. We can adjust this if we find more cases.
     pub fn increment_oom_metric(&self, timestamp: i64) {
         self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
     }
@@ -112,6 +120,10 @@ impl Lambda {
         {
             error!("failed to insert metric: {}", e);
         }
+    }
+
+    pub fn set_invoked_received(&mut self) {
+        self.invoked_received = true;
     }
 
     fn increment_metric(&self, metric_name: &str, timestamp: i64) {
@@ -178,6 +190,12 @@ impl Lambda {
             return;
         }
         self.increment_metric(constants::SHUTDOWNS_METRIC, timestamp);
+    }
+
+    pub fn set_unused_init_metric(&self, timestamp: i64) {
+        if !self.invoked_received {
+            self.increment_metric(constants::UNUSED_INIT, timestamp);
+        }
     }
 
     pub fn set_post_runtime_duration_metric(&self, duration_ms: f64, timestamp: i64) {
@@ -894,100 +912,130 @@ mod tests {
             now,
         );
         let aggr = metrics_aggr.lock().expect("lock poisoned");
-        assert!(aggr
-            .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::ERRORS_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::PRODUCED_BYTES_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::DURATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::RX_BYTES_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::TX_BYTES_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(
+        assert!(
+            aggr.get_entry_by_id(constants::INVOCATIONS_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::ERRORS_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::TIMEOUTS_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::INIT_DURATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::PRODUCED_BYTES_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::DURATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::RX_BYTES_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::TX_BYTES_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(
                 constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
                 &None,
                 now
             )
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::NUM_CORES_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::TMP_MAX_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::TMP_USED_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::TMP_FREE_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::FD_MAX_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::THREADS_MAX_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
-            .is_none());
+            .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::NUM_CORES_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::TMP_MAX_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::TMP_USED_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::TMP_FREE_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::FD_MAX_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::THREADS_MAX_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1272,11 +1320,13 @@ mod tests {
         assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now);
 
         let aggr = lambda.aggregator.lock().expect("lock poisoned");
-        assert!(aggr
-            .get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
-            .is_none());
-        assert!(aggr
-            .get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
-            .is_none());
+        assert!(
+            aggr.get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
+                .is_none()
+        );
+        assert!(
+            aggr.get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
+                .is_none()
+        );
     }
 }

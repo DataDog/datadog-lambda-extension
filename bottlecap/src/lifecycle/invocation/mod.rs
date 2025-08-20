@@ -1,6 +1,6 @@
-use base64::{engine::general_purpose, DecodeError, Engine};
+use base64::{DecodeError, Engine, engine::general_purpose};
 use datadog_trace_protobuf::pb::Span;
-use rand::{rngs::OsRng, Rng, RngCore};
+use rand::{Rng, RngCore, rngs::OsRng};
 use std::collections::HashMap;
 
 use crate::tags::lambda::tags::{INIT_TYPE, SNAP_START_VALUE};
@@ -32,23 +32,29 @@ pub fn base64_to_string(base64_string: &str) -> Result<String, DecodeError> {
 }
 
 fn create_empty_span(name: String, resource: &str, service: &str) -> Span {
-    Span {
+    let mut span = Span {
         name,
         resource: resource.to_string(),
         service: service.to_string(),
         r#type: String::from("serverless"),
         ..Default::default()
-    }
+    };
+
+    // Add span.kind to the span to enable other server based features for serverless
+    span.meta
+        .insert("span.kind".to_string(), "server".to_string());
+
+    span
 }
 
 #[must_use]
 pub fn generate_span_id() -> u64 {
-    if std::env::var(INIT_TYPE).map_or(false, |it| it == SNAP_START_VALUE) {
+    if std::env::var(INIT_TYPE).is_ok_and(|it| it == SNAP_START_VALUE) {
         return OsRng.next_u64();
     }
 
     let mut rng = rand::thread_rng();
-    rng.gen()
+    rng.r#gen()
 }
 
 fn redact_value(key: &str, value: String) -> String {

@@ -6,12 +6,12 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     lifecycle::invocation::triggers::{
-        ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+        FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
     },
     traces::{
         context::{Sampling, SpanContext},
         propagation::text_map_propagator::{
-            DatadogHeaderPropagator, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY,
+            DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_TAGS_KEY, DatadogHeaderPropagator,
         },
     },
 };
@@ -116,6 +116,7 @@ impl Trigger for StepFunctionEvent {
         &self,
         _span: &mut datadog_trace_protobuf::pb::Span,
         _service_mapping: &HashMap<String, String>,
+        _aws_service_representation_enabled: bool,
     ) {
     }
 
@@ -239,11 +240,7 @@ impl StepFunctionEvent {
         result &= !(1u64 << 63);
 
         // Return 1 if result is 0
-        if result == 0 {
-            1
-        } else {
-            result
-        }
+        if result == 0 { 1 } else { result }
     }
 }
 
@@ -272,7 +269,9 @@ mod tests {
 
         let expected = StepFunctionEvent {
             execution: Execution {
-                id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44"),
+                id: String::from(
+                    "arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44",
+                ),
                 redrive_count: 0,
             },
             state: State {
@@ -307,7 +306,9 @@ mod tests {
 
         let expected = StepFunctionEvent {
             execution: Execution {
-                id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:aa6c9316-713a-41d4-9c30-61131716744f"),
+                id: String::from(
+                    "arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:aa6c9316-713a-41d4-9c30-61131716744f",
+                ),
                 redrive_count: 0,
             },
             state: State {
@@ -320,7 +321,9 @@ mod tests {
             }),
             trace_id: None,
             trace_tags: None,
-            root_execution_id: Some(String::from("arn:aws:states:sa-east-1:425362996713:execution:invokeJavaLambda:4875aba4-ae31-4a4c-bf8a-63e9eee31dad")),
+            root_execution_id: Some(String::from(
+                "arn:aws:states:sa-east-1:425362996713:execution:invokeJavaLambda:4875aba4-ae31-4a4c-bf8a-63e9eee31dad",
+            )),
             serverless_version: Some(String::from("v1")),
         };
 
@@ -342,7 +345,9 @@ mod tests {
 
         let expected = StepFunctionEvent {
             execution: Execution {
-                id: String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:aa6c9316-713a-41d4-9c30-61131716744f"),
+                id: String::from(
+                    "arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:aa6c9316-713a-41d4-9c30-61131716744f",
+                ),
                 redrive_count: 0,
             },
             state: State {
@@ -587,7 +592,9 @@ mod tests {
     #[test]
     fn test_generate_parent_id() {
         let parent_id = StepFunctionEvent::generate_parent_id(
-            String::from("arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"),
+            String::from(
+                "arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111",
+            ),
             String::from("step-one"),
             String::from("2022-12-08T21:08:19.224Z"),
             0,
@@ -597,7 +604,9 @@ mod tests {
         assert_eq!(parent_id, 4_340_734_536_022_949_921);
 
         let parent_id = StepFunctionEvent::generate_parent_id(
-            String::from("arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111"),
+            String::from(
+                "arn:aws:states:sa-east-1:601427271234:express:DatadogStateMachine:acaf1a67-336a-e854-1599-2a627eb2dd8a:c8baf081-31f1-464d-971f-70cb17d01111",
+            ),
             String::from("step-one"),
             String::from("2022-12-08T21:08:19.224Y"),
             0,
@@ -619,14 +628,86 @@ mod tests {
 
         assert_eq!(hex_tid, "60ee1db79e4803f8");
 
-        let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(
-            String::from("arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44")
-        );
+        let (lo_tid, hi_tid) = StepFunctionEvent::generate_trace_id(String::from(
+            "arn:aws:states:us-east-1:425362996713:execution:agocsTestSF:bc9f281c-3daa-4e5a-9a60-471a3810bf44",
+        ));
         let hex_tid = format!("{hi_tid:x}");
 
         assert_eq!(lo_tid, 5_744_042_798_732_701_615);
         assert_eq!(hi_tid, 1_807_349_139_850_867_390);
 
         assert_eq!(hex_tid, "1914fe7789eb32be");
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_enabled() {
+        let json = read_json_file("step_function_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
+
+        // Test 1: Generic mapping is used for Step Functions
+        let generic_service_mapping = HashMap::from([(
+            "lambda_stepfunction".to_string(),
+            "generic-service".to_string(),
+        )]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                "stepfunction",
+                "stepfunction",
+                true // aws_service_representation_enabled
+            ),
+            "generic-service"
+        );
+
+        // Test 2: When no mapping exists, uses instance name
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                "stepfunction",
+                "stepfunction",
+                true // aws_service_representation_enabled
+            ),
+            "stepfunction" // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("step_function_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            StepFunctionEvent::new(payload).expect("Failed to deserialize StepFunctionEvent");
+
+        // Test 1: With generic mapping - still respects mapping
+        let generic_service_mapping = HashMap::from([(
+            "lambda_stepfunction".to_string(),
+            "generic-service".to_string(),
+        )]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                "stepfunction",
+                "stepfunction",
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 2: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                "stepfunction",
+                "stepfunction",
+                false // aws_service_representation_enabled = false
+            ),
+            "stepfunction" // fallback value
+        );
     }
 }

@@ -6,9 +6,9 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::{send_data::SendData, tracer_header_tags};
+use datadog_trace_utils::tracer_header_tags;
 use dogstatsd::aggregator::Aggregator as MetricsAggregator;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::{debug, warn};
 
@@ -20,26 +20,29 @@ use crate::{
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
-        self,
+        self, CPUData, NetworkData,
         constants::{ETC_PATH, PROC_PATH},
-        CPUData, NetworkData,
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{
-            text_map_propagator::{
-                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY,
-                DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY,
-            },
             DatadogCompositePropagator, Propagator,
+            text_map_propagator::{
+                DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY,
+                DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
+            },
         },
+        trace_aggregator::SendDataBuilderInfo,
         trace_processor::{self, TraceProcessor},
     },
 };
 
+use crate::lifecycle::invocation::triggers::get_default_service_name;
+
 pub const MS_TO_NS: f64 = 1_000_000.0;
+pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
@@ -60,7 +63,7 @@ pub struct Processor {
     /// Helper class to send enhanced metrics.
     enhanced_metrics: EnhancedMetrics,
     /// AWS configuration from the Lambda environment.
-    aws_config: AwsConfig,
+    aws_config: Arc<AwsConfig>,
     /// Flag to determine if a tracer was detected through
     /// universal instrumentation.
     tracer_detected: bool,
@@ -85,22 +88,29 @@ impl Processor {
     pub fn new(
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
-        aws_config: &AwsConfig,
+        aws_config: Arc<AwsConfig>,
         metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
     ) -> Self {
-        let service = config.service.clone().unwrap_or(String::from("aws.lambda"));
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
 
+        let service = get_default_service_name(
+            &config.service.clone().unwrap_or(resource.clone()),
+            "aws.lambda",
+            config.trace_aws_service_representation_enabled,
+        );
         let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
             context_buffer: ContextBuffer::default(),
-            inferrer: SpanInferrer::new(config.service_mapping.clone()),
+            inferrer: SpanInferrer::new(
+                config.service_mapping.clone(),
+                config.trace_aws_service_representation_enabled,
+            ),
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
-            aws_config: aws_config.clone(),
+            aws_config,
             tracer_detected: false,
             runtime: None,
             config: Arc::clone(&config),
@@ -155,6 +165,7 @@ impl Processor {
 
         // Increment the invocation metric
         self.enhanced_metrics.increment_invocation_metric(timestamp);
+        self.enhanced_metrics.set_invoked_received();
 
         // If `UniversalInstrumentationStart` event happened first, process it
         if let Some((headers, payload)) = self.context_buffer.pair_invoke_event(&request_id) {
@@ -193,6 +204,7 @@ impl Processor {
 
         self.dynamic_tags
             .insert(String::from("cold_start"), cold_start.to_string());
+
         if proactive_initialization {
             self.dynamic_tags.insert(
                 String::from("proactive_initialization"),
@@ -236,7 +248,6 @@ impl Processor {
         );
         cold_start_span.span_id = generate_span_id();
         cold_start_span.start = start_time;
-
         context.cold_start_span = Some(cold_start_span);
     }
 
@@ -282,9 +293,10 @@ impl Processor {
         request_id: &String,
         metrics: RuntimeDoneMetrics,
         status: Status,
+        error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_agent_tx: Sender<SendData>,
+        trace_agent_tx: Sender<SendDataBuilderInfo>,
         timestamp: i64,
     ) {
         // Set the runtime duration metric
@@ -298,6 +310,13 @@ impl Processor {
             // Increment the error type metric
             if status == Status::Timeout {
                 self.enhanced_metrics.increment_timeout_metric(timestamp);
+            }
+
+            if status == Status::Error && error_type == Some("Runtime.OutOfMemory".to_string()) {
+                debug!(
+                    "Invocation Processor | PlatformRuntimeDone | Got Runtime.OutOfMemory. Incrementing OOM metric."
+                );
+                self.enhanced_metrics.increment_oom_metric(timestamp);
             }
         }
 
@@ -328,7 +347,7 @@ impl Processor {
         status: Status,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_agent_tx: Sender<SendData>,
+        trace_agent_tx: Sender<SendDataBuilderInfo>,
     ) {
         let context = self.enrich_ctx_at_platform_done(request_id, status);
 
@@ -351,7 +370,9 @@ impl Processor {
         status: Status,
     ) -> Option<Context> {
         let Some(context) = self.context_buffer.get_mut(request_id) else {
-            debug!("Cannot process on platform runtime done, no invocation context found for request_id: {request_id}");
+            debug!(
+                "Cannot process on platform runtime done, no invocation context found for request_id: {request_id}"
+            );
             return None;
         };
         context.runtime_done_received = true;
@@ -415,7 +436,7 @@ impl Processor {
         &mut self,
         tags_provider: &Arc<provider::Provider>,
         trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendData>,
+        trace_agent_tx: &Sender<SendDataBuilderInfo>,
         context: Context,
     ) {
         let mut body_size = std::mem::size_of_val(&context.invocation_span);
@@ -467,7 +488,7 @@ impl Processor {
         &mut self,
         tags_provider: &Arc<provider::Provider>,
         trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendData>,
+        trace_agent_tx: &Sender<SendDataBuilderInfo>,
     ) {
         if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
             if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
@@ -500,7 +521,7 @@ impl Processor {
         body_size: usize,
         tags_provider: &Arc<provider::Provider>,
         trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendData>,
+        trace_agent_tx: &Sender<SendDataBuilderInfo>,
     ) {
         // todo: figure out what to do here
         let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -516,16 +537,18 @@ impl Processor {
             dropped_p0_spans: 0,
         };
 
-        let send_data: SendData = trace_processor.process_traces(
-            self.config.clone(),
-            tags_provider.clone(),
-            header_tags,
-            vec![traces],
-            body_size,
-            self.inferrer.span_pointers.clone(),
-        );
+        let send_data_builder_info: SendDataBuilderInfo = trace_processor
+            .process_traces(
+                self.config.clone(),
+                tags_provider.clone(),
+                header_tags,
+                vec![traces],
+                body_size,
+                self.inferrer.span_pointers.clone(),
+            )
+            .await;
 
-        if let Err(e) = trace_agent_tx.send(send_data).await {
+        if let Err(e) = trace_agent_tx.send(send_data_builder_info).await {
             debug!("Failed to send context spans to agent: {e}");
         }
     }
@@ -545,6 +568,20 @@ impl Processor {
         // Set the report log metrics
         self.enhanced_metrics
             .set_report_log_metrics(&metrics, timestamp);
+
+        // For provided.al runtimes, if the last invocation hit the memory limit, increment the OOM metric.
+        // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
+        // We don't do this for other runtimes to avoid double counting.
+        if let Some(runtime) = &self.runtime {
+            if runtime.starts_with("provided.al")
+                && metrics.max_memory_used_mb == metrics.memory_size_mb
+            {
+                debug!(
+                    "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
+                );
+                self.enhanced_metrics.increment_oom_metric(timestamp);
+            }
+        }
 
         if let Some(context) = self.context_buffer.get(request_id) {
             if context.runtime_duration_ms != 0.0 {
@@ -572,6 +609,8 @@ impl Processor {
             .as_secs();
         self.enhanced_metrics
             .set_shutdown_metric(i64::try_from(now).expect("can't convert now to i64"));
+        self.enhanced_metrics
+            .set_unused_init_metric(i64::try_from(now).expect("can't convert now to i64"));
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented
@@ -898,7 +937,7 @@ impl Processor {
 
         let is_error = headers
             .get(DATADOG_INVOCATION_ERROR_KEY)
-            .map_or(false, |v| v.to_lowercase() == "true")
+            .is_some_and(|v| v.to_lowercase() == "true")
             || message.is_some()
             || stack.is_some()
             || r#type.is_some()
@@ -959,19 +998,19 @@ impl Processor {
 mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
 
     fn setup() -> Processor {
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
             function_name: "test-function".into(),
             sandbox_init_time: Instant::now(),
             runtime_api: "***".into(),
             exec_wrapper: None,
-        };
+        });
 
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
@@ -989,7 +1028,7 @@ mod tests {
             Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
         ));
 
-        Processor::new(tags_provider, config, &aws_config, metrics_aggregator)
+        Processor::new(tags_provider, config, aws_config, metrics_aggregator)
     }
 
     #[test]
@@ -1099,10 +1138,12 @@ mod tests {
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
-        assert!(!context
-            .invocation_span
-            .metrics
-            .contains_key(TAG_SAMPLING_PRIORITY));
+        assert!(
+            !context
+                .invocation_span
+                .metrics
+                .contains_key(TAG_SAMPLING_PRIORITY)
+        );
         assert_eq!(context.invocation_span.trace_id, 888);
         assert_eq!(context.invocation_span.parent_id, 999);
     }
@@ -1122,10 +1163,12 @@ mod tests {
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
-        assert!(!context
-            .invocation_span
-            .metrics
-            .contains_key(TAG_SAMPLING_PRIORITY));
+        assert!(
+            !context
+                .invocation_span
+                .metrics
+                .contains_key(TAG_SAMPLING_PRIORITY)
+        );
         assert_eq!(context.invocation_span.trace_id, 111);
         assert_eq!(context.invocation_span.parent_id, 222);
     }
@@ -1166,6 +1209,37 @@ mod tests {
                 .get("http.status_code")
                 .expect("Status code not parsed!"),
             "200"
+        );
+    }
+
+    #[test]
+    fn test_on_shutdown_event_creates_unused_init_metrics() {
+        let mut processor = setup();
+
+        let now1 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
+        let ts1 = (now1 / 10) * 10;
+        processor.on_shutdown_event();
+        let now2 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
+        let ts2 = (now2 / 10) * 10;
+
+        let aggregator = processor.enhanced_metrics.aggregator.lock().unwrap();
+
+        assert!(
+            aggregator
+                .get_entry_by_id(
+                    crate::metrics::enhanced::constants::UNUSED_INIT.into(),
+                    &None,
+                    ts1
+                )
+                .is_some()
+                || aggregator
+                    .get_entry_by_id(
+                        crate::metrics::enhanced::constants::UNUSED_INIT.into(),
+                        &None,
+                        ts2
+                    )
+                    .is_some(),
+            "UNUSED_INIT metric should be created when invoked_received=false"
         );
     }
 }

@@ -21,7 +21,7 @@
 use axum::http::{self, HeaderName, HeaderValue};
 use bytes::Bytes;
 use hyper::{HeaderMap, Uri};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
@@ -40,7 +40,9 @@ pub fn get_lwa_proxy_socket_address(
     let port = uri.port_u16().ok_or("LWA: Missing port in URI")?;
 
     if host == "localhost" {
-        error!("LWA | Cannot use localhost as host in AWS_LWA_LAMBDA_RUNTIME_API_PROXY, use 127.0.0.1 instead");
+        error!(
+            "LWA | Cannot use localhost as host in AWS_LWA_LAMBDA_RUNTIME_API_PROXY, use 127.0.0.1 instead"
+        );
         return Err("Cannot use localhost as host, use 127.0.0.1 instead".into());
     }
 

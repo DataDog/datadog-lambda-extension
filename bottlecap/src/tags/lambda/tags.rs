@@ -4,7 +4,7 @@ use std::env::consts::ARCH;
 use std::fs;
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::debug;
+use tracing::{debug, warn};
 
 // Environment variables for the Lambda execution environment info
 const QUALIFIER_ENV_VAR: &str = "AWS_LAMBDA_FUNCTION_VERSION";
@@ -45,7 +45,7 @@ const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-pub const EXTENSION_VERSION: &str = "82-next";
+pub const EXTENSION_VERSION: &str = "84-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -192,7 +192,10 @@ pub fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &st
                     },
                 )
         })
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| {
+            warn!("Failed to read os-release file or extract runtime");
+            "unknown".to_string()
+        });
 
     debug!(
         "Provided runtime {provided_al}, it took: {:?}",
@@ -316,11 +319,11 @@ mod tests {
             version: Some("1.0.0".to_string()),
             ..Config::default()
         });
-        std::env::set_var(MEMORY_SIZE_VAR, "128");
-        std::env::set_var(RUNTIME_VAR, "AWS_Lambda_java8");
+        unsafe { std::env::set_var(MEMORY_SIZE_VAR, "128") };
+        unsafe { std::env::set_var(RUNTIME_VAR, "AWS_Lambda_java8") };
         let tags = Lambda::new_from_config(config, &metadata);
-        std::env::remove_var(MEMORY_SIZE_VAR);
-        std::env::remove_var(RUNTIME_VAR);
+        unsafe { std::env::remove_var(MEMORY_SIZE_VAR) };
+        unsafe { std::env::remove_var(RUNTIME_VAR) };
         assert_eq!(tags.tags_map.get(ENV_KEY).unwrap(), "test");
         assert_eq!(tags.tags_map.get(VERSION_KEY).unwrap(), "1.0.0");
         assert_eq!(tags.tags_map.get(SERVICE_KEY).unwrap(), "my-service");

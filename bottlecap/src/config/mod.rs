@@ -27,7 +27,7 @@ use crate::config::{
     flush_strategy::FlushStrategy,
     log_level::LogLevel,
     logs_additional_endpoints::LogsAdditionalEndpoint,
-    processing_rule::{deserialize_processing_rules, ProcessingRule},
+    processing_rule::{ProcessingRule, deserialize_processing_rules},
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
@@ -197,7 +197,7 @@ impl ConfigBuilder {
         // or in the `proxy_no_proxy` config field.
         if self.config.proxy_https.is_some() {
             let site_in_no_proxy = std::env::var("NO_PROXY")
-                .map_or(false, |no_proxy| no_proxy.contains(&self.config.site))
+                .is_ok_and(|no_proxy| no_proxy.contains(&self.config.site))
                 || self
                     .config
                     .proxy_no_proxy
@@ -240,6 +240,7 @@ pub struct Config {
     pub api_key: String,
     pub log_level: LogLevel,
 
+    // Timeout for the request to flush data to Datadog endpoint
     pub flush_timeout: u64,
 
     // Proxy
@@ -273,13 +274,16 @@ pub struct Config {
     pub apm_replace_tags: Option<Vec<ReplaceRule>>,
     pub apm_config_obfuscation_http_remove_query_string: bool,
     pub apm_config_obfuscation_http_remove_paths_with_digits: bool,
+    pub apm_config_compression_level: i32,
     pub apm_features: Vec<String>,
+    pub apm_additional_endpoints: HashMap<String, Vec<String>>,
     //
     // Trace Propagation
     pub trace_propagation_style: Vec<TracePropagationStyle>,
     pub trace_propagation_style_extract: Vec<TracePropagationStyle>,
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
+    pub trace_aws_service_representation_enabled: bool,
 
     // OTLP
     //
@@ -365,7 +369,10 @@ impl Default for Config {
             apm_replace_tags: None,
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
+            apm_config_compression_level: 6,
             apm_features: vec![],
+            apm_additional_endpoints: HashMap::new(),
+            trace_aws_service_representation_enabled: true,
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
                 TracePropagationStyle::TraceContext,
@@ -543,7 +550,7 @@ where
 {
     struct KeyValueVisitor;
 
-    impl<'de> serde::de::Visitor<'de> for KeyValueVisitor {
+    impl serde::de::Visitor<'_> for KeyValueVisitor {
         type Value = HashMap<String, String>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -1181,10 +1188,10 @@ pub mod tests {
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "TRUE");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "0");
             let config = get_config(Path::new("")).expect("should parse config");
-            assert_eq!(config.serverless_logs_enabled, true);
-            assert_eq!(config.enhanced_metrics, true);
-            assert_eq!(config.logs_config_use_compression, true);
-            assert_eq!(config.capture_lambda_payload, false);
+            assert!(config.serverless_logs_enabled);
+            assert!(config.enhanced_metrics);
+            assert!(config.logs_config_use_compression);
+            assert!(!config.capture_lambda_payload);
             Ok(())
         });
     }

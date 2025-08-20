@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 env:
   PB_VERSION: 25.3
@@ -30,7 +31,7 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Install protobuf compiler for linux. The versions bundled with Ubuntu
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
@@ -58,7 +59,7 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Install protobuf compiler for linux. The versions bundled with Ubuntu
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
@@ -78,9 +79,9 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.9
       # We need to do these separately because the fips feature is incompatible with the default feature.
       - working-directory: bottlecap
-        run: cargo clippy --workspace --features default
+        run: cargo clippy --workspace --all-targets --features default
       - working-directory: bottlecap
-        run: cargo clippy --workspace --no-default-features --features fips
+        run: cargo clippy --workspace --all-targets --no-default-features --features fips
 
   build-all:
     name: Build All
@@ -90,7 +91,7 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Install protobuf compiler for linux. The versions bundled with Ubuntu
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
@@ -118,7 +119,7 @@ jobs:
       SCCACHE_GHA_ENABLED: "true"
       RUSTC_WRAPPER: "sccache"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Install protobuf compiler for linux. The versions bundled with Ubuntu
       # 20.04 and 22.04 are too old -- our messages require protobuf >= 3.15 --
@@ -146,9 +147,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ ubuntu-22.04, macos-latest ]
+        os: [ubuntu-22.04, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions-rust-lang/setup-rust-toolchain@v1.13.0
         with:
           components: rustfmt
@@ -156,62 +157,13 @@ jobs:
       - working-directory: bottlecap
         run: cargo fmt --all -- --check
 
-  # todo: fix upstream warnings; from the readme:
-  # The most common cause of missing licenses seems to be workspaces that
-  # don't include forward their license files. Go to the repo for the
-  # workspace and copy the relevant files from there.
-  # A package license may receive a confidence warning stating that
-  # cargo-bundle-licenses is "unsure" or "semi" confident. This means that
-  # when the found license was compared to a template license it was found to
-  # have diverged in more than a few words. You should verify that the licence
-  #  text is in fact correct in these cases.
-  #
-  # If this job fails, you probably need to regenerate the license, e.g.
-  # CARGO_HOME=/tmp/dd-cargo cargo bundle-licenses --format yaml --output LICENSE-3rdparty.yml
+  # If this fails, run `dd-rust-license-tool write` in bottlecap/
   license-3rdparty:
     runs-on: ubuntu-22.04
-    name: "Valid LICENSE-3rdparty.yml"
+    name: "Valid LICENSE-3rdparty.csv"
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
-      - run: stat LICENSE-3rdparty.yml
+        uses: actions/checkout@v5
+      - run: cargo install dd-rust-license-tool --locked
+      - run: dd-rust-license-tool check
         working-directory: bottlecap
-      - name: Cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/
-            ~/.cargo/git/db/
-            ~/.cargo/bin/
-            ~/.cargo/.crates.toml
-          # cache key contains current version of cargo-bundle-licenses
-          # when upstream version is updated we can bump the cache key version,
-          # to cache the latest version of the tool
-          key: "v1-2.2.0"
-      # cargo-bundle-licenses v2.0 doesn't understand path differences due to
-      # sparse vs git index, so force git.
-      - run: sudo apt-get update && sudo apt-get upgrade
-      - run: mkdir -p .cargo && printf "[registries.crates-io]\nprotocol = \"git\"\n" > .cargo/config.toml
-        working-directory: bottlecap
-      - run: cargo install cargo-bundle-licenses
-      - name: "Generate new LICENSE-3rdparty.yml and check against the previous"
-        working-directory: bottlecap
-        env:
-          CARGO_HOME: "/tmp/dd-cargo"
-        run: |
-          # Run cargo bundle-licenses without directly checking against a previous snapshot
-          cargo bundle-licenses \
-            --format yaml \
-            --output /tmp/CI.yaml
-
-          # Normalize the paths in both files to ignore registry differences
-          sed -E 's/(registry\/src\/)[^\/]+/\1normalized_path/g' /tmp/CI.yaml > /tmp/CI_normalized.yaml
-          sed -E 's/(registry\/src\/)[^\/]+/\1normalized_path/g' LICENSE-3rdparty.yml > /tmp/LICENSE-3rdparty_normalized.yml
-
-          # Now perform the diff on the normalized files
-          if ! diff /tmp/CI_normalized.yaml /tmp/LICENSE-3rdparty_normalized.yml; then
-            echo "Differences detected."
-            exit 1
-          fi
-
-          echo "No differences found."

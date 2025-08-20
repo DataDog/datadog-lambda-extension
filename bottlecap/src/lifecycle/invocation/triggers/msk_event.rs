@@ -1,6 +1,6 @@
 use crate::lifecycle::invocation::processor::MS_TO_NS;
 use crate::lifecycle::invocation::triggers::{
-    ServiceNameResolver, Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_TAG,
+    FUNCTION_TRIGGER_EVENT_SOURCE_TAG, ServiceNameResolver, Trigger,
 };
 use datadog_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
@@ -55,15 +55,25 @@ impl Trigger for MSKEvent {
             .and_then(|map| map.values().next())
             .and_then(Value::as_array)
             .and_then(|arr| arr.first())
-            .map_or(false, |rec| rec.get("topic").is_some())
+            .is_some_and(|rec| rec.get("topic").is_some())
     }
 
     #[allow(clippy::cast_possible_truncation)]
-    fn enrich_span(&self, span: &mut Span, service_mapping: &HashMap<String, String>) {
+    fn enrich_span(
+        &self,
+        span: &mut Span,
+        service_mapping: &HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) {
         debug!("Enriching an Inferred Span for an MSK event");
 
         span.name = String::from("aws.msk");
-        span.service = self.resolve_service_name(service_mapping, "msk");
+        span.service = self.resolve_service_name(
+            service_mapping,
+            &self.get_specific_identifier(),
+            "msk",
+            aws_service_representation_enabled,
+        );
         span.r#type = String::from("web");
 
         let first_value = self.records.values().find_map(|arr| arr.first());
@@ -131,14 +141,16 @@ mod tests {
         let record = MSKRecord {
             topic: String::from("topic1"),
             partition: 0,
-            timestamp: 1745846213022.0,
+            timestamp: 1_745_846_213_022f64,
         };
         let mut expected_records = HashMap::new();
         expected_records.insert(String::from("topic1"), vec![record]);
 
         let expected = MSKEvent {
             event_source: String::from("aws:kafka"),
-            event_source_arn: String::from("arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2"),
+            event_source_arn: String::from(
+                "arn:aws:kafka:us-east-1:123456789012:cluster/demo-cluster/751d2973-a626-431c-9d4e-d7975eb44dd7-2",
+            ),
             records: expected_records,
         };
 
@@ -167,13 +179,13 @@ mod tests {
         let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
         let mut span = Span::default();
         let service_mapping = HashMap::new();
-        event.enrich_span(&mut span, &service_mapping);
+        event.enrich_span(&mut span, &service_mapping, true);
 
         assert_eq!(span.name, "aws.msk");
-        assert_eq!(span.service, "msk");
+        assert_eq!(span.service, "demo-cluster");
         assert_eq!(span.r#type, "web");
         assert_eq!(span.resource, "topic1");
-        assert_eq!(span.start, 1745846213022000128);
+        assert_eq!(span.start, 1_745_846_213_022_000_128);
 
         assert_eq!(
             span.meta,
@@ -229,27 +241,98 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_service_name() {
+    fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("msk_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
         let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
 
-        // Priority is given to the specific key
+        // Test 1: Specific mapping takes priority
         let specific_service_mapping = HashMap::from([
             ("demo-cluster".to_string(), "specific-service".to_string()),
             ("lambda_msk".to_string(), "generic-service".to_string()),
         ]);
 
         assert_eq!(
-            event.resolve_service_name(&specific_service_mapping, "msk"),
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "msk",
+                true // aws_service_representation_enabled
+            ),
             "specific-service"
         );
 
+        // Test 2: Generic mapping is used when specific not found
         let generic_service_mapping =
             HashMap::from([("lambda_msk".to_string(), "generic-service".to_string())]);
         assert_eq!(
-            event.resolve_service_name(&generic_service_mapping, "msk"),
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "msk",
+                true // aws_service_representation_enabled
+            ),
             "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses instance name (cluster name)
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "msk",
+                true // aws_service_representation_enabled
+            ),
+            event.get_specific_identifier() // instance name
+        );
+    }
+
+    #[test]
+    fn test_resolve_service_name_with_representation_disabled() {
+        let json = read_json_file("msk_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event = MSKEvent::new(payload).expect("Failed to deserialize MSKEvent");
+
+        // Test 1: With specific mapping - still respects mapping
+        let specific_service_mapping = HashMap::from([
+            ("demo-cluster".to_string(), "specific-service".to_string()),
+            ("lambda_msk".to_string(), "generic-service".to_string()),
+        ]);
+
+        assert_eq!(
+            event.resolve_service_name(
+                &specific_service_mapping,
+                &event.get_specific_identifier(),
+                "msk",
+                false // aws_service_representation_enabled = false
+            ),
+            "specific-service"
+        );
+
+        // Test 2: With generic mapping - still respects mapping
+        let generic_service_mapping =
+            HashMap::from([("lambda_msk".to_string(), "generic-service".to_string())]);
+        assert_eq!(
+            event.resolve_service_name(
+                &generic_service_mapping,
+                &event.get_specific_identifier(),
+                "msk",
+                false // aws_service_representation_enabled = false
+            ),
+            "generic-service"
+        );
+
+        // Test 3: When no mapping exists, uses fallback value
+        let empty_mapping = HashMap::new();
+        assert_eq!(
+            event.resolve_service_name(
+                &empty_mapping,
+                &event.get_specific_identifier(),
+                "msk",
+                false // aws_service_representation_enabled = false
+            ),
+            "msk" // fallback value
         );
     }
 }

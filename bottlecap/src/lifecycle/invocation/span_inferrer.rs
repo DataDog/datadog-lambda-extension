@@ -12,6 +12,7 @@ use crate::{
     lifecycle::invocation::{
         generate_span_id,
         triggers::{
+            FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG, Trigger,
             api_gateway_http_event::APIGatewayHttpEvent,
             api_gateway_rest_event::APIGatewayRestEvent,
             api_gateway_websocket_event::APIGatewayWebSocketEvent,
@@ -22,9 +23,8 @@ use crate::{
             msk_event::MSKEvent,
             s3_event::S3Record,
             sns_event::{SnsEntity, SnsRecord},
-            sqs_event::{extract_trace_context_from_aws_trace_header, SqsRecord},
+            sqs_event::{SqsRecord, extract_trace_context_from_aws_trace_header},
             step_function_event::StepFunctionEvent,
-            Trigger, FUNCTION_TRIGGER_EVENT_SOURCE_ARN_TAG,
         },
     },
 };
@@ -32,6 +32,7 @@ use crate::{
 #[derive(Default)]
 pub struct SpanInferrer {
     service_mapping: HashMap<String, String>,
+    aws_service_representation_enabled: bool,
     // Span inferred from the Lambda incoming request payload
     pub inferred_span: Option<Span>,
     // Nested span inferred from the Lambda incoming request payload
@@ -50,9 +51,13 @@ pub struct SpanInferrer {
 
 impl SpanInferrer {
     #[must_use]
-    pub fn new(service_mapping: HashMap<String, String>) -> Self {
+    pub fn new(
+        service_mapping: HashMap<String, String>,
+        aws_service_representation_enabled: bool,
+    ) -> Self {
         Self {
             service_mapping,
+            aws_service_representation_enabled,
             inferred_span: None,
             wrapped_inferred_span: None,
             is_async_span: false,
@@ -87,19 +92,31 @@ impl SpanInferrer {
 
         if APIGatewayHttpEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayHttpEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 trigger = Some(Box::new(t));
             }
         } else if APIGatewayRestEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayRestEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 trigger = Some(Box::new(t));
             }
         } else if APIGatewayWebSocketEvent::is_match(payload_value) {
             if let Some(t) = APIGatewayWebSocketEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 trigger = Some(Box::new(t));
             }
@@ -110,19 +127,31 @@ impl SpanInferrer {
             }
         } else if LambdaFunctionUrlEvent::is_match(payload_value) {
             if let Some(t) = LambdaFunctionUrlEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 trigger = Some(Box::new(t));
             }
         } else if MSKEvent::is_match(payload_value) {
             if let Some(t) = MSKEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 trigger = Some(Box::new(t));
             }
         } else if SqsRecord::is_match(payload_value) {
             if let Some(t) = SqsRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 self.generated_span_context = extract_trace_context_from_aws_trace_header(
                     t.attributes.aws_trace_header.clone(),
@@ -140,7 +169,11 @@ impl SpanInferrer {
                         sns: sns_entity,
                         event_subscription_arn: None,
                     };
-                    wt.enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
+                    wt.enrich_span(
+                        &mut wrapped_inferred_span,
+                        &self.service_mapping,
+                        self.aws_service_representation_enabled,
+                    );
                     inferred_span.meta.extend(wt.get_tags());
 
                     wrapped_inferred_span.duration =
@@ -155,8 +188,11 @@ impl SpanInferrer {
                         ..Default::default()
                     };
 
-                    event_bridge_entity
-                        .enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
+                    event_bridge_entity.enrich_span(
+                        &mut wrapped_inferred_span,
+                        &self.service_mapping,
+                        self.aws_service_representation_enabled,
+                    );
                     inferred_span.meta.extend(event_bridge_entity.get_tags());
 
                     wrapped_inferred_span.duration =
@@ -169,7 +205,11 @@ impl SpanInferrer {
             }
         } else if SnsRecord::is_match(payload_value) {
             if let Some(t) = SnsRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 if let Some(message) = &t.sns.message {
                     if let Ok(event_bridge_wrapper_message) =
@@ -180,8 +220,11 @@ impl SpanInferrer {
                             ..Default::default()
                         };
 
-                        event_bridge_wrapper_message
-                            .enrich_span(&mut wrapped_inferred_span, &self.service_mapping);
+                        event_bridge_wrapper_message.enrich_span(
+                            &mut wrapped_inferred_span,
+                            &self.service_mapping,
+                            self.aws_service_representation_enabled,
+                        );
                         inferred_span
                             .meta
                             .extend(event_bridge_wrapper_message.get_tags());
@@ -197,27 +240,43 @@ impl SpanInferrer {
             }
         } else if DynamoDbRecord::is_match(payload_value) {
             if let Some(t) = DynamoDbRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 self.span_pointers = t.get_span_pointers();
 
                 trigger = Some(Box::new(t));
             }
         } else if S3Record::is_match(payload_value) {
             if let Some(t) = S3Record::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
                 self.span_pointers = t.get_span_pointers();
 
                 trigger = Some(Box::new(t));
             }
         } else if EventBridgeEvent::is_match(payload_value) {
             if let Some(t) = EventBridgeEvent::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 trigger = Some(Box::new(t));
             }
         } else if KinesisRecord::is_match(payload_value) {
             if let Some(t) = KinesisRecord::new(payload_value.clone()) {
-                t.enrich_span(&mut inferred_span, &self.service_mapping);
+                t.enrich_span(
+                    &mut inferred_span,
+                    &self.service_mapping,
+                    self.aws_service_representation_enabled,
+                );
 
                 trigger = Some(Box::new(t));
             }
@@ -282,6 +341,7 @@ impl SpanInferrer {
                 String::from("peer.service"),
                 invocation_span.service.clone(),
             );
+            s.meta.insert("span.kind".to_string(), "server".to_string());
 
             if let Some(ws) = &mut self.wrapped_inferred_span {
                 ws.trace_id = invocation_span.trace_id;
@@ -358,6 +418,7 @@ mod tests {
     use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
     use serde_json::json;
     use std::collections::HashMap;
+    use std::sync::Arc;
     use std::time::Instant;
 
     use super::*;
@@ -367,47 +428,48 @@ mod tests {
         generated_context: Option<SpanContext>,
         expected_source: &str,
     ) {
-        let mut inferrer = SpanInferrer::default();
-        inferrer.carrier = carrier;
-        inferrer.generated_span_context = generated_context;
+        let inferrer = SpanInferrer {
+            carrier,
+            generated_span_context: generated_context,
+            ..SpanInferrer::default()
+        };
 
         let propagator = DatadogHeaderPropagator;
         let context = inferrer.get_span_context(&propagator);
 
-        assert!(context.is_some(), "Should return a span context");
-        let context = context.unwrap();
+        let context = context.expect("Should return a span context");
         match expected_source {
             "inferred" => {
                 assert_eq!(
-                    context.trace_id, 123456789,
+                    context.trace_id, 123_456_789,
                     "Should have trace_id from inferred span"
                 );
                 assert_eq!(
-                    context.span_id, 987654321,
+                    context.span_id, 987_654_321,
                     "Should have span_id from inferred span"
                 );
             }
             "generated" => {
                 assert_eq!(
-                    context.trace_id, 111111111,
+                    context.trace_id, 111_111_111,
                     "Should have trace_id from generated context"
                 );
                 assert_eq!(
-                    context.span_id, 222222222,
+                    context.span_id, 222_222_222,
                     "Should have span_id from generated context"
                 );
             }
             "aws_trace_header" => {
                 assert_eq!(
-                    context.trace_id, 0x35578e774943fd9d,
+                    context.trace_id, 0x3557_8e77_4943_fd9d,
                     "Should have trace_id from AWSTraceHeader"
                 );
                 assert_eq!(
-                    context.span_id, 0x76c040bdc454a7ac,
+                    context.span_id, 0x76c0_40bd_c454_a7ac,
                     "Should have span_id from AWSTraceHeader"
                 );
             }
-            _ => panic!("Unknown expected source: {}", expected_source),
+            _ => panic!("Unknown expected source: {expected_source}"),
         }
     }
 
@@ -420,8 +482,8 @@ mod tests {
         ]);
 
         let generated_context = SpanContext {
-            trace_id: 111111111,
-            span_id: 222222222,
+            trace_id: 111_111_111,
+            span_id: 222_222_222,
             sampling: Some(Sampling {
                 priority: Some(1),
                 mechanism: None,
@@ -438,8 +500,8 @@ mod tests {
     #[test]
     fn test_get_span_context_fallback_to_generated() {
         let generated_context = SpanContext {
-            trace_id: 111111111,
-            span_id: 222222222,
+            trace_id: 111_111_111,
+            span_id: 222_222_222,
             sampling: Some(Sampling {
                 priority: Some(1),
                 mechanism: None,
@@ -478,14 +540,14 @@ mod tests {
             }]
         });
 
-        let aws_config = AwsConfig {
+        let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
-            aws_lwa_proxy_lambda_runtime_api: Some("".to_string()),
-            runtime_api: "".to_string(),
-            function_name: "".to_string(),
+            aws_lwa_proxy_lambda_runtime_api: Some(String::new()),
+            runtime_api: String::new(),
+            function_name: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
-        };
+        });
         inferrer.infer_span(&payload, &aws_config);
 
         assert!(

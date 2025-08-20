@@ -1,11 +1,10 @@
 use axum::{
+    Router,
     extract::{Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::post,
-    Router,
 };
-use datadog_trace_utils::send_data::SendData;
 use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use serde_json::json;
 use std::net::SocketAddr;
@@ -19,7 +18,7 @@ use crate::{
     http::{extract_request_body, handler_not_found},
     otlp::processor::Processor as OtlpProcessor,
     tags::provider,
-    traces::trace_processor::TraceProcessor,
+    traces::{trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor},
 };
 
 const OTLP_AGENT_HTTP_PORT: u16 = 4318;
@@ -29,7 +28,7 @@ type AgentState = (
     Arc<provider::Provider>,
     OtlpProcessor,
     Arc<dyn TraceProcessor + Send + Sync>,
-    Sender<SendData>,
+    Sender<SendDataBuilderInfo>,
 );
 
 pub struct Agent {
@@ -37,7 +36,7 @@ pub struct Agent {
     tags_provider: Arc<provider::Provider>,
     processor: OtlpProcessor,
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-    trace_tx: Sender<SendData>,
+    trace_tx: Sender<SendDataBuilderInfo>,
     port: u16,
     cancel_token: CancellationToken,
 }
@@ -47,10 +46,10 @@ impl Agent {
         config: Arc<Config>,
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendData>,
+        trace_tx: Sender<SendDataBuilderInfo>,
     ) -> Self {
         let port = Self::parse_port(
-            &config.otlp_config_receiver_protocols_http_endpoint,
+            config.otlp_config_receiver_protocols_http_endpoint.as_ref(),
             OTLP_AGENT_HTTP_PORT,
         );
         let cancel_token = CancellationToken::new();
@@ -71,7 +70,7 @@ impl Agent {
         self.cancel_token.clone()
     }
 
-    fn parse_port(endpoint: &Option<String>, default_port: u16) -> u16 {
+    fn parse_port(endpoint: Option<&String>, default_port: u16) -> u16 {
         if let Some(endpoint) = endpoint {
             let port = endpoint.split(':').nth(1);
             if let Some(port) = port {
@@ -155,16 +154,7 @@ impl Agent {
 
         let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
         let body_size = size_of_val(&traces);
-        let send_data = trace_processor.process_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        );
-
-        if send_data.is_empty() {
+        if body_size == 0 {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 json!({ "message": "Not sending traces, processor returned empty data" })
@@ -173,9 +163,20 @@ impl Agent {
                 .into_response();
         }
 
-        match trace_tx.send(send_data).await {
+        let send_data_builder = trace_processor
+            .process_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await;
+
+        match trace_tx.send(send_data_builder).await {
             Ok(()) => {
-                debug!("OTLP | Successfully buffered traces to be flushed.");
+                debug!("OTLP | Successfully buffered traces to be aggregated.");
                 (
                     StatusCode::OK,
                     json!({"rate_by_service":{"service:,env:":1}}).to_string(),
@@ -183,10 +184,10 @@ impl Agent {
                     .into_response()
             }
             Err(err) => {
-                error!("OTLP | Error sending traces to the trace flusher: {err}");
+                error!("OTLP | Error sending traces to the trace aggregator: {err}");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({ "message": format!("Error sending traces to the trace flusher: {err}") }).to_string()
+                    json!({ "message": format!("Error sending traces to the trace aggregator: {err}") }).to_string()
                 ).into_response()
             }
         }
@@ -201,7 +202,10 @@ mod tests {
     fn test_parse_port_with_valid_endpoint() {
         // Test with a valid endpoint containing a port
         let endpoint = Some("localhost:8080".to_string());
-        assert_eq!(Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT), 8080);
+        assert_eq!(
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
+            8080
+        );
     }
 
     #[test]
@@ -209,7 +213,7 @@ mod tests {
         // Test with an endpoint containing an invalid port format
         let endpoint = Some("localhost:invalid".to_string());
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }
@@ -219,7 +223,7 @@ mod tests {
         // Test with an endpoint missing a port
         let endpoint = Some("localhost".to_string());
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }
@@ -229,7 +233,7 @@ mod tests {
         // Test with None endpoint
         let endpoint: Option<String> = None;
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }
@@ -237,9 +241,9 @@ mod tests {
     #[test]
     fn test_parse_port_with_empty_endpoint() {
         // Test with an empty endpoint
-        let endpoint = Some("".to_string());
+        let endpoint = Some(String::new());
         assert_eq!(
-            Agent::parse_port(&endpoint, OTLP_AGENT_HTTP_PORT),
+            Agent::parse_port(endpoint.as_ref(), OTLP_AGENT_HTTP_PORT),
             OTLP_AGENT_HTTP_PORT
         );
     }
