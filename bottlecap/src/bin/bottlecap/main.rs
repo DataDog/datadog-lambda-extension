@@ -497,7 +497,13 @@ async fn extension_loop_active(
         )
         .expect("failed to create aggregator"),
     ));
-    debug!("Metrics aggregator created in {:} ms", metrics_aggr_init_start_time.elapsed().as_millis().to_string());
+    debug!(
+        "Metrics aggregator created in {:} ms",
+        metrics_aggr_init_start_time
+            .elapsed()
+            .as_millis()
+            .to_string()
+    );
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
