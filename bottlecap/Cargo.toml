@@ -42,6 +42,7 @@ opentelemetry-proto = { version = "0.29", features = ["trace", "with-serde", "ge
 opentelemetry-semantic-conventions = { version = "0.29", features = ["semconv_experimental"] }
 rustls-native-certs = { version = "0.8.1", optional = true }
 axum = { version = "0.8.4", default-features = false, features = ["default"] }
+ustr = { version = "1.0.0", default-features = false }
 # If you are adding or updating a datadog-owned code dependency, please ensure
 # that it has a clippy.toml rule for disallowing the reqwest::Client::builder
 # method in favor of our

@@ -90,6 +90,7 @@ use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::J
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+use ustr::Ustr;
 
 #[allow(clippy::struct_field_names)]
 struct PendingFlushHandles {
@@ -331,6 +332,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
+    init_ustr();
     let (aws_config, aws_credentials, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
@@ -380,6 +382,12 @@ async fn main() -> Result<()> {
             extension_loop_idle(&client, &r).await
         }
     }
+}
+
+fn init_ustr() {
+    tokio::spawn(async {
+        Ustr::from("");
+    });
 }
 
 fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
