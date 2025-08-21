@@ -3,10 +3,10 @@
 
 use async_trait::async_trait;
 use ddcommon::Endpoint;
-use futures::future::join_all;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tracing::{debug, error};
 
 use datadog_trace_utils::{
@@ -126,12 +126,17 @@ impl TraceFlusher for ServerlessTraceFlusher {
             }
 
             // Send to additional endpoints
-            let tasks = self.additional_endpoints.iter().map(|endpoint| {
+            let mut join_set = JoinSet::new();
+            for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
-                async move { self.send(traces_clone, Some(endpoint)).await }
-            });
-            for mut failed in join_all(tasks).await.into_iter().flatten() {
-                failed_batch.append(&mut failed);
+                let self_clone = self.clone();
+                join_set.spawn(async move { self_clone.send(traces_clone, Some(&endpoint)).await });
+            }
+
+            while let Some(result) = join_set.join_next().await {
+                if let Ok(Some(mut failed)) = result {
+                    failed_batch.append(&mut failed);
+                }
             }
 
             // Stop processing more batches if we have a failure
@@ -177,17 +182,31 @@ impl TraceFlusher for ServerlessTraceFlusher {
             }));
         }
 
+        let mut join_set = JoinSet::new();
         for task in tasks {
-            match task.await {
-                Ok(result) => {
-                    if let Err(e) = result {
-                        error!("Error sending trace: {e:?}");
-                        // Return the original traces for retry
-                        return Some(coalesced_traces.clone());
+            join_set.spawn(async move { task.await });
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            match result {
+                Ok(inner_result) => {
+                    match inner_result {
+                        Ok(send_result) => {
+                            if let Err(e) = send_result {
+                                error!("Error sending trace: {e:?}");
+                                // Return the original traces for retry
+                                return Some(coalesced_traces.clone());
+                            }
+                        }
+                        Err(e) => {
+                            error!("Task join error: {e:?}");
+                            // Return the original traces for retry if a task panics
+                            return Some(coalesced_traces.clone());
+                        }
                     }
                 }
                 Err(e) => {
-                    error!("Task join error: {e:?}");
+                    error!("JoinSet error: {e:?}");
                     // Return the original traces for retry if a task panics
                     return Some(coalesced_traces.clone());
                 }
