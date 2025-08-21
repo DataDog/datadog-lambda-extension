@@ -188,28 +188,25 @@ impl TraceFlusher for ServerlessTraceFlusher {
         }
 
         while let Some(result) = join_set.join_next().await {
-            match result {
-                Ok(inner_result) => {
-                    match inner_result {
-                        Ok(send_result) => {
-                            if let Err(e) = send_result {
-                                error!("Error sending trace: {e:?}");
-                                // Return the original traces for retry
-                                return Some(coalesced_traces.clone());
-                            }
-                        }
-                        Err(e) => {
-                            error!("Task join error: {e:?}");
-                            // Return the original traces for retry if a task panics
-                            return Some(coalesced_traces.clone());
-                        }
-                    }
-                }
-                Err(e) => {
+            let error_occurred = result
+                .map_err(|e| {
                     error!("JoinSet error: {e:?}");
-                    // Return the original traces for retry if a task panics
-                    return Some(coalesced_traces.clone());
-                }
+                })
+                .and_then(|inner_result| {
+                    inner_result.map_err(|e| {
+                        error!("Task join error: {e:?}");
+                    })
+                })
+                .and_then(|send_result| {
+                    send_result.map_err(|e| {
+                        error!("Error sending trace: {e:?}");
+                    })
+                })
+                .is_err();
+
+            if error_occurred {
+                // Return the original traces for retry
+                return Some(coalesced_traces.clone());
             }
         }
         debug!("Flushing traces took {}ms", start.elapsed().as_millis());
