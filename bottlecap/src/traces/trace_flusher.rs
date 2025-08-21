@@ -184,7 +184,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         let mut join_set = JoinSet::new();
         for task in tasks {
-            join_set.spawn(async move { task.await });
+            join_set.spawn(task);
         }
 
         while let Some(result) = join_set.join_next().await {
