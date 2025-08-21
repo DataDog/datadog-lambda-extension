@@ -94,6 +94,7 @@ use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::J
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
+use ustr::Ustr;
 
 #[allow(clippy::struct_field_names)]
 struct PendingFlushHandles {
@@ -335,6 +336,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
+    init_ustr();
     let (aws_config, aws_credentials, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
@@ -384,6 +386,14 @@ async fn main() -> Result<()> {
             extension_loop_idle(&client, &r).await
         }
     }
+}
+
+// Ustr initialization can take 10+ ms.
+// Start it early in a separate thread so it won't become a bottleneck later when SortedTags::parse() is called.
+fn init_ustr() {
+    tokio::spawn(async {
+        Ustr::from("");
+    });
 }
 
 fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
@@ -483,6 +493,7 @@ async fn extension_loop_active(
         event_bus.get_sender_copy(),
     );
 
+    let metrics_aggr_init_start_time = Instant::now();
     let metrics_aggr = Arc::new(Mutex::new(
         MetricsAggregator::new(
             SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
@@ -490,6 +501,13 @@ async fn extension_loop_active(
         )
         .expect("failed to create aggregator"),
     ));
+    debug!(
+        "Metrics aggregator created in {:} microseconds",
+        metrics_aggr_init_start_time
+            .elapsed()
+            .as_micros()
+            .to_string()
+    );
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),

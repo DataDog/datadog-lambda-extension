@@ -128,7 +128,10 @@ impl Flusher {
                     let status = resp.status();
                     _ = resp.text().await;
                     if status == StatusCode::FORBIDDEN {
-                        error!("No more retries as the access was rejected");
+                        // Access denied. Stop retrying.
+                        error!(
+                            "Failed to send logs to Datadog: Access denied. Please verify that your API key is valid."
+                        );
                         return Ok(());
                     }
                     if status == 202 {

@@ -565,6 +565,7 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-subscriber",
+ "ustr",
  "zstd",
 ]
 
