@@ -1,13 +1,12 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
-use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc::Sender, watch};
 use tracing::{debug, warn};
@@ -89,7 +88,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
+        enhanced_metrics: EnhancedMetrics,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -109,7 +108,7 @@ impl Processor {
                 config.trace_aws_service_representation_enabled,
             ),
             propagator,
-            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
+            enhanced_metrics,
             aws_config,
             tracer_detected: false,
             runtime: None,
@@ -1001,6 +1000,7 @@ mod tests {
     use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator::Aggregator;
     use dogstatsd::metric::EMPTY_TAGS;
+    use std::sync::Mutex;
 
     fn setup() -> Processor {
         let aws_config = Arc::new(AwsConfig {
@@ -1028,7 +1028,8 @@ mod tests {
             Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
         ));
 
-        Processor::new(tags_provider, config, aws_config, metrics_aggregator)
+        let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config));
+        Processor::new(tags_provider, config, aws_config, enhanced_metrics)
     }
 
     #[test]

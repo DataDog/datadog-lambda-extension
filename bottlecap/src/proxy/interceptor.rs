@@ -386,7 +386,10 @@ mod tests {
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
 
-    use crate::{LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider};
+    use crate::{
+        LAMBDA_RUNTIME_SLUG, config::Config, metrics::enhanced::lambda::Lambda as enhanced_metrics,
+        tags::provider::Provider,
+    };
 
     use super::*;
 
@@ -436,11 +439,13 @@ mod tests {
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
         });
+        let enhanced_metrics =
+            enhanced_metrics::new(Arc::clone(&metrics_aggregator), Arc::clone(&config));
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             Arc::clone(&aws_config),
-            metrics_aggregator,
+            enhanced_metrics,
         )));
 
         let proxy_handle =

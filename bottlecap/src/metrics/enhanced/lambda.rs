@@ -78,7 +78,7 @@ impl Lambda {
         }
 
         let mut combined_tags = self.dynamic_value_tags.clone();
-        combined_tags.extend(additional_tags.iter().map(|(k, v)| (k.clone(), v.clone())));
+        combined_tags.extend(additional_tags.clone());
 
         Self::tags_to_sorted_tags(&combined_tags)
     }
@@ -105,14 +105,14 @@ impl Lambda {
         self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
     }
 
-    /// Emits a metric tracking configuration load issue with details
-    pub fn emit_config_load_issue_metric(&self, timestamp: i64, reason_msg: &str) {
+    /// Set up a metric tracking configuration load issue with details
+    pub fn set_config_load_issue_metric(&self, timestamp: i64, reason_msg: &str) {
         let dynamic_tags = self.get_combined_tags(&HashMap::from([(
             "reason".to_string(),
             reason_msg.to_string(),
         )]));
         self.increment_metric_with_tags(
-            constants::CONFIG_ISSUE_DD_SLVS_EXTENSION_FAILOVER,
+            constants::DATADOG_SERVERLESS_EXTENSION_FAILOVER_CONFIG_ISSUE_METRIC,
             timestamp,
             dynamic_tags,
         );
@@ -852,9 +852,19 @@ mod tests {
         value: f64,
         timestamp: i64,
     ) {
+        assert_sketch_with_tag(aggregator_mutex, metric_id, value, timestamp, None);
+    }
+
+    fn assert_sketch_with_tag(
+        aggregator_mutex: &Mutex<Aggregator>,
+        metric_id: &str,
+        value: f64,
+        timestamp: i64,
+        tags: Option<SortedTags>,
+    ) {
         let ts = (timestamp / 10) * 10;
         let aggregator = aggregator_mutex.lock().unwrap();
-        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None, ts) {
+        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &tags, ts) {
             let metric = e.value.get_sketch().unwrap();
             assert!((metric.max().unwrap() - value).abs() < PRECISION);
             assert!((metric.min().unwrap() - value).abs() < PRECISION);
@@ -1361,6 +1371,31 @@ mod tests {
         assert!(
             aggr.get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn test_set_config_load_issue_metric() {
+        let (metrics_aggr, my_config) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+        let test_reason = "test_config_issue";
+
+        lambda.set_config_load_issue_metric(now, test_reason);
+
+        // Create the expected tags for the metric lookup
+        let expected_tags = SortedTags::parse(&format!("reason:{test_reason}")).ok();
+        assert_sketch_with_tag(
+            &metrics_aggr,
+            constants::DATADOG_SERVERLESS_EXTENSION_FAILOVER_CONFIG_ISSUE_METRIC,
+            1f64,
+            now,
+            expected_tags,
         );
     }
 }

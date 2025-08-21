@@ -33,6 +33,7 @@ use bottlecap::{
     },
     logger,
     logs::{agent::LogsAgent, flusher::LogsFlusher},
+    metrics::enhanced::lambda::Lambda as enhanced_metrics,
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -386,11 +387,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>)
     let aws_credentials = AwsCredentials::from_env();
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = {
-        let config = config::get_config(Path::new(&lambda_directory));
-        // Add fallback reasons to config_errors
-        Arc::new(config)
-    };
+    let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
     (aws_config, aws_credentials, config)
 }
 
@@ -482,35 +479,28 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
 
+    let metrics_intake_url = create_metrics_intake_url_prefix(config);
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &metrics_aggr,
+        &metrics_intake_url,
         config,
     )));
 
-    // Send config error metrics if config loading failed (non-blocking)
+    // Create lambda enhanced metrics instance once
+    let lambda_enhanced_metrics =
+        enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
+
+    // Send config issue metrics
     let config_issues = config::fallback(config);
-    if !config_issues.is_empty() {
-        let config_clone = Arc::clone(config);
-        let api_key_factory_clone = Arc::clone(&api_key_factory);
-        let tags_provider_clone = Arc::clone(&tags_provider);
-        tokio::spawn(async move {
-            send_config_issue_metric(
-                &config_issues,
-                &config_clone,
-                api_key_factory_clone,
-                &tags_provider_clone,
-            )
-            .await;
-        });
-    }
+    send_config_issue_metric(&config_issues, &lambda_enhanced_metrics);
 
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
         Arc::clone(config),
         Arc::clone(&aws_config),
-        Arc::clone(&metrics_aggr),
+        lambda_enhanced_metrics,
     )));
 
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
@@ -995,16 +985,15 @@ fn create_metrics_intake_url_prefix(config: &Config) -> MetricsIntakeUrlPrefix {
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
     metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
+    metrics_intake_url: &MetricsIntakeUrlPrefix,
     config: &Arc<Config>,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
-    let metrics_intake_url = create_metrics_intake_url_prefix(config);
-
     let flusher_config = MetricsFlusherConfig {
         api_key_factory,
         aggregator: Arc::clone(metrics_aggr),
-        metrics_intake_url_prefix: metrics_intake_url,
+        metrics_intake_url_prefix: metrics_intake_url.clone(),
         https_proxy: config.proxy_https.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
         retry_strategy: DsdRetryStrategy::Immediate(3),
@@ -1129,34 +1118,13 @@ fn start_trace_agent(
 
 /// Sends metrics indicating issue with configuration.
 ///
-/// This function creates a separate metrics aggregator and flusher to ensure the
-/// config failure metrics are sent even when the main config loading process fails.
-/// Each error message is sent as a separate metric with the issue included as a tag.
-///
 /// # Arguments
 /// * `issue_reasons` - Vector of messages describing the issue with the configurations
-/// * `config` - The config instance (from fallback compatibility agent)
-/// * `api_key_factory` - Factory for creating API keys for metric submission
-/// * `tags_provider` - Provider for getting standard tags to include with the metrics
-async fn send_config_issue_metric(
-    issue_reasons: &[String],
-    config: &Arc<Config>,
-    api_key_factory: Arc<ApiKeyFactory>,
-    tags_provider: &Arc<TagProvider>,
-) {
-    use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
-
-    // Create a separate aggregator for config error metrics
-    let config_issue_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::new(
-            SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
-            CONTEXTS,
-        )
-        .expect("failed to create config issue aggregator"),
-    ));
-
-    let lambda_enhanced_metrics =
-        enhanced_metrics::new(Arc::clone(&config_issue_aggr), Arc::clone(config));
+/// * `lambda_enhanced_metrics` - The lambda enhanced metrics instance
+fn send_config_issue_metric(issue_reasons: &[String], lambda_enhanced_metrics: &enhanced_metrics) {
+    if issue_reasons.is_empty() {
+        return;
+    }
     let now = std::time::UNIX_EPOCH
         .elapsed()
         .expect("can't poll clock")
@@ -1164,23 +1132,10 @@ async fn send_config_issue_metric(
         .try_into()
         .unwrap_or_default();
 
-    // Emit a separate metric for each config issue reason
+    // Setup a separate metric for each config issue reason
     for issue_reason in issue_reasons {
-        lambda_enhanced_metrics.emit_config_load_issue_metric(now, issue_reason);
+        lambda_enhanced_metrics.set_config_load_issue_metric(now, issue_reason);
     }
-
-    let metrics_intake_url = create_metrics_intake_url_prefix(config);
-
-    let flusher_config = MetricsFlusherConfig {
-        api_key_factory,
-        aggregator: config_issue_aggr,
-        metrics_intake_url_prefix: metrics_intake_url,
-        https_proxy: config.proxy_https.clone(),
-        timeout: Duration::from_secs(config.flush_timeout),
-        retry_strategy: DsdRetryStrategy::Immediate(1),
-    };
-    let mut metrics_flusher = MetricsFlusher::new(flusher_config);
-    let _ = metrics_flusher.flush().await;
 }
 
 async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {
