@@ -3,8 +3,7 @@ ARG DATADOG_WRAPPER=datadog_wrapper
 ARG FILE_SUFFIX
 
 # Install dependencies
-RUN apt-get update
-RUN apt-get install -y zip binutils wget tar xz-utils
+RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends zip binutils wget tar xz-utils
 
 # UPX installation directly from GitHub
 ENV UPX_VERSION=5.0.0
@@ -19,24 +18,21 @@ RUN ARCH=$(uname -m) && \
     mv upx-${UPX_VERSION}-${ARCH_NAME}_linux/upx /usr/local/bin/ && \
     rm -rf upx-${UPX_VERSION}-${ARCH_NAME}_linux upx-${UPX_VERSION}-${ARCH_NAME}_linux.tar.xz
 
-# Copy Go Agent binary
-COPY .binaries/datadog-agent-$FILE_SUFFIX /datadog-agent-go
-
-# UPX compress
-RUN upx -1 /datadog-agent-go
-
 RUN mkdir /extensions
 WORKDIR /extensions
 
 # Copy Rust Agent binary
 COPY .binaries/bottlecap-$FILE_SUFFIX /extensions/datadog-agent
 
+# UPX compress
+RUN upx -1 /extensions/datadog-agent
+
 # Copy wrapper script
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
 
 # Zip all binaries together
-RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER /datadog-agent-go
+RUN  zip -r datadog_extension.zip /extensions /$DATADOG_WRAPPER
 
 # Use smallest image possible
 FROM scratch
