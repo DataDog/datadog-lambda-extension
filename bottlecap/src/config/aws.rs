@@ -1,4 +1,4 @@
-use std::{env, time::Instant};
+use std::{collections::HashMap, env, time::Instant};
 
 const AWS_DEFAULT_REGION: &str = "AWS_DEFAULT_REGION";
 const AWS_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
@@ -24,14 +24,25 @@ pub struct AwsConfig {
 
 impl AwsConfig {
     #[must_use]
-    pub fn from_env(start_time: Instant) -> Self {
+    pub fn from_env(envs: &HashMap<String, String>, start_time: Instant) -> Self {
+        let region = envs.get(AWS_DEFAULT_REGION).unwrap_or(&"us-east-1".to_string()).clone();
+        eprintln!("Got region. {:?} ms", start_time.elapsed().as_millis().to_string());
+        let function_name = envs.get(AWS_LAMBDA_FUNCTION_NAME).unwrap_or(&String::new()).clone();
+        eprintln!("Got function_name. {:?} ms", start_time.elapsed().as_millis().to_string());
+        let runtime_api = envs.get(AWS_LAMBDA_RUNTIME_API).unwrap_or(&String::new()).clone();
+        eprintln!("Got runtime_api. {:?} ms", start_time.elapsed().as_millis().to_string());
+        let exec_wrapper = envs.get(AWS_LAMBDA_EXEC_WRAPPER).cloned();
+        eprintln!("Got exec_wrapper. {:?} ms", start_time.elapsed().as_millis().to_string());
+        let aws_lwa_proxy_lambda_runtime_api = envs.get(AWS_LWA_LAMBDA_RUNTIME_API_PROXY).cloned();
+        eprintln!("Got aws_lwa_proxy_lambda_runtime_api. {:?} ms", start_time.elapsed().as_millis().to_string());
+
         Self {
-            region: env::var(AWS_DEFAULT_REGION).unwrap_or("us-east-1".to_string()),
-            aws_lwa_proxy_lambda_runtime_api: env::var(AWS_LWA_LAMBDA_RUNTIME_API_PROXY).ok(),
-            function_name: env::var(AWS_LAMBDA_FUNCTION_NAME).unwrap_or_default(),
-            runtime_api: env::var(AWS_LAMBDA_RUNTIME_API).unwrap_or_default(),
+            region: region.clone(),
+            aws_lwa_proxy_lambda_runtime_api,
+            function_name,
+            runtime_api,
             sandbox_init_time: start_time,
-            exec_wrapper: env::var(AWS_LAMBDA_EXEC_WRAPPER).ok(),
+            exec_wrapper,
         }
     }
 }
@@ -48,15 +59,15 @@ pub struct AwsCredentials {
 
 impl AwsCredentials {
     #[must_use]
-    pub fn from_env() -> Self {
+    pub fn from_env(envs: &HashMap<String, String>) -> Self {
         Self {
-            aws_access_key_id: env::var(AWS_ACCESS_KEY_ID).unwrap_or_default(),
-            aws_secret_access_key: env::var(AWS_SECRET_ACCESS_KEY).unwrap_or_default(),
-            aws_session_token: env::var(AWS_SESSION_TOKEN).unwrap_or_default(),
-            aws_container_credentials_full_uri: env::var(AWS_CONTAINER_CREDENTIALS_FULL_URI)
-                .unwrap_or_default(),
-            aws_container_authorization_token: env::var(AWS_CONTAINER_AUTHORIZATION_TOKEN)
-                .unwrap_or_default(),
+            aws_access_key_id: envs.get(AWS_ACCESS_KEY_ID).unwrap_or(&String::new()).clone(),
+            aws_secret_access_key: envs.get(AWS_SECRET_ACCESS_KEY).unwrap_or(&String::new()).clone(),
+            aws_session_token: envs.get(AWS_SESSION_TOKEN).unwrap_or(&String::new()).clone(),
+            aws_container_credentials_full_uri: envs.get(AWS_CONTAINER_CREDENTIALS_FULL_URI)
+                .unwrap_or(&String::new()).clone(),
+            aws_container_authorization_token: envs.get(AWS_CONTAINER_AUTHORIZATION_TOKEN)
+                .unwrap_or(&String::new()).clone(),
         }
     }
 }

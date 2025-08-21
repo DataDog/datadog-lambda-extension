@@ -331,15 +331,33 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // // Visible CPUs
+    // eprintln!("visible_cpus(std)       = {}", visible_cpus_std());
+    // if let Some(n) = visible_cpus_proc() {
+    //     eprintln!("visible_cpus(/proc)     = {}", n);
+    // }
+
+    // // Effective vCPU entitlement from cgroups (quota/period)
+    // match effective_vcpus() {
+    //     Some(v) => eprintln!("effective_vcpus(cgroup) = {:.3}", v),
+    //     None => eprintln!("effective_vcpus(cgroup) = <unknown>"),
+    // }
+
+    eprintln!("workers={}", tokio::runtime::Handle::current().metrics().num_workers());
+
     let start_time = Instant::now();
     init_ustr();
+    eprintln!("init_ustr done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let (aws_config, aws_credentials, config) = load_configs(start_time);
+    eprintln!("load_configs done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
-    enable_logging_subsystem(&config);
+    enable_logging_subsystem(&config, start_time);
+    debug!("Logging subsystem enabled: {:?} ms", start_time.elapsed().as_millis().to_string());
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
     prepare_client_provider()?;
+    debug!("prepare_client_provider done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let client = create_reqwest_client_builder()
         .map_err(|e| {
             Error::new(
@@ -355,14 +373,14 @@ async fn main() -> Result<()> {
                 format!("Failed to create client: {e:?}"),
             )
         })?;
-
+    debug!("create_reqwest_client_builder done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-
+    debug!("register done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, aws_credentials);
-
+    debug!("create_api_key_factory done: {:?} ms", start_time.elapsed().as_millis().to_string());
     match extension_loop_active(
         Arc::clone(&aws_config),
         &config,
@@ -393,12 +411,21 @@ fn init_ustr() {
 }
 
 fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
+    let envs = env::vars().collect::<HashMap<String, String>>();
+
     // First load the AWS configuration
-    let aws_config = AwsConfig::from_env(start_time);
-    let aws_credentials = AwsCredentials::from_env();
+    let aws_config = AwsConfig::from_env(&envs, start_time);
+    eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
+    let aws_credentials = AwsCredentials::from_env(&envs);
+    eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory)) {
+        eprintln!("lambda_directory done: {:?} ms", start_time.elapsed().as_millis().to_string());
+    let path = Path::new(&lambda_directory);
+    eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
+    let config = config::get_config(path, start_time);
+    eprintln!("config::get_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
+    let config = match config {
         Ok(config) => Arc::new(config),
         Err(_e) => {
             let err = Command::new("/opt/datadog-agent-go").exec();
@@ -409,11 +436,12 @@ fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>)
     (aws_config, aws_credentials, config)
 }
 
-fn enable_logging_subsystem(config: &Arc<Config>) {
+fn enable_logging_subsystem(config: &Arc<Config>, start_time: Instant) {
     let env_filter = format!(
         "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
         config.log_level
     );
+    eprintln!("env_filter created: {:?} ms", start_time.elapsed().as_millis().to_string());
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
             EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
@@ -427,6 +455,7 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
         .without_time()
         .event_format(logger::Formatter)
         .finish();
+    eprintln!("subscriber created: {:?} ms", start_time.elapsed().as_millis().to_string());
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     debug!("Logging subsystem enabled");
@@ -464,6 +493,70 @@ async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()
     }
 }
 
+// fn visible_cpus_std() -> usize {
+//     std::thread::available_parallelism()
+//         .map(NonZeroUsize::get)
+//         .unwrap_or(1)
+// }
+
+// fn visible_cpus_proc() -> Option<usize> {
+//     let s = fs::read_to_string("/proc/cpuinfo").ok()?;
+//     let count = s.lines().filter(|l| l.starts_with("processor")).count();
+//     if count > 0 { Some(count) } else { None }
+// }
+
+// /// Try to read effective vCPUs from cgroup v2: /sys/fs/cgroup/cpu.max
+// /// Format: "<quota> <period>" or "max <period>"
+// fn vcpus_from_cgroup_v2() -> Option<f64> {
+//     let path = "/sys/fs/cgroup/cpu.max";
+//     if !Path::new(path).exists() {
+//         return None;
+//     }
+//     let s = fs::read_to_string(path).ok()?;
+//     // e.g., "100000 100000" => 1.0 vCPU; "200000 100000" => 2.0; "max 100000" => unlimited
+//     let mut parts = s.split_whitespace();
+//     let quota = parts.next()?;
+//     let period = parts.next()?.parse::<f64>().ok()?;
+//     if quota == "max" {
+//         None // unlimited; not typical on Lambda
+//     } else {
+//         let q = quota.parse::<f64>().ok()?;
+//         Some(q / period)
+//     }
+// }
+
+// /// Try to read effective vCPUs from cgroup v1:
+// ///   /sys/fs/cgroup/cpu/cpu.cfs_quota_us
+// ///   /sys/fs/cgroup/cpu/cpu.cfs_period_us
+// fn vcpus_from_cgroup_v1() -> Option<f64> {
+//     // Common candidate directories
+//     let bases = [
+//         "/sys/fs/cgroup/cpu",                 // classic
+//         "/sys/fs/cgroup/cpu,cpuacct",         // some distros
+//     ];
+
+//     for base in bases {
+//         let quota_p = format!("{}/cpu.cfs_quota_us", base);
+//         let period_p = format!("{}/cpu.cfs_period_us", base);
+//         if Path::new(&quota_p).exists() && Path::new(&period_p).exists() {
+//             let quota_s = fs::read_to_string(&quota_p).ok()?.trim().to_string();
+//             let period_s = fs::read_to_string(&period_p).ok()?.trim().to_string();
+//             let quota = quota_s.parse::<f64>().ok()?;
+//             let period = period_s.parse::<f64>().ok()?;
+//             if quota > 0.0 && period > 0.0 {
+//                 return Some(quota / period);
+//             }
+//         }
+//     }
+//     None
+// }
+
+// /// Best-effort detection of effective vCPUs using cgroup data.
+// /// Returns None if not determinable.
+// fn effective_vcpus() -> Option<f64> {
+//     vcpus_from_cgroup_v2().or_else(vcpus_from_cgroup_v1())
+// }
+
 #[allow(clippy::too_many_lines)]
 async fn extension_loop_active(
     aws_config: Arc<AwsConfig>,
@@ -481,14 +574,14 @@ async fn extension_loop_active(
         .unwrap_or(&"none".to_string())
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
-
+    debug!("setup_tag_provider done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
         Arc::clone(&api_key_factory),
         &tags_provider,
         event_bus.get_sender_copy(),
     );
-
+    debug!("start_logs_agent done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let metrics_aggr_init_start_time = Instant::now();
     let metrics_aggr = Arc::new(Mutex::new(
         MetricsAggregator::new(
@@ -504,12 +597,14 @@ async fn extension_loop_active(
             .as_micros()
             .to_string()
     );
+    debug!("Metrics aggregator init done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &metrics_aggr,
         config,
     )));
+    debug!("Metrics flushers done: {:?} ms", start_time.elapsed().as_millis().to_string());
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -517,7 +612,7 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
     )));
-
+    debug!("Invocation processor done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (
         trace_agent_channel,
@@ -533,10 +628,10 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
         Arc::clone(&trace_aggregator),
     );
-
+    debug!("Trace agent done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let api_runtime_proxy_shutdown_signal =
         start_api_runtime_proxy(config, aws_config, &invocation_processor);
-
+    debug!("API runtime proxy done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
     };
@@ -547,22 +642,22 @@ async fn extension_loop_active(
             error!("Error starting hello agent: {e:?}");
         }
     });
-
+    debug!("Lifecycle listener done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
-
+    debug!("Dogstatsd done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
-
+    debug!("Telemetry client done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let otlp_cancel_token = start_otlp_agent(
         config,
         tags_provider.clone(),
         trace_processor.clone(),
         trace_agent_channel.clone(),
     );
-
+    debug!("OTLP agent done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut flush_control =
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
-
+    debug!("Flush control done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 

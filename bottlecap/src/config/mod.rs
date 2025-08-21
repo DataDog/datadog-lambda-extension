@@ -32,6 +32,8 @@ use crate::config::{
     yaml::YamlConfigSource,
 };
 
+use std::time::Instant;
+
 /// Helper macro to merge Option<String> fields to String fields
 ///
 /// Providing one field argument will merge the value from the source config field into the config
@@ -165,9 +167,14 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn build(&mut self) -> Config {
+    pub fn build(&mut self, start_time: Instant) -> Config {
         let mut failed_sources = 0;
         for source in &self.sources {
+            eprintln!(
+                "Loading a source: {}, {:?}",
+                std::any::type_name_of_val(&source),
+                start_time.elapsed().as_millis().to_string()
+            );
             match source.load(&mut self.config) {
                 Ok(()) => (),
                 Err(e) => {
@@ -176,6 +183,7 @@ impl ConfigBuilder {
                 }
             }
         }
+        eprintln!("sources loaded: {:?} ms", start_time.elapsed().as_millis().to_string());
 
         if !self.sources.is_empty() && failed_sources == self.sources.len() {
             debug!("All sources failed to load config, using default config.");
@@ -185,6 +193,8 @@ impl ConfigBuilder {
             self.config.site = "datadoghq.com".to_string();
         }
 
+        eprintln!("config.site checked: {:?}", start_time.elapsed().as_millis().to_string());
+
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
         if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
@@ -192,6 +202,8 @@ impl ConfigBuilder {
                 self.config.proxy_https = Some(https_proxy);
             }
         }
+
+        eprintln!("proxy_https checked: {:?}", start_time.elapsed().as_millis().to_string());
 
         // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable
         // or in the `proxy_no_proxy` config field.
@@ -208,6 +220,8 @@ impl ConfigBuilder {
             }
         }
 
+        eprintln!("proxy_no_proxy checked: {:?}", start_time.elapsed().as_millis().to_string());
+
         // If extraction is not set, set it to the same as the propagation style
         if self.config.trace_propagation_style_extract.is_empty() {
             self.config
@@ -215,10 +229,14 @@ impl ConfigBuilder {
                 .clone_from(&self.config.trace_propagation_style);
         }
 
+        eprintln!("trace_propagation_style_extract checked: {:?}", start_time.elapsed().as_millis().to_string());
+
         // If Logs URL is not set, set it to the default
         if self.config.logs_config_logs_dd_url.is_empty() {
             self.config.logs_config_logs_dd_url = build_fqdn_logs(self.config.site.clone());
         }
+
+        eprintln!("logs_config_logs_dd_url checked: {:?}", start_time.elapsed().as_millis().to_string());
 
         // If APM URL is not set, set it to the default
         if self.config.apm_dd_url.is_empty() {
@@ -227,6 +245,8 @@ impl ConfigBuilder {
             // If APM URL is set, add the site to the URL
             self.config.apm_dd_url = trace_intake_url_prefixed(self.config.apm_dd_url.as_str());
         }
+
+        eprintln!("apm_dd_url checked: {:?}", start_time.elapsed().as_millis().to_string());
 
         self.config.clone()
     }
@@ -484,15 +504,19 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
+pub fn get_config(config_directory: &Path, start_time: Instant) -> Result<Config, ConfigError> {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
+    eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut config_builder = ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))
         .add_source(Box::new(EnvConfigSource));
 
-    let config = config_builder.build();
+    eprintln!("config_builder created: {:?} ms", start_time.elapsed().as_millis().to_string());
+    let config = config_builder.build(start_time);
+    eprintln!("config_builder.build() done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     fallback(&config)?;
+    eprintln!("fallback(&config) done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     Ok(config)
 }
