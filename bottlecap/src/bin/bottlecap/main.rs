@@ -498,10 +498,10 @@ async fn extension_loop_active(
         .expect("failed to create aggregator"),
     ));
     debug!(
-        "Metrics aggregator created in {:} ms",
+        "Metrics aggregator created in {:} microseconds",
         metrics_aggr_init_start_time
             .elapsed()
-            .as_millis()
+            .as_micros()
             .to_string()
     );
 
