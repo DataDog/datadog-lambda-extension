@@ -21,8 +21,10 @@ use datadog_trace_utils::trace_utils::{self};
 use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
 use ddcommon::Endpoint;
+use regex::Regex;
 use std::str::FromStr;
 use std::sync::Arc;
+use tracing::debug;
 use tracing::error;
 
 use super::trace_aggregator::SendDataBuilderInfo;
@@ -34,6 +36,7 @@ pub struct ServerlessTraceProcessor {
 }
 
 struct ChunkProcessor {
+    config: Arc<config::Config>,
     obfuscation_config: Arc<obfuscation_config::ObfuscationConfig>,
     tags_provider: Arc<provider::Provider>,
     span_pointers: Option<Vec<SpanPointer>>,
@@ -41,6 +44,13 @@ struct ChunkProcessor {
 
 impl TraceChunkProcessor for ChunkProcessor {
     fn process(&mut self, chunk: &mut pb::TraceChunk, root_span_index: usize) {
+        if let Some(root_span) = chunk.spans.get(root_span_index) {
+            if filter_span_by_tags(root_span, &self.config) {
+                chunk.spans.clear();
+                return;
+            }
+        }
+
         chunk
             .spans
             .retain(|span| !filter_span_from_lambda_library_or_runtime(span));
@@ -70,6 +80,113 @@ impl TraceChunkProcessor for ChunkProcessor {
             attach_span_pointers_to_meta(&mut span.meta, &self.span_pointers);
         }
     }
+}
+
+fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
+    // Handle required tags from DD_APM_FILTER_TAGS_REQUIRE
+    if let Some(require_tags) = &config.apm_filter_tags_require {
+        if !require_tags.is_empty() {
+            let matches_require = require_tags
+                .iter()
+                .all(|filter| span_matches_tag(span, filter, config));
+            if !matches_require {
+                debug!(
+                    "Filtering out span '{}' - doesn't match all required tags {}",
+                    span.name,
+                    require_tags.join(", ")
+                );
+                return true;
+            }
+        }
+    }
+    // Handle reject tags from DD_APM_FILTER_TAGS_REJECT
+    if let Some(reject_tags) = &config.apm_filter_tags_reject {
+        if !reject_tags.is_empty() {
+            let matches_reject = reject_tags
+                .iter()
+                .any(|filter| span_matches_tag(span, filter, config));
+            if matches_reject {
+                debug!(
+                    "Filtering out span '{}' - matches reject tags {}",
+                    span.name,
+                    reject_tags.join(", ")
+                );
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn span_matches_tag(span: &Span, filter: &str, config: &config::Config) -> bool {
+    let parts: Vec<&str> = filter.splitn(2, ':').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+
+    let key = parts[0].trim();
+    let value = parts[1].trim();
+
+    if config.apm_filter_tags_regex_reject {
+        span_matches_tag_regex(span, key, value)
+    } else {
+        span_matches_tag_exact(span, key, value)
+    }
+}
+
+fn span_matches_tag_exact(span: &Span, key: &str, value: &str) -> bool {
+    if let Some(span_value) = span.meta.get(key) {
+        if span_value == value {
+            return true;
+        }
+    }
+
+    let span_property_value = match key {
+        "name" => Some(&span.name),
+        "service" => Some(&span.service),
+        "resource" => Some(&span.resource),
+        "type" => Some(&span.r#type),
+        _ => None,
+    };
+
+    if let Some(prop_value) = span_property_value {
+        if prop_value == value {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn span_matches_tag_regex(span: &Span, key: &str, value: &str) -> bool {
+    let Ok(regex) = Regex::new(value) else {
+        debug!(
+            "Invalid regex pattern '{}' for key '{}', treating as non-match",
+            value, key
+        );
+        return false;
+    };
+
+    if let Some(span_value) = span.meta.get(key) {
+        if regex.is_match(span_value) {
+            return true;
+        }
+    }
+
+    let span_property_value = match key {
+        "name" => Some(&span.name),
+        "service" => Some(&span.service),
+        "resource" => Some(&span.resource),
+        "type" => Some(&span.r#type),
+        _ => None,
+    };
+    if let Some(prop_value) = span_property_value {
+        if regex.is_match(prop_value) {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
@@ -149,6 +266,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             traces,
             &header_tags,
             &mut ChunkProcessor {
+                config: config.clone(),
                 obfuscation_config: self.obfuscation_config.clone(),
                 tags_provider: tags_provider.clone(),
                 span_pointers,
@@ -300,7 +418,9 @@ mod tests {
         };
 
         let trace_processor = ServerlessTraceProcessor {
-            obfuscation_config: Arc::new(ObfuscationConfig::new().unwrap()),
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
@@ -343,6 +463,420 @@ mod tests {
         assert_eq!(
             expected_tracer_payload,
             received_payload.expect("no payload received")
+        );
+    }
+
+    #[test]
+    fn test_span_matches_tag_exact() {
+        let span = Span {
+            service: "my-service".to_string(),
+            meta: {
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("env".to_string(), "production".to_string());
+                meta
+            },
+            ..Default::default()
+        };
+
+        assert!(span_matches_tag_exact(&span, "env", "production"));
+        assert!(!span_matches_tag_exact(&span, "env", "development"));
+
+        assert!(span_matches_tag_exact(&span, "service", "my-service"));
+        assert!(!span_matches_tag_exact(&span, "service", "other-service"));
+    }
+
+    #[test]
+    fn test_span_matches_tag_regex() {
+        let span = Span {
+            service: "user-service".to_string(),
+            meta: {
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("env".to_string(), "production".to_string());
+                meta
+            },
+            ..Default::default()
+        };
+
+        // Test regex matching for meta tags
+        assert!(span_matches_tag_regex(&span, "env", r"prod.*"));
+        assert!(!span_matches_tag_regex(&span, "env", r"dev.*"));
+
+        // Test regex matching for span properties
+        assert!(span_matches_tag_regex(&span, "service", r".*-service"));
+        assert!(!span_matches_tag_regex(&span, "service", r"api-.*"));
+
+        // Test invalid regex patterns
+        assert!(!span_matches_tag_regex(&span, "env", r"[unclosed"));
+    }
+
+    #[test]
+    fn test_span_matches_tag_with_config() {
+        let span = Span {
+            service: "user-service".to_string(),
+            meta: {
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("env".to_string(), "test-environment".to_string());
+                meta
+            },
+            ..Default::default()
+        };
+
+        // Test with regex disabled (exact matching)
+        let config_no_regex = Config {
+            apm_filter_tags_regex_reject: false,
+            ..Default::default()
+        };
+
+        assert!(span_matches_tag(
+            &span,
+            "env:test-environment",
+            &config_no_regex
+        ));
+        assert!(!span_matches_tag(&span, "env:test", &config_no_regex));
+
+        // Test with regex enabled
+        let config_regex = Config {
+            apm_filter_tags_regex_reject: true,
+            ..Default::default()
+        };
+
+        assert!(span_matches_tag(&span, r"env:test.*", &config_regex));
+        assert!(span_matches_tag(
+            &span,
+            r"service:.*-service",
+            &config_regex
+        ));
+        assert!(!span_matches_tag(&span, r"env:prod.*", &config_regex));
+    }
+
+    #[test]
+    fn test_filter_span_require_tags() {
+        let config = Config {
+            apm_filter_tags_require: Some(vec![
+                "env:production".to_string(),
+                "service:api".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        // Span that matches ALL of the require tags
+        let mut span_match_all = Span::default();
+        span_match_all
+            .meta
+            .insert("env".to_string(), "production".to_string());
+        span_match_all
+            .meta
+            .insert("service".to_string(), "api".to_string());
+        assert!(!filter_span_by_tags(&span_match_all, &config));
+
+        // Span that matches only one of the require tags
+        let mut span_partial_match = Span::default();
+        span_partial_match
+            .meta
+            .insert("env".to_string(), "production".to_string());
+        assert!(filter_span_by_tags(&span_partial_match, &config));
+
+        // Span that doesn't match any require tags
+        let mut span_no_match = Span::default();
+        span_no_match
+            .meta
+            .insert("env".to_string(), "development".to_string());
+        assert!(filter_span_by_tags(&span_no_match, &config));
+    }
+
+    #[test]
+    fn test_filter_span_reject_tags() {
+        let config = Config {
+            apm_filter_tags_reject: Some(vec!["debug:true".to_string(), "env:test".to_string()]),
+            ..Default::default()
+        };
+
+        // Span that matches a reject tag
+        let mut span_reject = Span::default();
+        span_reject
+            .meta
+            .insert("debug".to_string(), "true".to_string());
+        span_reject
+            .meta
+            .insert("env".to_string(), "production".to_string());
+        assert!(filter_span_by_tags(&span_reject, &config));
+
+        // Span that doesn't match any reject tags
+        let mut span_keep = Span::default();
+        span_keep
+            .meta
+            .insert("env".to_string(), "production".to_string());
+        assert!(!filter_span_by_tags(&span_keep, &config));
+    }
+
+    #[test]
+    fn test_filter_span_require_and_reject_tags() {
+        let config = Config {
+            apm_filter_tags_require: Some(vec!["env:production".to_string()]),
+            apm_filter_tags_reject: Some(vec!["debug:true".to_string()]),
+            ..Default::default()
+        };
+
+        // Span that matches require but also matches reject
+        let mut span_both = Span::default();
+        span_both
+            .meta
+            .insert("env".to_string(), "production".to_string());
+        span_both
+            .meta
+            .insert("debug".to_string(), "true".to_string());
+        assert!(filter_span_by_tags(&span_both, &config));
+
+        // Span that matches require and doesn't match reject
+        let mut span_good = Span::default();
+        span_good
+            .meta
+            .insert("env".to_string(), "production".to_string());
+        assert!(!filter_span_by_tags(&span_good, &config));
+    }
+
+    #[test]
+    fn test_root_span_filtering_drops_entire_trace() {
+        use crate::tags::provider::Provider;
+        use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use std::sync::Arc;
+
+        let root_span = pb::Span {
+            name: "lambda.invoke".to_string(),
+            service: "my-service".to_string(),
+            resource: "my-resource".to_string(),
+            trace_id: 123,
+            span_id: 456,
+            parent_id: 0,
+            start: 1000,
+            duration: 5000,
+            error: 0,
+            meta: {
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("env".to_string(), "test".to_string());
+                meta
+            },
+            metrics: std::collections::HashMap::new(),
+            r#type: String::new(),
+            span_links: vec![],
+            meta_struct: std::collections::HashMap::new(),
+        };
+
+        let child_span = pb::Span {
+            name: "child.operation".to_string(),
+            service: "my-service".to_string(),
+            resource: "child-resource".to_string(),
+            trace_id: 123,
+            span_id: 789,
+            parent_id: 456,
+            start: 1100,
+            duration: 1000,
+            error: 0,
+            meta: std::collections::HashMap::new(),
+            metrics: std::collections::HashMap::new(),
+            r#type: String::new(),
+            span_links: vec![],
+            meta_struct: std::collections::HashMap::new(),
+        };
+
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![root_span, child_span],
+            tags: std::collections::HashMap::new(),
+            dropped_trace: false,
+        };
+
+        let config = Arc::new(Config {
+            apm_filter_tags_reject: Some(vec!["env:test".to_string()]),
+            ..Default::default()
+        });
+
+        let mut processor = ChunkProcessor {
+            config: config.clone(),
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            tags_provider: Arc::new(Provider::new(
+                config,
+                "lambda".to_string(),
+                &std::collections::HashMap::from([(
+                    "function_arn".to_string(),
+                    "test-arn".to_string(),
+                )]),
+            )),
+            span_pointers: None,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans.len(),
+            0,
+            "Entire trace should be dropped when root span matches filter rules"
+        );
+    }
+
+    #[test]
+    fn test_root_span_filtering_allows_trace_when_no_match() {
+        use crate::tags::provider::Provider;
+        use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use std::sync::Arc;
+
+        let root_span = pb::Span {
+            name: "lambda.invoke".to_string(),
+            service: "my-service".to_string(),
+            resource: "my-resource".to_string(),
+            trace_id: 123,
+            span_id: 456,
+            parent_id: 0,
+            start: 1000,
+            duration: 5000,
+            error: 0,
+            meta: {
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("env".to_string(), "production".to_string());
+                meta
+            },
+            metrics: std::collections::HashMap::new(),
+            r#type: String::new(),
+            span_links: vec![],
+            meta_struct: std::collections::HashMap::new(),
+        };
+
+        let child_span = pb::Span {
+            name: "child.operation".to_string(),
+            service: "my-service".to_string(),
+            resource: "child-resource".to_string(),
+            trace_id: 123,
+            span_id: 789,
+            parent_id: 456,
+            start: 1100,
+            duration: 1000,
+            error: 0,
+            meta: std::collections::HashMap::new(),
+            metrics: std::collections::HashMap::new(),
+            r#type: String::new(),
+            span_links: vec![],
+            meta_struct: std::collections::HashMap::new(),
+        };
+
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![root_span, child_span],
+            tags: std::collections::HashMap::new(),
+            dropped_trace: false,
+        };
+
+        let config = Arc::new(Config {
+            apm_filter_tags_reject: Some(vec!["env:test".to_string()]),
+            ..Default::default()
+        });
+
+        let mut processor = ChunkProcessor {
+            config: config.clone(),
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            tags_provider: Arc::new(Provider::new(
+                config,
+                "lambda".to_string(),
+                &std::collections::HashMap::from([(
+                    "function_arn".to_string(),
+                    "test-arn".to_string(),
+                )]),
+            )),
+            span_pointers: None,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans.len(),
+            2,
+            "Trace should be kept when root span doesn't match filter rules"
+        );
+    }
+
+    #[test]
+    fn test_root_span_filtering_allows_trace_when_no_filter_tags() {
+        use crate::tags::provider::Provider;
+        use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use std::sync::Arc;
+
+        let root_span = pb::Span {
+            name: "lambda.invoke".to_string(),
+            service: "my-service".to_string(),
+            resource: "my-resource".to_string(),
+            trace_id: 123,
+            span_id: 456,
+            parent_id: 0,
+            start: 1000,
+            duration: 5000,
+            error: 0,
+            meta: {
+                let mut meta = std::collections::HashMap::new();
+                meta.insert("env".to_string(), "production".to_string());
+                meta
+            },
+            metrics: std::collections::HashMap::new(),
+            r#type: String::new(),
+            span_links: vec![],
+            meta_struct: std::collections::HashMap::new(),
+        };
+
+        let child_span = pb::Span {
+            name: "child.operation".to_string(),
+            service: "my-service".to_string(),
+            resource: "child-resource".to_string(),
+            trace_id: 123,
+            span_id: 789,
+            parent_id: 456,
+            start: 1100,
+            duration: 1000,
+            error: 0,
+            meta: std::collections::HashMap::new(),
+            metrics: std::collections::HashMap::new(),
+            r#type: String::new(),
+            span_links: vec![],
+            meta_struct: std::collections::HashMap::new(),
+        };
+
+        let mut chunk = pb::TraceChunk {
+            priority: 1,
+            origin: "lambda".to_string(),
+            spans: vec![root_span, child_span],
+            tags: std::collections::HashMap::new(),
+            dropped_trace: false,
+        };
+
+        let config = Arc::new(Config {
+            ..Default::default()
+        });
+
+        let mut processor = ChunkProcessor {
+            config: config.clone(),
+            obfuscation_config: Arc::new(
+                ObfuscationConfig::new().expect("Failed to create ObfuscationConfig"),
+            ),
+            tags_provider: Arc::new(Provider::new(
+                config,
+                "lambda".to_string(),
+                &std::collections::HashMap::from([(
+                    "function_arn".to_string(),
+                    "test-arn".to_string(),
+                )]),
+            )),
+            span_pointers: None,
+        };
+
+        processor.process(&mut chunk, 0);
+
+        assert_eq!(
+            chunk.spans.len(),
+            2,
+            "Trace should be kept when no filter tags are set."
         );
     }
 }

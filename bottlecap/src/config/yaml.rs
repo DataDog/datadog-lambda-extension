@@ -891,6 +891,9 @@ extension_version: "compatibility"
                 capture_lambda_payload_max_depth: 5,
                 serverless_appsec_enabled: true,
                 extension_version: Some("compatibility".to_string()),
+                apm_filter_tags_require: None,
+                apm_filter_tags_reject: None,
+                apm_filter_tags_regex_reject: false,
             };
 
             // Assert that

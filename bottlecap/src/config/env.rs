@@ -9,8 +9,9 @@ use crate::{
         Config, ConfigError, ConfigSource,
         additional_endpoints::deserialize_additional_endpoints,
         apm_replace_rule::deserialize_apm_replace_rules,
-        deserialize_array_from_comma_separated_string, deserialize_key_value_pairs,
-        deserialize_optional_bool_from_anything, deserialize_string_or_int,
+        deserialize_apm_filter_tags, deserialize_array_from_comma_separated_string,
+        deserialize_key_value_pairs, deserialize_optional_bool_from_anything,
+        deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
         logs_additional_endpoints::{
@@ -178,6 +179,25 @@ pub struct EnvConfig {
     /// <https://docs.datadoghq.com/agent/configuration/dual-shipping/?tab=helm#environment-variable-configuration-1>
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
     pub apm_additional_endpoints: HashMap<String, Vec<String>>,
+    /// @env `DD_APM_FILTER_TAGS_REQUIRE`
+    ///
+    /// Space-separated list of key:value tag pairs that spans must match to be kept.
+    /// Only spans matching at least one of these tags will be sent to Datadog.
+    /// Example: "env:production service:api-gateway"
+    #[serde(deserialize_with = "deserialize_apm_filter_tags")]
+    pub apm_filter_tags_require: Option<Vec<String>>,
+    /// @env `DD_APM_FILTER_TAGS_REJECT`
+    ///
+    /// Space-separated list of key:value tag pairs that will cause spans to be filtered out.
+    /// Spans matching any of these tags will be dropped.
+    /// Example: "env:development debug:true name:health.check"
+    #[serde(deserialize_with = "deserialize_apm_filter_tags")]
+    pub apm_filter_tags_reject: Option<Vec<String>>,
+    /// @env `DD_APM_FILTER_TAGS_REGEX_REJECT`
+    ///
+    /// Enable regex pattern matching for reject tag filters. Default is `false`.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub apm_filter_tags_regex_reject: Option<bool>,
     /// @env `DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED`
     ///
     /// Enable the new AWS-resource naming logic in the tracer.
@@ -367,6 +387,9 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, apm_config_compression_level);
     merge_vec!(config, env_config, apm_features);
     merge_hashmap!(config, env_config, apm_additional_endpoints);
+    merge_option!(config, env_config, apm_filter_tags_require);
+    merge_option!(config, env_config, apm_filter_tags_reject);
+    merge_option_to_value!(config, env_config, apm_filter_tags_regex_reject);
     merge_option_to_value!(config, env_config, trace_aws_service_representation_enabled);
 
     // Trace Propagation
@@ -560,6 +583,9 @@ mod tests {
                 "enable_otlp_compute_top_level_by_span_kind,enable_stats_by_span_kind",
             );
             jail.set_env("DD_APM_ADDITIONAL_ENDPOINTS", "{\"https://trace.agent.datadoghq.com\": [\"apikey2\", \"apikey3\"], \"https://trace.agent.datadoghq.eu\": [\"apikey4\"]}");
+            jail.set_env("DD_APM_FILTER_TAGS_REQUIRE", "env:production service:api");
+            jail.set_env("DD_APM_FILTER_TAGS_REJECT", "debug:true env:test");
+            jail.set_env("DD_APM_FILTER_TAGS_REGEX_REJECT", "true");
 
             // Trace Propagation
             jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog");
@@ -712,6 +738,15 @@ mod tests {
                         vec!["apikey4".to_string()],
                     ),
                 ]),
+                apm_filter_tags_require: Some(vec![
+                    "env:production".to_string(),
+                    "service:api".to_string(),
+                ]),
+                apm_filter_tags_reject: Some(vec![
+                    "debug:true".to_string(),
+                    "env:test".to_string(),
+                ]),
+                apm_filter_tags_regex_reject: true,
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,

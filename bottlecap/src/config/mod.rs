@@ -277,6 +277,9 @@ pub struct Config {
     pub apm_config_compression_level: i32,
     pub apm_features: Vec<String>,
     pub apm_additional_endpoints: HashMap<String, Vec<String>>,
+    pub apm_filter_tags_require: Option<Vec<String>>,
+    pub apm_filter_tags_reject: Option<Vec<String>>,
+    pub apm_filter_tags_regex_reject: bool,
     //
     // Trace Propagation
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -372,6 +375,9 @@ impl Default for Config {
             apm_config_compression_level: 6,
             apm_features: vec![],
             apm_additional_endpoints: HashMap::new(),
+            apm_filter_tags_require: None,
+            apm_filter_tags_reject: None,
+            apm_filter_tags_regex_reject: false,
             trace_aws_service_representation_enabled: true,
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
@@ -605,6 +611,44 @@ where
         }
     }
     Ok(map)
+}
+
+/// Deserialize APM filter tags from space-separated "key:value" pairs
+pub fn deserialize_apm_filter_tags<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let opt: Option<String> = Option::deserialize(deserializer)?;
+
+    match opt {
+        None => Ok(None),
+        Some(s) if s.trim().is_empty() => Ok(None),
+        Some(s) => {
+            let tags: Vec<String> = s
+                .split_whitespace()
+                .filter_map(|pair| {
+                    let parts: Vec<&str> = pair.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        let key = parts[0].trim();
+                        let value = parts[1].trim();
+                        if !key.is_empty() && !value.is_empty() {
+                            Some(format!("{key}:{value}"))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if tags.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(tags))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
