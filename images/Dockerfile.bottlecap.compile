@@ -24,7 +24,7 @@ COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
 COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
 
 # Build the binary
-ENV RUSTFLAGS="-C panic=abort"
+ENV RUSTFLAGS="-C panic=abort --cfg tokio_unstable --cfg tokio_taskdump"
 ENV AWS_LC_FIPS_SYS_CC=clang
 ENV AWS_LC_FIPS_SYS_CXX=clang++
 

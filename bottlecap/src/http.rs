@@ -26,7 +26,8 @@ pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
 fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn Error>> {
     let mut client = create_reqwest_client_builder()?
         .timeout(Duration::from_secs(config.flush_timeout))
-        .pool_idle_timeout(Some(Duration::from_secs(270)))
+        .pool_idle_timeout(Some(Duration::from_secs(5)))
+        .pool_max_idle_per_host(2)
         // Enable TCP keepalive
         .tcp_keepalive(Some(Duration::from_secs(120)));
 

@@ -22,7 +22,7 @@ reqwest = { version = "0.12.11", features = ["json", "http2"], default-features 
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 thiserror = { version = "1.0", default-features = false }
-tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "tracing"] }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-core = { version = "0.1", default-features = false }
@@ -54,7 +54,7 @@ datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = 
 datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" , features = ["mini_agent"] }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50"  }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "67df094a84223a89c349868351994d04ca402ff2", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
 
 [dev-dependencies]
@@ -94,3 +94,6 @@ fips = [
     "rustls/fips",
     "rustls-native-certs",
 ]
+
+[build]
+rustflags = ["--cfg", "tokio_unstable", "--cfg", "tokio_taskdump"]

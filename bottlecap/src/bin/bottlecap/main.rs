@@ -15,7 +15,6 @@ use tikv_jemallocator::Jemalloc;
 #[cfg(not(target_env = "msvc"))]
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
-
 use bottlecap::{
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
@@ -86,6 +85,8 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
+use tokio::runtime::Handle;
+use tokio::time::{Duration as TokioDuration, timeout};
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
@@ -523,12 +524,14 @@ async fn extension_loop_active(
         invocation_processor: Arc::clone(&invocation_processor),
     };
     // TODO(astuyve): deprioritize this task after the first request
-    tokio::spawn(async move {
-        let res = lifecycle_listener.start().await;
-        if let Err(e) = res {
-            error!("Error starting hello agent: {e:?}");
-        }
-    });
+    tokio::task::Builder::new()
+        .name("lifecycle-listener")
+        .spawn(async move {
+            let res = lifecycle_listener.start().await;
+            if let Err(e) = res {
+                error!("Error starting hello agent: {e:?}");
+            }
+        })?;
 
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
 
@@ -555,7 +558,6 @@ async fn extension_loop_active(
     let next_lambda_response = next_event(client, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
-    let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let maybe_shutdown_event;
@@ -576,19 +578,19 @@ async fn extension_loop_active(
                             }
                         }
                     }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr,
-                        )
-                        .await;
-                    }
+                    // _ = race_flush_interval.tick() => {
+                    //     let mut locked_metrics = metrics_flushers.lock().await;
+                    //     blocking_flush_all(
+                    //         &logs_flusher,
+                    //         &mut locked_metrics,
+                    //         &*trace_flusher,
+                    //         &*stats_flusher,
+                    //         &proxy_flusher,
+                    //         &mut race_flush_interval,
+                    //         &metrics_aggr,
+                    //     )
+                    //     .await;
+                    // }
                 }
             }
             // flush
@@ -608,18 +610,19 @@ async fn extension_loop_active(
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
-            if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
-                let tf = trace_flusher.clone();
-                // Await any previous flush handles. This
-                last_continuous_flush_error = pending_flush_handles
-                    .await_flush_handles(
-                        &logs_flusher.clone(),
-                        &tf,
-                        &metrics_flushers,
-                        &proxy_flusher,
-                    )
-                    .await;
+            if current_flush_decision == FlushDecision::Continuous {
+                // let tf = trace_flusher.clone();
+                // // Await any previous flush handles. This
+                // last_continuous_flush_error = pending_flush_handles
+                //     .await_flush_handles(
+                //         &logs_flusher.clone(),
+                //         &tf,
+                //         &metrics_flushers,
+                //         &proxy_flusher,
+                //     )
+                //     .await;
 
+                println!("AJ spawning continuous trace flush");
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
@@ -639,6 +642,7 @@ async fn extension_loop_active(
                         aggregator.consume_distributions(),
                     )
                 };
+                println!("AJ spawning continuous metrics flush");
                 for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
                     let series_clone = series.clone();
                     let sketches_clone = sketches.clone();
@@ -663,6 +667,7 @@ async fn extension_loop_active(
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
+                println!("aj done spawning flushers");
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
@@ -676,13 +681,20 @@ async fn extension_loop_active(
                     &metrics_aggr,
                 )
                 .await;
-                last_continuous_flush_error = false;
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
+            let handle = Handle::current();
+            if let Ok(dump) = timeout(TokioDuration::from_secs(2), handle.dump()).await {
+                for (i, task) in dump.tasks().iter().enumerate() {
+                    let trace = task.trace();
+                    println!("TASK {i}:");
+                    println!("{trace}\n");
+                }
+            }
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
@@ -704,19 +716,19 @@ async fn extension_loop_active(
                     Some(event) = event_bus.rx.recv() => {
                         handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr,
-                        )
-                        .await;
-                    }
+                    // _ = race_flush_interval.tick() => {
+                    //     let mut locked_metrics = metrics_flushers.lock().await;
+                    //     blocking_flush_all(
+                    //         &logs_flusher,
+                    //         &mut locked_metrics,
+                    //         &*trace_flusher,
+                    //         &*stats_flusher,
+                    //         &proxy_flusher,
+                    //         &mut race_flush_interval,
+                    //         &metrics_aggr,
+                    //     )
+                    //     .await;
+                    // }
                 }
             }
         }

@@ -12,7 +12,7 @@ use axum::{
 };
 use chrono::Utc;
 use std::net::SocketAddr;
-use tokio::{net::TcpListener, sync::mpsc::Sender};
+use tokio::{net::TcpListener, sync::mpsc::Sender, task};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
@@ -48,19 +48,21 @@ impl TelemetryListener {
 
         let cancel_token_clone = self.cancel_token();
         let event_bus_clone = self.event_bus.clone();
-        tokio::spawn(async move {
-            let listener = TcpListener::bind(&socket)
-                .await
-                .expect("Failed to bind socket");
-            debug!("Telemetry API | Starting listener on {}", socket);
-            axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(
-                    cancel_token_clone,
-                    event_bus_clone,
-                ))
-                .await
-                .expect("Failed to start telemetry listener");
-        });
+        task::Builder::new()
+            .name("telemetry-listener")
+            .spawn(async move {
+                let listener = TcpListener::bind(&socket)
+                    .await
+                    .expect("Failed to bind socket");
+                debug!("Telemetry API | Starting listener on {}", socket);
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(Self::graceful_shutdown(
+                        cancel_token_clone,
+                        event_bus_clone,
+                    ))
+                    .await
+                    .expect("Failed to start telemetry listener");
+            })?;
 
         Ok(())
     }
