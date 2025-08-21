@@ -255,20 +255,28 @@ enum NextEventResponse {
     },
 }
 
-async fn next_event(client: &Client, ext_id: &str) -> Result<NextEventResponse> {
+async fn next_event(client: &Client, ext_id: &str, start_time: Instant) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
+    debug!("url created: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     let response = client
         .get(&url)
-        .header(EXTENSION_ID_HEADER, ext_id)
-        .send()
+        .header(EXTENSION_ID_HEADER, ext_id);
+    debug!("response created: {:?} ms", start_time.elapsed().as_millis().to_string());
+
+    let response = response.send();
+    debug!("response sent: {:?} ms", start_time.elapsed().as_millis().to_string());
+
+    let response = response
         .await
         .map_err(|e| {
             error!("Next request failed: {}", e);
             Error::new(std::io::ErrorKind::InvalidData, e.to_string())
         })?;
+
+    debug!("response received: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     let status = response.status();
     let text = response.text().await.map_err(|e| {
@@ -346,7 +354,7 @@ async fn main() -> Result<()> {
     eprintln!("workers={}", tokio::runtime::Handle::current().metrics().num_workers());
 
     let start_time = Instant::now();
-    init_ustr();
+    init_ustr(start_time);
     eprintln!("init_ustr done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let (aws_config, aws_credentials, config) = load_configs(start_time);
     eprintln!("load_configs done: {:?} ms", start_time.elapsed().as_millis().to_string());
@@ -397,26 +405,27 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             error!("Extension loop failed: {e:?}, Calling /next without Datadog instrumentation");
-            extension_loop_idle(&client, &r).await
+            extension_loop_idle(&client, &r, start_time).await
         }
     }
 }
 
 // Ustr initialization can take 10+ ms.
 // Start it early in a separate thread so it won't become a bottleneck later when SortedTags::parse() is called.
-fn init_ustr() {
-    tokio::spawn(async {
+fn init_ustr(start_time: Instant) {
+    tokio::spawn(async move {
         Ustr::from("");
+        eprintln!("ustr initialized: {:?} ms", start_time.elapsed().as_millis().to_string());
     });
 }
 
 fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
-    let envs = env::vars().collect::<HashMap<String, String>>();
+    // let envs = env::vars().collect::<HashMap<String, String>>();
 
     // First load the AWS configuration
-    let aws_config = AwsConfig::from_env(&envs, start_time);
+    let aws_config = AwsConfig::from_env(start_time);
     eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let aws_credentials = AwsCredentials::from_env(&envs);
+    let aws_credentials = AwsCredentials::from_env();
     eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
@@ -479,9 +488,9 @@ fn create_api_key_factory(
     })))
 }
 
-async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
+async fn extension_loop_idle(client: &Client, r: &RegisterResponse, start_time: Instant) -> Result<()> {
     loop {
-        match next_event(client, &r.extension_id).await {
+        match next_event(client, &r.extension_id, start_time).await {
             Ok(_) => {
                 debug!("Extension is idle, skipping next event");
             }
@@ -665,7 +674,7 @@ async fn extension_loop_active(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
-    let next_lambda_response = next_event(client, &r.extension_id).await;
+    let next_lambda_response = next_event(client, &r.extension_id, start_time).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
@@ -716,7 +725,7 @@ async fn extension_loop_active(
                 &metrics_aggr,
             )
             .await;
-            let next_response = next_event(client, &r.extension_id).await;
+            let next_response = next_event(client, &r.extension_id, start_time).await;
             maybe_shutdown_event =
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
@@ -796,7 +805,7 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
-            let next_lambda_response = next_event(client, &r.extension_id);
+            let next_lambda_response = next_event(client, &r.extension_id, start_time);
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
                 tokio::select! {
@@ -1005,6 +1014,7 @@ async fn handle_next_invocation(
     next_response: Result<NextEventResponse>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
 ) -> NextEventResponse {
+    eprintln!("In handle_next_invocation(), workers={}", tokio::runtime::Handle::current().metrics().num_workers());
     match next_response {
         Ok(NextEventResponse::Invoke {
             ref request_id,
