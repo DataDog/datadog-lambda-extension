@@ -21,6 +21,8 @@ use std::path::Path;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
+use std::time::Instant;
+
 use crate::config::{
     apm_replace_rule::deserialize_apm_replace_rules,
     env::EnvConfigSource,
@@ -31,8 +33,6 @@ use crate::config::{
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
-
-use std::time::Instant;
 
 /// Helper macro to merge Option<String> fields to String fields
 ///
@@ -148,8 +148,8 @@ pub enum ConfigError {
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub trait ConfigSource {
-    fn load(&self, config: &mut Config) -> Result<(), ConfigError>;
+pub trait ConfigSource: Send {
+    fn load(&self, config: &mut Config, start_time: Instant) -> Result<(), ConfigError>;
 }
 
 #[derive(Default)]
@@ -159,6 +159,9 @@ pub struct ConfigBuilder {
     config: Config,
 }
 
+use std::sync::Arc;
+use tokio::sync::RwLock;
+
 #[allow(clippy::module_name_repetitions)]
 impl ConfigBuilder {
     #[must_use]
@@ -167,7 +170,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub fn build(&mut self, start_time: Instant) -> Config {
+    pub async fn build(&mut self, start_time: Instant, envs: Arc<RwLock<HashMap<String, String>>>) -> Config {
         let mut failed_sources = 0;
         for source in &self.sources {
             eprintln!(
@@ -175,7 +178,7 @@ impl ConfigBuilder {
                 std::any::type_name_of_val(&source),
                 start_time.elapsed().as_millis().to_string()
             );
-            match source.load(&mut self.config) {
+            match source.load(&mut self.config, start_time) {
                 Ok(()) => (),
                 Err(e) => {
                     error!("Failed to load config: {:?}", e);
@@ -195,11 +198,12 @@ impl ConfigBuilder {
 
         eprintln!("config.site checked: {:?}", start_time.elapsed().as_millis().to_string());
 
+        let envs = envs.read().await;
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
-        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
+        if let Some(https_proxy) = envs.get("HTTPS_PROXY") {
             if self.config.proxy_https.is_none() {
-                self.config.proxy_https = Some(https_proxy);
+                self.config.proxy_https = Some(https_proxy.clone());
             }
         }
 
@@ -208,8 +212,8 @@ impl ConfigBuilder {
         // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable
         // or in the `proxy_no_proxy` config field.
         if self.config.proxy_https.is_some() {
-            let site_in_no_proxy = std::env::var("NO_PROXY")
-                .is_ok_and(|no_proxy| no_proxy.contains(&self.config.site))
+            let site_in_no_proxy = envs.get("NO_PROXY")
+                .is_some_and(|no_proxy| no_proxy.contains(&self.config.site))
                 || self
                     .config
                     .proxy_no_proxy
@@ -504,7 +508,8 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 }
 
 #[allow(clippy::module_name_repetitions)]
-pub fn get_config(config_directory: &Path, start_time: Instant) -> Result<Config, ConfigError> {
+#[allow(clippy::pedantic)] // TODO: fix this
+pub async fn get_config(config_directory: &Path, start_time: Instant, envs: Arc<RwLock<HashMap<String, String>>>) -> Result<Config, ConfigError> {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
     eprintln!("In get_config(), path done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut config_builder = ConfigBuilder::default()
@@ -512,7 +517,7 @@ pub fn get_config(config_directory: &Path, start_time: Instant) -> Result<Config
         .add_source(Box::new(EnvConfigSource));
 
     eprintln!("config_builder created: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let config = config_builder.build(start_time);
+    let config = config_builder.build(start_time, envs).await;
     eprintln!("config_builder.build() done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     fallback(&config)?;

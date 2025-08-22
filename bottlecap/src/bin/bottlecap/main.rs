@@ -354,27 +354,21 @@ async fn main() -> Result<()> {
     eprintln!("workers={}", tokio::runtime::Handle::current().metrics().num_workers());
 
     let start_time = Instant::now();
-    init_ustr(start_time);
-    eprintln!("init_ustr done: {:?} ms", start_time.elapsed().as_millis().to_string());
+
+    let envs = Arc::new(RwLock::new(env::vars().collect::<HashMap<String, String>>()));
+    eprintln!("Loaded all envs: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     /* load_configs() */
-    let aws_task = tokio::spawn(async move {
-        let aws_config = AwsConfig::from_env(start_time);
-        eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
-
-        let aws_credentials = AwsCredentials::from_env();
-        eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
-        
-        (aws_config, aws_credentials)
-    });
-
+    let envs_clone = envs.clone();
     let config_task = tokio::spawn(async move {
-        let lambda_directory: String =
-            env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+        let lambda_directory: String = {
+            let envs_read = envs_clone.read().await;
+            envs_read.get("LAMBDA_TASK_ROOT").unwrap_or(&"/var/task".to_string()).clone()
+        };
         eprintln!("lambda_directory done: {:?} ms", start_time.elapsed().as_millis().to_string());
         let path = Path::new(&lambda_directory);
         eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
-        let config = config::get_config(path, start_time);
+        let config = config::get_config(path, start_time, envs_clone).await;
         eprintln!("config::get_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
         match config {
             Ok(config) => Arc::new(config),
@@ -384,6 +378,19 @@ async fn main() -> Result<()> {
             }
         }
     });
+
+    let envs_clone = envs.clone();
+    let aws_task = tokio::spawn(async move {
+        let aws_config = AwsConfig::from_env(envs_clone.clone(), start_time).await;
+        eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
+
+        let aws_credentials = AwsCredentials::from_env(envs_clone).await;
+        eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
+        
+        (aws_config, aws_credentials)
+    });
+
+    init_ustr(start_time);
 
     let (aws_result, config_result) = tokio::join!(aws_task, config_task);
     let (aws_config, aws_credentials) = aws_result.expect("aws_task failed");
