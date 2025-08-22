@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, time::Instant};
+use std::{env, time::Instant};
 
 const AWS_DEFAULT_REGION: &str = "AWS_DEFAULT_REGION";
 const AWS_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
@@ -22,20 +22,16 @@ pub struct AwsConfig {
     pub exec_wrapper: Option<String>,
 }
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
-
 impl AwsConfig {
     #[must_use]
-    pub async fn from_env(envs: Arc<RwLock<HashMap<String, String>>>, start_time: Instant) -> Self {
-        let envs = envs.read().await;
+    pub fn from_env(start_time: Instant) -> Self {
         Self {
-            region: envs.get(AWS_DEFAULT_REGION).unwrap_or(&"us-east-1".to_string()).clone(),
-            aws_lwa_proxy_lambda_runtime_api: envs.get(AWS_LWA_LAMBDA_RUNTIME_API_PROXY).cloned(),
-            function_name: envs.get(AWS_LAMBDA_FUNCTION_NAME).unwrap_or(&String::new()).clone(),
-            runtime_api: envs.get(AWS_LAMBDA_RUNTIME_API).unwrap_or(&String::new()).clone(),
+            region: env::var(AWS_DEFAULT_REGION).unwrap_or("us-east-1".to_string()),
+            aws_lwa_proxy_lambda_runtime_api: env::var(AWS_LWA_LAMBDA_RUNTIME_API_PROXY).ok(),
+            function_name: env::var(AWS_LAMBDA_FUNCTION_NAME).unwrap_or_default(),
+            runtime_api: env::var(AWS_LAMBDA_RUNTIME_API).unwrap_or_default(),
             sandbox_init_time: start_time,
-            exec_wrapper: envs.get(AWS_LAMBDA_EXEC_WRAPPER).cloned(),
+            exec_wrapper: env::var(AWS_LAMBDA_EXEC_WRAPPER).ok(),
         }
     }
 }
@@ -52,16 +48,15 @@ pub struct AwsCredentials {
 
 impl AwsCredentials {
     #[must_use]
-    pub async fn from_env(envs: Arc<RwLock<HashMap<String, String>>>) -> Self {
-        let envs = envs.read().await;
+    pub fn from_env() -> Self {
         Self {
-            aws_access_key_id: envs.get(AWS_ACCESS_KEY_ID).unwrap_or(&String::new()).clone(),
-            aws_secret_access_key: envs.get(AWS_SECRET_ACCESS_KEY).unwrap_or(&String::new()).clone(),
-            aws_session_token: envs.get(AWS_SESSION_TOKEN).unwrap_or(&String::new()).clone(),
-            aws_container_credentials_full_uri: envs.get(AWS_CONTAINER_CREDENTIALS_FULL_URI)
-                .unwrap_or(&String::new()).clone(),
-            aws_container_authorization_token: envs.get(AWS_CONTAINER_AUTHORIZATION_TOKEN)
-                .unwrap_or(&String::new()).clone(),
+            aws_access_key_id: env::var(AWS_ACCESS_KEY_ID).unwrap_or_default(),
+            aws_secret_access_key: env::var(AWS_SECRET_ACCESS_KEY).unwrap_or_default(),
+            aws_session_token: env::var(AWS_SESSION_TOKEN).unwrap_or_default(),
+            aws_container_credentials_full_uri: env::var(AWS_CONTAINER_CREDENTIALS_FULL_URI)
+                .unwrap_or_default(),
+            aws_container_authorization_token: env::var(AWS_CONTAINER_AUTHORIZATION_TOKEN)
+                .unwrap_or_default(),
         }
     }
 }

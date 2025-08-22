@@ -334,18 +334,11 @@ async fn main() -> Result<()> {
     let start_time = Instant::now();
     init_ustr();
 
-    let envs = Arc::new(RwLock::new(env::vars().collect::<HashMap<String, String>>()));
-    eprintln!("Loaded all envs: {:?} ms", start_time.elapsed().as_millis().to_string());
-
     /* load_configs() */
-    let envs_clone = envs.clone();
     let config_task = tokio::spawn(async move {
-        let lambda_directory: String = {
-            let envs_read = envs_clone.read().await;
-            envs_read.get("LAMBDA_TASK_ROOT").unwrap_or(&"/var/task".to_string()).clone()
-        };
+        let lambda_directory: String = env::var("LAMBDA_TASK_ROOT").unwrap_or("/var/task".to_string());
         let path = Path::new(&lambda_directory);
-        let config = config::get_config(path, envs_clone).await;
+        let config = config::get_config(path);
         match config {
             Ok(config) => Arc::new(config),
             Err(_e) => {
@@ -355,11 +348,10 @@ async fn main() -> Result<()> {
         }
     });
 
-    let envs_clone = envs.clone();
     let aws_task = tokio::spawn(async move {
-        let aws_config = AwsConfig::from_env(envs_clone.clone(), start_time).await;
+        let aws_config = AwsConfig::from_env(start_time);
 
-        let aws_credentials = AwsCredentials::from_env(envs_clone).await;
+        let aws_credentials = AwsCredentials::from_env();
         
         (aws_config, aws_credentials)
     });
@@ -579,7 +571,7 @@ async fn extension_loop_active(
 
     let mut flush_control =
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
-        
+
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 

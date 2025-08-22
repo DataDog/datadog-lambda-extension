@@ -157,9 +157,6 @@ pub struct ConfigBuilder {
     config: Config,
 }
 
-use std::sync::Arc;
-use tokio::sync::RwLock;
-
 #[allow(clippy::module_name_repetitions)]
 impl ConfigBuilder {
     #[must_use]
@@ -168,7 +165,7 @@ impl ConfigBuilder {
         self
     }
 
-    pub async fn build(&mut self, envs: Arc<RwLock<HashMap<String, String>>>) -> Config {
+    pub fn build(&mut self) -> Config {
         let mut failed_sources = 0;
         for source in &self.sources {
             match source.load(&mut self.config) {
@@ -188,10 +185,9 @@ impl ConfigBuilder {
             self.config.site = "datadoghq.com".to_string();
         }
 
-        let envs = envs.read().await;
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
-        if let Some(https_proxy) = envs.get("HTTPS_PROXY") {
+        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
             if self.config.proxy_https.is_none() {
                 self.config.proxy_https = Some(https_proxy.clone());
             }
@@ -200,8 +196,8 @@ impl ConfigBuilder {
         // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable
         // or in the `proxy_no_proxy` config field.
         if self.config.proxy_https.is_some() {
-            let site_in_no_proxy = envs.get("NO_PROXY")
-                .is_some_and(|no_proxy| no_proxy.contains(&self.config.site))
+            let site_in_no_proxy = std::env::var("NO_PROXY")
+                .is_ok_and(|no_proxy| no_proxy.contains(&self.config.site))
                 || self
                     .config
                     .proxy_no_proxy
@@ -488,14 +484,13 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 }
 
 #[allow(clippy::module_name_repetitions)]
-#[allow(clippy::pedantic)] // TODO: fix this
-pub async fn get_config(config_directory: &Path, envs: Arc<RwLock<HashMap<String, String>>>) -> Result<Config, ConfigError> {
+pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
     let mut config_builder = ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))
         .add_source(Box::new(EnvConfigSource));
 
-    let config = config_builder.build(envs).await;
+    let config = config_builder.build();
 
     fallback(&config)?;
 
