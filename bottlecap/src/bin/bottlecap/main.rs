@@ -255,28 +255,20 @@ enum NextEventResponse {
     },
 }
 
-async fn next_event(client: &Client, ext_id: &str, start_time: Instant) -> Result<NextEventResponse> {
+async fn next_event(client: &Client, ext_id: &str) -> Result<NextEventResponse> {
     let base_url = base_url(EXTENSION_ROUTE)
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
     let url = format!("{base_url}/event/next");
-    debug!("url created: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     let response = client
         .get(&url)
-        .header(EXTENSION_ID_HEADER, ext_id);
-    debug!("response created: {:?} ms", start_time.elapsed().as_millis().to_string());
-
-    let response = response.send();
-    debug!("response sent: {:?} ms", start_time.elapsed().as_millis().to_string());
-
-    let response = response
+        .header(EXTENSION_ID_HEADER, ext_id)
+        .send()
         .await
         .map_err(|e| {
             error!("Next request failed: {}", e);
             Error::new(std::io::ErrorKind::InvalidData, e.to_string())
         })?;
-
-    debug!("response received: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     let status = response.status();
     let text = response.text().await.map_err(|e| {
@@ -339,8 +331,6 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    eprintln!("workers={}", tokio::runtime::Handle::current().metrics().num_workers());
-
     let start_time = Instant::now();
 
     let envs = Arc::new(RwLock::new(env::vars().collect::<HashMap<String, String>>()));
@@ -353,11 +343,8 @@ async fn main() -> Result<()> {
             let envs_read = envs_clone.read().await;
             envs_read.get("LAMBDA_TASK_ROOT").unwrap_or(&"/var/task".to_string()).clone()
         };
-        eprintln!("lambda_directory done: {:?} ms", start_time.elapsed().as_millis().to_string());
         let path = Path::new(&lambda_directory);
-        eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
-        let config = config::get_config(path, start_time, envs_clone).await;
-        eprintln!("config::get_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
+        let config = config::get_config(path, envs_clone).await;
         match config {
             Ok(config) => Arc::new(config),
             Err(_e) => {
@@ -370,24 +357,20 @@ async fn main() -> Result<()> {
     let envs_clone = envs.clone();
     let aws_task = tokio::spawn(async move {
         let aws_config = AwsConfig::from_env(envs_clone.clone(), start_time).await;
-        eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
         let aws_credentials = AwsCredentials::from_env(envs_clone).await;
-        eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
         
         (aws_config, aws_credentials)
     });
 
-    init_ustr(start_time);
+    init_ustr();
 
     let (aws_result, config_result) = tokio::join!(aws_task, config_task);
     let (aws_config, aws_credentials) = aws_result.expect("aws_task failed");
     let config = config_result.expect("config_task failed");
     /* End of load_configs() */
 
-    eprintln!("load_configs done: {:?} ms", start_time.elapsed().as_millis().to_string());
-
-    enable_logging_subsystem(&config, start_time);
+    enable_logging_subsystem(&config);
     debug!("Logging subsystem enabled: {:?} ms", start_time.elapsed().as_millis().to_string());
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
@@ -409,14 +392,11 @@ async fn main() -> Result<()> {
                 format!("Failed to create client: {e:?}"),
             )
         })?;
-    debug!("create_reqwest_client_builder done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    debug!("register done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, aws_credentials);
-    debug!("create_api_key_factory done: {:?} ms", start_time.elapsed().as_millis().to_string());
     match extension_loop_active(
         Arc::clone(&aws_config),
         &config,
@@ -433,52 +413,24 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             error!("Extension loop failed: {e:?}, Calling /next without Datadog instrumentation");
-            extension_loop_idle(&client, &r, start_time).await
+            extension_loop_idle(&client, &r).await
         }
     }
 }
 
 // Ustr initialization can take 10+ ms.
 // Start it early in a separate thread so it won't become a bottleneck later when SortedTags::parse() is called.
-fn init_ustr(start_time: Instant) {
+fn init_ustr() {
     tokio::spawn(async move {
         Ustr::from("");
-        eprintln!("ustr initialized: {:?} ms", start_time.elapsed().as_millis().to_string());
     });
 }
 
-// fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
-//     // let envs = env::vars().collect::<HashMap<String, String>>();
-
-//     // First load the AWS configuration
-//     let aws_config = AwsConfig::from_env(start_time);
-//     eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
-//     let aws_credentials = AwsCredentials::from_env();
-//     eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
-//     let lambda_directory: String =
-//         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-//         eprintln!("lambda_directory done: {:?} ms", start_time.elapsed().as_millis().to_string());
-//     let path = Path::new(&lambda_directory);
-//     eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
-//     let config = config::get_config(path, start_time);
-//     eprintln!("config::get_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
-//     let config = match config {
-//         Ok(config) => Arc::new(config),
-//         Err(_e) => {
-//             let err = Command::new("/opt/datadog-agent-go").exec();
-//             panic!("Error starting the extension: {err:?}");
-//         }
-//     };
-
-//     (aws_config, aws_credentials, config)
-// }
-
-fn enable_logging_subsystem(config: &Arc<Config>, start_time: Instant) {
+fn enable_logging_subsystem(config: &Arc<Config>) {
     let env_filter = format!(
         "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
         config.log_level
     );
-    eprintln!("env_filter created: {:?} ms", start_time.elapsed().as_millis().to_string());
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
             EnvFilter::try_new(env_filter).expect("could not parse log level in configuration"),
@@ -492,7 +444,6 @@ fn enable_logging_subsystem(config: &Arc<Config>, start_time: Instant) {
         .without_time()
         .event_format(logger::Formatter)
         .finish();
-    eprintln!("subscriber created: {:?} ms", start_time.elapsed().as_millis().to_string());
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     debug!("Logging subsystem enabled");
@@ -516,9 +467,9 @@ fn create_api_key_factory(
     })))
 }
 
-async fn extension_loop_idle(client: &Client, r: &RegisterResponse, start_time: Instant) -> Result<()> {
+async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
     loop {
-        match next_event(client, &r.extension_id, start_time).await {
+        match next_event(client, &r.extension_id).await {
             Ok(_) => {
                 debug!("Extension is idle, skipping next event");
             }
@@ -547,14 +498,12 @@ async fn extension_loop_active(
         .unwrap_or(&"none".to_string())
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
-    debug!("setup_tag_provider done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
         Arc::clone(&api_key_factory),
         &tags_provider,
         event_bus.get_sender_copy(),
     );
-    debug!("start_logs_agent done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let metrics_aggr_init_start_time = Instant::now();
     let metrics_aggr = Arc::new(Mutex::new(
         MetricsAggregator::new(
@@ -570,14 +519,12 @@ async fn extension_loop_active(
             .as_micros()
             .to_string()
     );
-    debug!("Metrics aggregator init done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &metrics_aggr,
         config,
     )));
-    debug!("Metrics flushers done: {:?} ms", start_time.elapsed().as_millis().to_string());
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -585,7 +532,6 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
     )));
-    debug!("Invocation processor done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (
         trace_agent_channel,
@@ -601,10 +547,8 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
         Arc::clone(&trace_aggregator),
     );
-    debug!("Trace agent done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let api_runtime_proxy_shutdown_signal =
         start_api_runtime_proxy(config, aws_config, &invocation_processor);
-    debug!("API runtime proxy done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
     };
@@ -615,22 +559,17 @@ async fn extension_loop_active(
             error!("Error starting hello agent: {e:?}");
         }
     });
-    debug!("Lifecycle listener done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
-    debug!("Dogstatsd done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
-    debug!("Telemetry client done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let otlp_cancel_token = start_otlp_agent(
         config,
         tags_provider.clone(),
         trace_processor.clone(),
         trace_agent_channel.clone(),
     );
-    debug!("OTLP agent done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut flush_control =
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
-    debug!("Flush control done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
@@ -638,7 +577,7 @@ async fn extension_loop_active(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
-    let next_lambda_response = next_event(client, &r.extension_id, start_time).await;
+    let next_lambda_response = next_event(client, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
@@ -689,7 +628,7 @@ async fn extension_loop_active(
                 &metrics_aggr,
             )
             .await;
-            let next_response = next_event(client, &r.extension_id, start_time).await;
+            let next_response = next_event(client, &r.extension_id).await;
             maybe_shutdown_event =
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
@@ -769,7 +708,7 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
-            let next_lambda_response = next_event(client, &r.extension_id, start_time);
+            let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
                 tokio::select! {
@@ -978,7 +917,6 @@ async fn handle_next_invocation(
     next_response: Result<NextEventResponse>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
 ) -> NextEventResponse {
-    eprintln!("In handle_next_invocation(), workers={}", tokio::runtime::Handle::current().metrics().num_workers());
     match next_response {
         Ok(NextEventResponse::Invoke {
             ref request_id,

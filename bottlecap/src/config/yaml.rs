@@ -615,31 +615,19 @@ pub struct YamlConfigSource {
     pub path: PathBuf,
 }
 
-use std::time::Instant;
-
 impl ConfigSource for YamlConfigSource {
-    fn load(&self, config: &mut Config, start_time: Instant) -> Result<(), ConfigError> {
-        println!("  Entered YamlConfigSource::load(). {:?} ms", start_time.elapsed().as_millis().to_string());
+    fn load(&self, config: &mut Config) -> Result<(), ConfigError> {
         let yaml_file = Yaml::file(self.path.clone());
-        println!("  In YamlConfigSource::load(), yaml_file created: {:?} ms", start_time.elapsed().as_millis().to_string());
         let figment = Figment::new().merge(yaml_file);
 
-        println!("  In YamlConfigSource::load(), figment created: {:?} ms", start_time.elapsed().as_millis().to_string());
-
         match figment.extract::<YamlConfig>() {
-            Ok(yaml_config) => {
-                println!("In YamlConfigSource::load(), yaml_config created: {:?} ms", start_time.elapsed().as_millis().to_string());
-                merge_config(config, &yaml_config);
-                println!("In YamlConfigSource::load(), merge_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
-            }
+            Ok(yaml_config) => merge_config(config, &yaml_config),
             Err(e) => {
                 return Err(ConfigError::ParseError(format!(
                     "Failed to parse config from yaml file: {e}, using default config."
                 )));
             }
         }
-
-        println!("  Finished YamlConfigSource::load(). {:?} ms", start_time.elapsed().as_millis().to_string());
 
         Ok(())
     }

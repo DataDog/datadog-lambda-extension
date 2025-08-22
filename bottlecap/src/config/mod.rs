@@ -21,8 +21,6 @@ use std::path::Path;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
-use std::time::Instant;
-
 use crate::config::{
     apm_replace_rule::deserialize_apm_replace_rules,
     env::EnvConfigSource,
@@ -149,7 +147,7 @@ pub enum ConfigError {
 
 #[allow(clippy::module_name_repetitions)]
 pub trait ConfigSource: Send {
-    fn load(&self, config: &mut Config, start_time: Instant) -> Result<(), ConfigError>;
+    fn load(&self, config: &mut Config) -> Result<(), ConfigError>;
 }
 
 #[derive(Default)]
@@ -170,15 +168,10 @@ impl ConfigBuilder {
         self
     }
 
-    pub async fn build(&mut self, start_time: Instant, envs: Arc<RwLock<HashMap<String, String>>>) -> Config {
+    pub async fn build(&mut self, envs: Arc<RwLock<HashMap<String, String>>>) -> Config {
         let mut failed_sources = 0;
         for source in &self.sources {
-            eprintln!(
-                "Loading a source: {}, {:?}",
-                std::any::type_name_of_val(&source),
-                start_time.elapsed().as_millis().to_string()
-            );
-            match source.load(&mut self.config, start_time) {
+            match source.load(&mut self.config) {
                 Ok(()) => (),
                 Err(e) => {
                     error!("Failed to load config: {:?}", e);
@@ -186,7 +179,6 @@ impl ConfigBuilder {
                 }
             }
         }
-        eprintln!("sources loaded: {:?} ms", start_time.elapsed().as_millis().to_string());
 
         if !self.sources.is_empty() && failed_sources == self.sources.len() {
             debug!("All sources failed to load config, using default config.");
@@ -196,8 +188,6 @@ impl ConfigBuilder {
             self.config.site = "datadoghq.com".to_string();
         }
 
-        eprintln!("config.site checked: {:?}", start_time.elapsed().as_millis().to_string());
-
         let envs = envs.read().await;
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
@@ -206,8 +196,6 @@ impl ConfigBuilder {
                 self.config.proxy_https = Some(https_proxy.clone());
             }
         }
-
-        eprintln!("proxy_https checked: {:?}", start_time.elapsed().as_millis().to_string());
 
         // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable
         // or in the `proxy_no_proxy` config field.
@@ -224,8 +212,6 @@ impl ConfigBuilder {
             }
         }
 
-        eprintln!("proxy_no_proxy checked: {:?}", start_time.elapsed().as_millis().to_string());
-
         // If extraction is not set, set it to the same as the propagation style
         if self.config.trace_propagation_style_extract.is_empty() {
             self.config
@@ -233,14 +219,10 @@ impl ConfigBuilder {
                 .clone_from(&self.config.trace_propagation_style);
         }
 
-        eprintln!("trace_propagation_style_extract checked: {:?}", start_time.elapsed().as_millis().to_string());
-
         // If Logs URL is not set, set it to the default
         if self.config.logs_config_logs_dd_url.is_empty() {
             self.config.logs_config_logs_dd_url = build_fqdn_logs(self.config.site.clone());
         }
-
-        eprintln!("logs_config_logs_dd_url checked: {:?}", start_time.elapsed().as_millis().to_string());
 
         // If APM URL is not set, set it to the default
         if self.config.apm_dd_url.is_empty() {
@@ -249,8 +231,6 @@ impl ConfigBuilder {
             // If APM URL is set, add the site to the URL
             self.config.apm_dd_url = trace_intake_url_prefixed(self.config.apm_dd_url.as_str());
         }
-
-        eprintln!("apm_dd_url checked: {:?}", start_time.elapsed().as_millis().to_string());
 
         self.config.clone()
     }
@@ -509,19 +489,15 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 
 #[allow(clippy::module_name_repetitions)]
 #[allow(clippy::pedantic)] // TODO: fix this
-pub async fn get_config(config_directory: &Path, start_time: Instant, envs: Arc<RwLock<HashMap<String, String>>>) -> Result<Config, ConfigError> {
+pub async fn get_config(config_directory: &Path, envs: Arc<RwLock<HashMap<String, String>>>) -> Result<Config, ConfigError> {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
-    eprintln!("In get_config(), path done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut config_builder = ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))
         .add_source(Box::new(EnvConfigSource));
 
-    eprintln!("config_builder created: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let config = config_builder.build(start_time, envs).await;
-    eprintln!("config_builder.build() done: {:?} ms", start_time.elapsed().as_millis().to_string());
+    let config = config_builder.build(envs).await;
 
     fallback(&config)?;
-    eprintln!("fallback(&config) done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     Ok(config)
 }

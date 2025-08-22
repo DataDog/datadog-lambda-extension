@@ -320,7 +320,7 @@ pub struct EnvConfig {
 }
 
 #[allow(clippy::too_many_lines)]
-fn merge_config(config: &mut Config, env_config: &EnvConfig, start_time: Instant) {
+fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     // Basic fields
     merge_string!(config, env_config, site);
     merge_string!(config, env_config, api_key);
@@ -463,35 +463,25 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig, start_time: Instant
     merge_option!(config, env_config, extension_version);
 }
 
-use std::time::Instant;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 #[allow(clippy::module_name_repetitions)]
 pub struct EnvConfigSource;
 
 impl ConfigSource for EnvConfigSource {
-    fn load(&self, config: &mut Config, start_time: Instant) -> Result<(), ConfigError> {
-        println!("  Entered EnvConfigSource::load(). {:?} ms", start_time.elapsed().as_millis().to_string());
+    fn load(&self, config: &mut Config) -> Result<(), ConfigError> {
         let figment = Figment::new()
             .merge(Env::prefixed("DATADOG_"))
             .merge(Env::prefixed("DD_"));
 
-        println!("  In EnvConfigSource::load(), figment created: {:?} ms", start_time.elapsed().as_millis().to_string());
-
         match figment.extract::<EnvConfig>() {
-            Ok(env_config) => {
-                println!("In EnvConfigSource::load(), env_config created: {:?} ms", start_time.elapsed().as_millis().to_string());
-                merge_config(config, &env_config, start_time);
-                println!("In EnvConfigSource::load(), merge_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
-            }
+            Ok(env_config) => merge_config(config, &env_config),
             Err(e) => {
                 return Err(ConfigError::ParseError(format!(
                     "Failed to parse config from environment variables: {e}, using default config.",
                 )));
             }
         }
-
-        println!("  Finished EnvConfigSource::load(). {:?} ms", start_time.elapsed().as_millis().to_string());
 
         Ok(())
     }
