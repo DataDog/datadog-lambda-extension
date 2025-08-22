@@ -3,7 +3,7 @@ ARG DATADOG_WRAPPER=datadog_wrapper
 ARG FILE_SUFFIX
 
 # Install dependencies
-RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends zip binutils wget tar xz-utils
+RUN apt-get update && apt-get install -y zip binutils wget tar xz-utils
 
 # UPX installation directly from GitHub
 ENV UPX_VERSION=5.0.0
