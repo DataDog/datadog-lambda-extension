@@ -332,6 +332,7 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let start_time = Instant::now();
+    init_ustr();
 
     let envs = Arc::new(RwLock::new(env::vars().collect::<HashMap<String, String>>()));
     eprintln!("Loaded all envs: {:?} ms", start_time.elapsed().as_millis().to_string());
@@ -362,8 +363,6 @@ async fn main() -> Result<()> {
         
         (aws_config, aws_credentials)
     });
-
-    init_ustr();
 
     let (aws_result, config_result) = tokio::join!(aws_task, config_task);
     let (aws_config, aws_credentials) = aws_result.expect("aws_task failed");
@@ -421,7 +420,7 @@ async fn main() -> Result<()> {
 // Ustr initialization can take 10+ ms.
 // Start it early in a separate thread so it won't become a bottleneck later when SortedTags::parse() is called.
 fn init_ustr() {
-    tokio::spawn(async move {
+    tokio::spawn(async {
         Ustr::from("");
     });
 }
