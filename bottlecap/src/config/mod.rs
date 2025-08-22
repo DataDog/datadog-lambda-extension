@@ -506,7 +506,7 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
 #[allow(clippy::module_name_repetitions)]
 pub fn get_config(config_directory: &Path, start_time: Instant) -> Result<Config, ConfigError> {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
-    eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
+    eprintln!("In get_config(), path done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let mut config_builder = ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))
         .add_source(Box::new(EnvConfigSource));

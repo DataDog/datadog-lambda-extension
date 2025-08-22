@@ -356,7 +356,40 @@ async fn main() -> Result<()> {
     let start_time = Instant::now();
     init_ustr(start_time);
     eprintln!("init_ustr done: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let (aws_config, aws_credentials, config) = load_configs(start_time);
+
+    /* load_configs() */
+    let aws_task = tokio::spawn(async move {
+        let aws_config = AwsConfig::from_env(start_time);
+        eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
+
+        let aws_credentials = AwsCredentials::from_env();
+        eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
+        
+        (aws_config, aws_credentials)
+    });
+
+    let config_task = tokio::spawn(async move {
+        let lambda_directory: String =
+            env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+        eprintln!("lambda_directory done: {:?} ms", start_time.elapsed().as_millis().to_string());
+        let path = Path::new(&lambda_directory);
+        eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
+        let config = config::get_config(path, start_time);
+        eprintln!("config::get_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
+        match config {
+            Ok(config) => Arc::new(config),
+            Err(_e) => {
+                let err = Command::new("/opt/datadog-agent-go").exec();
+                panic!("Error starting the extension: {err:?}");
+            }
+        }
+    });
+
+    let (aws_result, config_result) = tokio::join!(aws_task, config_task);
+    let (aws_config, aws_credentials) = aws_result.expect("aws_task failed");
+    let config = config_result.expect("config_task failed");
+    /* End of load_configs() */
+
     eprintln!("load_configs done: {:?} ms", start_time.elapsed().as_millis().to_string());
 
     enable_logging_subsystem(&config, start_time);
@@ -419,31 +452,31 @@ fn init_ustr(start_time: Instant) {
     });
 }
 
-fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
-    // let envs = env::vars().collect::<HashMap<String, String>>();
+// fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
+//     // let envs = env::vars().collect::<HashMap<String, String>>();
 
-    // First load the AWS configuration
-    let aws_config = AwsConfig::from_env(start_time);
-    eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let aws_credentials = AwsCredentials::from_env();
-    eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let lambda_directory: String =
-        env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-        eprintln!("lambda_directory done: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let path = Path::new(&lambda_directory);
-    eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let config = config::get_config(path, start_time);
-    eprintln!("config::get_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
-    let config = match config {
-        Ok(config) => Arc::new(config),
-        Err(_e) => {
-            let err = Command::new("/opt/datadog-agent-go").exec();
-            panic!("Error starting the extension: {err:?}");
-        }
-    };
+//     // First load the AWS configuration
+//     let aws_config = AwsConfig::from_env(start_time);
+//     eprintln!("AwsConfig::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
+//     let aws_credentials = AwsCredentials::from_env();
+//     eprintln!("AwsCredentials::from_env done: {:?} ms", start_time.elapsed().as_millis().to_string());
+//     let lambda_directory: String =
+//         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+//         eprintln!("lambda_directory done: {:?} ms", start_time.elapsed().as_millis().to_string());
+//     let path = Path::new(&lambda_directory);
+//     eprintln!("path done: {:?} ms", start_time.elapsed().as_millis().to_string());
+//     let config = config::get_config(path, start_time);
+//     eprintln!("config::get_config done: {:?} ms", start_time.elapsed().as_millis().to_string());
+//     let config = match config {
+//         Ok(config) => Arc::new(config),
+//         Err(_e) => {
+//             let err = Command::new("/opt/datadog-agent-go").exec();
+//             panic!("Error starting the extension: {err:?}");
+//         }
+//     };
 
-    (aws_config, aws_credentials, config)
-}
+//     (aws_config, aws_credentials, config)
+// }
 
 fn enable_logging_subsystem(config: &Arc<Config>, start_time: Instant) {
     let env_filter = format!(
