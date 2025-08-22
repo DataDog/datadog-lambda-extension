@@ -370,12 +370,10 @@ async fn main() -> Result<()> {
     /* End of load_configs() */
 
     enable_logging_subsystem(&config);
-    debug!("Logging subsystem enabled: {:?} ms", start_time.elapsed().as_millis().to_string());
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
     prepare_client_provider()?;
-    debug!("prepare_client_provider done: {:?} ms", start_time.elapsed().as_millis().to_string());
     let client = create_reqwest_client_builder()
         .map_err(|e| {
             Error::new(
@@ -391,11 +389,14 @@ async fn main() -> Result<()> {
                 format!("Failed to create client: {e:?}"),
             )
         })?;
+
     let r = register(&client)
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, aws_credentials);
+
     match extension_loop_active(
         Arc::clone(&aws_config),
         &config,
@@ -497,12 +498,14 @@ async fn extension_loop_active(
         .unwrap_or(&"none".to_string())
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
+
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
         Arc::clone(&api_key_factory),
         &tags_provider,
         event_bus.get_sender_copy(),
     );
+
     let metrics_aggr_init_start_time = Instant::now();
     let metrics_aggr = Arc::new(Mutex::new(
         MetricsAggregator::new(
@@ -531,6 +534,7 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
     )));
+
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (
         trace_agent_channel,
@@ -546,8 +550,10 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
         Arc::clone(&trace_aggregator),
     );
+
     let api_runtime_proxy_shutdown_signal =
         start_api_runtime_proxy(config, aws_config, &invocation_processor);
+
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
     };
@@ -558,17 +564,22 @@ async fn extension_loop_active(
             error!("Error starting hello agent: {e:?}");
         }
     });
+
     let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
+
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
+
     let otlp_cancel_token = start_otlp_agent(
         config,
         tags_provider.clone(),
         trace_processor.clone(),
         trace_agent_channel.clone(),
     );
+
     let mut flush_control =
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
+        
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 

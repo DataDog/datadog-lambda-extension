@@ -617,8 +617,7 @@ pub struct YamlConfigSource {
 
 impl ConfigSource for YamlConfigSource {
     fn load(&self, config: &mut Config) -> Result<(), ConfigError> {
-        let yaml_file = Yaml::file(self.path.clone());
-        let figment = Figment::new().merge(yaml_file);
+        let figment = Figment::new().merge(Yaml::file(self.path.clone()));
 
         match figment.extract::<YamlConfig>() {
             Ok(yaml_config) => merge_config(config, &yaml_config),

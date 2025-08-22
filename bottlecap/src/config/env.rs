@@ -463,7 +463,6 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, extension_version);
 }
 
-
 #[derive(Debug, PartialEq, Clone, Copy)]
 #[allow(clippy::module_name_repetitions)]
 pub struct EnvConfigSource;
