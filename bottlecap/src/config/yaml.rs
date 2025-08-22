@@ -38,6 +38,8 @@ pub struct YamlConfig {
 
     pub flush_timeout: Option<u64>,
 
+    pub compression_level: Option<i32>,
+
     // Proxy
     pub proxy: ProxyConfig,
     // nit: this should probably be in the endpoints section
@@ -77,6 +79,9 @@ pub struct YamlConfig {
     pub trace_propagation_extract_first: Option<bool>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub trace_propagation_http_baggage_enabled: Option<bool>,
+
+    // Metrics
+    pub metrics_config: MetricsConfig,
 
     // OTLP
     pub otlp_config: Option<OtlpConfig>,
@@ -129,6 +134,15 @@ pub struct LogsConfig {
     pub use_compression: Option<bool>,
     pub compression_level: Option<i32>,
     pub additional_endpoints: Vec<LogsAdditionalEndpoint>,
+}
+
+/// Metrics specific config
+///
+#[derive(Debug, PartialEq, Deserialize, Clone, Copy, Default)]
+#[serde(default)]
+#[allow(clippy::module_name_repetitions)]
+pub struct MetricsConfig {
+    pub compression_level: Option<i32>,
 }
 
 /// APM Config
@@ -373,6 +387,8 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option!(config, yaml_config, version);
     merge_hashmap!(config, yaml_config, tags);
 
+    merge_option_to_value!(config, yaml_config, compression_level);
+
     // Proxy
     merge_option!(config, proxy_https, yaml_config.proxy, https);
     merge_option_to_value!(config, proxy_no_proxy, yaml_config.proxy, no_proxy);
@@ -404,6 +420,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(
         config,
         logs_config_compression_level,
+        yaml_config,
+        compression_level
+    );
+    merge_option_to_value!(
+        config,
+        logs_config_compression_level,
         yaml_config.logs_config,
         compression_level
     );
@@ -414,6 +436,20 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         additional_endpoints
     );
 
+    merge_option_to_value!(
+        config,
+        metrics_config_compression_level,
+        yaml_config,
+        compression_level
+    );
+
+    merge_option_to_value!(
+        config,
+        metrics_config_compression_level,
+        yaml_config.metrics_config,
+        compression_level
+    );
+
     // APM
     merge_hashmap!(config, yaml_config, service_mapping);
     merge_string!(config, apm_dd_url, yaml_config.apm_config, apm_dd_url);
@@ -422,6 +458,12 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
         apm_replace_tags,
         yaml_config.apm_config,
         replace_tags
+    );
+    merge_option_to_value!(
+        config,
+        apm_config_compression_level,
+        yaml_config,
+        compression_level
     );
     merge_option_to_value!(
         config,
@@ -667,7 +709,7 @@ site: "test-site"
 api_key: "test-api-key"
 log_level: "debug"
 flush_timeout: 42
-
+compression_level: 4
 # Proxy
 proxy:
   https: "https://proxy.example.com"
@@ -699,7 +741,7 @@ logs_config:
       type: "exclude_at_match"
       pattern: "test-pattern"
   use_compression: false
-  compression_level: 3
+  compression_level: 1
   additional_endpoints:
     - api_key: "apikey2"
       Host: "agent-http-intake.logs.datadoghq.com"
@@ -714,7 +756,7 @@ apm_config:
     http:
       remove_query_string: true
       remove_paths_with_digits: true
-  compression_level: 3
+  compression_level: 2
   features:
     - "enable_otlp_compute_top_level_by_span_kind"
     - "enable_stats_by_span_kind"
@@ -733,6 +775,9 @@ trace_propagation_style_extract: "b3"
 trace_propagation_extract_first: true
 trace_propagation_http_baggage_enabled: true
 trace_aws_service_representation_enabled: true
+
+metrics_config:
+  compression_level: 3
 
 # OTLP
 otlp_config:
@@ -801,6 +846,7 @@ extension_version: "compatibility"
                 api_key: "test-api-key".to_string(),
                 log_level: LogLevel::Debug,
                 flush_timeout: 42,
+                compression_level: 4,
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
@@ -831,7 +877,7 @@ extension_version: "compatibility"
                     replace_placeholder: None,
                 }]),
                 logs_config_use_compression: false,
-                logs_config_compression_level: 3,
+                logs_config_compression_level: 1,
                 logs_config_additional_endpoints: vec![LogsAdditionalEndpoint {
                     api_key: "apikey2".to_string(),
                     host: "agent-http-intake.logs.datadoghq.com".to_string(),
@@ -846,7 +892,7 @@ extension_version: "compatibility"
                 apm_replace_tags: Some(vec![]),
                 apm_config_obfuscation_http_remove_query_string: true,
                 apm_config_obfuscation_http_remove_paths_with_digits: true,
-                apm_config_compression_level: 3,
+                apm_config_compression_level: 2,
                 apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
@@ -866,6 +912,7 @@ extension_version: "compatibility"
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
                 trace_aws_service_representation_enabled: true,
+                metrics_config_compression_level: 3,
                 otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,
                 otlp_config_traces_span_name_remappings: HashMap::from([(
