@@ -557,9 +557,8 @@ async fn extension_loop_active(
         appsec_processor.as_ref(),
     );
 
-    let lifecycle_listener = LifecycleListener {
-        invocation_processor: Arc::clone(&invocation_processor),
-    };
+    let lifecycle_listener = LifecycleListener::new(Arc::clone(&invocation_processor));
+    let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
     // TODO(astuyve): deprioritize this task after the first request
     tokio::spawn(async move {
         let res = lifecycle_listener.start().await;
@@ -801,6 +800,7 @@ async fn extension_loop_active(
             trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
             telemetry_listener_cancel_token.cancel();
+            lifecycle_listener_shutdown_token.cancel();
 
             // gotta lock here
             let mut locked_metrics = metrics_flushers.lock().await;
