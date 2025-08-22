@@ -245,6 +245,8 @@ pub struct Config {
     // Timeout for the request to flush data to Datadog endpoint
     pub flush_timeout: u64,
 
+    pub compression_level: i32,
+
     // Proxy
     pub proxy_https: Option<String>,
     pub proxy_no_proxy: Vec<String>,
@@ -286,6 +288,9 @@ pub struct Config {
     pub trace_propagation_extract_first: bool,
     pub trace_propagation_http_baggage_enabled: bool,
     pub trace_aws_service_representation_enabled: bool,
+
+    // Metrics
+    pub metrics_config_compression_level: i32,
 
     // OTLP
     //
@@ -364,6 +369,8 @@ impl Default for Config {
             version: None,
             tags: HashMap::new(),
 
+            compression_level: 6,
+
             // Logs
             logs_config_logs_dd_url: String::default(),
             logs_config_processing_rules: None,
@@ -388,6 +395,9 @@ impl Default for Config {
             trace_propagation_style_extract: vec![],
             trace_propagation_extract_first: false,
             trace_propagation_http_baggage_enabled: false,
+
+            // Metrics
+            metrics_config_compression_level: 6,
 
             // OTLP
             otlp_config_traces_enabled: true,
