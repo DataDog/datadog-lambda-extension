@@ -193,11 +193,20 @@ pub struct EnvConfig {
     /// Example: "env:development debug:true name:health.check"
     #[serde(deserialize_with = "deserialize_apm_filter_tags")]
     pub apm_filter_tags_reject: Option<Vec<String>>,
+    /// @env `DD_APM_FILTER_TAGS_REGEX_REQUIRE`
+    ///
+    /// Space-separated list of key:value tag pairs with regex values that spans must match to be kept.
+    /// Only spans matching at least one of these regex patterns will be sent to Datadog.
+    /// Example: "env:^prod.*$ service:^api-.*$"
+    #[serde(deserialize_with = "deserialize_apm_filter_tags")]
+    pub apm_filter_tags_regex_require: Option<Vec<String>>,
     /// @env `DD_APM_FILTER_TAGS_REGEX_REJECT`
     ///
-    /// Enable regex pattern matching for reject tag filters. Default is `false`.
-    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
-    pub apm_filter_tags_regex_reject: Option<bool>,
+    /// Space-separated list of key:value tag pairs with regex values that will cause spans to be filtered out.
+    /// Spans matching any of these regex patterns will be dropped.
+    /// Example: "env:^test.*$ debug:^true$"
+    #[serde(deserialize_with = "deserialize_apm_filter_tags")]
+    pub apm_filter_tags_regex_reject: Option<Vec<String>>,
     /// @env `DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED`
     ///
     /// Enable the new AWS-resource naming logic in the tracer.
@@ -389,7 +398,8 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_hashmap!(config, env_config, apm_additional_endpoints);
     merge_option!(config, env_config, apm_filter_tags_require);
     merge_option!(config, env_config, apm_filter_tags_reject);
-    merge_option_to_value!(config, env_config, apm_filter_tags_regex_reject);
+    merge_option!(config, env_config, apm_filter_tags_regex_require);
+    merge_option!(config, env_config, apm_filter_tags_regex_reject);
     merge_option_to_value!(config, env_config, trace_aws_service_representation_enabled);
 
     // Trace Propagation
@@ -585,7 +595,14 @@ mod tests {
             jail.set_env("DD_APM_ADDITIONAL_ENDPOINTS", "{\"https://trace.agent.datadoghq.com\": [\"apikey2\", \"apikey3\"], \"https://trace.agent.datadoghq.eu\": [\"apikey4\"]}");
             jail.set_env("DD_APM_FILTER_TAGS_REQUIRE", "env:production service:api");
             jail.set_env("DD_APM_FILTER_TAGS_REJECT", "debug:true env:test");
-            jail.set_env("DD_APM_FILTER_TAGS_REGEX_REJECT", "true");
+            jail.set_env(
+                "DD_APM_FILTER_TAGS_REGEX_REQUIRE",
+                "env:^test.*$ debug:^true$",
+            );
+            jail.set_env(
+                "DD_APM_FILTER_TAGS_REGEX_REJECT",
+                "env:^test.*$ debug:^true$",
+            );
 
             // Trace Propagation
             jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog");
@@ -746,7 +763,14 @@ mod tests {
                     "debug:true".to_string(),
                     "env:test".to_string(),
                 ]),
-                apm_filter_tags_regex_reject: true,
+                apm_filter_tags_regex_require: Some(vec![
+                    "env:^test.*$".to_string(),
+                    "debug:^true$".to_string(),
+                ]),
+                apm_filter_tags_regex_reject: Some(vec![
+                    "env:^test.*$".to_string(),
+                    "debug:^true$".to_string(),
+                ]),
                 trace_propagation_style: vec![TracePropagationStyle::Datadog],
                 trace_propagation_style_extract: vec![TracePropagationStyle::B3],
                 trace_propagation_extract_first: true,

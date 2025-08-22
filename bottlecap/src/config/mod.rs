@@ -279,7 +279,8 @@ pub struct Config {
     pub apm_additional_endpoints: HashMap<String, Vec<String>>,
     pub apm_filter_tags_require: Option<Vec<String>>,
     pub apm_filter_tags_reject: Option<Vec<String>>,
-    pub apm_filter_tags_regex_reject: bool,
+    pub apm_filter_tags_regex_require: Option<Vec<String>>,
+    pub apm_filter_tags_regex_reject: Option<Vec<String>>,
     //
     // Trace Propagation
     pub trace_propagation_style: Vec<TracePropagationStyle>,
@@ -377,7 +378,8 @@ impl Default for Config {
             apm_additional_endpoints: HashMap::new(),
             apm_filter_tags_require: None,
             apm_filter_tags_reject: None,
-            apm_filter_tags_regex_reject: false,
+            apm_filter_tags_regex_require: None,
+            apm_filter_tags_regex_reject: None,
             trace_aws_service_representation_enabled: true,
             trace_propagation_style: vec![
                 TracePropagationStyle::Datadog,
@@ -613,7 +615,7 @@ where
     Ok(map)
 }
 
-/// Deserialize APM filter tags from space-separated "key:value" pairs
+/// Deserialize APM filter tags from space-separated "key:value" pairs, also support key-only tags
 pub fn deserialize_apm_filter_tags<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
 where
     D: Deserializer<'de>,
@@ -631,10 +633,19 @@ where
                     if parts.len() == 2 {
                         let key = parts[0].trim();
                         let value = parts[1].trim();
-                        if !key.is_empty() && !value.is_empty() {
-                            Some(format!("{key}:{value}"))
-                        } else {
+                        if key.is_empty() {
                             None
+                        } else if value.is_empty() {
+                            Some(key.to_string())
+                        } else {
+                            Some(format!("{key}:{value}"))
+                        }
+                    } else if parts.len() == 1 {
+                        let key = parts[0].trim();
+                        if key.is_empty() {
+                            None
+                        } else {
+                            Some(key.to_string())
                         }
                     } else {
                         None

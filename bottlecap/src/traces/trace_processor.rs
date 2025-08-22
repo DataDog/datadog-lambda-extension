@@ -24,8 +24,7 @@ use ddcommon::Endpoint;
 use regex::Regex;
 use std::str::FromStr;
 use std::sync::Arc;
-use tracing::debug;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::trace_aggregator::SendDataBuilderInfo;
 
@@ -83,12 +82,12 @@ impl TraceChunkProcessor for ChunkProcessor {
 }
 
 fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
-    // Handle required tags from DD_APM_FILTER_TAGS_REQUIRE
+    // Handle required tags from DD_APM_FILTER_TAGS_REQUIRE (exact match)
     if let Some(require_tags) = &config.apm_filter_tags_require {
         if !require_tags.is_empty() {
             let matches_require = require_tags
                 .iter()
-                .all(|filter| span_matches_tag(span, filter, config));
+                .all(|filter| span_matches_tag_exact_filter(span, filter));
             if !matches_require {
                 debug!(
                     "Filtering out span '{}' - doesn't match all required tags {}",
@@ -99,12 +98,30 @@ fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
             }
         }
     }
-    // Handle reject tags from DD_APM_FILTER_TAGS_REJECT
+
+    // Handle required regex tags from DD_APM_FILTER_TAGS_REGEX_REQUIRE (regex match)
+    if let Some(require_regex_tags) = &config.apm_filter_tags_regex_require {
+        if !require_regex_tags.is_empty() {
+            let matches_require_regex = require_regex_tags
+                .iter()
+                .all(|filter| span_matches_tag_regex_filter(span, filter));
+            if !matches_require_regex {
+                debug!(
+                    "Filtering out span '{}' - doesn't match all required regex tags {}",
+                    span.name,
+                    require_regex_tags.join(", ")
+                );
+                return true;
+            }
+        }
+    }
+
+    // Handle reject tags from DD_APM_FILTER_TAGS_REJECT (exact match)
     if let Some(reject_tags) = &config.apm_filter_tags_reject {
         if !reject_tags.is_empty() {
             let matches_reject = reject_tags
                 .iter()
-                .any(|filter| span_matches_tag(span, filter, config));
+                .any(|filter| span_matches_tag_exact_filter(span, filter));
             if matches_reject {
                 debug!(
                     "Filtering out span '{}' - matches reject tags {}",
@@ -115,22 +132,54 @@ fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
             }
         }
     }
+
+    // Handle reject regex tags from DD_APM_FILTER_TAGS_REGEX_REJECT (regex match)
+    if let Some(reject_regex_tags) = &config.apm_filter_tags_regex_reject {
+        if !reject_regex_tags.is_empty() {
+            let matches_reject_regex = reject_regex_tags
+                .iter()
+                .any(|filter| span_matches_tag_regex_filter(span, filter));
+            if matches_reject_regex {
+                debug!(
+                    "Filtering out span '{}' - matches reject regex tags {}",
+                    span.name,
+                    reject_regex_tags.join(", ")
+                );
+                return true;
+            }
+        }
+    }
+
     false
 }
 
-fn span_matches_tag(span: &Span, filter: &str, config: &config::Config) -> bool {
+fn span_matches_tag_exact_filter(span: &Span, filter: &str) -> bool {
     let parts: Vec<&str> = filter.splitn(2, ':').collect();
-    if parts.len() != 2 {
-        return false;
-    }
 
-    let key = parts[0].trim();
-    let value = parts[1].trim();
-
-    if config.apm_filter_tags_regex_reject {
-        span_matches_tag_regex(span, key, value)
-    } else {
+    if parts.len() == 2 {
+        let key = parts[0].trim();
+        let value = parts[1].trim();
         span_matches_tag_exact(span, key, value)
+    } else if parts.len() == 1 {
+        let key = parts[0].trim();
+        span_has_key(span, key)
+    } else {
+        false
+    }
+}
+
+fn span_matches_tag_regex_filter(span: &Span, filter: &str) -> bool {
+    let parts: Vec<&str> = filter.splitn(2, ':').collect();
+
+    if parts.len() == 2 {
+        let key = parts[0].trim();
+        let value = parts[1].trim();
+        span_matches_tag_regex(span, key, value)
+    } else if parts.len() == 1 {
+        let key = parts[0].trim();
+        span_has_key(span, key)
+    } else {
+        false
     }
 }
 
@@ -187,6 +236,19 @@ fn span_matches_tag_regex(span: &Span, key: &str, value: &str) -> bool {
     }
 
     false
+}
+
+fn span_has_key(span: &Span, key: &str) -> bool {
+    if span.meta.contains_key(key) {
+        return true;
+    }
+    match key {
+        "name" => !span.name.is_empty(),
+        "service" => !span.service.is_empty(),
+        "resource" => !span.resource.is_empty(),
+        "type" => !span.r#type.is_empty(),
+        _ => false,
+    }
 }
 
 fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
@@ -479,9 +541,11 @@ mod tests {
         };
 
         assert!(span_matches_tag_exact(&span, "env", "production"));
+        assert!(!span_matches_tag_exact(&span, "env", "")); // Empty string doesn't match non-empty value
         assert!(!span_matches_tag_exact(&span, "env", "development"));
 
         assert!(span_matches_tag_exact(&span, "service", "my-service"));
+        assert!(!span_matches_tag_exact(&span, "service", "")); // Empty string doesn't match non-empty value
         assert!(!span_matches_tag_exact(&span, "service", "other-service"));
     }
 
@@ -497,15 +561,14 @@ mod tests {
             ..Default::default()
         };
 
-        // Test regex matching for meta tags
         assert!(span_matches_tag_regex(&span, "env", r"prod.*"));
+        assert!(span_matches_tag_regex(&span, "env", ""));
         assert!(!span_matches_tag_regex(&span, "env", r"dev.*"));
 
-        // Test regex matching for span properties
         assert!(span_matches_tag_regex(&span, "service", r".*-service"));
+        assert!(span_matches_tag_regex(&span, "service", ""));
         assert!(!span_matches_tag_regex(&span, "service", r"api-.*"));
 
-        // Test invalid regex patterns
         assert!(!span_matches_tag_regex(&span, "env", r"[unclosed"));
     }
 
@@ -521,32 +584,11 @@ mod tests {
             ..Default::default()
         };
 
-        // Test with regex disabled (exact matching)
-        let config_no_regex = Config {
-            apm_filter_tags_regex_reject: false,
-            ..Default::default()
-        };
+        assert!(span_matches_tag_exact(&span, "env", "test-environment"));
+        assert!(!span_matches_tag_exact(&span, "env", "test"));
 
-        assert!(span_matches_tag(
-            &span,
-            "env:test-environment",
-            &config_no_regex
-        ));
-        assert!(!span_matches_tag(&span, "env:test", &config_no_regex));
-
-        // Test with regex enabled
-        let config_regex = Config {
-            apm_filter_tags_regex_reject: true,
-            ..Default::default()
-        };
-
-        assert!(span_matches_tag(&span, r"env:test.*", &config_regex));
-        assert!(span_matches_tag(
-            &span,
-            r"service:.*-service",
-            &config_regex
-        ));
-        assert!(!span_matches_tag(&span, r"env:prod.*", &config_regex));
+        assert!(span_matches_tag_regex(&span, "env", r"test.*"));
+        assert!(!span_matches_tag_regex(&span, "env", r"prod.*"));
     }
 
     #[test]

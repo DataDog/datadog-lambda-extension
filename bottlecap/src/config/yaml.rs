@@ -893,7 +893,8 @@ extension_version: "compatibility"
                 extension_version: Some("compatibility".to_string()),
                 apm_filter_tags_require: None,
                 apm_filter_tags_reject: None,
-                apm_filter_tags_regex_reject: false,
+                apm_filter_tags_regex_require: None,
+                apm_filter_tags_regex_reject: None,
             };
 
             // Assert that
