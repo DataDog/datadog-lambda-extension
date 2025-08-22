@@ -333,7 +333,8 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 async fn main() -> Result<()> {
     let start_time = Instant::now();
     init_ustr();
-    let (aws_config, aws_credentials, config) = load_configs(start_time);
+    let envs = Arc::new(RwLock::new(env::vars().collect::<HashMap<String, String>>()));
+    let (aws_config, aws_credentials, config) = load_configs(start_time, envs).await;
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -392,12 +393,14 @@ fn init_ustr() {
     });
 }
 
-fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
+async fn load_configs(start_time: Instant, envs: Arc<RwLock<HashMap<String, String>>>) -> (AwsConfig, AwsCredentials, Arc<Config>) {
     // First load the AWS configuration
-    let aws_config = AwsConfig::from_env(start_time);
-    let aws_credentials = AwsCredentials::from_env();
-    let lambda_directory: String =
-        env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let aws_config = AwsConfig::from_env(start_time, envs.clone()).await;
+    let aws_credentials = AwsCredentials::from_env(envs.clone()).await;
+    let lambda_directory: String = {
+        let envs_read = envs.read().await;
+        envs_read.get("LAMBDA_TASK_ROOT").unwrap_or(&"/var/task".to_string()).clone()
+    };
     let config = match config::get_config(Path::new(&lambda_directory)) {
         Ok(config) => Arc::new(config),
         Err(_e) => {
