@@ -5,7 +5,7 @@
 # listed in the agen't go.work files. The go we install here will download the
 # appropriate version  specified in the go.work file before running go commands
 # for the agent.
-FROM golang:1.24.4 as builder
+FROM golang:1.24.6 as builder
 
 ARG EXTENSION_VERSION
 ARG ENABLE_RACE_DETECTION
