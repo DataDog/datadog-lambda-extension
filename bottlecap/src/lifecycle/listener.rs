@@ -13,8 +13,9 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use tokio::{net::TcpListener, task::JoinSet};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -33,33 +34,63 @@ const AGENT_PORT: usize = 8124;
 
 pub struct Listener {
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    pub shutdown_token: CancellationToken,
 }
 
+type ListenerState = (Arc<Mutex<InvocationProcessor>>, Arc<Mutex<JoinSet<()>>>);
+
 impl Listener {
+    pub fn new(invocation_processor: Arc<Mutex<InvocationProcessor>>) -> Self {
+        let shutdown_token = CancellationToken::new();
+        Self {
+            invocation_processor,
+            shutdown_token,
+        }
+    }
+
+    #[must_use]
+    pub fn get_shutdown_token(&self) -> CancellationToken {
+        self.shutdown_token.clone()
+    }
+
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let port = u16::try_from(AGENT_PORT).expect("AGENT_PORT is too large");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
         let listener = TcpListener::bind(&addr).await?;
 
-        let router = self.make_router();
+        let tasks = Arc::new(Mutex::new(JoinSet::new()));
+        let state: ListenerState = (self.invocation_processor.clone(), tasks.clone());
+        let router = Self::make_router(state);
 
         debug!("Lifecycle API | Starting listener on {}", addr);
-        axum::serve(listener, router).await?;
+        axum::serve(listener, router)
+            .with_graceful_shutdown(Self::graceful_shutdown(tasks, self.shutdown_token.clone()))
+            .await?;
         Ok(())
     }
 
-    fn make_router(&self) -> Router {
-        let invocation_processor = self.invocation_processor.clone();
-
+    fn make_router(state: ListenerState) -> Router {
         Router::new()
             .route(START_INVOCATION_PATH, post(Self::handle_start_invocation))
             .route(END_INVOCATION_PATH, post(Self::handle_end_invocation))
             .route(HELLO_PATH, get(Self::handle_hello))
-            .with_state(invocation_processor)
+            .with_state(state)
+    }
+
+    async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: CancellationToken) {
+        shutdown_token.cancelled().await;
+        debug!("Lifecycle API | Shutdown signal received, shutting down");
+
+        let mut tasks = tasks.lock().await;
+        while let Some(task) = tasks.join_next().await {
+            if let Some(e) = task.err() {
+                error!("Lifecycle API | Shutdown error: {e}");
+            }
+        }
     }
 
     async fn handle_start_invocation(
-        State(invocation_processor): State<Arc<Mutex<InvocationProcessor>>>,
+        State((invocation_processor, _tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
         let (parts, body) = match extract_request_body(request).await {
@@ -81,33 +112,28 @@ impl Listener {
     }
 
     async fn handle_end_invocation(
-        State(invocation_processor): State<Arc<Mutex<InvocationProcessor>>>,
+        State((invocation_processor, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
-        let (parts, body) = match extract_request_body(request).await {
-            Ok(r) => r,
-            Err(e) => {
-                error!("Failed to extract request body: {e}");
-                return (
-                    StatusCode::BAD_REQUEST,
-                    "Could not read end invocation request body",
-                )
-                    .into_response();
-            }
-        };
+        let mut join_set = tasks.lock().await;
+        join_set.spawn(async move {
+            let (parts, body) = match extract_request_body(request).await {
+                Ok(r) => r,
+                Err(e) => {
+                    error!("Failed to extract request body: {e}");
+                    return;
+                }
+            };
 
-        match Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await
-        {
-            Ok(response) => response,
-            Err(e) => {
-                error!("Failed to end invocation {e}");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to end invocation",
-                )
-                    .into_response()
+            if let Err(e) =
+                Self::universal_instrumentation_end(&parts.headers, body, invocation_processor)
+                    .await
+            {
+                error!("Failed to process end invocation request {e}");
             }
-        }
+        });
+
+        (StatusCode::OK, json!({}).to_string()).into_response()
     }
 
     #[allow(clippy::unused_async)]
@@ -183,16 +209,15 @@ impl Listener {
         headers: &HeaderMap,
         body: Bytes,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> Result<Response, Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         debug!("Received end invocation request");
         let body = body.to_vec();
         let mut processor = invocation_processor.lock().await;
 
         let headers = Self::headers_to_map(headers);
         processor.on_universal_instrumentation_end(headers, body);
-        drop(processor);
 
-        Ok((StatusCode::OK, json!({}).to_string()).into_response())
+        Ok(())
     }
 
     fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
