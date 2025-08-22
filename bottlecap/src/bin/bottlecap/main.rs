@@ -339,18 +339,6 @@ async fn register(client: &Client) -> Result<RegisterResponse> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // // Visible CPUs
-    // eprintln!("visible_cpus(std)       = {}", visible_cpus_std());
-    // if let Some(n) = visible_cpus_proc() {
-    //     eprintln!("visible_cpus(/proc)     = {}", n);
-    // }
-
-    // // Effective vCPU entitlement from cgroups (quota/period)
-    // match effective_vcpus() {
-    //     Some(v) => eprintln!("effective_vcpus(cgroup) = {:.3}", v),
-    //     None => eprintln!("effective_vcpus(cgroup) = <unknown>"),
-    // }
-
     eprintln!("workers={}", tokio::runtime::Handle::current().metrics().num_workers());
 
     let start_time = Instant::now();
@@ -541,70 +529,6 @@ async fn extension_loop_idle(client: &Client, r: &RegisterResponse, start_time: 
         };
     }
 }
-
-// fn visible_cpus_std() -> usize {
-//     std::thread::available_parallelism()
-//         .map(NonZeroUsize::get)
-//         .unwrap_or(1)
-// }
-
-// fn visible_cpus_proc() -> Option<usize> {
-//     let s = fs::read_to_string("/proc/cpuinfo").ok()?;
-//     let count = s.lines().filter(|l| l.starts_with("processor")).count();
-//     if count > 0 { Some(count) } else { None }
-// }
-
-// /// Try to read effective vCPUs from cgroup v2: /sys/fs/cgroup/cpu.max
-// /// Format: "<quota> <period>" or "max <period>"
-// fn vcpus_from_cgroup_v2() -> Option<f64> {
-//     let path = "/sys/fs/cgroup/cpu.max";
-//     if !Path::new(path).exists() {
-//         return None;
-//     }
-//     let s = fs::read_to_string(path).ok()?;
-//     // e.g., "100000 100000" => 1.0 vCPU; "200000 100000" => 2.0; "max 100000" => unlimited
-//     let mut parts = s.split_whitespace();
-//     let quota = parts.next()?;
-//     let period = parts.next()?.parse::<f64>().ok()?;
-//     if quota == "max" {
-//         None // unlimited; not typical on Lambda
-//     } else {
-//         let q = quota.parse::<f64>().ok()?;
-//         Some(q / period)
-//     }
-// }
-
-// /// Try to read effective vCPUs from cgroup v1:
-// ///   /sys/fs/cgroup/cpu/cpu.cfs_quota_us
-// ///   /sys/fs/cgroup/cpu/cpu.cfs_period_us
-// fn vcpus_from_cgroup_v1() -> Option<f64> {
-//     // Common candidate directories
-//     let bases = [
-//         "/sys/fs/cgroup/cpu",                 // classic
-//         "/sys/fs/cgroup/cpu,cpuacct",         // some distros
-//     ];
-
-//     for base in bases {
-//         let quota_p = format!("{}/cpu.cfs_quota_us", base);
-//         let period_p = format!("{}/cpu.cfs_period_us", base);
-//         if Path::new(&quota_p).exists() && Path::new(&period_p).exists() {
-//             let quota_s = fs::read_to_string(&quota_p).ok()?.trim().to_string();
-//             let period_s = fs::read_to_string(&period_p).ok()?.trim().to_string();
-//             let quota = quota_s.parse::<f64>().ok()?;
-//             let period = period_s.parse::<f64>().ok()?;
-//             if quota > 0.0 && period > 0.0 {
-//                 return Some(quota / period);
-//             }
-//         }
-//     }
-//     None
-// }
-
-// /// Best-effort detection of effective vCPUs using cgroup data.
-// /// Returns None if not determinable.
-// fn effective_vcpus() -> Option<f64> {
-//     vcpus_from_cgroup_v2().or_else(vcpus_from_cgroup_v1())
-// }
 
 #[allow(clippy::too_many_lines)]
 async fn extension_loop_active(
