@@ -199,24 +199,24 @@ publish layer {{ $environment_name }} ({{ $flavor.name }}):
 
 {{ end }} # end environments
 
-publish layer sandbox [us-east-1] ({{ $flavor.name }}):
+publish layer [self-monitoring] ({{ $flavor.name }}):
   stage: self-monitoring
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
     - when: manual
       allow_failure: true
-
+  parallel:
+    matrix:
+      - REGION: us-east-1 # Self Monitoring
+      - REGION: us-west-2 # E2E Testing
   needs:
     - layer ({{ $flavor.name }})
-
   dependencies:
     - layer ({{ $flavor.name }})
-
   {{ with $environment := (ds "environments").environments.sandbox }}
   variables:
     LAYER_NAME_BASE_SUFFIX: {{ $flavor.layer_name_base_suffix }}
-    REGION: us-east-1
     ARCHITECTURE: {{ $flavor.arch }}
     LAYER_FILE: datadog_extension-{{ $flavor.suffix }}.zip
     ADD_LAYER_VERSION_PERMISSIONS: {{ $environment.add_layer_version_permissions }}
