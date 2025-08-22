@@ -5,6 +5,23 @@
 # This product includes software developed at Datadog (https://www.datadoghq.com/).
 # Copyright 2024 Datadog, Inc.
 
+set -euxo pipefail
+
+echo "PWD=$PWD"
+echo "Project dir: ${CI_PROJECT_DIR:-N/A}"
+
+# What artifacts/directories exist?
+ls -la
+ls -la .layers || true
+ls -la .layers/datadog_extension-arm64 || true
+ls -la .layers/datadog_extension-arm64/extensions || true
+ls -la .layers/datadog_extension-arm64/extensions/datadog-agent || true
+
+# If it’s supposed to be a file, show file info; if a dir, show tree
+file .layers/datadog_extension-arm64/extensions/datadog-agent || true
+
+
+
 set -e
 
 DOCKER_TARGET_IMAGE="425362996713.dkr.ecr.us-east-1.amazonaws.com/self-monitoring-lambda-extension"
