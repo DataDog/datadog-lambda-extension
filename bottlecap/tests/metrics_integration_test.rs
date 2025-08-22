@@ -54,6 +54,7 @@ async fn test_enhanced_metrics() {
         https_proxy: None,
         timeout: std::time::Duration::from_secs(5),
         retry_strategy: dogstatsd::datadog::RetryStrategy::Immediate(1),
+        compression_level: 6,
     };
     let mut metrics_flusher = MetricsFlusher::new(flusher_config);
     let lambda_enhanced_metrics =

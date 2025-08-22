@@ -108,6 +108,13 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_key_value_pairs")]
     pub tags: HashMap<String, String>,
 
+    /// @env `DD_COMPRESSION_LEVEL`
+    ///
+    /// Global level `compression_level` parameter accepts values from 0 (no compression)
+    /// to 9 (maximum compression but higher resource usage). This value is effective only if
+    /// the individual component doesn't specify its own.
+    pub compression_level: Option<i32>,
+
     // Logs
     /// @env `DD_LOGS_CONFIG_LOGS_DD_URL`
     ///
@@ -228,6 +235,12 @@ pub struct EnvConfig {
     /// @env `DD_TRACE_PROPAGATION_HTTP_BAGGAGE_ENABLED`
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub trace_propagation_http_baggage_enabled: Option<bool>,
+
+    /// @env `DD_METRICS_CONFIG_COMPRESSION_LEVEL`
+    /// The metrics compresses traces before sending them. The `compression_level` parameter
+    /// accepts values from 0 (no compression) to 9 (maximum compression but
+    /// higher resource usage).
+    pub metrics_config_compression_level: Option<i32>,
 
     // OTLP
     //
@@ -383,6 +396,8 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, version);
     merge_hashmap!(config, env_config, tags);
 
+    merge_option_to_value!(config, env_config, compression_level);
+
     // Proxy
     merge_option!(config, env_config, proxy_https);
     merge_vec!(config, env_config, proxy_no_proxy);
@@ -397,6 +412,12 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_string!(config, env_config, logs_config_logs_dd_url);
     merge_option!(config, env_config, logs_config_processing_rules);
     merge_option_to_value!(config, env_config, logs_config_use_compression);
+    merge_option_to_value!(
+        config,
+        logs_config_compression_level,
+        env_config,
+        compression_level
+    );
     merge_option_to_value!(config, env_config, logs_config_compression_level);
     merge_vec!(config, env_config, logs_config_additional_endpoints);
 
@@ -414,6 +435,12 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         env_config,
         apm_config_obfuscation_http_remove_paths_with_digits
     );
+    merge_option_to_value!(
+        config,
+        apm_config_compression_level,
+        env_config,
+        compression_level
+    );
     merge_option_to_value!(config, env_config, apm_config_compression_level);
     merge_vec!(config, env_config, apm_features);
     merge_hashmap!(config, env_config, apm_additional_endpoints);
@@ -428,6 +455,15 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_vec!(config, env_config, trace_propagation_style_extract);
     merge_option_to_value!(config, env_config, trace_propagation_extract_first);
     merge_option_to_value!(config, env_config, trace_propagation_http_baggage_enabled);
+
+    // Metrics
+    merge_option_to_value!(
+        config,
+        metrics_config_compression_level,
+        env_config,
+        compression_level
+    );
+    merge_option_to_value!(config, env_config, metrics_config_compression_level);
 
     // OTLP
     merge_option_to_value!(config, env_config, otlp_config_traces_enabled);
@@ -589,6 +625,8 @@ mod tests {
             jail.set_env("DD_VERSION", "1.0.0");
             jail.set_env("DD_TAGS", "team:test-team,project:test-project");
 
+            jail.set_env("DD_COMPRESSION_LEVEL", "4");
+
             // Logs
             jail.set_env("DD_LOGS_CONFIG_LOGS_DD_URL", "https://logs.datadoghq.com");
             jail.set_env(
@@ -596,7 +634,7 @@ mod tests {
                 r#"[{"type":"exclude_at_match","name":"exclude","pattern":"exclude"}]"#,
             );
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "false");
-            jail.set_env("DD_LOGS_CONFIG_COMPRESSION_LEVEL", "3");
+            jail.set_env("DD_LOGS_CONFIG_COMPRESSION_LEVEL", "1");
             jail.set_env(
                 "DD_LOGS_CONFIG_ADDITIONAL_ENDPOINTS",
                 "[{\"api_key\": \"apikey2\", \"Host\": \"agent-http-intake.logs.datadoghq.com\", \"Port\": 443, \"is_reliable\": true}]",
@@ -615,7 +653,7 @@ mod tests {
                 "DD_APM_CONFIG_OBFUSCATION_HTTP_REMOVE_PATHS_WITH_DIGITS",
                 "true",
             );
-            jail.set_env("DD_APM_CONFIG_COMPRESSION_LEVEL", "3");
+            jail.set_env("DD_APM_CONFIG_COMPRESSION_LEVEL", "2");
             jail.set_env(
                 "DD_APM_FEATURES",
                 "enable_otlp_compute_top_level_by_span_kind,enable_stats_by_span_kind",
@@ -638,6 +676,9 @@ mod tests {
             jail.set_env("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true");
             jail.set_env("DD_TRACE_PROPAGATION_HTTP_BAGGAGE_ENABLED", "true");
             jail.set_env("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", "true");
+
+            // Metrics
+            jail.set_env("DD_METRICS_CONFIG_COMPRESSION_LEVEL", "3");
 
             // OTLP
             jail.set_env("DD_OTLP_CONFIG_TRACES_ENABLED", "false");
@@ -721,6 +762,7 @@ mod tests {
                 site: "test-site".to_string(),
                 api_key: "test-api-key".to_string(),
                 log_level: LogLevel::Debug,
+                compression_level: 4,
                 flush_timeout: 42,
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
@@ -752,7 +794,7 @@ mod tests {
                     replace_placeholder: None,
                 }]),
                 logs_config_use_compression: false,
-                logs_config_compression_level: 3,
+                logs_config_compression_level: 1,
                 logs_config_additional_endpoints: vec![LogsAdditionalEndpoint {
                     api_key: "apikey2".to_string(),
                     host: "agent-http-intake.logs.datadoghq.com".to_string(),
@@ -772,7 +814,7 @@ mod tests {
                 ),
                 apm_config_obfuscation_http_remove_query_string: true,
                 apm_config_obfuscation_http_remove_paths_with_digits: true,
-                apm_config_compression_level: 3,
+                apm_config_compression_level: 2,
                 apm_features: vec![
                     "enable_otlp_compute_top_level_by_span_kind".to_string(),
                     "enable_stats_by_span_kind".to_string(),
@@ -808,6 +850,7 @@ mod tests {
                 trace_propagation_extract_first: true,
                 trace_propagation_http_baggage_enabled: true,
                 trace_aws_service_representation_enabled: true,
+                metrics_config_compression_level: 3,
                 otlp_config_traces_enabled: false,
                 otlp_config_traces_span_name_as_resource_name: true,
                 otlp_config_traces_span_name_remappings: HashMap::from([(
