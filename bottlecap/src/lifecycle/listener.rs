@@ -74,12 +74,8 @@ impl Listener {
             }
         };
 
-        let (_, response) = Self::universal_instrumentation_start(
-            &parts.headers,
-            body,
-            invocation_processor,
-        )
-        .await;
+        let (_, response) =
+            Self::universal_instrumentation_start(&parts.headers, body, invocation_processor).await;
 
         response
     }
@@ -100,17 +96,21 @@ impl Listener {
             }
         };
 
-        match Self::universal_instrumentation_end(&parts.headers, body, invocation_processor)
-            .await
+        match Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await
         {
             Ok(response) => response,
             Err(e) => {
                 error!("Failed to end invocation {e}");
-                (StatusCode::INTERNAL_SERVER_ERROR, "Failed to end invocation").into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to end invocation",
+                )
+                    .into_response()
             }
         }
     }
 
+    #[allow(clippy::unused_async)]
     async fn handle_hello() -> Response {
         warn!("[DEPRECATED] Please upgrade your tracing library, the /hello route is deprecated");
         (StatusCode::OK, json!({}).to_string()).into_response()
@@ -138,11 +138,20 @@ impl Listener {
         // since this logic looks messy
         let response = if let Some(sp) = extracted_span_context {
             let mut headers = HeaderMap::new();
-            headers.insert(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string().parse().unwrap());
+            headers.insert(
+                DATADOG_TRACE_ID_KEY,
+                sp.trace_id
+                    .to_string()
+                    .parse()
+                    .expect("Failed to parse trace id"),
+            );
             if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
                 headers.insert(
                     DATADOG_SAMPLING_PRIORITY_KEY,
-                    priority.to_string().parse().unwrap(),
+                    priority
+                        .to_string()
+                        .parse()
+                        .expect("Failed to parse sampling priority"),
                 );
             }
 
@@ -152,9 +161,11 @@ impl Listener {
             {
                 headers.insert(
                     DATADOG_TAGS_KEY,
-                    format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}")
-                        .parse()
-                        .unwrap(),
+                    format!(
+                        "{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"
+                    )
+                    .parse()
+                    .expect("Failed to parse tags"),
                 );
             }
             found_parent_span_id = sp.span_id;
@@ -183,7 +194,6 @@ impl Listener {
 
         Ok((StatusCode::OK, json!({}).to_string()).into_response())
     }
-
 
     fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
         headers
