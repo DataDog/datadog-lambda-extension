@@ -1,10 +1,11 @@
-FROM registry.ddbuild.io/images/mirror/alpine:3.16 AS compiler
+FROM registry.ddbuild.io/images/mirror/alpine:3.22.0 AS compiler
 ARG PLATFORM
 
 ARG FIPS
 
 # Install dependencies
-RUN apk add --no-cache curl gcc musl-dev make unzip bash autoconf automake libtool g++ perl go cmake linux-headers;
+RUN apk add --no-cache bash build-base clang-libclang cmake curl go \
+    linux-headers perl unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -12,40 +13,51 @@ SHELL ["/bin/bash", "-c"]
 RUN apk add --no-cache protoc
 
 # Install Rust Toolchain
-RUN curl https://sh.rustup.rs -sSf | \
-    sh -s -- --profile minimal --default-toolchain stable-$PLATFORM-unknown-linux-musl -y
-ENV PATH=/root/.cargo/bin:$PATH
-RUN rustup component add rust-src --toolchain stable-$PLATFORM-unknown-linux-musl
-
-# Copy source code
-RUN mkdir -p /tmp/dd
-COPY ./bottlecap/src /tmp/dd/bottlecap/src
-COPY ./bottlecap/build.rs /tmp/dd/bottlecap/build.rs
-COPY ./bottlecap/Cargo.toml /tmp/dd/bottlecap/Cargo.toml
-COPY ./bottlecap/Cargo.lock /tmp/dd/bottlecap/Cargo.lock
+RUN set -euo pipefail && \
+    curl https://sh.rustup.rs -sSf | \
+        sh -s -- --profile minimal \
+                 --default-host "${PLATFORM}-unknown-linux-musl" \
+                 --default-toolchain "stable-${PLATFORM}-unknown-linux-musl" \
+                 --component rust-src \
+                 -y
+ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
-#
-# Added `-C link-arg=-lgcc` for alpine.
-ENV RUSTFLAGS="-C panic=abort -C link-arg=-lgcc"
+ENV RUSTFLAGS="-Cpanic=abort"
+# Added -Ctarget-feature=-crt-static for alpine: the default MUSL target is
+# configured to produce fully static binaries, hence incapable of dynamically
+# loading libraries. The libddwaf crate uses `bindgen` which by default
+# dynamically loads `libclang`, and the `static` feature is tricky to get
+# working on alpine due to how it packages the static version of libLLVM.
+ENV RUSTFLAGS="${RUSTFLAGS} -Ctarget-feature=-crt-static"
 
 WORKDIR /tmp/dd/bottlecap
-RUN --mount=type=cache,target=/root/.cargo/registry \
-    export PROFILE="release"; \
-    if [ "$FIPS" = "1" ]; then \
+RUN --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=bind,source=.,target=/tmp/dd,rw \
+    --mount=type=cache,target=/tmp/dd/bottlecap/target \
+    if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
-        if [ "$PLATFORM" = "aarch64" ]; then \
+        if [ "${PLATFORM}" = "aarch64" ]; then \
             export PROFILE="release-alpine-arm64-fips"; \
         fi \
     else \
         export FEATURES=default; \
     fi; \
-    env; \
-    cargo +stable build --verbose --no-default-features --features $FEATURES --profile $PROFILE --target $PLATFORM-unknown-linux-musl; \
-    cp /tmp/dd/bottlecap/target/$PLATFORM-unknown-linux-musl/$PROFILE/bottlecap /tmp/dd/bottlecap/bottlecap
+    # Explicitly NOT passing `--target` as this makes the `RUSTFLAGS` (from any
+    # source) not apply to `build.rs` compilation, which in turns means
+    # `libddwaf`'s builder fails to build because on MUSL platforms it can only
+    # work with `-Ctarget-feature=-crt-runtime` being specified. There is
+    # currently no way to set `RUSTFLAGS` for `build.rs` compilation if
+    # `--target` is passed (see: https://github.com/rust-lang/cargo/issues/4423).
+    cargo +stable build --verbose --locked --no-default-features \
+        --features="${FEATURES}" \
+        --profile="${PROFILE:-release}" && \
+    mkdir -p /tmp/out && \
+    cp "/tmp/dd/bottlecap/target/${PROFILE:-release}/bottlecap" /tmp/out/bottlecap
 
 # Use the smallest image possible
 FROM scratch
-COPY --from=compiler /tmp/dd/bottlecap/bottlecap /
+COPY --from=compiler /tmp/out/bottlecap /
 ENTRYPOINT ["/bottlecap"]
 

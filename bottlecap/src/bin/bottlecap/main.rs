@@ -9,6 +9,7 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
+use bottlecap::traces::trace_processor::SendingTraceProcessor;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -19,7 +20,10 @@ static GLOBAL: Jemalloc = Jemalloc;
 use bottlecap::{
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
-    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT, base_url,
+    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
+    appsec::processor::Processor as AppSecProcessor,
+    base_url,
     config::{
         self, Config,
         aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
@@ -517,6 +521,17 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
     )));
+    // AppSec processor (if enabled)
+    let appsec_processor = match AppSecProcessor::new(config) {
+        Ok(p) => Some(Arc::new(TokioMutex::new(p))),
+        Err(AppSecFeatureDisabled) => None,
+        Err(e) => {
+            error!(
+                "AAP | error creating App & API Protection processor, the feature will be disabled: {e}"
+            );
+            None
+        }
+    };
 
     let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (
@@ -531,11 +546,16 @@ async fn extension_loop_active(
         &api_key_factory,
         &tags_provider,
         Arc::clone(&invocation_processor),
+        appsec_processor.clone(),
         Arc::clone(&trace_aggregator),
     );
 
-    let api_runtime_proxy_shutdown_signal =
-        start_api_runtime_proxy(config, aws_config, &invocation_processor);
+    let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
+        config,
+        aws_config,
+        &invocation_processor,
+        appsec_processor.as_ref(),
+    );
 
     let lifecycle_listener = LifecycleListener {
         invocation_processor: Arc::clone(&invocation_processor),
@@ -588,7 +608,7 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                 break 'flush_end;
                             }
@@ -720,7 +740,7 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
                         let mut locked_metrics = metrics_flushers.lock().await;
@@ -758,7 +778,7 @@ async fn extension_loop_active(
                             debug!("Received tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
@@ -829,6 +849,7 @@ async fn blocking_flush_all(
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
@@ -879,8 +900,11 @@ async fn handle_event_bus_event(
                         status,
                         error_type.clone(),
                         tags_provider.clone(),
-                        trace_processor.clone(),
-                        trace_agent_channel.clone(),
+                        Arc::new(SendingTraceProcessor {
+                            appsec: appsec_processor.clone(),
+                            processor: trace_processor.clone(),
+                            trace_tx: trace_agent_channel.clone(),
+                        }),
                         event.time.timestamp(),
                     )
                     .await;
@@ -1053,6 +1077,7 @@ fn start_trace_agent(
     api_key_factory: &Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
 ) -> (
     Sender<SendDataBuilderInfo>,
@@ -1109,6 +1134,7 @@ fn start_trace_agent(
         stats_processor,
         proxy_aggregator,
         invocation_processor,
+        appsec_processor,
         Arc::clone(tags_provider),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
@@ -1198,6 +1224,7 @@ fn start_api_runtime_proxy(
     config: &Arc<Config>,
     aws_config: Arc<AwsConfig>,
     invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
+    appsec_processor: Option<&Arc<TokioMutex<AppSecProcessor>>>,
 ) -> Option<CancellationToken> {
     if !should_start_proxy(config, Arc::clone(&aws_config)) {
         debug!("Skipping API runtime proxy, no LWA proxy or datadog wrapper found");
@@ -1205,5 +1232,6 @@ fn start_api_runtime_proxy(
     }
 
     let invocation_processor = invocation_processor.clone();
-    interceptor::start(aws_config, invocation_processor).ok()
+    let appsec_processor = appsec_processor.map(Arc::clone);
+    interceptor::start(aws_config, invocation_processor, appsec_processor).ok()
 }
