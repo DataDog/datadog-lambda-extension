@@ -55,8 +55,8 @@ datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = 
 datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" , features = ["mini_agent"] }
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50"  }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "d131de8419c191ce21c91bb30b5915c4d8a2cc5a", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "62e7207e1b588126ca0106dc91080a4ead080f3d", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "62e7207e1b588126ca0106dc91080a4ead080f3d", default-features = false }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
