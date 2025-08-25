@@ -1,7 +1,17 @@
-FROM scratch
+FROM alpine:3.16 AS base
 ARG TARGETARCH
 ARG SUFFIX
 
-COPY .layers/datadog_extension-${TARGETARCH}${SUFFIX}/extensions/datadog-agent opt/extensions/datadog-agent
-COPY .layers/datadog_extension-${TARGETARCH}${SUFFIX}/datadog-agent-go opt/datadog-agent-go
-COPY --chmod=0755 scripts/datadog_wrapper opt/datadog_wrapper
+# Mount the layers directory and copy the required files
+RUN --mount=type=bind,source=.layers/datadog_extension-${TARGETARCH}${SUFFIX}/extensions/datadog-agent,target=/tmp/extensions/datadog-agent \
+    --mount=type=bind,source=.layers/datadog_extension-${TARGETARCH}${SUFFIX}/datadog-agent-go,target=/tmp/datadog-agent-go \
+    --mount=type=bind,source=scripts/datadog_wrapper,target=/tmp/datadog_wrapper \
+    mkdir -p /opt/extensions /opt && \
+    cp /tmp/extensions/datadog-agent /opt/extensions/datadog-agent && \
+    cp /tmp/datadog-agent-go /opt/datadog-agent-go && \
+    cp /tmp/datadog_wrapper /opt/datadog_wrapper && \
+    chmod 0755 /opt/datadog_wrapper
+
+# Final stage - copy from the base stage to scratch
+FROM scratch
+COPY --from=base /opt /
