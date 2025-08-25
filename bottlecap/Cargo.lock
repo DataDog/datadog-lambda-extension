@@ -1920,8 +1920,8 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libddwaf"
-version = "1.26.0"
-source = "git+https://github.com/DataDog/libddwaf-rust?rev=89c693078d392e344b594281c1e8f9f3f94685c0#89c693078d392e344b594281c1e8f9f3f94685c0"
+version = "1.27.0"
+source = "git+https://github.com/DataDog/libddwaf-rust?rev=91a8332d0c4d642b4149cb8d17b385b057bd96ff#91a8332d0c4d642b4149cb8d17b385b057bd96ff"
 dependencies = [
  "libddwaf-sys",
  "serde",
@@ -1929,16 +1929,20 @@ dependencies = [
 
 [[package]]
 name = "libddwaf-sys"
-version = "1.26.0"
-source = "git+https://github.com/DataDog/libddwaf-rust?rev=89c693078d392e344b594281c1e8f9f3f94685c0#89c693078d392e344b594281c1e8f9f3f94685c0"
+version = "1.27.0"
+source = "git+https://github.com/DataDog/libddwaf-rust?rev=91a8332d0c4d642b4149cb8d17b385b057bd96ff#91a8332d0c4d642b4149cb8d17b385b057bd96ff"
 dependencies = [
  "bindgen 0.72.0",
  "flate2",
  "hyper-rustls",
+ "lazy_static",
  "libc",
+ "libloading",
  "reqwest",
  "rustls",
  "tar",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
