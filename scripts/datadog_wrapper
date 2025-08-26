@@ -21,13 +21,17 @@ DD_SERVERLESS_APPSEC_ENABLED=$(echo "$DD_SERVERLESS_APPSEC_ENABLED" | tr '[:uppe
 
 if [ "$DD_EXPERIMENTAL_ENABLE_PROXY" == "true" ] || [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
 then
-  debug_log "Enabling Datadog's Runtime API proxy"
-  debug_log "The original AWS_LAMBDA_RUNTIME_API value is $AWS_LAMBDA_RUNTIME_API"
+  if [[ "$AWS_EXECUTION_ENV" == *"dotnet"* ]]; then
+    debug_log "Skipping proxy rerouting for .NET functions due to runtime issue, LWA and AAP won't work correctly."
+  else
+    debug_log "Enabling Datadog's Runtime API proxy"
+    debug_log "The original AWS_LAMBDA_RUNTIME_API value is $AWS_LAMBDA_RUNTIME_API"
 
-  # Replace the Runtime API address with the proxy address of the extension
-  export AWS_LAMBDA_RUNTIME_API="127.0.0.1:9000"
+    # Replace the Runtime API address with the proxy address of the extension
+    export AWS_LAMBDA_RUNTIME_API="127.0.0.1:9000"
 
-  debug_log "Rerouting AWS_LAMBDA_RUNTIME_API to the Datadog extension at $AWS_LAMBDA_RUNTIME_API"
+    debug_log "Rerouting AWS_LAMBDA_RUNTIME_API to the Datadog extension at $AWS_LAMBDA_RUNTIME_API"
+  fi
 fi
 
 if [[ "$DD_SERVERLESS_APPSEC_ENABLED" =~ ^(1|t|true)$ ]]
