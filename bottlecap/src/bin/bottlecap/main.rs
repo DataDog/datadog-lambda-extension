@@ -511,7 +511,7 @@ async fn extension_loop_active(
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
-        metrics_aggr_handle.clone(),
+        &metrics_aggr_handle,
         config,
     )));
     // Lifecycle Invocation Processor
@@ -1014,7 +1014,7 @@ fn start_logs_agent(
 
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
-    metrics_aggr_handle: MetricsAggregatorHandle,
+    metrics_aggr_handle: &MetricsAggregatorHandle,
     config: &Arc<Config>,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
