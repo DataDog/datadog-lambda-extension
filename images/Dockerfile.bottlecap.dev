@@ -3,17 +3,20 @@ ARG FILE_SUFFIX
 
 RUN apt-get update && apt-get install -y zip binutils
 
-# Copy Go Agent from last release
-COPY --from=public.ecr.aws/datadog/lambda-extension:latest /opt/datadog-agent-go  /datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 
+# Copy Rust Agent binary
 COPY .binaries/bottlecap-${FILE_SUFFIX} /extensions/datadog-agent
+
+# Copy wrapper script
 COPY ./scripts/datadog_wrapper /datadog_wrapper
 RUN chmod +x /datadog_wrapper
-RUN  zip -r datadog_extension.zip /extensions /datadog_wrapper /datadog-agent-go
 
-# keep the smallest possible docker image
+# Zip all binaries together
+RUN  zip -r datadog_extension.zip /extensions /datadog_wrapper
+
+# Keep the smallest possible docker image
 FROM scratch
 COPY --from=compresser /extensions/datadog_extension.zip /
 ENTRYPOINT ["/datadog_extension.zip"]
