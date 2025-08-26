@@ -976,7 +976,7 @@ mod tests {
     use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
 
-    async fn setup() -> Processor {
+    fn setup() -> Processor {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
-        let mut p = setup().await;
+        let mut p = setup();
         let mut headers = HashMap::new();
 
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "999".to_string());
@@ -1096,7 +1096,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
-        let mut p = setup().await;
+        let mut p = setup();
         let mut headers = HashMap::new();
 
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "888".to_string());
@@ -1125,7 +1125,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
-        let mut p = setup().await;
+        let mut p = setup();
         let mut headers = HashMap::new();
 
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "111".to_string());
@@ -1150,7 +1150,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_on_invocation_end_tags_response_with_status_code() {
-        let mut p = setup().await;
+        let mut p = setup();
 
         let response = r#"
        {
@@ -1189,7 +1189,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_on_shutdown_event_creates_unused_init_metrics() {
-        let mut processor = setup().await;
+        let mut processor = setup();
 
         let now1 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
         let ts1 = (now1 / 10) * 10;
