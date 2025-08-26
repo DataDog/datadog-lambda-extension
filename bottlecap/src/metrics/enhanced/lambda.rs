@@ -4,8 +4,8 @@ use crate::metrics::enhanced::{
 };
 use crate::proc::{self, CPUData, NetworkData};
 use crate::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
-use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::metric::SortedTags;
+use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator_service::AggregatorHandle, metric};
 use std::collections::HashMap;
 use std::env::consts::ARCH;
@@ -757,38 +757,35 @@ impl PartialEq for EnhancedMetricData {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::collections::HashMap;
-    use std::sync::Mutex;
 
     use super::*;
     use crate::config;
-    use dogstatsd::aggregator::Aggregator;
+    use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
 
-    fn setup() -> (Arc<Mutex<Aggregator>>, Arc<config::Config>) {
+    fn setup() -> (AggregatorHandle, Arc<config::Config>) {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
             ..config::Config::default()
         });
 
-        (
-            Arc::new(Mutex::new(
-                Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
-            )),
-            config,
-        )
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+
+        tokio::spawn(service.run());
+
+        (handle, config)
     }
 
-    fn assert_sketch(
-        aggregator_mutex: &Mutex<Aggregator>,
-        metric_id: &str,
-        value: f64,
-        timestamp: i64,
-    ) {
+    async fn assert_sketch(handle: &AggregatorHandle, metric_id: &str, value: f64, timestamp: i64) {
         let ts = (timestamp / 10) * 10;
-        let aggregator = aggregator_mutex.lock().unwrap();
-        if let Some(e) = aggregator.get_entry_by_id(metric_id.into(), &None, ts) {
+        if let Some(e) = handle
+            .get_entry_by_id(metric_id.into(), None, ts)
+            .await
+            .unwrap()
+        {
             let metric = e.value.get_sketch().unwrap();
             assert!((metric.max().unwrap() - value).abs() < PRECISION);
             assert!((metric.min().unwrap() - value).abs() < PRECISION);
@@ -799,9 +796,9 @@ mod tests {
         }
     }
 
-    #[test]
+    #[tokio::test]
     #[allow(clippy::float_cmp)]
-    fn test_increment_invocation_metric() {
+    async fn test_increment_invocation_metric() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
@@ -817,12 +814,12 @@ mod tests {
             .as_secs()
             .try_into()
             .unwrap_or_default();
-        assert_sketch(&metrics_aggr, constants::INVOCATIONS_METRIC, 1f64, now);
+        assert_sketch(&metrics_aggr, constants::INVOCATIONS_METRIC, 1f64, now).await;
     }
 
-    #[test]
+    #[tokio::test]
     #[allow(clippy::float_cmp)]
-    fn test_increment_errors_metric() {
+    async fn test_increment_errors_metric() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
@@ -838,12 +835,12 @@ mod tests {
             .as_secs()
             .try_into()
             .unwrap_or_default();
-        assert_sketch(&metrics_aggr, constants::ERRORS_METRIC, 1f64, now);
+        assert_sketch(&metrics_aggr, constants::ERRORS_METRIC, 1f64, now).await;
     }
 
-    #[test]
+    #[tokio::test]
     #[allow(clippy::too_many_lines)]
-    fn test_disabled() {
+    async fn test_disabled() {
         let (metrics_aggr, no_config) = setup();
         let my_config = Arc::new(config::Config {
             enhanced_metrics: false,
@@ -879,135 +876,224 @@ mod tests {
             },
             now,
         );
-        let aggr = metrics_aggr.lock().expect("lock poisoned");
         assert!(
-            aggr.get_entry_by_id(constants::INVOCATIONS_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::INVOCATIONS_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::ERRORS_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::ERRORS_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::TIMEOUTS_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::TIMEOUTS_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::INIT_DURATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::INIT_DURATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::RUNTIME_DURATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::PRODUCED_BYTES_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::PRODUCED_BYTES_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::POST_RUNTIME_DURATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::DURATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::DURATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::BILLED_DURATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::MAX_MEMORY_USED_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::MEMORY_SIZE_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::ESTIMATED_COST_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::RX_BYTES_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::RX_BYTES_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::TX_BYTES_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::TX_BYTES_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::TOTAL_NETWORK_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_USER_TIME_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_SYSTEM_TIME_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_TOTAL_TIME_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(
-                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
-                &None,
-                now
-            )
-            .is_none()
-        );
-        assert!(
-            aggr.get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(
+                    constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
+                    None,
+                    now
+                )
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::NUM_CORES_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_TOTAL_UTILIZATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::NUM_CORES_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_MIN_UTILIZATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::TMP_MAX_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::TMP_USED_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::TMP_MAX_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::TMP_FREE_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::TMP_USED_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::FD_MAX_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::TMP_FREE_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::FD_MAX_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::THREADS_MAX_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::FD_USE_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::THREADS_MAX_METRIC.into(), None, now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            metrics_aggr
+                .get_entry_by_id(constants::THREADS_USE_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
     }
 
-    #[test]
-    fn test_set_runtime_done_metrics() {
+    #[tokio::test]
+    async fn test_set_runtime_done_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let runtime_done_metrics = RuntimeDoneMetrics {
@@ -1027,12 +1113,13 @@ mod tests {
             constants::RUNTIME_DURATION_METRIC,
             100.0,
             now,
-        );
-        assert_sketch(&metrics_aggr, constants::PRODUCED_BYTES_METRIC, 42.0, now);
+        )
+        .await;
+        assert_sketch(&metrics_aggr, constants::PRODUCED_BYTES_METRIC, 42.0, now).await;
     }
 
-    #[test]
-    fn test_set_report_log_metrics() {
+    #[tokio::test]
+    async fn test_set_report_log_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let report_metrics = ReportMetrics {
@@ -1051,17 +1138,17 @@ mod tests {
             .unwrap_or_default();
         lambda.set_report_log_metrics(&report_metrics, now);
 
-        assert_sketch(&metrics_aggr, constants::DURATION_METRIC, 0.1, now);
-        assert_sketch(&metrics_aggr, constants::BILLED_DURATION_METRIC, 0.1, now);
+        assert_sketch(&metrics_aggr, constants::DURATION_METRIC, 0.1, now).await;
+        assert_sketch(&metrics_aggr, constants::BILLED_DURATION_METRIC, 0.1, now).await;
 
-        assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0, now);
-        assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0, now);
+        assert_sketch(&metrics_aggr, constants::MAX_MEMORY_USED_METRIC, 128.0, now).await;
+        assert_sketch(&metrics_aggr, constants::MEMORY_SIZE_METRIC, 256.0, now).await;
     }
 
-    #[test]
-    fn test_set_network_enhanced_metrics() {
+    #[tokio::test]
+    async fn test_set_network_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1080,19 +1167,19 @@ mod tests {
         Lambda::generate_network_enhanced_metrics(
             network_offset,
             network_data,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
+            &metrics_aggr,
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0, now);
-        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0, now);
-        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0, now);
+        assert_sketch(&metrics_aggr, constants::RX_BYTES_METRIC, 20000.0, now).await;
+        assert_sketch(&metrics_aggr, constants::TX_BYTES_METRIC, 74746.0, now).await;
+        assert_sketch(&metrics_aggr, constants::TOTAL_NETWORK_METRIC, 94746.0, now).await;
     }
 
-    #[test]
-    fn test_set_cpu_time_enhanced_metrics() {
+    #[tokio::test]
+    async fn test_set_cpu_time_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1119,22 +1206,17 @@ mod tests {
             individual_cpu_idle_times: individual_cpu_idle_times_end,
         };
 
-        Lambda::generate_cpu_time_enhanced_metrics(
-            &cpu_offset,
-            &cpu_data,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
-            None,
-        );
+        Lambda::generate_cpu_time_enhanced_metrics(&cpu_offset, &cpu_data, &metrics_aggr, None);
 
-        assert_sketch(&metrics_aggr, constants::CPU_USER_TIME_METRIC, 100.0, now);
-        assert_sketch(&metrics_aggr, constants::CPU_SYSTEM_TIME_METRIC, 53.0, now);
-        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_TIME_METRIC, 153.0, now);
+        assert_sketch(&metrics_aggr, constants::CPU_USER_TIME_METRIC, 100.0, now).await;
+        assert_sketch(&metrics_aggr, constants::CPU_SYSTEM_TIME_METRIC, 53.0, now).await;
+        assert_sketch(&metrics_aggr, constants::CPU_TOTAL_TIME_METRIC, 153.0, now).await;
     }
 
-    #[test]
-    fn test_set_cpu_utilization_enhanced_metrics() {
+    #[tokio::test]
+    async fn test_set_cpu_utilization_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1168,7 +1250,7 @@ mod tests {
             &cpu_data,
             uptime_offset,
             uptime_data,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
+            &metrics_aggr,
             None,
         );
 
@@ -1178,32 +1260,36 @@ mod tests {
             constants::CPU_TOTAL_UTILIZATION_PCT_METRIC,
             30.0,
             now,
-        );
+        )
+        .await;
         assert_sketch(
             &metrics_aggr,
             constants::CPU_TOTAL_UTILIZATION_METRIC,
             0.6,
             now,
-        );
-        assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0, now);
+        )
+        .await;
+        assert_sketch(&metrics_aggr, constants::NUM_CORES_METRIC, 2.0, now).await;
         assert_sketch(
             &metrics_aggr,
             constants::CPU_MAX_UTILIZATION_METRIC,
             30.0,
             now,
-        );
+        )
+        .await;
         assert_sketch(
             &metrics_aggr,
             constants::CPU_MIN_UTILIZATION_METRIC,
             28.75,
             now,
-        );
+        )
+        .await;
     }
 
-    #[test]
-    fn test_set_tmp_enhanced_metrics() {
+    #[tokio::test]
+    async fn test_set_tmp_enhanced_metrics() {
         let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1213,27 +1299,23 @@ mod tests {
         let tmp_max = 550_461_440.0;
         let tmp_used = 12_165_120.0;
 
-        Lambda::generate_tmp_enhanced_metrics(
-            tmp_max,
-            tmp_used,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
-            None,
-        );
+        Lambda::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &metrics_aggr, None);
 
-        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0, now);
-        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0, now);
+        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0, now).await;
+        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0, now).await;
         assert_sketch(
             &metrics_aggr,
             constants::TMP_FREE_METRIC,
             538_296_320.0,
             now,
-        );
+        )
+        .await;
     }
 
-    #[test]
-    fn test_set_process_enhanced_metrics_valid_use() {
+    #[tokio::test]
+    async fn test_set_process_enhanced_metrics_valid_use() {
         let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1250,20 +1332,20 @@ mod tests {
             fd_use,
             threads_max,
             threads_use,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
+            &metrics_aggr,
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now);
-        assert_sketch(&metrics_aggr, constants::FD_USE_METRIC, 175.0, now);
-        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now);
-        assert_sketch(&metrics_aggr, constants::THREADS_USE_METRIC, 40.0, now);
+        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now).await;
+        assert_sketch(&metrics_aggr, constants::FD_USE_METRIC, 175.0, now).await;
+        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now).await;
+        assert_sketch(&metrics_aggr, constants::THREADS_USE_METRIC, 40.0, now).await;
     }
 
-    #[test]
-    fn test_set_process_enhanced_metrics_invalid_use() {
+    #[tokio::test]
+    async fn test_set_process_enhanced_metrics_invalid_use() {
         let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1280,20 +1362,25 @@ mod tests {
             fd_use,
             threads_max,
             threads_use,
-            &mut lambda.aggregator.lock().expect("lock poisoned"),
+            &metrics_aggr,
             None,
         );
 
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now);
-        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now);
+        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now).await;
+        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now).await;
 
-        let aggr = lambda.aggregator.lock().expect("lock poisoned");
         assert!(
-            aggr.get_entry_by_id(constants::FD_USE_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::FD_USE_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
         assert!(
-            aggr.get_entry_by_id(constants::THREADS_USE_METRIC.into(), &None, now)
+            metrics_aggr
+                .get_entry_by_id(constants::THREADS_USE_METRIC.into(), None, now)
+                .await
+                .unwrap()
                 .is_none()
         );
     }

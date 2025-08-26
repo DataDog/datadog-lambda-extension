@@ -973,10 +973,10 @@ mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use dogstatsd::aggregator::Aggregator;
+    use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
 
-    fn setup() -> Processor {
+    async fn setup() -> Processor {
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
@@ -998,11 +998,12 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let metrics_aggregator = Arc::new(Mutex::new(
-            Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
-        ));
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
 
-        Processor::new(tags_provider, config, aws_config, metrics_aggregator)
+        tokio::spawn(service.run());
+
+        Processor::new(tags_provider, config, aws_config, handle)
     }
 
     #[test]
@@ -1064,9 +1065,9 @@ mod tests {
         assert_eq!(error_tags["error.stack"], error_stack);
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
-        let mut p = setup();
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
+        let mut p = setup().await;
         let mut headers = HashMap::new();
 
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "999".to_string());
@@ -1093,9 +1094,9 @@ mod tests {
         assert_eq!(priority, Some(-1.0));
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
-        let mut p = setup();
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
+        let mut p = setup().await;
         let mut headers = HashMap::new();
 
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "888".to_string());
@@ -1122,9 +1123,9 @@ mod tests {
         assert_eq!(context.invocation_span.parent_id, 999);
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
-        let mut p = setup();
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
+        let mut p = setup().await;
         let mut headers = HashMap::new();
 
         headers.insert(DATADOG_TRACE_ID_KEY.to_string(), "111".to_string());
@@ -1147,9 +1148,9 @@ mod tests {
         assert_eq!(context.invocation_span.parent_id, 222);
     }
 
-    #[test]
-    fn test_process_on_invocation_end_tags_response_with_status_code() {
-        let mut p = setup();
+    #[tokio::test]
+    async fn test_process_on_invocation_end_tags_response_with_status_code() {
+        let mut p = setup().await;
 
         let response = r#"
        {
@@ -1186,9 +1187,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_on_shutdown_event_creates_unused_init_metrics() {
-        let mut processor = setup();
+    #[tokio::test]
+    async fn test_on_shutdown_event_creates_unused_init_metrics() {
+        let mut processor = setup().await;
 
         let now1 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
         let ts1 = (now1 / 10) * 10;
@@ -1196,22 +1197,26 @@ mod tests {
         let now2 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
         let ts2 = (now2 / 10) * 10;
 
-        let aggregator = processor.enhanced_metrics.aggregator.lock().unwrap();
+        let handle = &processor.enhanced_metrics.aggr_handle;
 
         assert!(
-            aggregator
+            handle
                 .get_entry_by_id(
                     crate::metrics::enhanced::constants::UNUSED_INIT.into(),
-                    &None,
+                    None,
                     ts1
                 )
+                .await
+                .unwrap()
                 .is_some()
-                || aggregator
+                || handle
                     .get_entry_by_id(
                         crate::metrics::enhanced::constants::UNUSED_INIT.into(),
-                        &None,
+                        None,
                         ts2
                     )
+                    .await
+                    .unwrap()
                     .is_some(),
             "UNUSED_INIT metric should be created when invoked_received=false"
         );
