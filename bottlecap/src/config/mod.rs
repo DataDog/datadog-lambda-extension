@@ -32,6 +32,7 @@ use crate::config::{
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
+use crate::proc::has_dotnet_binary;
 
 /// Helper macro to merge Option<String> fields to String fields
 ///
@@ -448,6 +449,15 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
         log_fallback_reason("extension_version");
         return Err(ConfigError::UnsupportedField(
             "extension_version".to_string(),
+        ));
+    }
+
+    // ASM / .NET
+    // todo(duncanista): Remove once the .NET runtime is fixed
+    if config.serverless_appsec_enabled && has_dotnet_binary() {
+        log_fallback_reason("serverless_appsec_enabled_dotnet");
+        return Err(ConfigError::UnsupportedField(
+            "serverless_appsec_enabled_dotnet".to_string(),
         ));
     }
 
