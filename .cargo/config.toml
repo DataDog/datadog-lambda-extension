@@ -2,3 +2,16 @@
 license = "dd-rust-license-tool check"
 format = "fmt --all && clippy --workspace --all-features --fix"
 
+# libddwaf's bindgen uses `clang-sys` which by default dynamically opens
+# `libclang.so`; however this is not supported on Alpine Linux (the usual musl
+# target).
+# Enabling the `static` feature of `bindgen`/`clang-sys` creates additional
+# build requirements (`libLLVM.a`), which Alpine's `llvm-static` does not
+# provide (it has its content presented as many `libLLVM*.a` files). Disabling
+# statically linking to the C runtime alleviates this issue, but can result in
+# `proc-macro` not being usable; which notably causes doc tests to fail with
+# a big linker error.
+[target.aarch64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=-crt-static"]
