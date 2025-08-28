@@ -89,7 +89,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
+        enhanced_metrics: EnhancedMetrics,
         propagator: Arc<DatadogCompositePropagator>,
     ) -> Self {
         let resource = tags_provider
@@ -106,7 +106,7 @@ impl Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(Arc::clone(&config)),
             propagator,
-            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
+            enhanced_metrics,
             aws_config,
             tracer_detected: false,
             runtime: None,
@@ -988,8 +988,15 @@ mod tests {
 
         tokio::spawn(service.run());
 
+        let enhanced_metrics = EnhancedMetrics::new(handle, Arc::clone(&config));
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        Processor::new(tags_provider, config, aws_config, handle, propagator)
+        Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            enhanced_metrics,
+            propagator,
+        )
     }
 
     #[test]
