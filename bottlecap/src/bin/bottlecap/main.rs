@@ -37,7 +37,6 @@ use bottlecap::{
     },
     logger,
     logs::{agent::LogsAgent, flusher::LogsFlusher},
-    metrics::enhanced::lambda::Lambda as enhanced_metrics,
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -85,7 +84,9 @@ use std::{
     collections::{HashMap, hash_map},
     env,
     io::{Error, Result},
+    os::unix::process::CommandExt,
     path::Path,
+    process::Command,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -401,7 +402,14 @@ fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>)
     let aws_credentials = AwsCredentials::from_env();
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
+    let config = match config::get_config(Path::new(&lambda_directory)) {
+        Ok(config) => Arc::new(config),
+        Err(_e) => {
+            let err = Command::new("/opt/datadog-agent-go").exec();
+            panic!("Error starting the extension: {err:?}");
+        }
+    };
+
     (aws_config, aws_credentials, config)
 }
 
@@ -500,22 +508,12 @@ async fn extension_loop_active(
             .as_micros()
             .to_string()
     );
-    let metrics_intake_url = create_metrics_intake_url_prefix(config);
+
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &metrics_aggr,
-        &metrics_intake_url,
         config,
     )));
-
-    // Create lambda enhanced metrics instance once
-    let lambda_enhanced_metrics =
-        enhanced_metrics::new(Arc::clone(&metrics_aggr), Arc::clone(config));
-
-    // Send config issue metrics
-    let config_issues = config::fallback(config);
-    send_config_issue_metric(&config_issues, &lambda_enhanced_metrics);
-
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -1008,33 +1006,33 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-fn create_metrics_intake_url_prefix(config: &Config) -> MetricsIntakeUrlPrefix {
-    if !config.dd_url.is_empty() {
-        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
-        MetricsIntakeUrlPrefix::new(None, prefix_override).expect("can't parse DD_DD_URL prefix")
-    } else if !config.url.is_empty() {
-        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
-        MetricsIntakeUrlPrefix::new(None, prefix_override).expect("can't parse DD_URL prefix")
-    } else {
-        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
-        MetricsIntakeUrlPrefix::new(Some(metrics_site), None).expect("can't parse site prefix")
-    }
-}
-
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
     metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
-    metrics_intake_url: &MetricsIntakeUrlPrefix,
     config: &Arc<Config>,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
+    let metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else if !config.url.is_empty() {
+        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else {
+        // use site
+        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+    };
+
     let flusher_config = MetricsFlusherConfig {
         api_key_factory,
         aggregator: Arc::clone(metrics_aggr),
-        metrics_intake_url_prefix: metrics_intake_url.clone(),
+        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
         https_proxy: config.proxy_https.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
         retry_strategy: DsdRetryStrategy::Immediate(3),
@@ -1157,28 +1155,6 @@ fn start_trace_agent(
         proxy_flusher,
         shutdown_token,
     )
-}
-
-/// Sends metrics indicating issue with configuration.
-///
-/// # Arguments
-/// * `issue_reasons` - Vector of messages describing the issue with the configurations
-/// * `lambda_enhanced_metrics` - The lambda enhanced metrics instance
-fn send_config_issue_metric(issue_reasons: &[String], lambda_enhanced_metrics: &enhanced_metrics) {
-    if issue_reasons.is_empty() {
-        return;
-    }
-    let now = std::time::UNIX_EPOCH
-        .elapsed()
-        .expect("can't poll clock")
-        .as_secs()
-        .try_into()
-        .unwrap_or_default();
-
-    // Setup a separate metric for each config issue reason
-    for issue_reason in issue_reasons {
-        lambda_enhanced_metrics.set_config_load_issue_metric(now, issue_reason);
-    }
 }
 
 async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {
