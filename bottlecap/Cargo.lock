@@ -516,7 +516,6 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "proptest",
  "prost",
- "protobuf",
  "rand 0.8.5",
  "regex",
  "reqwest",
