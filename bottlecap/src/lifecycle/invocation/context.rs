@@ -8,6 +8,7 @@ use std::{
 };
 
 use datadog_trace_protobuf::pb::Span;
+use serde_json::Value;
 use tracing::debug;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -127,7 +128,7 @@ pub struct ContextBuffer {
 
 struct UniversalInstrumentationData {
     headers: HashMap<String, String>,
-    payload: Vec<u8>,
+    payload_value: Value,
 }
 
 impl Default for ContextBuffer {
@@ -225,12 +226,14 @@ impl ContextBuffer {
     pub fn pair_invoke_event(
         &mut self,
         request_id: &str,
-    ) -> Option<(HashMap<String, String>, Vec<u8>)> {
-        if let Some(UniversalInstrumentationData { headers, payload }) =
-            self.universal_instrumentation_start_events.pop_front()
+    ) -> Option<(HashMap<String, String>, Value)> {
+        if let Some(UniversalInstrumentationData {
+            headers,
+            payload_value,
+        }) = self.universal_instrumentation_start_events.pop_front()
         {
             // Bad scenario, we found an `UniversalInstrumentationStart`
-            Some((headers, payload))
+            Some((headers, payload_value))
         } else {
             // `UniversalInstrumentationStart` event hasn't occurred yet, this is good,
             // push the Invoke event to the queue and return `None`
@@ -246,7 +249,7 @@ impl ContextBuffer {
     pub fn pair_universal_instrumentation_start_event(
         &mut self,
         headers: &HashMap<String, String>,
-        payload: &[u8],
+        payload_value: &Value,
     ) -> Option<String> {
         if let Some(request_id) = self.invoke_events_request_ids.pop_front() {
             // Bad scenario, we found an `UniversalInstrumentationStart`
@@ -257,7 +260,7 @@ impl ContextBuffer {
             self.universal_instrumentation_start_events
                 .push_back(UniversalInstrumentationData {
                     headers: headers.clone(),
-                    payload: payload.to_vec(),
+                    payload_value: payload_value.clone(),
                 });
             None
         }
@@ -269,7 +272,7 @@ impl ContextBuffer {
     pub fn pair_universal_instrumentation_end_event(
         &mut self,
         headers: &HashMap<String, String>,
-        payload: &[u8],
+        payload_value: &Value,
     ) -> Option<String> {
         if let Some(request_id) = self.platform_runtime_done_events_request_ids.pop_front() {
             // Bad scenario, we found a `PlatformRuntimeDone`
@@ -280,7 +283,7 @@ impl ContextBuffer {
             self.universal_instrumentation_end_events
                 .push_back(UniversalInstrumentationData {
                     headers: headers.clone(),
-                    payload: payload.to_vec(),
+                    payload_value: payload_value.clone(),
                 });
             None
         }
@@ -292,12 +295,14 @@ impl ContextBuffer {
     pub fn pair_platform_runtime_done_event(
         &mut self,
         request_id: &str,
-    ) -> Option<(HashMap<String, String>, Vec<u8>)> {
-        if let Some(UniversalInstrumentationData { headers, payload }) =
-            self.universal_instrumentation_end_events.pop_front()
+    ) -> Option<(HashMap<String, String>, Value)> {
+        if let Some(UniversalInstrumentationData {
+            headers,
+            payload_value,
+        }) = self.universal_instrumentation_end_events.pop_front()
         {
             // Good scenario, we found an `UniversalInstrumentationEnd`
-            Some((headers, payload))
+            Some((headers, payload_value))
         } else {
             // `UniversalInstrumentationEnd` hasn't occurred yet, this is bad,
             // push the `PlatformRuntimeDone` event to the queue and return `None`
@@ -423,6 +428,7 @@ impl ContextBuffer {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use crate::proc::{CPUData, NetworkData};
+    use serde_json::json;
     use std::collections::HashMap;
     use tokio::sync::watch;
 
@@ -617,14 +623,14 @@ mod tests {
         let request_id = "test-request-1".to_string();
         let mut headers = HashMap::new();
         headers.insert("test-header".to_string(), "test-value".to_string());
-        let payload = vec![1, 2, 3];
+        let payload = json!({ "test": "payload" });
 
         // Test case 1: UniversalInstrumentationStart arrives before Invoke
         buffer
             .universal_instrumentation_start_events
             .push_back(UniversalInstrumentationData {
                 headers: headers.clone(),
-                payload: payload.clone(),
+                payload_value: payload.clone(),
             });
 
         // When Invoke arrives, it should pair with the existing UniversalInstrumentationStart
@@ -651,7 +657,7 @@ mod tests {
         let request_id = "test-request-1".to_string();
         let mut headers = HashMap::new();
         headers.insert("test-header".to_string(), "test-value".to_string());
-        let payload = vec![1, 2, 3];
+        let payload = json!({ "test": "payload" });
 
         // Test case 1: Invoke arrives before UniversalInstrumentationStart
         buffer
@@ -672,7 +678,7 @@ mod tests {
             .front()
             .unwrap();
         assert_eq!(stored_event.headers, headers);
-        assert_eq!(stored_event.payload, payload);
+        assert_eq!(stored_event.payload_value, payload);
     }
 
     #[test]
@@ -681,7 +687,7 @@ mod tests {
         let request_id = "test-request-1".to_string();
         let mut headers = HashMap::new();
         headers.insert("test-header".to_string(), "test-value".to_string());
-        let payload = vec![1, 2, 3];
+        let payload = json!({ "test": "payload" });
 
         // Test case 1: PlatformRuntimeDone arrives before UniversalInstrumentationEnd
         buffer
@@ -699,7 +705,7 @@ mod tests {
         assert_eq!(buffer.universal_instrumentation_end_events.len(), 1);
         let stored_event = buffer.universal_instrumentation_end_events.front().unwrap();
         assert_eq!(stored_event.headers, headers);
-        assert_eq!(stored_event.payload, payload);
+        assert_eq!(stored_event.payload_value, payload);
     }
 
     #[test]
@@ -708,14 +714,14 @@ mod tests {
         let request_id = "test-request-1".to_string();
         let mut headers = HashMap::new();
         headers.insert("test-header".to_string(), "test-value".to_string());
-        let payload = vec![1, 2, 3];
+        let payload = json!({ "test": "payload" });
 
         // Test case 1: UniversalInstrumentationEnd arrives before PlatformRuntimeDone
         buffer
             .universal_instrumentation_end_events
             .push_back(UniversalInstrumentationData {
                 headers: headers.clone(),
-                payload: payload.clone(),
+                payload_value: payload.clone(),
             });
 
         // When PlatformRuntimeDone arrives, it should pair with the existing UniversalInstrumentationEnd
@@ -745,7 +751,7 @@ mod tests {
         let request_id = "test-request-1".to_string();
         let mut headers = HashMap::new();
         headers.insert("test-header".to_string(), "test-value".to_string());
-        let payload = vec![1, 2, 3];
+        let payload = json!({ "test": "payload" });
 
         // Test the complete flow with events arriving in different orders
         // Case 1: Events arrive in reverse order
@@ -753,7 +759,7 @@ mod tests {
             .universal_instrumentation_end_events
             .push_back(UniversalInstrumentationData {
                 headers: headers.clone(),
-                payload: payload.clone(),
+                payload_value: payload.clone(),
             });
         buffer
             .platform_runtime_done_events_request_ids
