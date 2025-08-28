@@ -140,7 +140,8 @@ impl Agent {
             }
         };
 
-        let traces = match processor.process(&body) {
+        let content_type = parts.headers.get("content-type").and_then(|h| h.to_str().ok());
+        let traces = match processor.process(&body, content_type) {
             Ok(traces) => traces,
             Err(e) => {
                 error!("OTLP | Failed to process request: {:?}", e);
