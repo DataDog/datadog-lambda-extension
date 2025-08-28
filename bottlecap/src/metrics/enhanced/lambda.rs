@@ -387,54 +387,41 @@ impl Lambda {
         // Multiply by num_cores to report in terms of cores
         let cpu_total_utilization = cpu_total_utilization_decimal * num_cores;
 
-        let metric = Metric::new(
-            constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
-            MetricValue::distribution(cpu_total_utilization_pct),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert cpu_total_utilization_pct metric: {}", e);
-        }
+        let metrics = vec![
+            Metric::new(
+                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
+                MetricValue::distribution(cpu_total_utilization_pct),
+                tags.clone(),
+                Some(now),
+            ),
+            Metric::new(
+                constants::CPU_TOTAL_UTILIZATION_METRIC.into(),
+                MetricValue::distribution(cpu_total_utilization),
+                tags.clone(),
+                Some(now),
+            ),
+            Metric::new(
+                constants::NUM_CORES_METRIC.into(),
+                MetricValue::distribution(num_cores),
+                tags.clone(),
+                Some(now),
+            ),
+            Metric::new(
+                constants::CPU_MAX_UTILIZATION_METRIC.into(),
+                MetricValue::distribution(cpu_max_utilization),
+                tags.clone(),
+                Some(now),
+            ),
+            Metric::new(
+                constants::CPU_MIN_UTILIZATION_METRIC.into(),
+                MetricValue::distribution(cpu_min_utilization),
+                tags,
+                Some(now),
+            ),
+        ];
 
-        let metric = Metric::new(
-            constants::CPU_TOTAL_UTILIZATION_METRIC.into(),
-            MetricValue::distribution(cpu_total_utilization),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert cpu_total_utilization metric: {}", e);
-        }
-
-        let metric = Metric::new(
-            constants::NUM_CORES_METRIC.into(),
-            MetricValue::distribution(num_cores),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert num_cores metric: {}", e);
-        }
-
-        let metric = Metric::new(
-            constants::CPU_MAX_UTILIZATION_METRIC.into(),
-            MetricValue::distribution(cpu_max_utilization),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert cpu_max_utilization metric: {}", e);
-        }
-
-        let metric = Metric::new(
-            constants::CPU_MIN_UTILIZATION_METRIC.into(),
-            MetricValue::distribution(cpu_min_utilization),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert cpu_min_utilization metric: {}", e);
+        if let Err(e) = aggr.insert_batch(metrics) {
+            error!("Failed to insert cpu utilization metrics: {}", e);
         }
     }
 
