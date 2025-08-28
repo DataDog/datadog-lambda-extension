@@ -441,13 +441,13 @@ impl Default for Config {
     }
 }
 
-fn log_fallback_reason(reason: &str) {
-    error!("Fallback support for {reason} is no longer available.");
+fn log_unsupported_reason(reason: &str) {
+    error!("Found unsupported config: {reason} is no longer available.");
 }
 
-#[must_use = "fallback reasons should be processed to emit appropriate metrics"]
-pub fn fallback(config: &Config) -> Vec<String> {
-    let mut fallback_reasons = Vec::new();
+#[must_use = "Unsupported reasons should be processed to emit appropriate metrics"]
+pub fn inspect_config(config: &Config) -> Vec<String> {
+    let mut unsupported_reasons = Vec::new();
 
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match config.extension_version.as_deref() {
@@ -458,16 +458,16 @@ pub fn fallback(config: &Config) -> Vec<String> {
 
     if opted_out {
         let reason = "extension_version";
-        log_fallback_reason(reason);
-        fallback_reasons.push(reason.to_string());
+        log_unsupported_reason(reason);
+        unsupported_reasons.push(reason.to_string());
     }
 
     // ASM / .NET
     // todo(duncanista): Remove once the .NET runtime is fixed
     if config.serverless_appsec_enabled && has_dotnet_binary() {
         let reason = "serverless_appsec_enabled_dotnet";
-        log_fallback_reason(reason);
-        fallback_reasons.push(reason.to_string());
+        log_unsupported_reason(reason);
+        unsupported_reasons.push(reason.to_string());
     }
     // OTLP
     let has_otlp_config = config
@@ -501,11 +501,11 @@ pub fn fallback(config: &Config) -> Vec<String> {
 
     if has_otlp_config {
         let reason = "otel";
-        log_fallback_reason(reason);
-        fallback_reasons.push(reason.to_string());
+        log_unsupported_reason(reason);
+        unsupported_reasons.push(reason.to_string());
     }
 
-    fallback_reasons
+    unsupported_reasons
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -724,13 +724,96 @@ pub mod tests {
     };
 
     #[test]
-    fn test_reject_on_opted_out() {
+    fn test_baseline_case() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_EXTENSION_VERSION", "compatibility");
             let _config = get_config(Path::new(""));
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_inspect_config() {
+        struct TestCase {
+            name: &'static str,
+            env_vars: Vec<(&'static str, &'static str)>,
+            yaml_content: Option<&'static str>,
+            expected_reasons: Vec<&'static str>,
+        }
+
+        let test_cases = vec![
+            TestCase {
+                name: "default config - no unsupported reasons",
+                env_vars: vec![],
+                yaml_content: None,
+                expected_reasons: vec![],
+            },
+            TestCase {
+                name: "extension_version compatibility - should discover",
+                env_vars: vec![("DD_EXTENSION_VERSION", "compatibility")],
+                yaml_content: None,
+                expected_reasons: vec!["extension_version"],
+            },
+            TestCase {
+                name: "otlp config enabled - should discover",
+                env_vars: vec![(
+                    "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                    "localhost:4317",
+                )],
+                yaml_content: None,
+                expected_reasons: vec!["otel"],
+            },
+            TestCase {
+                name: "multiple unsupported reasons",
+                env_vars: vec![
+                    ("DD_EXTENSION_VERSION", "compatibility"),
+                    ("DD_OTLP_CONFIG_METRICS_ENABLED", "true"),
+                ],
+                yaml_content: None,
+                expected_reasons: vec!["extension_version", "otel"],
+            },
+            TestCase {
+                name: "otlp config via yaml - should discover",
+                env_vars: vec![],
+                yaml_content: Some(
+                    r"
+                    otlp_config:
+                      receiver:
+                        protocols:
+                          grpc:
+                            endpoint: localhost:4317
+                ",
+                ),
+                expected_reasons: vec!["otel"],
+            },
+        ];
+
+        for test_case in test_cases {
+            figment::Jail::expect_with(|jail| {
+                jail.clear_env();
+
+                // Set environment variables
+                for (key, value) in &test_case.env_vars {
+                    jail.set_env(key, value);
+                }
+
+                // Create YAML file if provided
+                if let Some(yaml_content) = test_case.yaml_content {
+                    jail.create_file("datadog.yaml", yaml_content)?;
+                }
+
+                let config = get_config(Path::new(""));
+                let unsupported_reasons = inspect_config(&config);
+
+                assert_eq!(
+                    unsupported_reasons, test_case.expected_reasons,
+                    "Test case '{}' failed: expected {:?}, got {:?}",
+                    test_case.name, test_case.expected_reasons, unsupported_reasons
+                );
+
+                Ok(())
+            });
+        }
     }
 
     #[test]
@@ -845,17 +928,6 @@ pub mod tests {
 
             let config = get_config(Path::new(""));
             assert_eq!(config.dd_url, String::new());
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_allowed_but_disabled() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
-
-            let _config = get_config(Path::new(""));
             Ok(())
         });
     }

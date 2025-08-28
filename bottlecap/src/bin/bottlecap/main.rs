@@ -515,7 +515,7 @@ async fn extension_loop_active(
         enhanced_metrics::new(metrics_aggr_handle.clone(), Arc::clone(config));
 
     // Send config issue metrics
-    let config_issues = config::fallback(config);
+    let config_issues = config::inspect_config(config);
     send_config_issue_metric(&config_issues, &lambda_enhanced_metrics);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
