@@ -447,7 +447,7 @@ mod tests {
                 "routeKey": "GET /httpapi/get",
                 "stage": "$default",
                 "time": "09/Sep/2021:18:31:23 +0000",
-                "timeEpoch": 1631212283738_i64
+                "timeEpoch": 1_631_212_283_738_i64
             },
             "isBase64Encoded": false
         });
@@ -558,13 +558,13 @@ mod tests {
         );
 
         // Verify the trigger tags contain the expected SQS information
-        let trigger_tags = inferrer.trigger_tags.unwrap();
+        let trigger_tags = inferrer.trigger_tags.expect("Should have trigger tags");
         assert!(
             trigger_tags.contains_key("function_trigger.event_source"),
             "Should have event source in trigger tags"
         );
         assert_eq!(
-            trigger_tags.get("function_trigger.event_source").unwrap(),
+            trigger_tags.get("function_trigger.event_source").expect("Should have event source"),
             "sqs",
             "Should have SQS as event source"
         );
