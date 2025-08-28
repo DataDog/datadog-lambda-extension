@@ -183,7 +183,7 @@ impl SpanInferrer {
             // There is no inferred span for ALB events
             IdentifiedTrigger::ALBEvent(_) => true,
             // There is no inferred span for Step Functions events
-            // unless the `SpanContext` is generated
+            // if the `SpanContext` is generated
             IdentifiedTrigger::StepFunctionEvent(_) => {
                 extract_generated_span_context(identified_trigger).is_some()
             }
