@@ -1,4 +1,5 @@
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
+use crate::traces::propagation::DatadogCompositePropagator;
 use crate::{
     EXTENSION_HOST, appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
     lifecycle::invocation::processor::Processor as InvocationProcessor, lwa,
@@ -32,6 +33,7 @@ type InterceptorState = (
     Arc<Client<HttpConnector, Body>>,
     Arc<Mutex<InvocationProcessor>>,
     Option<Arc<Mutex<AppSecProcessor>>>,
+    Arc<DatadogCompositePropagator>,
     Arc<Mutex<JoinSet<()>>>,
 );
 
@@ -39,6 +41,7 @@ pub fn start(
     aws_config: Arc<AwsConfig>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
+    propagator: Arc<DatadogCompositePropagator>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
     let socket = get_proxy_socket_address(aws_config.aws_lwa_proxy_lambda_runtime_api.as_ref());
     let shutdown_token = CancellationToken::new();
@@ -57,6 +60,7 @@ pub fn start(
         Arc::new(client),
         invocation_processor,
         appsec_processor,
+        propagator,
         tasks.clone(),
     );
 
@@ -129,7 +133,7 @@ fn get_proxy_socket_address(aws_lwa_proxy_lambda_runtime_api: Option<&String>) -
 
 async fn invocation_next_proxy(
     Path(api_version): Path<String>,
-    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+    State((aws_config, client, invocation_processor, appsec_processor, propagator, tasks)): State<
         InterceptorState,
     >,
     request: Request,
@@ -170,6 +174,7 @@ async fn invocation_next_proxy(
 
     let mut join_set = tasks.lock().await;
     let intercepted_parts_clone = intercepted_parts.clone();
+    let propagator = Arc::clone(&propagator);
     join_set.spawn(async move {
         if let Ok(body) = intercepted_completion_receiver.await {
             debug!("PROXY | invocation_next_proxy | intercepted body completed");
@@ -197,6 +202,7 @@ async fn invocation_next_proxy(
                     &invocation_processor,
                     &intercepted_parts_clone,
                     &body,
+                    Arc::clone(&propagator),
                 )
                 .await;
             }
@@ -218,7 +224,7 @@ async fn invocation_next_proxy(
 
 async fn invocation_response_proxy(
     Path((api_version, request_id)): Path<(String, String)>,
-    State((aws_config, client, invocation_processor, appsec_processor, tasks)): State<
+    State((aws_config, client, invocation_processor, appsec_processor, _, tasks)): State<
         InterceptorState,
     >,
     request: Request,
@@ -299,7 +305,7 @@ async fn invocation_error_proxy(
     request: Request,
 ) -> Response {
     debug!("PROXY | invocation_error_proxy | api_version: {api_version}, request_id: {request_id}");
-    let State((_, _, _, appsec_processor, _)) = &state;
+    let State((_, _, _, appsec_processor, _, _)) = &state;
     if let Some(appsec_processor) = appsec_processor {
         // Marking any outstanding security context as finalized by sending a blank response.
         appsec_processor
@@ -313,7 +319,7 @@ async fn invocation_error_proxy(
 }
 
 async fn passthrough_proxy(
-    State((aws_config, client, _, _, _)): State<InterceptorState>,
+    State((aws_config, client, _, _, _, _)): State<InterceptorState>,
     request: Request,
 ) -> Response {
     let (parts, body) = request.into_parts();
@@ -442,7 +448,7 @@ mod tests {
 
     use crate::{
         LAMBDA_RUNTIME_SLUG, appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
-        config::Config, tags::provider::Provider,
+        config::Config, tags::provider::Provider, traces::propagation::DatadogCompositePropagator,
     };
 
     use super::*;
@@ -493,11 +499,13 @@ mod tests {
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
         });
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             Arc::clone(&aws_config),
             metrics_aggregator,
+            Arc::clone(&propagator),
         )));
         let appsec_processor = match AppSecProcessor::new(&config) {
             Ok(p) => Some(Arc::new(TokioMutex::new(p))),
@@ -510,8 +518,13 @@ mod tests {
             }
         };
 
-        let proxy_handle = start(aws_config, invocation_processor, appsec_processor)
-            .expect("Failed to start API runtime proxy");
+        let proxy_handle = start(
+            aws_config,
+            invocation_processor,
+            appsec_processor,
+            propagator,
+        )
+        .expect("Failed to start API runtime proxy");
         let https = HttpConnector::new();
         let client = Client::builder(hyper_util::rt::TokioExecutor::new())
             .build::<_, http_body_util::Full<prost::bytes::Bytes>>(https);

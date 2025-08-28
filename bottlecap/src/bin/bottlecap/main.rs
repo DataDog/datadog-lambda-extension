@@ -9,7 +9,6 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-use bottlecap::traces::trace_processor::SendingTraceProcessor;
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
@@ -21,8 +20,9 @@ use bottlecap::{
     DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
     EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
     LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
-    appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
-    appsec::processor::Processor as AppSecProcessor,
+    appsec::processor::{
+        Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
+    },
     base_url,
     config::{
         self, Config,
@@ -50,6 +50,7 @@ use bottlecap::{
         listener::TelemetryListener,
     },
     traces::{
+        propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
@@ -57,7 +58,7 @@ use bottlecap::{
         stats_processor, trace_agent,
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
-        trace_processor,
+        trace_processor::{self, SendingTraceProcessor},
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -514,12 +515,15 @@ async fn extension_loop_active(
         &metrics_aggr,
         config,
     )));
+
+    let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
         Arc::clone(config),
         Arc::clone(&aws_config),
         Arc::clone(&metrics_aggr),
+        Arc::clone(&propagator),
     )));
     // AppSec processor (if enabled)
     let appsec_processor = match AppSecProcessor::new(config) {
@@ -555,9 +559,11 @@ async fn extension_loop_active(
         aws_config,
         &invocation_processor,
         appsec_processor.as_ref(),
+        Arc::clone(&propagator),
     );
 
-    let lifecycle_listener = LifecycleListener::new(Arc::clone(&invocation_processor));
+    let lifecycle_listener =
+        LifecycleListener::new(Arc::clone(&invocation_processor), Arc::clone(&propagator));
     let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
     // TODO(astuyve): deprioritize this task after the first request
     tokio::spawn(async move {
@@ -1225,6 +1231,7 @@ fn start_api_runtime_proxy(
     aws_config: Arc<AwsConfig>,
     invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
     appsec_processor: Option<&Arc<TokioMutex<AppSecProcessor>>>,
+    propagator: Arc<DatadogCompositePropagator>,
 ) -> Option<CancellationToken> {
     if !should_start_proxy(config, Arc::clone(&aws_config)) {
         debug!("Skipping API runtime proxy, no LWA proxy or datadog wrapper found");
@@ -1233,5 +1240,11 @@ fn start_api_runtime_proxy(
 
     let invocation_processor = invocation_processor.clone();
     let appsec_processor = appsec_processor.map(Arc::clone);
-    interceptor::start(aws_config, invocation_processor, appsec_processor).ok()
+    interceptor::start(
+        aws_config,
+        invocation_processor,
+        appsec_processor,
+        propagator,
+    )
+    .ok()
 }
