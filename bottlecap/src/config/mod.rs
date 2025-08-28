@@ -18,6 +18,7 @@ use serde_aux::prelude::deserialize_bool_from_anything;
 use serde_json::Value;
 
 use std::path::Path;
+use std::time::Duration;
 use std::{collections::HashMap, fmt};
 use tracing::{debug, error};
 
@@ -31,6 +32,7 @@ use crate::config::{
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
+use crate::proc::has_dotnet_binary;
 
 /// Helper macro to merge Option<String> fields to String fields
 ///
@@ -328,7 +330,13 @@ pub struct Config {
     pub lambda_proc_enhanced_metrics: bool,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
+
     pub serverless_appsec_enabled: bool,
+    pub appsec_rules: Option<String>,
+    pub appsec_waf_timeout: Duration,
+    pub api_security_enabled: bool,
+    pub api_security_sample_delay: Duration,
+
     pub extension_version: Option<String>,
 }
 
@@ -413,7 +421,13 @@ impl Default for Config {
             lambda_proc_enhanced_metrics: true,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
+
             serverless_appsec_enabled: false,
+            appsec_rules: None,
+            appsec_waf_timeout: Duration::from_millis(5),
+            api_security_enabled: true,
+            api_security_sample_delay: Duration::from_secs(30),
+
             extension_version: None,
         }
     }
@@ -438,10 +452,12 @@ fn fallback(config: &Config) -> Result<(), ConfigError> {
         ));
     }
 
-    if config.serverless_appsec_enabled {
-        log_fallback_reason("appsec_enabled");
+    // ASM / .NET
+    // todo(duncanista): Remove once the .NET runtime is fixed
+    if config.serverless_appsec_enabled && has_dotnet_binary() {
+        log_fallback_reason("serverless_appsec_enabled_dotnet");
         return Err(ConfigError::UnsupportedField(
-            "serverless_appsec_enabled".to_string(),
+            "serverless_appsec_enabled_dotnet".to_string(),
         ));
     }
 
@@ -607,16 +623,53 @@ where
     Ok(map)
 }
 
+pub fn deserialize_optional_duration_from_microseconds<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error> {
+    Ok(Option::<u64>::deserialize(deserializer)?.map(Duration::from_micros))
+}
+
+pub fn deserialize_optional_duration_from_seconds<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error> {
+    struct DurationVisitor;
+    impl serde::de::Visitor<'_> for DurationVisitor {
+        type Value = Option<Duration>;
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            write!(f, "a duration in seconds (integer or float)")
+        }
+        fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<Self::Value, E> {
+            Ok(Some(Duration::from_secs(v)))
+        }
+        fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
+            if v < 0 {
+                return Err(E::custom("negative durations are not allowed"));
+            }
+            self.visit_u64(u64::try_from(v).expect("positive i64 to u64 conversion never fails"))
+        }
+        fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
+            if v < 0f64 {
+                return Err(E::custom("negative durations are not allowed"));
+            }
+            Ok(Some(Duration::from_secs_f64(v)))
+        }
+    }
+    deserializer.deserialize_any(DurationVisitor)
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 pub mod tests {
     use datadog_trace_obfuscation::replacer::parse_rules_from_string;
 
     use super::*;
 
-    use crate::config::flush_strategy::{FlushStrategy, PeriodicStrategy};
-    use crate::config::log_level::LogLevel;
-    use crate::config::processing_rule;
-    use crate::config::trace_propagation_style::TracePropagationStyle;
+    use crate::config::{
+        flush_strategy::{FlushStrategy, PeriodicStrategy},
+        log_level::LogLevel,
+        processing_rule::ProcessingRule,
+        trace_propagation_style::TracePropagationStyle,
+    };
 
     #[test]
     fn test_reject_on_opted_out() {
@@ -754,13 +807,13 @@ pub mod tests {
     fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                "localhost:4138",
+            );
 
             let config = get_config(Path::new("")).expect_err("should reject unknown fields");
-            assert_eq!(
-                config,
-                ConfigError::UnsupportedField("serverless_appsec_enabled".to_string())
-            );
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
             Ok(())
         });
     }
@@ -1219,5 +1272,63 @@ pub mod tests {
             assert_eq!(config.flush_timeout, 10);
             Ok(())
         });
+    }
+
+    #[test]
+    fn test_parse_duration_from_microseconds() {
+        #[derive(Deserialize, Debug, PartialEq, Eq)]
+        struct Value {
+            #[serde(default)]
+            #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
+            duration: Option<Duration>,
+        }
+
+        assert_eq!(
+            serde_json::from_str::<Value>("{}").expect("failed to parse JSON"),
+            Value { duration: None }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1}"#)
+            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1000000}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_secs(1))
+            }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1.5}"#)
+            .expect_err("should have failed parsing");
+        serde_json::from_str::<Value>(r#"{"duration":1.5}"#)
+            .expect_err("should have failed parsing");
+    }
+
+    #[test]
+    fn test_parse_duration_from_seconds() {
+        #[derive(Deserialize, Debug, PartialEq, Eq)]
+        struct Value {
+            #[serde(default)]
+            #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
+            duration: Option<Duration>,
+        }
+
+        assert_eq!(
+            serde_json::from_str::<Value>("{}").expect("failed to parse JSON"),
+            Value { duration: None }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1}"#)
+            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_secs(1))
+            }
+        );
+        serde_json::from_str::<Value>(r#"{"duration":-1.5}"#)
+            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1.5}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_millis(1500))
+            }
+        );
     }
 }

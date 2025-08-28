@@ -16,7 +16,10 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::cast_precision_loss)]
 #![allow(clippy::needless_pass_by_value)]
+// Allow use of the `coverage_nightly` attribute
+#![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 
+pub mod appsec;
 pub mod config;
 pub mod event_bus;
 pub mod fips;

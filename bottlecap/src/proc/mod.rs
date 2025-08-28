@@ -9,10 +9,31 @@ use std::{
 
 use constants::{
     LAMBDA_NETWORK_INTERFACE, LAMBDA_RUNTIME_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH,
-    PROC_STAT_PATH, PROC_UPTIME_PATH,
+    PROC_STAT_PATH, PROC_UPTIME_PATH, VAR_LANG_BIN_PATH,
 };
 use regex::Regex;
 use tracing::{debug, trace};
+
+#[must_use]
+pub fn has_dotnet_binary() -> bool {
+    match fs::read_dir(VAR_LANG_BIN_PATH) {
+        Ok(mut entries) => entries.any(|entry| match entry {
+            Ok(entry) => {
+                let file_name = entry.file_name();
+                let file_name_str = file_name.to_str().unwrap_or_default();
+                file_name_str.contains("dotnet")
+            }
+            Err(e) => {
+                debug!("Error reading VAR_LANG_BIN_PATH: {e}");
+                false
+            }
+        }),
+        Err(e) => {
+            debug!("Error reading VAR_LANG_BIN_PATH: {e}");
+            false
+        }
+    }
+}
 
 #[must_use]
 pub fn get_pid_list() -> Vec<i64> {
