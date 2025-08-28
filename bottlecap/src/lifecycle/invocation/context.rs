@@ -131,10 +131,12 @@ struct UniversalInstrumentationData {
 }
 
 impl Default for ContextBuffer {
-    /// Creates a new `ContextBuffer` with a default capacity of 5.
+    /// Creates a new `ContextBuffer` with a default capacity of 500
+    /// This gives us enough capacity to process events which may be delayed due to async tasks
+    /// piling up preventing us from reading them quickly enough
     ///
     fn default() -> Self {
-        ContextBuffer::with_capacity(5000)
+        ContextBuffer::with_capacity(500)
     }
 }
 
