@@ -564,7 +564,9 @@ mod tests {
             "Should have event source in trigger tags"
         );
         assert_eq!(
-            trigger_tags.get("function_trigger.event_source").expect("Should have event source"),
+            trigger_tags
+                .get("function_trigger.event_source")
+                .expect("Should have event source"),
             "sqs",
             "Should have SQS as event source"
         );
