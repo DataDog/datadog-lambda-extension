@@ -989,13 +989,7 @@ mod tests {
         tokio::spawn(service.run());
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        Processor::new(
-            tags_provider,
-            config,
-            aws_config,
-            handle,
-            propagator,
-        )
+        Processor::new(tags_provider, config, aws_config, handle, propagator)
     }
 
     #[test]
