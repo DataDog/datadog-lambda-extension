@@ -1,15 +1,14 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
-use dogstatsd::aggregator::Aggregator as MetricsAggregator;
 use serde_json::{Value, json};
-use tokio::sync::{mpsc::Sender, watch};
+use tokio::sync::watch;
 use tracing::{debug, warn};
 
 use crate::{
@@ -34,8 +33,7 @@ use crate::{
                 DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
             },
         },
-        trace_aggregator::SendDataBuilderInfo,
-        trace_processor::{self, TraceProcessor},
+        trace_processor::SendingTraceProcessor,
     },
 };
 
@@ -89,7 +87,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
+        metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -295,8 +293,7 @@ impl Processor {
         status: Status,
         error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_agent_tx: Sender<SendDataBuilderInfo>,
+        trace_sender: Arc<SendingTraceProcessor>,
         timestamp: i64,
     ) {
         // Set the runtime duration metric
@@ -331,14 +328,8 @@ impl Processor {
             self.process_on_universal_instrumentation_end(request_id.clone(), headers, payload);
         }
 
-        self.process_on_platform_runtime_done(
-            request_id,
-            status,
-            tags_provider,
-            trace_processor,
-            trace_agent_tx,
-        )
-        .await;
+        self.process_on_platform_runtime_done(request_id, status, tags_provider, trace_sender)
+            .await;
     }
 
     async fn process_on_platform_runtime_done(
@@ -346,20 +337,19 @@ impl Processor {
         request_id: &String,
         status: Status,
         tags_provider: Arc<provider::Provider>,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_agent_tx: Sender<SendDataBuilderInfo>,
+        trace_sender: Arc<SendingTraceProcessor>,
     ) {
         let context = self.enrich_ctx_at_platform_done(request_id, status);
 
         if self.tracer_detected {
             if let Some(ctx) = context {
                 if ctx.invocation_span.trace_id != 0 && ctx.invocation_span.span_id != 0 {
-                    self.send_ctx_spans(&tags_provider, &trace_processor, &trace_agent_tx, ctx)
+                    self.send_ctx_spans(&tags_provider, &trace_sender, ctx)
                         .await;
                 }
             }
         } else {
-            self.send_cold_start_span(&tags_provider, &trace_processor, &trace_agent_tx)
+            self.send_cold_start_span(&tags_provider, &trace_sender)
                 .await;
         }
     }
@@ -435,8 +425,7 @@ impl Processor {
     pub async fn send_ctx_spans(
         &mut self,
         tags_provider: &Arc<provider::Provider>,
-        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendDataBuilderInfo>,
+        trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) {
         let mut body_size = std::mem::size_of_val(&context.invocation_span);
@@ -457,14 +446,8 @@ impl Processor {
             traces.push(cold_start_span.clone());
         }
 
-        self.send_spans(
-            traces,
-            body_size,
-            tags_provider,
-            trace_processor,
-            trace_agent_tx,
-        )
-        .await;
+        self.send_spans(traces, body_size, tags_provider, trace_sender)
+            .await;
     }
 
     /// For Node/Python: Updates the cold start span with the given trace ID.
@@ -487,8 +470,7 @@ impl Processor {
     async fn send_cold_start_span(
         &mut self,
         tags_provider: &Arc<provider::Provider>,
-        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendDataBuilderInfo>,
+        trace_sender: &Arc<SendingTraceProcessor>,
     ) {
         if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
             if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
@@ -500,14 +482,8 @@ impl Processor {
                 let traces = vec![cold_start_span.clone()];
                 let body_size = size_of_val(cold_start_span);
 
-                self.send_spans(
-                    traces,
-                    body_size,
-                    tags_provider,
-                    trace_processor,
-                    trace_agent_tx,
-                )
-                .await;
+                self.send_spans(traces, body_size, tags_provider, trace_sender)
+                    .await;
             }
         }
     }
@@ -520,8 +496,7 @@ impl Processor {
         traces: Vec<Span>,
         body_size: usize,
         tags_provider: &Arc<provider::Provider>,
-        trace_processor: &Arc<dyn TraceProcessor + Send + Sync>,
-        trace_agent_tx: &Sender<SendDataBuilderInfo>,
+        trace_sender: &Arc<SendingTraceProcessor>,
     ) {
         // todo: figure out what to do here
         let header_tags = tracer_header_tags::TracerHeaderTags {
@@ -537,8 +512,8 @@ impl Processor {
             dropped_p0_spans: 0,
         };
 
-        let send_data_builder_info: SendDataBuilderInfo = trace_processor
-            .process_traces(
+        if let Err(e) = trace_sender
+            .send_processed_traces(
                 self.config.clone(),
                 tags_provider.clone(),
                 header_tags,
@@ -546,9 +521,8 @@ impl Processor {
                 body_size,
                 self.inferrer.span_pointers.clone(),
             )
-            .await;
-
-        if let Err(e) = trace_agent_tx.send(send_data_builder_info).await {
+            .await
+        {
             debug!("Failed to send context spans to agent: {e}");
         }
     }
@@ -999,7 +973,7 @@ mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use dogstatsd::aggregator::Aggregator;
+    use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
 
     fn setup() -> Processor {
@@ -1024,11 +998,12 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let metrics_aggregator = Arc::new(Mutex::new(
-            Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
-        ));
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
 
-        Processor::new(tags_provider, config, aws_config, metrics_aggregator)
+        tokio::spawn(service.run());
+
+        Processor::new(tags_provider, config, aws_config, handle)
     }
 
     #[test]
@@ -1090,8 +1065,8 @@ mod tests {
         assert_eq!(error_tags["error.stack"], error_stack);
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -1119,8 +1094,8 @@ mod tests {
         assert_eq!(priority, Some(-1.0));
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -1148,8 +1123,8 @@ mod tests {
         assert_eq!(context.invocation_span.parent_id, 999);
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -1173,8 +1148,8 @@ mod tests {
         assert_eq!(context.invocation_span.parent_id, 222);
     }
 
-    #[test]
-    fn test_process_on_invocation_end_tags_response_with_status_code() {
+    #[tokio::test]
+    async fn test_process_on_invocation_end_tags_response_with_status_code() {
         let mut p = setup();
 
         let response = r#"
@@ -1212,8 +1187,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_on_shutdown_event_creates_unused_init_metrics() {
+    #[tokio::test]
+    async fn test_on_shutdown_event_creates_unused_init_metrics() {
         let mut processor = setup();
 
         let now1 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
@@ -1222,22 +1197,26 @@ mod tests {
         let now2 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
         let ts2 = (now2 / 10) * 10;
 
-        let aggregator = processor.enhanced_metrics.aggregator.lock().unwrap();
+        let handle = &processor.enhanced_metrics.aggr_handle;
 
         assert!(
-            aggregator
+            handle
                 .get_entry_by_id(
                     crate::metrics::enhanced::constants::UNUSED_INIT.into(),
-                    &None,
+                    None,
                     ts1
                 )
+                .await
+                .unwrap()
                 .is_some()
-                || aggregator
+                || handle
                     .get_entry_by_id(
                         crate::metrics::enhanced::constants::UNUSED_INIT.into(),
-                        &None,
+                        None,
                         ts2
                     )
+                    .await
+                    .unwrap()
                     .is_some(),
             "UNUSED_INIT metric should be created when invoked_received=false"
         );

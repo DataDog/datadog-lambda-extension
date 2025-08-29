@@ -8,10 +8,10 @@ COPY --from=public.ecr.aws/datadog/lambda-extension:latest /opt/datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 
-COPY .binaries/bottlecap-${FILE_SUFFIX} /extensions/datadog-agent
-COPY ./scripts/datadog_wrapper /datadog_wrapper
-RUN chmod +x /datadog_wrapper
-RUN  zip -r datadog_extension.zip /extensions /datadog_wrapper /datadog-agent-go
+RUN --mount=type=bind,source=.binaries/bottlecap-${FILE_SUFFIX},target=/extensions/datadog-agent \
+    --mount=type=bind,source=./scripts/datadog_wrapper,target=/datadog_wrapper,rw \
+    chmod +x /datadog_wrapper && \
+    zip -r datadog_extension.zip /extensions /datadog_wrapper /datadog-agent-go
 
 # keep the smallest possible docker image
 FROM scratch

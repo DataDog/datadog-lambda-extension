@@ -1,6 +1,8 @@
 // Copyright 2023-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
+use crate::appsec::processor::Processor as AppSecProcessor;
+use crate::appsec::processor::context::HoldArguments;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::tags::provider;
@@ -24,6 +26,9 @@ use ddcommon::Endpoint;
 use regex::Regex;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::sync::mpsc::Sender;
+use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
 use super::trace_aggregator::SendDataBuilderInfo;
@@ -365,6 +370,93 @@ impl TraceProcessor for ServerlessTraceProcessor {
             ));
 
         SendDataBuilderInfo::new(builder, body_size)
+    }
+}
+
+/// A utility that is used to process, then send traces to the trace aggregator.
+///
+/// This applies [`AppSecProcessor::process_span`] on the `aws.lambda` span
+/// contained in the traces (if any), and may buffer the traces if the
+/// [`AppSecProcessor`] has not yet seen the corresponding response payload.
+///
+/// Once ready to flush, the traces are submitted to the provided [`Sender`].
+#[derive(Clone)]
+pub struct SendingTraceProcessor {
+    /// The [`AppSecProcessor`] to use for security-processing the traces, if
+    /// configured.
+    pub appsec: Option<Arc<Mutex<AppSecProcessor>>>,
+    /// The [`TraceProcessor`]  to use for transforming raw traces into
+    /// [`SendDataBuilderInfo`]s before flushing.
+    pub processor: Arc<dyn TraceProcessor + Send + Sync>,
+    /// The [`Sender`] to use for flushing the traces to the trace aggregator.
+    pub trace_tx: Sender<SendDataBuilderInfo>,
+}
+impl SendingTraceProcessor {
+    /// Processes the provided traces, then flushes them to the trace aggregator
+    /// for sending to the backend.
+    pub async fn send_processed_traces(
+        &self,
+        config: Arc<config::Config>,
+        tags_provider: Arc<provider::Provider>,
+        header_tags: tracer_header_tags::TracerHeaderTags<'_>,
+        mut traces: Vec<Vec<pb::Span>>,
+        body_size: usize,
+        span_pointers: Option<Vec<SpanPointer>>,
+    ) -> Result<(), SendError<SendDataBuilderInfo>> {
+        traces = if let Some(appsec) = &self.appsec {
+            let mut appsec = appsec.lock().await;
+            traces.into_iter().filter_map(|mut trace| {
+                let Some(span) = AppSecProcessor::service_entry_span_mut(&mut trace) else {
+                    return Some(trace);
+                };
+
+                let (finalized, ctx) = appsec.process_span(span);
+                if  finalized {
+                    Some(trace)
+                } else if let Some(ctx) = ctx{
+                    debug!("TRACE_PROCESSOR | holding trace for App & API Protection additional data");
+                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone() }, HoldArguments{
+                        config:Arc::clone(&config),
+                        tags_provider:Arc::clone(&tags_provider),
+                        body_size,
+                        span_pointers:span_pointers.clone(),
+                        tracer_header_tags_lang: header_tags.lang.to_string(),
+                        tracer_header_tags_lang_version: header_tags.lang_version.to_string(),
+                        tracer_header_tags_lang_interpreter: header_tags.lang_interpreter.to_string(),
+                        tracer_header_tags_lang_vendor: header_tags.lang_vendor.to_string(),
+                        tracer_header_tags_tracer_version: header_tags.tracer_version.to_string(),
+                        tracer_header_tags_container_id: header_tags.container_id.to_string(),
+                        tracer_header_tags_client_computed_top_level: header_tags.client_computed_top_level,
+                        tracer_header_tags_client_computed_stats: header_tags.client_computed_stats,
+                        tracer_header_tags_dropped_p0_traces: header_tags.dropped_p0_traces,
+                        tracer_header_tags_dropped_p0_spans: header_tags.dropped_p0_spans,
+                    });
+                    None
+                } else {
+                    Some(trace)
+                }
+            }).collect()
+        } else {
+            traces
+        };
+
+        if traces.is_empty() {
+            debug!("TRACE_PROCESSOR | no traces left to be sent, skipping...");
+            return Ok(());
+        }
+
+        let payload = self
+            .processor
+            .process_traces(
+                config,
+                tags_provider,
+                header_tags,
+                traces,
+                body_size,
+                span_pointers,
+            )
+            .await;
+        self.trace_tx.send(payload).await
     }
 }
 

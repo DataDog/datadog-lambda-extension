@@ -1,23 +1,29 @@
 // Copyright 2024-Present Datadog, Inc. https://www.datadoghq.com/
 // SPDX-License-Identifier: Apache-2.0
 
-use ddcommon::hyper_migration;
-use ddcommon::hyper_migration::Body;
-use http_body_util::BodyExt;
-use hyper::service::service_fn;
-use hyper::{HeaderMap, Method, Response, StatusCode, http};
+use axum::{
+    Router,
+    extract::{Request, State},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{get, post},
+};
+use bytes::Bytes;
 use serde_json::json;
 use std::collections::HashMap;
-use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tracing::{debug, error, warn};
 
-use crate::lifecycle::invocation::processor::Processor as InvocationProcessor;
-use crate::traces::propagation::text_map_propagator::{
-    DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
-    DATADOG_TRACE_ID_KEY,
+use crate::{
+    http::extract_request_body,
+    lifecycle::invocation::processor::Processor as InvocationProcessor,
+    traces::propagation::text_map_propagator::{
+        DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_TAGS_KEY,
+        DATADOG_TRACE_ID_KEY,
+    },
 };
 
 const HELLO_PATH: &str = "/lambda/hello";
@@ -31,203 +37,162 @@ pub struct Listener {
 
 impl Listener {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let invocation_processor = self.invocation_processor.clone();
-
-        let service = service_fn(move |req| {
-            let invocation_processor = invocation_processor.clone();
-
-            Self::handler(
-                req.map(hyper_migration::Body::incoming),
-                invocation_processor.clone(),
-            )
-        });
-
         let port = u16::try_from(AGENT_PORT).expect("AGENT_PORT is too large");
         let addr = SocketAddr::from(([127, 0, 0, 1], port));
-        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        let listener = TcpListener::bind(&addr).await?;
 
-        let server = hyper::server::conn::http1::Builder::new();
-        let mut joinset = tokio::task::JoinSet::new();
-        loop {
-            let conn = tokio::select! {
-                con_res = listener.accept() => match con_res {
-                    Err(e)
-                        if matches!(
-                            e.kind(),
-                            io::ErrorKind::ConnectionAborted
-                                | io::ErrorKind::ConnectionReset
-                                | io::ErrorKind::ConnectionRefused
-                        ) =>
-                    {
-                        continue;
-                    }
-                    Err(e) => {
-                        error!("Server error: {e}");
-                        return Err(e.into());
-                    }
-                    Ok((conn, _)) => conn,
-                },
-                finished = async {
-                    match joinset.join_next().await {
-                        Some(finished) => finished,
-                        None => std::future::pending().await,
-                    }
-                } => match finished {
-                    Err(e) if e.is_panic() => {
-                        std::panic::resume_unwind(e.into_panic());
-                    },
-                    Ok(()) | Err(_) => continue,
-                },
-            };
-            let conn = hyper_util::rt::TokioIo::new(conn);
-            let server = server.clone();
-            let service = service.clone();
-            joinset.spawn(async move {
-                if let Err(e) = server.serve_connection(conn, service).await {
-                    debug!("Lifecycle connection error: {e}");
-                }
-            });
+        let router = self.make_router();
+
+        debug!("Lifecycle API | Starting listener on {}", addr);
+        axum::serve(listener, router).await?;
+        Ok(())
+    }
+
+    fn make_router(&self) -> Router {
+        let invocation_processor = self.invocation_processor.clone();
+
+        Router::new()
+            .route(START_INVOCATION_PATH, post(Self::handle_start_invocation))
+            .route(END_INVOCATION_PATH, post(Self::handle_end_invocation))
+            .route(HELLO_PATH, get(Self::handle_hello))
+            .with_state(invocation_processor)
+    }
+
+    async fn handle_start_invocation(
+        State(invocation_processor): State<Arc<Mutex<InvocationProcessor>>>,
+        request: Request,
+    ) -> Response {
+        let (parts, body) = match extract_request_body(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to extract request body: {e}");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Could not read start invocation request body",
+                )
+                    .into_response();
+            }
+        };
+
+        let (_, response) =
+            Self::universal_instrumentation_start(&parts.headers, body, invocation_processor).await;
+
+        response
+    }
+
+    async fn handle_end_invocation(
+        State(invocation_processor): State<Arc<Mutex<InvocationProcessor>>>,
+        request: Request,
+    ) -> Response {
+        let (parts, body) = match extract_request_body(request).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!("Failed to extract request body: {e}");
+                return (
+                    StatusCode::BAD_REQUEST,
+                    "Could not read end invocation request body",
+                )
+                    .into_response();
+            }
+        };
+
+        match Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await
+        {
+            Ok(response) => response,
+            Err(e) => {
+                error!("Failed to end invocation {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to end invocation",
+                )
+                    .into_response()
+            }
         }
     }
 
-    async fn handler(
-        req: hyper_migration::HttpRequest,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> http::Result<hyper_migration::HttpResponse> {
-        match (req.method(), req.uri().path()) {
-            (&Method::POST, START_INVOCATION_PATH) => {
-                let (parts, body) = req.into_parts();
-                Self::universal_instrumentation_start(&parts.headers, body, invocation_processor)
-                    .await
-                    .1
-            }
-            (&Method::POST, END_INVOCATION_PATH) => {
-                let (parts, body) = req.into_parts();
-                match Self::universal_instrumentation_end(
-                    &parts.headers,
-                    body,
-                    invocation_processor,
-                )
-                .await
-                {
-                    Ok(response) => Ok(response),
-                    Err(e) => {
-                        error!("Failed to end invocation {e}");
-                        Ok(Response::builder()
-                            .status(500)
-                            .body(hyper_migration::Body::empty())
-                            .expect("no body"))
-                    }
-                }
-            }
-            (&Method::GET, HELLO_PATH) => Self::hello_handler(),
-            _ => {
-                let mut not_found = Response::default();
-                *not_found.status_mut() = StatusCode::NOT_FOUND;
-                Ok(not_found)
-            }
-        }
+    #[allow(clippy::unused_async)]
+    async fn handle_hello() -> Response {
+        warn!("[DEPRECATED] Please upgrade your tracing library, the /hello route is deprecated");
+        (StatusCode::OK, json!({}).to_string()).into_response()
     }
 
     pub async fn universal_instrumentation_start(
         headers: &HeaderMap,
-        body: Body,
+        body: Bytes,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> (u64, http::Result<hyper_migration::HttpResponse>) {
+    ) -> (u64, Response) {
         debug!("Received start invocation request");
-        match body.collect().await {
-            Ok(b) => {
-                let body = b.to_bytes().to_vec();
+        let body = body.to_vec();
 
-                let headers = Self::headers_to_map(headers);
+        let headers = Self::headers_to_map(headers);
 
-                let extracted_span_context = {
-                    let mut processor = invocation_processor.lock().await;
-                    processor.on_universal_instrumentation_start(headers, body)
-                };
-                let mut response = Response::builder().status(200);
+        let extracted_span_context = {
+            let mut processor = invocation_processor.lock().await;
+            processor.on_universal_instrumentation_start(headers, body)
+        };
 
-                let found_parent_span_id;
-                // If a `SpanContext` exists, then tell the tracer to use it.
-                // todo: update this whole code with DatadogHeaderPropagator::inject
-                // since this logic looks messy
-                if let Some(sp) = extracted_span_context {
-                    response = response.header(DATADOG_TRACE_ID_KEY, sp.trace_id.to_string());
-                    if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
-                        response =
-                            response.header(DATADOG_SAMPLING_PRIORITY_KEY, priority.to_string());
-                    }
+        let found_parent_span_id;
 
-                    // Handle 128 bit trace ids
-                    if let Some(trace_id_higher_order_bits) =
-                        sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
-                    {
-                        response = response.header(
-                        DATADOG_TAGS_KEY,
-                        format!("{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"),
-                    );
-                    }
-                    found_parent_span_id = sp.span_id;
-                } else {
-                    found_parent_span_id = 0;
-                }
-
-                (
-                    found_parent_span_id,
-                    response.body(hyper_migration::Body::from(json!({}).to_string())),
-                )
+        // If a `SpanContext` exists, then tell the tracer to use it.
+        // todo: update this whole code with DatadogHeaderPropagator::inject
+        // since this logic looks messy
+        let response = if let Some(sp) = extracted_span_context {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                DATADOG_TRACE_ID_KEY,
+                sp.trace_id
+                    .to_string()
+                    .parse()
+                    .expect("Failed to parse trace id"),
+            );
+            if let Some(priority) = sp.sampling.and_then(|s| s.priority) {
+                headers.insert(
+                    DATADOG_SAMPLING_PRIORITY_KEY,
+                    priority
+                        .to_string()
+                        .parse()
+                        .expect("Failed to parse sampling priority"),
+                );
             }
-            Err(e) => {
-                error!("Could not read start invocation request body {e}");
 
-                (
-                    0,
-                    Response::builder()
-                        .status(400)
-                        .body(hyper_migration::Body::from(
-                            "Could not read start invocation request body",
-                        )),
-                )
+            // Handle 128 bit trace ids
+            if let Some(trace_id_higher_order_bits) =
+                sp.tags.get(DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY)
+            {
+                headers.insert(
+                    DATADOG_TAGS_KEY,
+                    format!(
+                        "{DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY}={trace_id_higher_order_bits}"
+                    )
+                    .parse()
+                    .expect("Failed to parse tags"),
+                );
             }
-        }
+            found_parent_span_id = sp.span_id;
+
+            (StatusCode::OK, headers, json!({}).to_string()).into_response()
+        } else {
+            found_parent_span_id = 0;
+            (StatusCode::OK, json!({}).to_string()).into_response()
+        };
+
+        (found_parent_span_id, response)
     }
 
     pub async fn universal_instrumentation_end(
         headers: &HeaderMap,
-        body: Body,
+        body: Bytes,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
-    ) -> http::Result<hyper_migration::HttpResponse> {
+    ) -> Result<Response, Box<dyn std::error::Error>> {
         debug!("Received end invocation request");
-        match body.collect().await {
-            Ok(b) => {
-                let body = b.to_bytes().to_vec();
-                let mut processor = invocation_processor.lock().await;
+        let body = body.to_vec();
+        let mut processor = invocation_processor.lock().await;
 
-                let headers = Self::headers_to_map(headers);
-                processor.on_universal_instrumentation_end(headers, body);
-                drop(processor);
+        let headers = Self::headers_to_map(headers);
+        processor.on_universal_instrumentation_end(headers, body);
+        drop(processor);
 
-                Response::builder()
-                    .status(200)
-                    .body(hyper_migration::Body::from(json!({}).to_string()))
-            }
-            Err(e) => {
-                error!("Could not read end invocation request body {e}");
-
-                Response::builder()
-                    .status(400)
-                    .body(hyper_migration::Body::from(
-                        "Could not read end invocation request body",
-                    ))
-            }
-        }
-    }
-
-    fn hello_handler() -> http::Result<hyper_migration::HttpResponse> {
-        warn!("[DEPRECATED] Please upgrade your tracing library, the /hello route is deprecated");
-        Response::builder()
-            .status(200)
-            .body(hyper_migration::Body::from(json!({}).to_string()))
+        Ok((StatusCode::OK, json!({}).to_string()).into_response())
     }
 
     fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {

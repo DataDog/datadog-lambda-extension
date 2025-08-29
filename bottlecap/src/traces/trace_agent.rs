@@ -20,7 +20,9 @@ use tokio::sync::{
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 
+use crate::traces::trace_processor::SendingTraceProcessor;
 use crate::{
+    appsec::processor::Processor as AppSecProcessor,
     config,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{
@@ -72,8 +74,7 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 #[derive(Clone)]
 pub struct TraceState {
     pub config: Arc<config::Config>,
-    pub trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-    pub trace_tx: Sender<SendDataBuilderInfo>,
+    pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
 }
@@ -98,6 +99,7 @@ pub struct TraceAgent {
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
     invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
 }
@@ -119,6 +121,7 @@ impl TraceAgent {
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
@@ -142,6 +145,7 @@ impl TraceAgent {
             stats_processor,
             proxy_aggregator,
             invocation_processor,
+            appsec_processor,
             tags_provider,
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
@@ -189,8 +193,11 @@ impl TraceAgent {
     fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
-            trace_processor: Arc::clone(&self.trace_processor),
-            trace_tx: self.tx.clone(),
+            trace_sender: Arc::new(SendingTraceProcessor {
+                appsec: self.appsec_processor.clone(),
+                processor: Arc::clone(&self.trace_processor),
+                trace_tx: self.tx.clone(),
+            }),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
         };
@@ -258,8 +265,7 @@ impl TraceAgent {
         Self::handle_traces(
             state.config,
             request,
-            state.trace_processor,
-            state.trace_tx,
+            state.trace_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V04,
@@ -271,8 +277,7 @@ impl TraceAgent {
         Self::handle_traces(
             state.config,
             request,
-            state.trace_processor,
-            state.trace_tx,
+            state.trace_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V05,
@@ -411,8 +416,7 @@ impl TraceAgent {
     async fn handle_traces(
         config: Arc<config::Config>,
         request: Request,
-        trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
-        trace_tx: Sender<SendDataBuilderInfo>,
+        trace_sender: Arc<SendingTraceProcessor>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -500,13 +504,13 @@ impl TraceAgent {
             for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
                 debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
                 invocation_processor
-                    .send_ctx_spans(&tags_provider, &trace_processor, &trace_tx, ctx_to_send)
+                    .send_ctx_spans(&tags_provider, &trace_sender, ctx_to_send)
                     .await;
             }
         }
 
-        let send_data = trace_processor
-            .process_traces(
+        match trace_sender
+            .send_processed_traces(
                 config,
                 tags_provider,
                 tracer_header_tags,
@@ -514,10 +518,8 @@ impl TraceAgent {
                 body_size,
                 None,
             )
-            .await;
-
-        // send trace payload to our trace aggregator
-        match trace_tx.send(send_data).await {
+            .await
+        {
             Ok(()) => success_response("Successfully buffered traces to be aggregated."),
             Err(err) => error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
