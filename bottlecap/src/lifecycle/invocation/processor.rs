@@ -1,22 +1,23 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
-use dogstatsd::aggregator::Aggregator as MetricsAggregator;
-use serde_json::{Value, json};
+use serde_json::Value;
 use tokio::sync::watch;
 use tracing::{debug, warn};
 
 use crate::{
     config::{self, aws::AwsConfig},
     lifecycle::invocation::{
-        base64_to_string, context::Context, context::ContextBuffer, context::ReparentingInfo,
-        create_empty_span, generate_span_id, get_metadata_from_value, span_inferrer::SpanInferrer,
+        base64_to_string,
+        context::{Context, ContextBuffer, ReparentingInfo},
+        create_empty_span, generate_span_id, get_metadata_from_value,
+        span_inferrer::{self, SpanInferrer},
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
@@ -58,7 +59,7 @@ pub struct Processor {
     /// extract trace context if available.
     inferrer: SpanInferrer,
     /// Propagator to extract span context from carriers.
-    propagator: DatadogCompositePropagator,
+    propagator: Arc<DatadogCompositePropagator>,
     /// Helper class to send enhanced metrics.
     enhanced_metrics: EnhancedMetrics,
     /// AWS configuration from the Lambda environment.
@@ -88,7 +89,8 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        metrics_aggregator: Arc<Mutex<MetricsAggregator>>,
+        metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
+        propagator: Arc<DatadogCompositePropagator>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -99,14 +101,10 @@ impl Processor {
             "aws.lambda",
             config.trace_aws_service_representation_enabled,
         );
-        let propagator = DatadogCompositePropagator::new(Arc::clone(&config));
 
         Processor {
             context_buffer: ContextBuffer::default(),
-            inferrer: SpanInferrer::new(
-                config.service_mapping.clone(),
-                config.trace_aws_service_representation_enabled,
-            ),
+            inferrer: SpanInferrer::new(Arc::clone(&config)),
             propagator,
             enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config,
@@ -167,14 +165,10 @@ impl Processor {
         self.enhanced_metrics.set_invoked_received();
 
         // If `UniversalInstrumentationStart` event happened first, process it
-        if let Some((headers, payload)) = self.context_buffer.pair_invoke_event(&request_id) {
-            let payload_value =
-                serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
+        if let Some((headers, payload_value)) = self.context_buffer.pair_invoke_event(&request_id) {
             // Infer span
             self.inferrer.infer_span(&payload_value, &self.aws_config);
-            let span_context = self.extract_span_context(&headers, &payload_value);
-
-            self.process_on_universal_instrumentation_start(request_id, payload, span_context);
+            self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
         }
     }
 
@@ -594,44 +588,32 @@ impl Processor {
     pub fn on_universal_instrumentation_start(
         &mut self,
         headers: HashMap<String, String>,
-        payload: Vec<u8>,
-    ) -> Option<SpanContext> {
+        payload_value: Value,
+    ) {
         self.tracer_detected = true;
 
-        let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
-        // Infer span
-        // todo(jordan): `infer_span` needs to be called before `extract_span_context`,
-        // this is not ideal, as they are separate operations and should not depend on each other.
         self.inferrer.infer_span(&payload_value, &self.aws_config);
-        let span_context = self.extract_span_context(&headers, &payload_value);
 
         // If `Invoke` event happened first, process right away
         if let Some(request_id) = self
             .context_buffer
-            .pair_universal_instrumentation_start_event(&headers, &payload)
+            .pair_universal_instrumentation_start_event(&headers, &payload_value)
         {
-            self.process_on_universal_instrumentation_start(
-                request_id,
-                payload,
-                span_context.clone(),
-            );
+            self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
         }
-
-        span_context
     }
 
     fn process_on_universal_instrumentation_start(
         &mut self,
         request_id: String,
-        payload: Vec<u8>,
-        span_context: Option<SpanContext>,
+        headers: HashMap<String, String>,
+        payload_value: Value,
     ) {
         let Some(context) = self.context_buffer.get_mut(&request_id) else {
             debug!("Cannot process on invocation start, no context for request_id: {request_id}");
             return;
         };
 
-        let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
             let metadata = get_metadata_from_value(
@@ -643,7 +625,8 @@ impl Processor {
             context.invocation_span.meta.extend(metadata);
         }
 
-        context.extracted_span_context = span_context;
+        context.extracted_span_context =
+            Self::extract_span_context(&headers, &payload_value, Arc::clone(&self.propagator));
 
         // Set the extracted trace context to the spans
         if let Some(sc) = &context.extracted_span_context {
@@ -747,23 +730,25 @@ impl Processor {
         ctx_to_send
     }
 
-    fn extract_span_context(
-        &self,
+    pub fn extract_span_context(
         headers: &HashMap<String, String>,
         payload_value: &Value,
+        propagator: Arc<impl Propagator>,
     ) -> Option<SpanContext> {
-        if let Some(sc) = self.inferrer.get_span_context(&self.propagator) {
+        if let Some(sc) =
+            span_inferrer::extract_span_context(payload_value, Arc::clone(&propagator))
+        {
             return Some(sc);
         }
 
         if let Some(payload_headers) = payload_value.get("headers") {
-            if let Some(sc) = self.propagator.extract(payload_headers) {
+            if let Some(sc) = propagator.extract(payload_headers) {
                 debug!("Extracted trace context from event headers");
                 return Some(sc);
             }
         }
 
-        if let Some(sc) = self.propagator.extract(headers) {
+        if let Some(sc) = propagator.extract(headers) {
             debug!("Extracted trace context from headers");
             return Some(sc);
         }
@@ -776,14 +761,14 @@ impl Processor {
     pub fn on_universal_instrumentation_end(
         &mut self,
         headers: HashMap<String, String>,
-        payload: Vec<u8>,
+        payload_value: Value,
     ) {
         // If `PlatformRuntimeDone` event happened first, process
         if let Some(request_id) = self
             .context_buffer
-            .pair_universal_instrumentation_end_event(&headers, &payload)
+            .pair_universal_instrumentation_end_event(&headers, &payload_value)
         {
-            self.process_on_universal_instrumentation_end(request_id, headers, payload);
+            self.process_on_universal_instrumentation_end(request_id, headers, payload_value);
         }
     }
 
@@ -791,14 +776,12 @@ impl Processor {
         &mut self,
         request_id: String,
         headers: HashMap<String, String>,
-        payload: Vec<u8>,
+        payload_value: Value,
     ) {
         let Some(context) = self.context_buffer.get_mut(&request_id) else {
             debug!("Cannot process on invocation end, no context for request_id: {request_id}");
             return;
         };
-
-        let payload_value = serde_json::from_slice::<Value>(&payload).unwrap_or_else(|_| json!({}));
 
         // Tag the invocation span with the request payload
         if self.config.capture_lambda_payload {
@@ -974,8 +957,9 @@ mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
     use base64::{Engine, engine::general_purpose::STANDARD};
-    use dogstatsd::aggregator::Aggregator;
+    use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
+    use serde_json::json;
 
     fn setup() -> Processor {
         let aws_config = Arc::new(AwsConfig {
@@ -999,11 +983,13 @@ mod tests {
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
 
-        let metrics_aggregator = Arc::new(Mutex::new(
-            Aggregator::new(EMPTY_TAGS, 1024).expect("failed to create aggregator"),
-        ));
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
 
-        Processor::new(tags_provider, config, aws_config, metrics_aggregator)
+        tokio::spawn(service.run());
+
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+        Processor::new(tags_provider, config, aws_config, handle, propagator)
     }
 
     #[test]
@@ -1065,8 +1051,8 @@ mod tests {
         assert_eq!(error_tags["error.stack"], error_stack);
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_with_sampling_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -1077,7 +1063,7 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
 
-        p.process_on_universal_instrumentation_end(request_id.clone(), headers, vec![]);
+        p.process_on_universal_instrumentation_end(request_id.clone(), headers, json!({}));
 
         let context = p
             .context_buffer
@@ -1094,8 +1080,8 @@ mod tests {
         assert_eq!(priority, Some(-1.0));
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_with_invalid_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -1109,7 +1095,7 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
 
-        p.process_on_universal_instrumentation_end(request_id.clone(), headers, vec![]);
+        p.process_on_universal_instrumentation_end(request_id.clone(), headers, json!({}));
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
@@ -1123,8 +1109,8 @@ mod tests {
         assert_eq!(context.invocation_span.parent_id, 999);
     }
 
-    #[test]
-    fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
+    #[tokio::test]
+    async fn test_process_on_universal_instrumentation_end_headers_no_sampling_priority() {
         let mut p = setup();
         let mut headers = HashMap::new();
 
@@ -1134,7 +1120,7 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
 
-        p.process_on_universal_instrumentation_end(request_id.clone(), headers, vec![]);
+        p.process_on_universal_instrumentation_end(request_id.clone(), headers, json!({}));
 
         let context = p.context_buffer.get(&request_id).unwrap();
 
@@ -1148,8 +1134,8 @@ mod tests {
         assert_eq!(context.invocation_span.parent_id, 222);
     }
 
-    #[test]
-    fn test_process_on_invocation_end_tags_response_with_status_code() {
+    #[tokio::test]
+    async fn test_process_on_invocation_end_tags_response_with_status_code() {
         let mut p = setup();
 
         let response = r#"
@@ -1169,10 +1155,11 @@ mod tests {
         let request_id = String::from("request_id");
         p.context_buffer.start_context(&request_id, Span::default());
         p.context_buffer.add_start_time(&request_id, 1);
+        let parsed_response = serde_json::from_str(response).unwrap();
         p.process_on_universal_instrumentation_end(
             request_id.clone(),
             HashMap::new(),
-            response.as_bytes().to_vec(),
+            parsed_response,
         );
 
         let context = p.context_buffer.get(&request_id).unwrap();
@@ -1187,8 +1174,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_on_shutdown_event_creates_unused_init_metrics() {
+    #[tokio::test]
+    async fn test_on_shutdown_event_creates_unused_init_metrics() {
         let mut processor = setup();
 
         let now1 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
@@ -1197,22 +1184,26 @@ mod tests {
         let now2 = i64::try_from(std::time::UNIX_EPOCH.elapsed().unwrap().as_secs()).unwrap();
         let ts2 = (now2 / 10) * 10;
 
-        let aggregator = processor.enhanced_metrics.aggregator.lock().unwrap();
+        let handle = &processor.enhanced_metrics.aggr_handle;
 
         assert!(
-            aggregator
+            handle
                 .get_entry_by_id(
                     crate::metrics::enhanced::constants::UNUSED_INIT.into(),
-                    &None,
+                    None,
                     ts1
                 )
+                .await
+                .unwrap()
                 .is_some()
-                || aggregator
+                || handle
                     .get_entry_by_id(
                         crate::metrics::enhanced::constants::UNUSED_INIT.into(),
-                        &None,
+                        None,
                         ts2
                     )
+                    .await
+                    .unwrap()
                     .is_some(),
             "UNUSED_INIT metric should be created when invoked_received=false"
         );

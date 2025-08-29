@@ -14,4 +14,4 @@ RUN --mount=type=bind,source=.layers/datadog_extension-${TARGETARCH}${SUFFIX}/ex
 
 # Final stage - copy from the base stage to scratch
 FROM scratch
-COPY --from=base /opt /
+COPY --from=base /opt /opt/.
