@@ -32,9 +32,9 @@ pub trait TraceFlusher {
     /// Given a `Vec<SendData>`, a tracer payload, send it to the Datadog intake endpoint.
     /// Returns the traces back if there was an error sending them.
     async fn send(
-        &self,
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
+        proxy_https: &Option<String>,
     ) -> Option<Vec<SendData>>;
 
     /// Flushes traces by getting every available batch on the aggregator.
@@ -102,7 +102,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             // If we have traces from a previous failed attempt, try to send those first
             if !traces.is_empty() {
                 debug!("Retrying to send {} previously failed traces", traces.len());
-                let retry_result = self.send(traces, None).await;
+                let retry_result = Self::send(traces, None, &self.config.proxy_https).await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
                     return retry_result;
@@ -121,7 +121,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 .map(|builder| builder.with_api_key(api_key))
                 .map(SendDataBuilder::build)
                 .collect();
-            if let Some(mut failed) = self.send(traces.clone(), None).await {
+            if let Some(mut failed) =
+                Self::send(traces.clone(), None, &self.config.proxy_https).await
+            {
                 failed_batch.append(&mut failed);
             }
 
@@ -129,8 +131,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
             let mut join_set = JoinSet::new();
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
-                let self_clone = self.clone();
-                join_set.spawn(async move { self_clone.send(traces_clone, Some(&endpoint)).await });
+                let proxy_https = self.config.proxy_https.clone();
+                join_set.spawn(async move {
+                    Self::send(traces_clone, Some(&endpoint), &proxy_https).await
+                });
             }
 
             while let Some(result) = join_set.join_next().await {
@@ -155,9 +159,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
     }
 
     async fn send(
-        &self,
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
+        proxy_https: &Option<String>,
     ) -> Option<Vec<SendData>> {
         if traces.is_empty() {
             return None;
@@ -173,10 +177,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 Some(additional_endpoint) => trace.with_endpoint(additional_endpoint.clone()),
                 None => trace.clone(),
             };
-            let proxy = self.config.proxy_https.clone();
+            let proxy_https = proxy_https.clone();
             tasks.push(tokio::spawn(async move {
                 trace_with_endpoint
-                    .send_proxy(proxy.as_deref())
+                    .send_proxy(proxy_https.as_deref())
                     .await
                     .last_result
             }));
