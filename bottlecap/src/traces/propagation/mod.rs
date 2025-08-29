@@ -21,7 +21,7 @@ pub trait Propagator {
 }
 
 pub struct DatadogCompositePropagator {
-    propagators: Vec<Box<dyn Propagator + Send + 'static>>,
+    propagators: Vec<Box<dyn Propagator + Send + Sync>>,
     config: Arc<config::Config>,
 }
 
@@ -61,17 +61,17 @@ impl Propagator for DatadogCompositePropagator {
 impl DatadogCompositePropagator {
     #[must_use]
     pub fn new(config: Arc<config::Config>) -> Self {
-        let propagators: Vec<Box<dyn Propagator + Send + 'static>> = config
+        let propagators: Vec<Box<dyn Propagator + Send + Sync>> = config
             .trace_propagation_style_extract
             .iter()
             .filter_map(|style| match style {
                 TracePropagationStyle::Datadog => {
                     Some(Box::new(text_map_propagator::DatadogHeaderPropagator)
-                        as Box<dyn Propagator + Send>)
+                        as Box<dyn Propagator + Send + Sync>)
                 }
                 TracePropagationStyle::TraceContext => {
                     Some(Box::new(text_map_propagator::TraceContextPropagator)
-                        as Box<dyn Propagator + Send>)
+                        as Box<dyn Propagator + Send + Sync>)
                 }
                 _ => None,
             })

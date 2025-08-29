@@ -26,9 +26,13 @@ use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 use tokio::sync::Mutex;
 use tracing::{debug, error};
 
-use crate::lifecycle::{
-    invocation::{generate_span_id, processor::Processor as InvocationProcessor},
-    listener::Listener as LifecycleListener,
+use crate::{
+    http::headers_to_map,
+    lifecycle::{
+        invocation::{generate_span_id, processor::Processor as InvocationProcessor},
+        listener::Listener as LifecycleListener,
+    },
+    traces::propagation::DatadogCompositePropagator,
 };
 
 pub fn get_lwa_proxy_socket_address(
@@ -63,8 +67,8 @@ pub async fn process_invocation_next(
     processor: &Arc<Mutex<InvocationProcessor>>,
     parts: &http::response::Parts,
     body_bytes: &Bytes,
+    propagator: Arc<DatadogCompositePropagator>,
 ) {
-    let headers = parts.headers.clone();
     // intercepted invocation/next. The *response body* contains the payload of
     // the request that the lambda handler will see
 
@@ -85,23 +89,33 @@ pub async fn process_invocation_next(
         vec![]
     });
 
-    let (parent_id, _) = LifecycleListener::universal_instrumentation_start(
-        &parts.headers,
-        body.into(),
+    let headers = headers_to_map(&parts.headers);
+    let payload_value =
+        serde_json::from_slice::<Value>(&body.clone()).unwrap_or_else(|_| json!({}));
+    let extracted_span_context = InvocationProcessor::extract_span_context(
+        &headers,
+        &payload_value,
+        Arc::clone(&propagator),
+    );
+    let request_id = headers
+        .get("lambda-runtime-aws-request-id")
+        .map(std::string::ToString::to_string);
+
+    LifecycleListener::universal_instrumentation_start(
+        headers,
+        payload_value,
         Arc::clone(processor),
     )
     .await;
 
-    let request_id = headers
-        .get("lambda-runtime-aws-request-id")
-        .unwrap_or(&HeaderValue::from_static(""))
-        .to_str()
-        .unwrap_or_default()
-        .to_string();
+    let mut parent_id = 0;
+    if let Some(sp) = extracted_span_context {
+        parent_id = sp.span_id;
+    }
 
-    {
+    if let Some(request_id) = request_id {
         let mut invocation_processor = processor.lock().await;
-        invocation_processor.add_reparenting(request_id, generate_span_id(), parent_id);
+        invocation_processor.add_reparenting(request_id.to_string(), generate_span_id(), parent_id);
     }
 }
 
@@ -133,7 +147,7 @@ pub async fn process_invocation_response(
         );
     }
 
-    let _ = LifecycleListener::universal_instrumentation_end(
+    LifecycleListener::universal_instrumentation_end(
         &headers,
         body_bytes.into(),
         Arc::clone(processor),

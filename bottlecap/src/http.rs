@@ -1,14 +1,14 @@
 use crate::config;
 use axum::{
     extract::{FromRequest, Request},
-    http::{self, StatusCode},
+    http::{self, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use core::time::Duration;
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
-use std::error::Error;
 use std::sync::Arc;
+use std::{collections::HashMap, error::Error};
 use tracing::error;
 
 #[must_use]
@@ -67,4 +67,17 @@ pub async fn extract_request_body(
     let bytes = Bytes::from_request(Request::from_parts(parts.clone(), body), &()).await?;
 
     Ok((parts, bytes))
+}
+
+#[must_use]
+pub fn headers_to_map(headers: &HeaderMap) -> HashMap<String, String> {
+    headers
+        .iter()
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                v.to_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect()
 }
