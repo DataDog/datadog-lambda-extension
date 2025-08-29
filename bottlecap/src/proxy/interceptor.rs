@@ -430,12 +430,11 @@ mod tests {
     use http_body_util::BodyExt;
     use std::{
         collections::HashMap,
-        sync::Mutex,
         time::{Duration, Instant},
     };
     use tokio::sync::Mutex as TokioMutex;
 
-    use dogstatsd::{aggregator::Aggregator as MetricsAggregator, metric::EMPTY_TAGS};
+    use dogstatsd::{aggregator_service::AggregatorService, metric::EMPTY_TAGS};
     use http_body_util::Full;
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
@@ -482,9 +481,12 @@ mod tests {
             LAMBDA_RUNTIME_SLUG.to_string(),
             &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
         ));
-        let metrics_aggregator = Arc::new(Mutex::new(
-            MetricsAggregator::new(EMPTY_TAGS, 1024).expect("failed to create metrics aggregator"),
-        ));
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+
+        tokio::spawn(service.run());
+
+        let metrics_aggregator = handle;
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "arn:some-function".to_string(),

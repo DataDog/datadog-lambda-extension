@@ -512,7 +512,7 @@ dependencies = [
  "bytes",
  "chrono",
  "cookie",
- "datadog-fips",
+ "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7)",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
@@ -763,7 +763,18 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=d131de8419c191ce21c91bb30b5915c4d8a2cc5a#d131de8419c191ce21c91bb30b5915c4d8a2cc5a"
+source = "git+https://github.com/DataDog/serverless-components?rev=abfec752b0638a9e4096e1465acd4bb2651edfa7#abfec752b0638a9e4096e1465acd4bb2651edfa7"
+dependencies = [
+ "reqwest",
+ "rustls",
+ "rustls-native-certs",
+ "tracing",
+]
+
+[[package]]
+name = "datadog-fips"
+version = "0.1.0"
+source = "git+https://github.com/DataDog/serverless-components?rev=fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7#fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7"
 dependencies = [
  "reqwest",
  "rustls",
@@ -992,9 +1003,9 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=d131de8419c191ce21c91bb30b5915c4d8a2cc5a#d131de8419c191ce21c91bb30b5915c4d8a2cc5a"
+source = "git+https://github.com/DataDog/serverless-components?rev=abfec752b0638a9e4096e1465acd4bb2651edfa7#abfec752b0638a9e4096e1465acd4bb2651edfa7"
 dependencies = [
- "datadog-fips",
+ "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=abfec752b0638a9e4096e1465acd4bb2651edfa7)",
  "datadog-protos 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "ddsketch-agent 0.1.0 (git+https://github.com/DataDog/saluki/?rev=c89b58e5784b985819baf11f13f7d35876741222)",
  "derive_more",

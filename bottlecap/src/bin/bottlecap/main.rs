@@ -66,7 +66,8 @@ use datadog_trace_obfuscation::obfuscation_config;
 use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
 use dogstatsd::{
-    aggregator::Aggregator as MetricsAggregator,
+    aggregator_service::AggregatorHandle as MetricsAggregatorHandle,
+    aggregator_service::AggregatorService as MetricsAggregatorService,
     api_key::ApiKeyFactory,
     constants::CONTEXTS,
     datadog::{
@@ -87,7 +88,7 @@ use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
@@ -494,13 +495,11 @@ async fn extension_loop_active(
     );
 
     let metrics_aggr_init_start_time = Instant::now();
-    let metrics_aggr = Arc::new(Mutex::new(
-        MetricsAggregator::new(
-            SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
-            CONTEXTS,
-        )
-        .expect("failed to create aggregator"),
-    ));
+    let (metrics_aggr_service, metrics_aggr_handle) = MetricsAggregatorService::new(
+        SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
+        CONTEXTS,
+    )
+    .expect("can't create metrics service");
     debug!(
         "Metrics aggregator created in {:} microseconds",
         metrics_aggr_init_start_time
@@ -508,10 +507,11 @@ async fn extension_loop_active(
             .as_micros()
             .to_string()
     );
+    start_dogstatsd_aggregator(metrics_aggr_service);
 
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
-        &metrics_aggr,
+        &metrics_aggr_handle,
         config,
     )));
     // Lifecycle Invocation Processor
@@ -519,7 +519,7 @@ async fn extension_loop_active(
         Arc::clone(&tags_provider),
         Arc::clone(config),
         Arc::clone(&aws_config),
-        Arc::clone(&metrics_aggr),
+        metrics_aggr_handle.clone(),
     )));
     // AppSec processor (if enabled)
     let appsec_processor = match AppSecProcessor::new(config) {
@@ -568,7 +568,7 @@ async fn extension_loop_active(
         }
     });
 
-    let dogstatsd_cancel_token = start_dogstatsd(&metrics_aggr).await;
+    let dogstatsd_cancel_token = start_dogstatsd(metrics_aggr_handle.clone()).await;
 
     let telemetry_listener_cancel_token =
         setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
@@ -623,7 +623,7 @@ async fn extension_loop_active(
                             &*stats_flusher,
                             &proxy_flusher,
                             &mut race_flush_interval,
-                            &metrics_aggr,
+                            &metrics_aggr_handle.clone(),
                         )
                         .await;
                     }
@@ -638,7 +638,7 @@ async fn extension_loop_active(
                 &*stats_flusher,
                 &proxy_flusher,
                 &mut race_flush_interval,
-                &metrics_aggr,
+                &metrics_aggr_handle.clone(),
             )
             .await;
             let next_response = next_event(client, &r.extension_id).await;
@@ -670,11 +670,15 @@ async fn extension_loop_active(
                     }));
                 let (metrics_flushers_copy, series, sketches) = {
                     let locked_metrics = metrics_flushers.lock().await;
-                    let mut aggregator = metrics_aggr.lock().expect("lock poisoned");
+                    let flush_response = metrics_aggr_handle
+                        .clone()
+                        .flush()
+                        .await
+                        .expect("can't flush metrics handle");
                     (
                         locked_metrics.clone(),
-                        aggregator.consume_metrics(),
-                        aggregator.consume_distributions(),
+                        flush_response.series,
+                        flush_response.distributions,
                     )
                 };
                 for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
@@ -711,7 +715,7 @@ async fn extension_loop_active(
                     &*stats_flusher,
                     &proxy_flusher,
                     &mut race_flush_interval,
-                    &metrics_aggr,
+                    &metrics_aggr_handle,
                 )
                 .await;
                 last_continuous_flush_error = false;
@@ -751,7 +755,7 @@ async fn extension_loop_active(
                             &*stats_flusher,
                             &proxy_flusher,
                             &mut race_flush_interval,
-                            &metrics_aggr,
+                            &metrics_aggr_handle,
                         )
                         .await;
                     }
@@ -807,7 +811,7 @@ async fn extension_loop_active(
                 &*stats_flusher,
                 &proxy_flusher,
                 &mut race_flush_interval,
-                &metrics_aggr,
+                &metrics_aggr_handle,
             )
             .await;
             return Ok(());
@@ -822,18 +826,20 @@ async fn blocking_flush_all(
     stats_flusher: &impl StatsFlusher,
     proxy_flusher: &ProxyFlusher,
     race_flush_interval: &mut tokio::time::Interval,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
+    metrics_aggr_handle: &MetricsAggregatorHandle,
 ) {
-    let (series, sketches) = {
-        let mut aggregator = metrics_aggr.lock().expect("lock poisoned");
-        (
-            aggregator.consume_metrics(),
-            aggregator.consume_distributions(),
-        )
-    };
+    let flush_response = metrics_aggr_handle
+        .flush()
+        .await
+        .expect("can't flush metrics aggr handle");
     let metrics_futures: Vec<_> = metrics_flushers
         .iter_mut()
-        .map(|f| f.flush_metrics(series.clone(), sketches.clone()))
+        .map(|f| {
+            f.flush_metrics(
+                flush_response.series.clone(),
+                flush_response.distributions.clone(),
+            )
+        })
         .collect();
 
     tokio::join!(
@@ -1008,7 +1014,7 @@ fn start_logs_agent(
 
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
-    metrics_aggr: &Arc<Mutex<MetricsAggregator>>,
+    metrics_aggr_handle: &MetricsAggregatorHandle,
     config: &Arc<Config>,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
@@ -1031,7 +1037,7 @@ fn start_metrics_flushers(
 
     let flusher_config = MetricsFlusherConfig {
         api_key_factory,
-        aggregator: Arc::clone(metrics_aggr),
+        aggregator_handle: metrics_aggr_handle.clone(),
         metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
         https_proxy: config.proxy_https.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
@@ -1059,7 +1065,7 @@ fn start_metrics_flushers(
             let additional_api_key_factory = Arc::new(ApiKeyFactory::new(api_key));
             let additional_flusher_config = MetricsFlusherConfig {
                 api_key_factory: additional_api_key_factory,
-                aggregator: metrics_aggr.clone(),
+                aggregator_handle: metrics_aggr_handle.clone(),
                 metrics_intake_url_prefix: metrics_intake_url.clone(),
                 https_proxy: config.proxy_https.clone(),
                 timeout: Duration::from_secs(config.flush_timeout),
@@ -1157,7 +1163,13 @@ fn start_trace_agent(
     )
 }
 
-async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> CancellationToken {
+fn start_dogstatsd_aggregator(aggr_service: MetricsAggregatorService) {
+    tokio::spawn(async move {
+        aggr_service.run().await;
+    });
+}
+
+async fn start_dogstatsd(metrics_aggr_handle: MetricsAggregatorHandle) -> CancellationToken {
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
@@ -1165,7 +1177,7 @@ async fn start_dogstatsd(metrics_aggr: &Arc<Mutex<MetricsAggregator>>) -> Cancel
     let dogstatsd_cancel_token = tokio_util::sync::CancellationToken::new();
     let dogstatsd_client = DogStatsD::new(
         &dogstatsd_config,
-        Arc::clone(metrics_aggr),
+        metrics_aggr_handle,
         dogstatsd_cancel_token.clone(),
     )
     .await;
