@@ -915,6 +915,10 @@ extension_version: "compatibility"
                 api_security_sample_delay: Duration::from_secs(60),
 
                 extension_version: Some("compatibility".to_string()),
+                apm_filter_tags_require: None,
+                apm_filter_tags_reject: None,
+                apm_filter_tags_regex_require: None,
+                apm_filter_tags_regex_reject: None,
             };
 
             // Assert that

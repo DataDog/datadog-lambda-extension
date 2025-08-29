@@ -3,10 +3,10 @@
 
 use async_trait::async_trait;
 use ddcommon::Endpoint;
-use futures::future::join_all;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tracing::{debug, error};
 
 use datadog_trace_utils::{
@@ -32,9 +32,9 @@ pub trait TraceFlusher {
     /// Given a `Vec<SendData>`, a tracer payload, send it to the Datadog intake endpoint.
     /// Returns the traces back if there was an error sending them.
     async fn send(
-        &self,
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
+        proxy_https: &Option<String>,
     ) -> Option<Vec<SendData>>;
 
     /// Flushes traces by getting every available batch on the aggregator.
@@ -102,7 +102,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             // If we have traces from a previous failed attempt, try to send those first
             if !traces.is_empty() {
                 debug!("Retrying to send {} previously failed traces", traces.len());
-                let retry_result = self.send(traces, None).await;
+                let retry_result = Self::send(traces, None, &self.config.proxy_https).await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
                     return retry_result;
@@ -121,17 +121,26 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 .map(|builder| builder.with_api_key(api_key))
                 .map(SendDataBuilder::build)
                 .collect();
-            if let Some(mut failed) = self.send(traces.clone(), None).await {
+            if let Some(mut failed) =
+                Self::send(traces.clone(), None, &self.config.proxy_https).await
+            {
                 failed_batch.append(&mut failed);
             }
 
             // Send to additional endpoints
-            let tasks = self.additional_endpoints.iter().map(|endpoint| {
+            let mut join_set = JoinSet::new();
+            for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
-                async move { self.send(traces_clone, Some(endpoint)).await }
-            });
-            for mut failed in join_all(tasks).await.into_iter().flatten() {
-                failed_batch.append(&mut failed);
+                let proxy_https = self.config.proxy_https.clone();
+                join_set.spawn(async move {
+                    Self::send(traces_clone, Some(&endpoint), &proxy_https).await
+                });
+            }
+
+            while let Some(result) = join_set.join_next().await {
+                if let Ok(Some(mut failed)) = result {
+                    failed_batch.append(&mut failed);
+                }
             }
 
             // Stop processing more batches if we have a failure
@@ -150,9 +159,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
     }
 
     async fn send(
-        &self,
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
+        proxy_https: &Option<String>,
     ) -> Option<Vec<SendData>> {
         if traces.is_empty() {
             return None;
@@ -168,29 +177,40 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 Some(additional_endpoint) => trace.with_endpoint(additional_endpoint.clone()),
                 None => trace.clone(),
             };
-            let proxy = self.config.proxy_https.clone();
+            let proxy_https = proxy_https.clone();
             tasks.push(tokio::spawn(async move {
                 trace_with_endpoint
-                    .send_proxy(proxy.as_deref())
+                    .send_proxy(proxy_https.as_deref())
                     .await
                     .last_result
             }));
         }
 
+        let mut join_set = JoinSet::new();
         for task in tasks {
-            match task.await {
-                Ok(result) => {
-                    if let Err(e) = result {
+            join_set.spawn(task);
+        }
+
+        while let Some(result) = join_set.join_next().await {
+            let error_occurred = result
+                .map_err(|e| {
+                    error!("JoinSet error: {e:?}");
+                })
+                .and_then(|inner_result| {
+                    inner_result.map_err(|e| {
+                        error!("Task join error: {e:?}");
+                    })
+                })
+                .and_then(|send_result| {
+                    send_result.map_err(|e| {
                         error!("Error sending trace: {e:?}");
-                        // Return the original traces for retry
-                        return Some(coalesced_traces.clone());
-                    }
-                }
-                Err(e) => {
-                    error!("Task join error: {e:?}");
-                    // Return the original traces for retry if a task panics
-                    return Some(coalesced_traces.clone());
-                }
+                    })
+                })
+                .is_err();
+
+            if error_occurred {
+                // Return the original traces for retry
+                return Some(coalesced_traces.clone());
             }
         }
         debug!("Flushing traces took {}ms", start.elapsed().as_millis());
