@@ -83,7 +83,7 @@ impl Listener {
 
         let mut tasks = tasks.lock().await;
         while let Some(task) = tasks.join_next().await {
-            if let Some(e) = task.err() {
+            if let Err(e) = task {
                 error!("Lifecycle API | Shutdown error: {e}");
             }
         }
