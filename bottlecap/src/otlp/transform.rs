@@ -202,7 +202,7 @@ fn get_otel_service(otel_res: &OtelResource, normalize: bool) -> String {
     service
 }
 
-fn get_otel_operation_name(otel_span: &OtelSpan) -> String {
+fn get_otel_operation_name(otel_span: &OtelSpan, lib: &OtelInstrumentationScope) -> String {
     let operation_name =
         get_otel_attribute_value_as_string(&otel_span.attributes, "operation.name", false);
     if !operation_name.is_empty() {
@@ -293,6 +293,22 @@ fn get_otel_operation_name(otel_span: &OtelSpan) -> String {
         .is_empty()
     {
         return "graphql.server.request".to_string();
+    }
+
+    // Use instrumentation scope name + span kind naming to match Go agent behavior
+    let span_kind_name = match otel_span.kind() {
+        SpanKind::Unspecified => "unspecified",
+        SpanKind::Internal => "internal",
+        SpanKind::Server => "server",
+        SpanKind::Client => "client",
+        SpanKind::Producer => "producer",
+        SpanKind::Consumer => "consumer",
+        _ => "unspecified",
+    };
+    if !lib.name.is_empty() {
+        return format!("{}.{}", lib.name, span_kind_name);
+    } else {
+        return format!("opentelemetry.{}", span_kind_name);
     }
 
     // If nothing matches, checking for generic http server/client
@@ -830,7 +846,7 @@ pub fn otel_span_to_dd_span(
         }
 
         if dd_span.name.is_empty() {
-            dd_span.name = get_otel_operation_name(otel_span);
+            dd_span.name = get_otel_operation_name(otel_span, lib);
         }
 
         if dd_span.resource.is_empty() {
