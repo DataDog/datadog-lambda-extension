@@ -17,6 +17,8 @@ use std::collections::VecDeque;
 /// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
 const MAX_CONTENT_SIZE_BYTES: usize = 3 * 1024 * 1024; // ~3MB
 
+use tracing::debug;
+
 #[allow(clippy::module_name_repetitions)]
 pub struct StatsAggregator {
     queue: VecDeque<ClientStatsPayload>,
@@ -48,6 +50,7 @@ impl StatsAggregator {
 
     /// Takes in an individual trace stats payload.
     pub fn add(&mut self, payload: ClientStatsPayload) {
+        debug!("StatsAggregator | adding stats payload to aggregator: {payload:?}");
         self.queue.push_back(payload);
     }
 
