@@ -245,6 +245,8 @@ pub struct Config {
     // Timeout for the request to flush data to Datadog endpoint
     pub flush_timeout: u64,
 
+    // Global config of compression levels.
+    // It would be overridden by the setup for the individual component
     pub compression_level: i32,
 
     // Proxy
@@ -452,13 +454,10 @@ impl Default for Config {
 }
 
 fn log_fallback_reason(reason: &str) {
-    error!("Fallback support for {reason} is no longer available.");
+    println!("{{\"DD_EXTENSION_FALLBACK_REASON\":\"{reason}\"}}");
 }
 
-#[must_use = "fallback reasons should be processed to emit appropriate metrics"]
-pub fn fallback(config: &Config) -> Vec<String> {
-    let mut fallback_reasons = Vec::new();
-
+fn fallback(config: &Config) -> Result<(), ConfigError> {
     // Customer explicitly opted out of the Next Gen extension
     let opted_out = match config.extension_version.as_deref() {
         Some("compatibility") => true,
@@ -467,18 +466,21 @@ pub fn fallback(config: &Config) -> Vec<String> {
     };
 
     if opted_out {
-        let reason = "extension_version";
-        log_fallback_reason(reason);
-        fallback_reasons.push(reason.to_string());
+        log_fallback_reason("extension_version");
+        return Err(ConfigError::UnsupportedField(
+            "extension_version".to_string(),
+        ));
     }
 
     // ASM / .NET
     // todo(duncanista): Remove once the .NET runtime is fixed
     if config.serverless_appsec_enabled && has_dotnet_binary() {
-        let reason = "serverless_appsec_enabled_dotnet";
-        log_fallback_reason(reason);
-        fallback_reasons.push(reason.to_string());
+        log_fallback_reason("serverless_appsec_enabled_dotnet");
+        return Err(ConfigError::UnsupportedField(
+            "serverless_appsec_enabled_dotnet".to_string(),
+        ));
     }
+
     // OTLP
     let has_otlp_config = config
         .otlp_config_receiver_protocols_grpc_endpoint
@@ -510,22 +512,25 @@ pub fn fallback(config: &Config) -> Vec<String> {
         || config.otlp_config_logs_enabled;
 
     if has_otlp_config {
-        let reason = "otel";
-        log_fallback_reason(reason);
-        fallback_reasons.push(reason.to_string());
+        log_fallback_reason("otel");
+        return Err(ConfigError::UnsupportedField("otel".to_string()));
     }
 
-    fallback_reasons
+    Ok(())
 }
 
 #[allow(clippy::module_name_repetitions)]
-#[must_use = "configuration must be used to initialize the application"]
-pub fn get_config(config_directory: &Path) -> Config {
+pub fn get_config(config_directory: &Path) -> Result<Config, ConfigError> {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
     let mut config_builder = ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))
         .add_source(Box::new(EnvConfigSource));
-    config_builder.build()
+
+    let config = config_builder.build();
+
+    fallback(&config)?;
+
+    Ok(config)
 }
 
 #[inline]
@@ -738,7 +743,11 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_EXTENSION_VERSION", "compatibility");
-            let _config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(
+                config,
+                ConfigError::UnsupportedField("extension_version".to_string())
+            );
             Ok(())
         });
     }
@@ -752,7 +761,8 @@ pub mod tests {
                 "localhost:4138",
             );
 
-            let _config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
             Ok(())
         });
     }
@@ -772,7 +782,8 @@ pub mod tests {
             ",
             )?;
 
-            let _config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
             Ok(())
         });
     }
@@ -782,7 +793,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.logs_config_logs_dd_url,
                 "https://http-intake.logs.datadoghq.com".to_string()
@@ -800,7 +811,7 @@ pub mod tests {
                 "agent-http-intake-pci.logs.datadoghq.com:443",
             );
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.logs_config_logs_dd_url,
                 "agent-http-intake-pci.logs.datadoghq.com:443".to_string()
@@ -815,7 +826,7 @@ pub mod tests {
             jail.clear_env();
             jail.set_env("DD_APM_DD_URL", "https://trace-pci.agent.datadoghq.com");
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.apm_dd_url,
                 "https://trace-pci.agent.datadoghq.com/api/v0.2/traces".to_string()
@@ -830,7 +841,7 @@ pub mod tests {
             jail.clear_env();
             jail.set_env("DD_DD_URL", "custom_proxy:3128");
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.dd_url, "custom_proxy:3128".to_string());
             Ok(())
         });
@@ -842,7 +853,7 @@ pub mod tests {
             jail.clear_env();
             jail.set_env("DD_URL", "custom_proxy:3128");
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.url, "custom_proxy:3128".to_string());
             Ok(())
         });
@@ -853,7 +864,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.dd_url, String::new());
             Ok(())
         });
@@ -863,9 +874,13 @@ pub mod tests {
     fn test_allowed_but_disabled() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
+            jail.set_env(
+                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
+                "localhost:4138",
+            );
 
-            let _config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect_err("should reject unknown fields");
+            assert_eq!(config, ConfigError::UnsupportedField("otel".to_string()));
             Ok(())
         });
     }
@@ -881,7 +896,7 @@ pub mod tests {
             ",
             )?;
             jail.set_env("DD_SITE", "datad0g.com");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.site, "datad0g.com");
             Ok(())
         });
@@ -897,7 +912,7 @@ pub mod tests {
                 r"
             ",
             )?;
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.site, "datadoghq.com");
             Ok(())
         });
@@ -908,7 +923,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SITE", "datadoghq.eu");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.site, "datadoghq.eu");
             Ok(())
         });
@@ -919,7 +934,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_LOG_LEVEL", "TRACE");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.log_level, LogLevel::Trace);
             Ok(())
         });
@@ -929,7 +944,7 @@ pub mod tests {
     fn test_parse_default() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config,
                 Config {
@@ -953,7 +968,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_PROXY_HTTPS", "my-proxy:3128");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.proxy_https, Some("my-proxy:3128".to_string()));
             Ok(())
         });
@@ -969,7 +984,7 @@ pub mod tests {
                 "NO_PROXY",
                 "127.0.0.1,localhost,172.16.0.0/12,us-east-1.amazonaws.com,datadoghq.eu",
             );
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse noproxy");
             assert_eq!(config.proxy_https, None);
             Ok(())
         });
@@ -987,7 +1002,7 @@ pub mod tests {
             ",
             )?;
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse weird proxy config");
             assert_eq!(config.proxy_https, Some("my-proxy:3128".to_string()));
             Ok(())
         });
@@ -1007,7 +1022,7 @@ pub mod tests {
             ",
             )?;
 
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse weird proxy config");
             assert_eq!(config.proxy_https, None);
             // Assertion to ensure config.site runs before proxy
             // because we chenck that noproxy contains the site
@@ -1021,7 +1036,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "end");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::End);
             Ok(())
         });
@@ -1032,7 +1047,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "periodically,100000");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.serverless_flush_strategy,
                 FlushStrategy::Periodically(PeriodicStrategy { interval: 100_000 })
@@ -1046,7 +1061,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_SERVERLESS_FLUSH_STRATEGY", "invalid_strategy");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
             Ok(())
         });
@@ -1060,7 +1075,7 @@ pub mod tests {
                 "DD_SERVERLESS_FLUSH_STRATEGY",
                 "periodically,invalid_interval",
             );
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.serverless_flush_strategy, FlushStrategy::Default);
             Ok(())
         });
@@ -1073,7 +1088,7 @@ pub mod tests {
             jail.set_env("DD_VERSION", "123");
             jail.set_env("DD_ENV", "123456890");
             jail.set_env("DD_SERVICE", "123456");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(config.version.expect("failed to parse DD_VERSION"), "123");
             assert_eq!(config.env.expect("failed to parse DD_ENV"), "123456890");
             assert_eq!(
@@ -1103,7 +1118,7 @@ pub mod tests {
                       pattern: exclude-me-yaml
             ",
             )?;
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.logs_config_processing_rules,
                 Some(vec![ProcessingRule {
@@ -1132,7 +1147,7 @@ pub mod tests {
                       pattern: exclude
             ",
             )?;
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert_eq!(
                 config.logs_config_processing_rules,
                 Some(vec![ProcessingRule {
@@ -1161,7 +1176,7 @@ pub mod tests {
                       repl: 'REDACTED'
             ",
             )?;
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             let rule = parse_rules_from_string(
                 r#"[
                         {"name": "*", "pattern": "foo", "repl": "REDACTED"}
@@ -1192,7 +1207,7 @@ pub mod tests {
                       repl: 'REDACTED-YAML'
             ",
             )?;
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             let rule = parse_rules_from_string(
                 r#"[
                         {"name": "*", "pattern": "foo", "repl": "REDACTED-ENV"}
@@ -1219,7 +1234,7 @@ pub mod tests {
                       remove_paths_with_digits: true
             ",
             )?;
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert!(config.apm_config_obfuscation_http_remove_query_string,);
             assert!(config.apm_config_obfuscation_http_remove_paths_with_digits,);
             Ok(())
@@ -1234,7 +1249,7 @@ pub mod tests {
                 "datadog,tracecontext,b3,b3multi",
             );
             jail.set_env("DD_EXTENSION_VERSION", "next");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
 
             let expected_styles = vec![
                 TracePropagationStyle::Datadog,
@@ -1253,7 +1268,7 @@ pub mod tests {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
             jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "datadog");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
 
             assert_eq!(
                 config.trace_propagation_style,
@@ -1278,7 +1293,8 @@ pub mod tests {
                 "DD_APM_REPLACE_TAGS",
                 r#"[{"name":"resource.name","pattern":"(.*)/(foo[:%].+)","repl":"$1/{foo}"}]"#,
             );
-            let _config = get_config(Path::new(""));
+            let config = get_config(Path::new(""));
+            assert!(config.is_ok());
             Ok(())
         });
     }
@@ -1291,7 +1307,7 @@ pub mod tests {
             jail.set_env("DD_ENHANCED_METRICS", "1");
             jail.set_env("DD_LOGS_CONFIG_USE_COMPRESSION", "TRUE");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "0");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
             assert!(config.serverless_logs_enabled);
             assert!(config.enhanced_metrics);
             assert!(config.logs_config_use_compression);
@@ -1315,7 +1331,7 @@ pub mod tests {
             jail.set_env("DD_SITE", "us5.datadoghq.com");
             jail.set_env("DD_API_KEY", "env-api-key");
             jail.set_env("DD_FLUSH_TIMEOUT", "10");
-            let config = get_config(Path::new(""));
+            let config = get_config(Path::new("")).expect("should parse config");
 
             assert_eq!(config.site, "us5.datadoghq.com");
             assert_eq!(config.api_key, "env-api-key");

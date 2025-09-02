@@ -107,6 +107,12 @@ pub struct EnvConfig {
     /// @env `DD_TAGS`
     #[serde(deserialize_with = "deserialize_key_value_pairs")]
     pub tags: HashMap<String, String>,
+    /// @env `DD_COMPRESSION_LEVEL`
+    ///
+    /// Global level `compression_level` parameter accepts values from 0 (no compression)
+    /// to 9 (maximum compression but higher resource usage). This value is effective only if
+    /// the individual component doesn't specify its own.
+    pub compression_level: Option<i32>,
 
     /// @env `DD_COMPRESSION_LEVEL`
     ///
@@ -624,6 +630,7 @@ mod tests {
             jail.set_env("DD_SERVICE", "test-service");
             jail.set_env("DD_VERSION", "1.0.0");
             jail.set_env("DD_TAGS", "team:test-team,project:test-project");
+            jail.set_env("DD_COMPRESSION_LEVEL", "4");
 
             jail.set_env("DD_COMPRESSION_LEVEL", "4");
 
