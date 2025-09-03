@@ -89,7 +89,10 @@ use std::{
     os::unix::process::CommandExt,
     path::Path,
     process::Command,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
@@ -599,6 +602,7 @@ async fn extension_loop_active(
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
     let mut last_continuous_flush_error = false;
+    let flush_in_progress = Arc::new(AtomicBool::new(false));
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let maybe_shutdown_event;
@@ -620,17 +624,20 @@ async fn extension_loop_active(
                         }
                     }
                     _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle.clone(),
-                        )
-                        .await;
+                        // Only trigger race flush if no continuous flush is in progress
+                        if !flush_in_progress.load(Ordering::SeqCst) {
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            blocking_flush_all(
+                                &logs_flusher,
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle.clone(),
+                            )
+                            .await;
+                        }
                     }
                 }
             }
@@ -652,6 +659,8 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
+                flush_in_progress.store(true, Ordering::SeqCst);
+
                 let tf = trace_flusher.clone();
                 // Await any previous flush handles. This
                 last_continuous_flush_error = pending_flush_handles
@@ -710,6 +719,7 @@ async fn extension_loop_active(
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
+                flush_in_progress.store(false, Ordering::SeqCst);
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
@@ -752,17 +762,19 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle,
-                        )
-                        .await;
+                        if !flush_in_progress.load(Ordering::SeqCst) {
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            blocking_flush_all(
+                                &logs_flusher,
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle,
+                            )
+                            .await;
+                        }
                     }
                 }
             }
