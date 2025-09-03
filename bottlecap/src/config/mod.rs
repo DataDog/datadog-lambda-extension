@@ -189,10 +189,10 @@ impl ConfigBuilder {
 
         // If `proxy_https` is not set, set it from `HTTPS_PROXY` environment variable
         // if it exists
-        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY") {
-            if self.config.proxy_https.is_none() {
-                self.config.proxy_https = Some(https_proxy);
-            }
+        if let Ok(https_proxy) = std::env::var("HTTPS_PROXY")
+            && self.config.proxy_https.is_none()
+        {
+            self.config.proxy_https = Some(https_proxy);
         }
 
         // If `proxy_https` is set, check if the site is in `NO_PROXY` environment variable

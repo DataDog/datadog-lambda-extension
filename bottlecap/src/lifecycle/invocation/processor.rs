@@ -207,7 +207,7 @@ impl Processor {
 
         if let Some(runtime) = &self.runtime {
             self.dynamic_tags
-                .insert(String::from("runtime"), runtime.to_string());
+                .insert(String::from("runtime"), runtime.clone());
             self.enhanced_metrics.set_runtime_tag(runtime);
         }
 
@@ -337,11 +337,12 @@ impl Processor {
         let context = self.enrich_ctx_at_platform_done(request_id, status);
 
         if self.tracer_detected {
-            if let Some(ctx) = context {
-                if ctx.invocation_span.trace_id != 0 && ctx.invocation_span.span_id != 0 {
-                    self.send_ctx_spans(&tags_provider, &trace_sender, ctx)
-                        .await;
-                }
+            if let Some(ctx) = context
+                && ctx.invocation_span.trace_id != 0
+                && ctx.invocation_span.span_id != 0
+            {
+                self.send_ctx_spans(&tags_provider, &trace_sender, ctx)
+                    .await;
             }
         } else {
             self.send_cold_start_span(&tags_provider, &trace_sender)
@@ -408,11 +409,11 @@ impl Processor {
             .complete_inferred_spans(&context.invocation_span);
 
         // Handle cold start span if present
-        if let Some(cold_start_span) = &mut context.cold_start_span {
-            if context.invocation_span.trace_id != 0 {
-                cold_start_span.trace_id = context.invocation_span.trace_id;
-                cold_start_span.parent_id = context.invocation_span.parent_id;
-            }
+        if let Some(cold_start_span) = &mut context.cold_start_span
+            && context.invocation_span.trace_id != 0
+        {
+            cold_start_span.trace_id = context.invocation_span.trace_id;
+            cold_start_span.parent_id = context.invocation_span.parent_id;
         }
         Some(context.clone())
     }
@@ -448,14 +449,14 @@ impl Processor {
     /// For Node/Python: Updates the cold start span with the given trace ID.
     /// Returns the Span ID of the cold start span so we can reparent the `aws.lambda.load` span.
     pub fn set_cold_start_span_trace_id(&mut self, trace_id: u64) -> Option<u64> {
-        if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
-            if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
-                if cold_start_span.trace_id == 0 {
-                    cold_start_span.trace_id = trace_id;
-                }
-
-                return Some(cold_start_span.span_id);
+        if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start()
+            && let Some(cold_start_span) = &mut cold_start_context.cold_start_span
+        {
+            if cold_start_span.trace_id == 0 {
+                cold_start_span.trace_id = trace_id;
             }
+
+            return Some(cold_start_span.span_id);
         }
 
         None
@@ -467,19 +468,19 @@ impl Processor {
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
     ) {
-        if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start() {
-            if let Some(cold_start_span) = &mut cold_start_context.cold_start_span {
-                if cold_start_span.trace_id == 0 {
-                    debug!("Not sending cold start span because trace ID is unset.");
-                    return;
-                }
-
-                let traces = vec![cold_start_span.clone()];
-                let body_size = size_of_val(cold_start_span);
-
-                self.send_spans(traces, body_size, tags_provider, trace_sender)
-                    .await;
+        if let Some(cold_start_context) = self.context_buffer.get_context_with_cold_start()
+            && let Some(cold_start_span) = &mut cold_start_context.cold_start_span
+        {
+            if cold_start_span.trace_id == 0 {
+                debug!("Not sending cold start span because trace ID is unset.");
+                return;
             }
+
+            let traces = vec![cold_start_span.clone()];
+            let body_size = size_of_val(cold_start_span);
+
+            self.send_spans(traces, body_size, tags_provider, trace_sender)
+                .await;
         }
     }
 
@@ -541,15 +542,14 @@ impl Processor {
         // For provided.al runtimes, if the last invocation hit the memory limit, increment the OOM metric.
         // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
         // We don't do this for other runtimes to avoid double counting.
-        if let Some(runtime) = &self.runtime {
-            if runtime.starts_with("provided.al")
-                && metrics.max_memory_used_mb == metrics.memory_size_mb
-            {
-                debug!(
-                    "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
-                );
-                self.enhanced_metrics.increment_oom_metric(timestamp);
-            }
+        if let Some(runtime) = &self.runtime
+            && runtime.starts_with("provided.al")
+            && metrics.max_memory_used_mb == metrics.memory_size_mb
+        {
+            debug!(
+                "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
+            );
+            self.enhanced_metrics.increment_oom_metric(timestamp);
         }
 
         if let Some(context) = self.context_buffer.get(request_id) {
@@ -741,11 +741,11 @@ impl Processor {
             return Some(sc);
         }
 
-        if let Some(payload_headers) = payload_value.get("headers") {
-            if let Some(sc) = propagator.extract(payload_headers) {
-                debug!("Extracted trace context from event headers");
-                return Some(sc);
-            }
+        if let Some(payload_headers) = payload_value.get("headers")
+            && let Some(sc) = propagator.extract(payload_headers)
+        {
+            debug!("Extracted trace context from event headers");
+            return Some(sc);
         }
 
         if let Some(sc) = propagator.extract(headers) {
@@ -833,13 +833,13 @@ impl Processor {
                 parent_id = header.parse::<u64>().unwrap_or(0);
             }
 
-            if let Some(priority_str) = headers.get(DATADOG_SAMPLING_PRIORITY_KEY) {
-                if let Ok(priority) = priority_str.parse::<f64>() {
-                    context
-                        .invocation_span
-                        .metrics
-                        .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
-                }
+            if let Some(priority_str) = headers.get(DATADOG_SAMPLING_PRIORITY_KEY)
+                && let Ok(priority) = priority_str.parse::<f64>()
+            {
+                context
+                    .invocation_span
+                    .metrics
+                    .insert(TAG_SAMPLING_PRIORITY.to_string(), priority);
             }
 
             // Extract tags from headers
@@ -909,7 +909,7 @@ impl Processor {
         if let Some(m) = message {
             let decoded_message = base64_to_string(m).unwrap_or_else(|_| {
                 debug!("Error message header may not be encoded, setting as is");
-                m.to_string()
+                m.clone()
             });
 
             error_tags.insert(String::from("error.msg"), decoded_message);
@@ -918,7 +918,7 @@ impl Processor {
         if let Some(t) = r#type {
             let decoded_type = base64_to_string(t).unwrap_or_else(|_| {
                 debug!("Error type header may not be encoded, setting as is");
-                t.to_string()
+                t.clone()
             });
 
             error_tags.insert(String::from("error.type"), decoded_type);
@@ -927,7 +927,7 @@ impl Processor {
         if let Some(s) = stack {
             let decoded_stack = base64_to_string(s).unwrap_or_else(|e| {
                 debug!("Failed to decode error stack: {e}");
-                s.to_string()
+                s.clone()
             });
 
             error_tags.insert(String::from("error.stack"), decoded_stack);

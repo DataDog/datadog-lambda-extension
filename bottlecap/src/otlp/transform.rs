@@ -1,7 +1,8 @@
-use datadog_trace_normalization::normalize_utils::{normalize_name,normalize_service, normalize_tag};
+use datadog_trace_normalization::normalize_utils::{
+    normalize_name, normalize_service, normalize_tag,
+};
 use datadog_trace_protobuf::pb::Span as DatadogSpan;
 use hex;
-use lazy_static::lazy_static;
 use opentelemetry_proto::tonic::common::v1::{
     AnyValue, InstrumentationScope as OtelInstrumentationScope, KeyValue, any_value,
 };
@@ -28,6 +29,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::str;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use tracing::debug;
 
 use crate::config::Config;
@@ -57,27 +59,32 @@ pub const KEY_DATADOG_STATS_COMPUTED: &str = "_dd.stats_computed";
 
 // const SPAN_TYPE_GENERIC_DB: &str = "db";
 
-lazy_static! {
-    // TODO: add mappings
-    static ref DB_SYSTEM_MAP: HashMap<String, String> = HashMap::new();
-    static ref DD_SEMANTIC_KEYS_TO_META_KEYS: HashMap<&'static str, &'static str> = HashMap::from([
-        (KEY_DATADOG_ENVIRONMENT, "env"),
-        (KEY_DATADOG_VERSION, "version"),
-        (KEY_DATADOG_HTTP_STATUS_CODE, "http.status_code"),
-        (KEY_DATADOG_ERROR_MSG, "error.msg"),
-        (KEY_DATADOG_ERROR_TYPE, "error.type"),
-        (KEY_DATADOG_ERROR_STACK, "error.stack"),
-    ]);
+// TODO: add mappings
+// static DB_SYSTEM_MAP: LazyLock<HashMap<String, String>> = LazyLock::new(|| HashMap::new());
 
-    static ref META_KEYS_TO_DD_SEMANTIC_KEYS: HashMap<&'static str, &'static str> = HashMap::from([
-        ("env", KEY_DATADOG_ENVIRONMENT),
-        ("version", KEY_DATADOG_VERSION),
-        ("http.status_code", KEY_DATADOG_HTTP_STATUS_CODE),
-        ("error.msg", KEY_DATADOG_ERROR_MSG),
-        ("error.type", KEY_DATADOG_ERROR_TYPE),
-        ("error.stack", KEY_DATADOG_ERROR_STACK),
-    ]);
-}
+static DD_SEMANTIC_KEYS_TO_META_KEYS: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            (KEY_DATADOG_ENVIRONMENT, "env"),
+            (KEY_DATADOG_VERSION, "version"),
+            (KEY_DATADOG_HTTP_STATUS_CODE, "http.status_code"),
+            (KEY_DATADOG_ERROR_MSG, "error.msg"),
+            (KEY_DATADOG_ERROR_TYPE, "error.type"),
+            (KEY_DATADOG_ERROR_STACK, "error.stack"),
+        ])
+    });
+
+static META_KEYS_TO_DD_SEMANTIC_KEYS: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        HashMap::from([
+            ("env", KEY_DATADOG_ENVIRONMENT),
+            ("version", KEY_DATADOG_VERSION),
+            ("http.status_code", KEY_DATADOG_HTTP_STATUS_CODE),
+            ("error.msg", KEY_DATADOG_ERROR_MSG),
+            ("error.type", KEY_DATADOG_ERROR_TYPE),
+            ("error.stack", KEY_DATADOG_ERROR_STACK),
+        ])
+    });
 
 fn get_otel_attribute_value(attributes: &Vec<KeyValue>, key: &str) -> Option<AnyValue> {
     for attribute in attributes {
@@ -189,9 +196,11 @@ pub fn otel_span_id_to_u64(span_id: &[u8]) -> u64 {
 
 // Checks if the new operation and resource name logic should be used
 fn otel_operation_and_resource_v2_enabled(config: Arc<Config>) -> bool {
-    return !config.otlp_config_traces_span_name_as_resource_name 
-        && config.otlp_config_traces_span_name_remappings.is_empty() 
-        && !config.apm_features.contains(&"disable_operation_and_resource_name_logic_v2".to_string());
+    !config.otlp_config_traces_span_name_as_resource_name
+        && config.otlp_config_traces_span_name_remappings.is_empty()
+        && !config
+            .apm_features
+            .contains(&"disable_operation_and_resource_name_logic_v2".to_string())
 }
 
 fn get_otel_service(otel_res: &OtelResource, normalize: bool) -> String {
@@ -209,18 +218,24 @@ fn get_otel_service(otel_res: &OtelResource, normalize: bool) -> String {
     service
 }
 
-fn get_otel_operation_name_v1(otel_span: &OtelSpan, lib: &OtelInstrumentationScope, span_name_as_resource_name: bool, span_name_remappings: &HashMap<String, String>, normalize: bool) -> String {
+fn get_otel_operation_name_v1(
+    otel_span: &OtelSpan,
+    lib: &OtelInstrumentationScope,
+    span_name_as_resource_name: bool,
+    span_name_remappings: &HashMap<String, String>,
+    normalize: bool,
+) -> String {
     let mut operation_name =
         get_otel_attribute_value_as_string(&otel_span.attributes, "operation.name", false);
     if operation_name.is_empty() {
         if span_name_as_resource_name {
-            operation_name = otel_span.name.clone();
+            operation_name.clone_from(&otel_span.name);
         } else {
             let span_kind_name = get_dd_span_kind_from_otel_kind(otel_span);
-            if !lib.name.is_empty() {
-                operation_name = format!("{}.{}", lib.name, span_kind_name);
+            if lib.name.is_empty() {
+                operation_name = format!("opentelemetry.{span_kind_name}");
             } else {
-                operation_name = format!("opentelemetry.{}", span_kind_name);
+                operation_name = format!("{}.{}", lib.name, span_kind_name);
             }
         }
     }
@@ -524,18 +539,18 @@ fn get_otel_status_code(otel_span: &OtelSpan) -> u32 {
         "http.response.status_code",
         false,
     );
-    if !status_code.is_empty() {
-        if let Ok(status_code) = status_code.parse::<u32>() {
-            return status_code;
-        }
+    if !status_code.is_empty()
+        && let Ok(status_code) = status_code.parse::<u32>()
+    {
+        return status_code;
     }
 
     status_code =
         get_otel_attribute_value_as_string(&otel_span.attributes, HTTP_STATUS_CODE, false);
-    if !status_code.is_empty() {
-        if let Ok(status_code) = status_code.parse::<u32>() {
-            return status_code;
-        }
+    if !status_code.is_empty()
+        && let Ok(status_code) = status_code.parse::<u32>()
+    {
+        return status_code;
     }
 
     0
@@ -679,11 +694,11 @@ fn marshal_events(events: &[Event]) -> String {
         if !event.attributes.is_empty() {
             let mut attrs = json!({});
             for kv in &event.attributes {
-                let key = kv.key.to_string();
-                if let Some(v) = &kv.value {
-                    if let Some(value) = &v.value {
-                        attrs[key] = json!(otel_value_to_string(value));
-                    }
+                let key = kv.key.clone();
+                if let Some(v) = &kv.value
+                    && let Some(value) = &v.value
+                {
+                    attrs[key] = json!(otel_value_to_string(value));
                 }
             }
             event_obj["attributes"] = attrs;
@@ -715,11 +730,11 @@ fn marshal_links(links: &[Link]) -> String {
         if !link.attributes.is_empty() {
             let mut attrs = json!({});
             for kv in &link.attributes {
-                let key = kv.key.to_string();
-                if let Some(v) = &kv.value {
-                    if let Some(value) = &v.value {
-                        attrs[key] = json!(otel_value_to_string(value));
-                    }
+                let key = kv.key.clone();
+                if let Some(v) = &kv.value
+                    && let Some(value) = &v.value
+                {
+                    attrs[key] = json!(otel_value_to_string(value));
                 }
             }
             link_obj["attributes"] = attrs;
@@ -793,7 +808,7 @@ fn set_span_error_from_otel_span(dd_span: &mut DatadogSpan, otel_span: &OtelSpan
         if let Some(status_code) = dd_span.meta.get("http.response.status_code") {
             dd_span
                 .meta
-                .insert("error.msg".to_string(), status_code.to_string());
+                .insert("error.msg".to_string(), status_code.clone());
         }
     }
 }
@@ -866,7 +881,13 @@ pub fn otel_span_to_dd_span(
         if otel_operation_and_resource_v2_enabled(config.clone()) {
             dd_span.name = get_otel_operation_name_v2(otel_span);
         } else {
-            dd_span.name = get_otel_operation_name_v1(otel_span, lib, config.otlp_config_traces_span_name_as_resource_name, &config.otlp_config_traces_span_name_remappings, true);
+            dd_span.name = get_otel_operation_name_v1(
+                otel_span,
+                lib,
+                config.otlp_config_traces_span_name_as_resource_name,
+                &config.otlp_config_traces_span_name_remappings,
+                true,
+            );
         }
 
         if dd_span.resource.is_empty() {
@@ -982,7 +1003,7 @@ pub fn otel_span_to_dd_span(
         if let Some(v) = value.as_ref().and_then(|v| v.value.as_ref()) {
             let value = otel_value_to_string(v);
             if !value.is_empty() {
-                dd_span.meta.insert(key.to_string(), value);
+                dd_span.meta.insert(key.clone(), value);
             }
         }
     }
@@ -1284,19 +1305,22 @@ mod tests {
 
     #[test]
     fn test_otel_operation_name() {
-        let otel_span = OtelSpan{
+        let otel_span = OtelSpan {
             name: "test-span".to_string(),
             kind: SpanKind::Server as i32,
             ..Default::default()
         };
-        let lib = OtelInstrumentationScope{
+        let lib = OtelInstrumentationScope {
             name: "opentelemetry_instrumentation_aws_lambda".to_string(),
             version: "".to_string(),
             attributes: [].to_vec(),
-            dropped_attributes_count: 0
+            dropped_attributes_count: 0,
         };
 
-        assert_eq!(get_otel_operation_name_v1(&otel_span, &lib, false, &HashMap::new(), true), "opentelemetry_instrumentation_aws_lambda.server");
+        assert_eq!(
+            get_otel_operation_name_v1(&otel_span, &lib, false, &HashMap::new(), true),
+            "opentelemetry_instrumentation_aws_lambda.server"
+        );
         assert_eq!(get_otel_operation_name_v2(&otel_span), "server.request");
     }
 }

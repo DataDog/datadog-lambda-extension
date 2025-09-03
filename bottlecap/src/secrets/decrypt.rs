@@ -114,7 +114,7 @@ pub async fn resolve_secrets(
 
 fn clean_api_key(maybe_key: Option<String>) -> Option<String> {
     if let Some(key) = maybe_key {
-        let clean_key = key.trim_end_matches('\n').replace(' ', "").to_string();
+        let clean_key = key.trim_end_matches('\n').replace(' ', "").clone();
         if !clean_key.is_empty() {
             return Some(clean_key);
         }

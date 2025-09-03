@@ -105,7 +105,7 @@ impl Trigger for SnsRecord {
         );
 
         span.name = "aws.sns".to_string();
-        span.service = service_name.to_string();
+        span.service.clone_from(&service_name);
         span.resource.clone_from(&resource_name);
         span.r#type = "web".to_string();
         span.start = start_time;
@@ -153,10 +153,10 @@ impl Trigger for SnsRecord {
                     debug!("Unsupported type in SNS message attribute");
                 }
             }
-        } else if let Some(event_bridge_message) = &self.sns.message {
-            if let Ok(event) = serde_json::from_str::<EventBridgeEvent>(event_bridge_message) {
-                return event.get_carrier();
-            }
+        } else if let Some(event_bridge_message) = &self.sns.message
+            && let Ok(event) = serde_json::from_str::<EventBridgeEvent>(event_bridge_message)
+        {
+            return event.get_carrier();
         }
 
         HashMap::new()
@@ -172,7 +172,7 @@ impl ServiceNameResolver for SnsRecord {
         self.sns
             .topic_arn
             .split(':')
-            .last()
+            .next_back()
             .unwrap_or_default()
             .to_string()
     }

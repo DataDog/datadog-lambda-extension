@@ -78,7 +78,7 @@ impl Trigger for EventBridgeEvent {
         );
 
         span.name = String::from("aws.eventbridge");
-        span.service = service_name.to_string();
+        span.service.clone_from(&service_name);
         span.resource = resource_name;
         span.r#type = String::from("web");
         span.start = start_time;
@@ -100,10 +100,10 @@ impl Trigger for EventBridgeEvent {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        if let Ok(detail) = serde_json::from_value::<HashMap<String, Value>>(self.detail.clone()) {
-            if let Some(carrier) = detail.get(DATADOG_CARRIER_KEY) {
-                return serde_json::from_value(carrier.clone()).unwrap_or_default();
-            }
+        if let Ok(detail) = serde_json::from_value::<HashMap<String, Value>>(self.detail.clone())
+            && let Some(carrier) = detail.get(DATADOG_CARRIER_KEY)
+        {
+            return serde_json::from_value(carrier.clone()).unwrap_or_default();
         }
         HashMap::new()
     }
@@ -119,7 +119,7 @@ impl ServiceNameResolver for EventBridgeEvent {
         carrier
             .get(DATADOG_RESOURCE_NAME_KEY)
             .unwrap_or(&self.source)
-            .to_string()
+            .clone()
     }
 
     fn get_generic_identifier(&self) -> &'static str {
