@@ -1,4 +1,4 @@
-use datadog_trace_normalization::normalize_utils::{normalize_service, normalize_tag};
+use datadog_trace_normalization::normalize_utils::{normalize_name,normalize_service, normalize_tag};
 use datadog_trace_protobuf::pb::Span as DatadogSpan;
 use hex;
 use lazy_static::lazy_static;
@@ -187,6 +187,13 @@ pub fn otel_span_id_to_u64(span_id: &[u8]) -> u64 {
     u64::from_be_bytes(span_id.try_into().unwrap_or_default())
 }
 
+// Checks if the new operation and resource name logic should be used
+fn otel_operation_and_resource_v2_enabled(config: Arc<Config>) -> bool {
+    return !config.otlp_config_traces_span_name_as_resource_name 
+        && config.otlp_config_traces_span_name_remappings.is_empty() 
+        && !config.apm_features.contains(&"disable_operation_and_resource_name_logic_v2".to_string());
+}
+
 fn get_otel_service(otel_res: &OtelResource, normalize: bool) -> String {
     let mut service =
         get_otel_attribute_value_as_string(&otel_res.attributes, SERVICE_NAME, normalize);
@@ -202,7 +209,34 @@ fn get_otel_service(otel_res: &OtelResource, normalize: bool) -> String {
     service
 }
 
-fn get_otel_operation_name(otel_span: &OtelSpan, lib: &OtelInstrumentationScope) -> String {
+fn get_otel_operation_name_v1(otel_span: &OtelSpan, lib: &OtelInstrumentationScope, span_name_as_resource_name: bool, span_name_remappings: &HashMap<String, String>, normalize: bool) -> String {
+    let mut operation_name =
+        get_otel_attribute_value_as_string(&otel_span.attributes, "operation.name", false);
+    if operation_name.is_empty() {
+        if span_name_as_resource_name {
+            operation_name = otel_span.name.clone();
+        } else {
+            let span_kind_name = get_dd_span_kind_from_otel_kind(otel_span);
+            if !lib.name.is_empty() {
+                operation_name = format!("{}.{}", lib.name, span_kind_name);
+            } else {
+                operation_name = format!("opentelemetry.{}", span_kind_name);
+            }
+        }
+    }
+
+    if let Some(remapping_name) = span_name_remappings.get(&operation_name) {
+        operation_name = remapping_name.clone();
+    }
+
+    if normalize {
+        normalize_name(&mut operation_name);
+    }
+
+    operation_name
+}
+
+fn get_otel_operation_name_v2(otel_span: &OtelSpan) -> String {
     let operation_name =
         get_otel_attribute_value_as_string(&otel_span.attributes, "operation.name", false);
     if !operation_name.is_empty() {
@@ -295,13 +329,26 @@ fn get_otel_operation_name(otel_span: &OtelSpan, lib: &OtelInstrumentationScope)
         return "graphql.server.request".to_string();
     }
 
-    // Default (matches Go agent span naming)
-    let span_kind_name = get_dd_span_kind_from_otel_kind(otel_span);
-    if !lib.name.is_empty() {
-        return format!("{}.{}", lib.name, span_kind_name);
-    } else {
-        return format!("opentelemetry.{}", span_kind_name);
+    // If nothing matches, checking for generic http server/client
+    let protocol =
+        get_otel_attribute_value_as_string(&otel_span.attributes, "network.protocol.name", true);
+    if is_server {
+        if !protocol.is_empty() {
+            return format!("{protocol}.server.request");
+        }
+        return "server.request".to_string();
+    } else if is_client {
+        if !protocol.is_empty() {
+            return format!("{protocol}.client.request");
+        }
+        return "client.request".to_string();
     }
+
+    if otel_span.kind() != SpanKind::Unspecified {
+        return otel_span.kind().as_str_name().to_string();
+    }
+
+    SpanKind::Internal.as_str_name().to_string()
 }
 
 #[must_use]
@@ -816,8 +863,10 @@ pub fn otel_span_to_dd_span(
             dd_span.service = get_otel_service(otel_res, true);
         }
 
-        if dd_span.name.is_empty() {
-            dd_span.name = get_otel_operation_name(otel_span, lib);
+        if otel_operation_and_resource_v2_enabled(config.clone()) {
+            dd_span.name = get_otel_operation_name_v2(otel_span);
+        } else {
+            dd_span.name = get_otel_operation_name_v1(otel_span, lib, config.otlp_config_traces_span_name_as_resource_name, &config.otlp_config_traces_span_name_remappings, true);
         }
 
         if dd_span.resource.is_empty() {
@@ -1231,5 +1280,23 @@ mod tests {
     fn test_otel_value_to_string_empty_kvlist() {
         let value = Value::KvlistValue(KeyValueList { values: vec![] });
         assert_eq!(otel_value_to_string(&value), "{}");
+    }
+
+    #[test]
+    fn test_otel_operation_name() {
+        let otel_span = OtelSpan{
+            name: "test-span".to_string(),
+            kind: SpanKind::Server as i32,
+            ..Default::default()
+        };
+        let lib = OtelInstrumentationScope{
+            name: "opentelemetry_instrumentation_aws_lambda".to_string(),
+            version: "".to_string(),
+            attributes: [].to_vec(),
+            dropped_attributes_count: 0
+        };
+
+        assert_eq!(get_otel_operation_name_v1(&otel_span, &lib, false, &HashMap::new(), true), "opentelemetry_instrumentation_aws_lambda.server");
+        assert_eq!(get_otel_operation_name_v2(&otel_span), "server.request");
     }
 }
