@@ -124,7 +124,7 @@ impl PendingFlushHandles {
 
     async fn await_flush_handles(
         &mut self,
-        logs_flusher: &LogsFlusher,
+        logs_flusher: Option<&LogsFlusher>,
         trace_flusher: &ServerlessTraceFlusher,
         metrics_flushers: &Arc<TokioMutex<Vec<MetricsFlusher>>>,
         proxy_flusher: &Arc<ProxyFlusher>,
@@ -149,28 +149,30 @@ impl PendingFlushHandles {
             }
         }
 
-        while let Some(retries) = self.log_flush_handles.next().await {
-            match retries {
-                Ok(retry) => {
-                    if !retry.is_empty() {
-                        debug!("redriving {:?} log payloads", retry.len());
-                    }
-                    for item in retry {
-                        let lf = logs_flusher.clone();
-                        match item.try_clone() {
-                            Some(item_clone) => {
-                                joinset.spawn(async move {
-                                    lf.flush(Some(item_clone)).await;
-                                });
-                            }
-                            None => {
-                                error!("can't clone redrive log payloads");
+        if let Some(lf) = logs_flusher {
+            while let Some(retries) = self.log_flush_handles.next().await {
+                match retries {
+                    Ok(retry) => {
+                        if !retry.is_empty() {
+                            debug!("redriving {:?} log payloads", retry.len());
+                        }
+                        for item in retry {
+                            let lf = lf.clone();
+                            match item.try_clone() {
+                                Some(item_clone) => {
+                                    joinset.spawn(async move {
+                                        lf.flush(Some(item_clone)).await;
+                                    });
+                                }
+                                None => {
+                                    error!("can't clone redrive log payloads");
+                                }
                             }
                         }
                     }
-                }
-                Err(e) => {
-                    error!("redrive log error {e:?}");
+                    Err(e) => {
+                        error!("redrive log error {e:?}");
+                    }
                 }
             }
         }
@@ -340,6 +342,7 @@ async fn main() -> Result<()> {
     let start_time = Instant::now();
     init_ustr();
     let (aws_config, aws_credentials, config) = load_configs(start_time);
+    println!("LTN config: {config:?}");
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -609,35 +612,38 @@ async fn extension_loop_active(
             // flush everything
             // call next
             // optionally flush after tick for long running invos
-            'flush_end: loop {
-                tokio::select! {
-                biased;
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
-                                break 'flush_end;
+            if config.serverless_logs_enabled {
+                'flush_end: loop {
+                    tokio::select! {
+                    biased;
+                        Some(event) = event_bus.rx.recv() => {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                    break 'flush_end;
+                                }
                             }
                         }
-                    }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle.clone(),
-                        )
-                        .await;
+                        _ = race_flush_interval.tick() => {
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            blocking_flush_all(
+                                logs_flusher.as_ref(),
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle.clone(),
+                            )
+                            .await;
+                        }
                     }
                 }
             }
+
             // flush
             let mut locked_metrics = metrics_flushers.lock().await;
             blocking_flush_all(
-                &logs_flusher,
+                logs_flusher.as_ref(),
                 &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
@@ -656,17 +662,19 @@ async fn extension_loop_active(
                 // Await any previous flush handles. This
                 last_continuous_flush_error = pending_flush_handles
                     .await_flush_handles(
-                        &logs_flusher.clone(),
+                        logs_flusher.as_ref(),
                         &tf,
                         &metrics_flushers,
                         &proxy_flusher,
                     )
                     .await;
 
-                let lf = logs_flusher.clone();
-                pending_flush_handles
-                    .log_flush_handles
-                    .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                if let Some(lf) = &logs_flusher {
+                    let lf = lf.clone();
+                    pending_flush_handles
+                        .log_flush_handles
+                        .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                }
                 let tf = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
@@ -714,7 +722,7 @@ async fn extension_loop_active(
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
                 blocking_flush_all(
-                    &logs_flusher,
+                    logs_flusher.as_ref(),
                     &mut locked_metrics,
                     &*trace_flusher,
                     &*stats_flusher,
@@ -754,7 +762,7 @@ async fn extension_loop_active(
                     _ = race_flush_interval.tick() => {
                         let mut locked_metrics = metrics_flushers.lock().await;
                         blocking_flush_all(
-                            &logs_flusher,
+                            logs_flusher.as_ref(),
                             &mut locked_metrics,
                             &*trace_flusher,
                             &*stats_flusher,
@@ -773,26 +781,28 @@ async fn extension_loop_active(
             let tf = trace_flusher.clone();
             pending_flush_handles
                 .await_flush_handles(
-                    &logs_flusher.clone(),
+                    logs_flusher.as_ref(),
                     &tf,
                     &metrics_flushers,
                     &proxy_flusher,
                 )
                 .await;
             // Wait for tombstone event from telemetry listener to ensure all events are processed
-            'shutdown: loop {
-                tokio::select! {
-                    Some(event) = event_bus.rx.recv() => {
-                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
-                            debug!("Received tombstone event, proceeding with shutdown");
+            if config.serverless_logs_enabled {
+                'shutdown: loop {
+                    tokio::select! {
+                        Some(event) = event_bus.rx.recv() => {
+                        if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
+                                debug!("Received tombstone event, proceeding with shutdown");
+                                break 'shutdown;
+                            }
+                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        }
+                        // Add timeout to prevent hanging indefinitely
+                        () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
+                            debug!("Timeout waiting for tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
-                    }
-                    // Add timeout to prevent hanging indefinitely
-                    () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
-                        debug!("Timeout waiting for tombstone event, proceeding with shutdown");
-                        break 'shutdown;
                     }
                 }
             }
@@ -805,13 +815,15 @@ async fn extension_loop_active(
             }
             trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
-            telemetry_listener_cancel_token.cancel();
+            if let Some(telemetry_cancel_token) = telemetry_listener_cancel_token {
+                telemetry_cancel_token.cancel();
+            }
             lifecycle_listener_shutdown_token.cancel();
 
             // gotta lock here
             let mut locked_metrics = metrics_flushers.lock().await;
             blocking_flush_all(
-                &logs_flusher,
+                logs_flusher.as_ref(),
                 &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
@@ -826,7 +838,7 @@ async fn extension_loop_active(
 }
 
 async fn blocking_flush_all(
-    logs_flusher: &LogsFlusher,
+    logs_flusher: Option<&LogsFlusher>,
     metrics_flushers: &mut [MetricsFlusher],
     trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
@@ -848,8 +860,13 @@ async fn blocking_flush_all(
         })
         .collect();
 
+    let log_future = logs_flusher.map(|lf| lf.flush(None));
     tokio::join!(
-        logs_flusher.flush(None),
+        async {
+            if let Some(future) = log_future {
+                future.await;
+            }
+        },
         futures::future::join_all(metrics_futures),
         trace_flusher.flush(None),
         stats_flusher.flush(),
@@ -1004,7 +1021,12 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
-) -> (Sender<TelemetryEvent>, LogsFlusher) {
+) -> (Option<Sender<TelemetryEvent>>, Option<LogsFlusher>) {
+    if !config.serverless_logs_enabled {
+        println!("Logs agent disabled via serverless_logs_enabled=false");
+        return (None, None);
+    }
+
     let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
@@ -1015,7 +1037,7 @@ fn start_logs_agent(
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
-    (logs_agent_channel, logs_flusher)
+    (Some(logs_agent_channel), Some(logs_flusher))
 }
 
 fn start_metrics_flushers(
@@ -1197,10 +1219,14 @@ async fn start_dogstatsd(metrics_aggr_handle: MetricsAggregatorHandle) -> Cancel
 
 async fn setup_telemetry_client(
     extension_id: &str,
-    logs_agent_channel: Sender<TelemetryEvent>,
-) -> Result<CancellationToken> {
-    let telemetry_listener =
-        TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
+    logs_agent_channel: Option<Sender<TelemetryEvent>>,
+) -> Result<Option<CancellationToken>> {
+    let Some(channel) = logs_agent_channel else {
+        println!("Telemetry client disabled because logs are disabled");
+        return Ok(None);
+    };
+
+    let telemetry_listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, channel);
 
     let cancel_token = telemetry_listener.cancel_token();
     tokio::spawn(async move {
@@ -1214,7 +1240,7 @@ async fn setup_telemetry_client(
         .subscribe()
         .await
         .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    Ok(cancel_token)
+    Ok(Some(cancel_token))
 }
 
 fn start_otlp_agent(
