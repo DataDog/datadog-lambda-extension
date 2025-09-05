@@ -340,6 +340,7 @@ async fn main() -> Result<()> {
     let start_time = Instant::now();
     init_ustr();
     let (aws_config, aws_credentials, config) = load_configs(start_time);
+    println!("Using config: {config:?}");
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -1048,6 +1049,7 @@ fn start_metrics_flushers(
         https_proxy: config.proxy_https.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
         retry_strategy: DsdRetryStrategy::Immediate(3),
+        compression_level: config.metrics_config_compression_level,
     };
     flushers.push(MetricsFlusher::new(flusher_config));
 
@@ -1076,6 +1078,7 @@ fn start_metrics_flushers(
                 https_proxy: config.proxy_https.clone(),
                 timeout: Duration::from_secs(config.flush_timeout),
                 retry_strategy: DsdRetryStrategy::Immediate(3),
+                compression_level: config.metrics_config_compression_level,
             };
             flushers.push(MetricsFlusher::new(additional_flusher_config));
         }
