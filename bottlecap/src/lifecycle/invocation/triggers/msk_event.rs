@@ -82,7 +82,7 @@ impl Trigger for MSKEvent {
             span.start = (first_value.timestamp * MS_TO_NS) as i64;
             span.meta.extend([
                 ("operation_name".to_string(), String::from("aws.msk")),
-                ("topic".to_string(), first_value.topic.to_string()),
+                ("topic".to_string(), first_value.topic.clone()),
                 ("partition".to_string(), first_value.partition.to_string()),
                 ("event_source".to_string(), self.event_source.clone()),
                 (
@@ -101,7 +101,7 @@ impl Trigger for MSKEvent {
     }
 
     fn get_arn(&self, _region: &str) -> String {
-        self.event_source_arn.to_string()
+        self.event_source_arn.clone()
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {

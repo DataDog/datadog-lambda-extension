@@ -78,14 +78,14 @@ fn tags_from_env(
             tags_map.insert(AWS_ACCOUNT_KEY.to_string(), parts[4].to_string());
             tags_map.insert(FUNCTION_NAME_KEY.to_string(), parts[6].to_string());
             tags_map.insert(RESOURCE_KEY.to_string(), parts[6].to_string());
-            if let Ok(qualifier) = std::env::var(QUALIFIER_ENV_VAR) {
-                if qualifier != "$LATEST" {
-                    tags_map.insert(
-                        RESOURCE_KEY.to_string(),
-                        format!("{}:{}", parts[6], qualifier),
-                    );
-                    tags_map.insert(EXECUTED_VERSION_KEY.to_string(), qualifier);
-                }
+            if let Ok(qualifier) = std::env::var(QUALIFIER_ENV_VAR)
+                && qualifier != "$LATEST"
+            {
+                tags_map.insert(
+                    RESOURCE_KEY.to_string(),
+                    format!("{}:{}", parts[6], qualifier),
+                );
+                tags_map.insert(EXECUTED_VERSION_KEY.to_string(), qualifier);
             }
         }
         tags_map.insert(
@@ -94,13 +94,13 @@ fn tags_from_env(
         );
     }
     if let Some(version) = &config.version {
-        tags_map.insert(VERSION_KEY.to_string(), version.to_string());
+        tags_map.insert(VERSION_KEY.to_string(), version.clone());
     }
     if let Some(env) = &config.env {
-        tags_map.insert(ENV_KEY.to_string(), env.to_string());
+        tags_map.insert(ENV_KEY.to_string(), env.clone());
     }
     if let Some(service) = &config.service {
-        tags_map.insert(SERVICE_KEY.to_string(), service.to_string());
+        tags_map.insert(SERVICE_KEY.to_string(), service.clone());
     }
     if let Ok(init_type) = std::env::var(INIT_TYPE) {
         tags_map.insert(INIT_TYPE_KEY.to_string(), init_type);
@@ -157,7 +157,7 @@ pub fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &st
                         .find(|line| line.contains(RUNTIME_VAR))
                         .and_then(|runtime_var_line| {
                             // AWS_EXECUTION_ENV=AWS_Lambda_java8
-                            runtime_var_line.split('_').last().map(String::from)
+                            runtime_var_line.split('_').next_back().map(String::from)
                         })
                 });
 
@@ -165,7 +165,7 @@ pub fn resolve_runtime_from_proc(proc_path: &str, fallback_provided_al_path: &st
             if let Some(runtime_from_environ) = search_environ_runtime {
                 debug!("Proc runtime search successful in {search_time}us: {runtime_from_environ}");
                 return runtime_from_environ.replace('\"', "");
-            };
+            }
             debug!("Proc runtime search unsuccessful after {search_time}us");
         }
         Err(e) => {

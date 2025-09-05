@@ -92,18 +92,18 @@ impl Trigger for KinesisRecord {
         span.r#type = "web".to_string();
         span.meta = HashMap::from([
             ("operation_name".to_string(), "aws.kinesis".to_string()),
-            ("stream_name".to_string(), stream_name.to_string()),
+            ("stream_name".to_string(), stream_name.clone()),
             ("shard_id".to_string(), shard_id.to_string()),
             (
                 "event_source_arn".to_string(),
-                self.event_source_arn.to_string(),
+                self.event_source_arn.clone(),
             ),
-            ("event_id".to_string(), self.event_id.to_string()),
-            ("event_name".to_string(), self.event_name.to_string()),
-            ("event_version".to_string(), self.event_version.to_string()),
+            ("event_id".to_string(), self.event_id.clone()),
+            ("event_name".to_string(), self.event_name.clone()),
+            ("event_version".to_string(), self.event_version.clone()),
             (
                 "partition_key".to_string(),
-                self.kinesis.partition_key.to_string(),
+                self.kinesis.partition_key.clone(),
             ),
         ]);
     }
@@ -120,13 +120,12 @@ impl Trigger for KinesisRecord {
     }
 
     fn get_carrier(&self) -> HashMap<String, String> {
-        if let Ok(decoded_base64) = general_purpose::STANDARD.decode(&self.kinesis.data) {
-            if let Ok(as_json_map) = from_slice::<HashMap<String, Value>>(&decoded_base64) {
-                if let Some(carrier) = as_json_map.get(DATADOG_CARRIER_KEY) {
-                    return serde_json::from_value(carrier.clone()).unwrap_or_default();
-                }
-            }
-        };
+        if let Ok(decoded_base64) = general_purpose::STANDARD.decode(&self.kinesis.data)
+            && let Ok(as_json_map) = from_slice::<HashMap<String, Value>>(&decoded_base64)
+            && let Some(carrier) = as_json_map.get(DATADOG_CARRIER_KEY)
+        {
+            return serde_json::from_value(carrier.clone()).unwrap_or_default();
+        }
         HashMap::new()
     }
 
@@ -139,7 +138,7 @@ impl ServiceNameResolver for KinesisRecord {
     fn get_specific_identifier(&self) -> String {
         self.event_source_arn
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or_default()
             .to_string()
     }

@@ -161,7 +161,7 @@ impl Trigger for APIGatewayRestEvent {
             ),
             (
                 "http.user_agent".to_string(),
-                self.request_context.identity.user_agent.to_string(),
+                self.request_context.identity.user_agent.clone(),
             ),
             (
                 FUNCTION_TRIGGER_EVENT_SOURCE_TAG.to_string(),
@@ -170,7 +170,7 @@ impl Trigger for APIGatewayRestEvent {
         ]);
 
         if let Some(referer) = self.headers.get("referer") {
-            tags.insert("http.referer".to_string(), referer.to_string());
+            tags.insert("http.referer".to_string(), referer.clone());
         }
 
         tags

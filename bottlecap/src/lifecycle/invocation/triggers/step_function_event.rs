@@ -156,7 +156,7 @@ impl StepFunctionEvent {
 
                 let tags = DatadogHeaderPropagator::extract_tags(&HashMap::from([(
                     DATADOG_TAGS_KEY.to_string(),
-                    trace_tags.to_string(),
+                    trace_tags.clone(),
                 )]));
 
                 (lo_tid, tags)
@@ -196,6 +196,7 @@ impl StepFunctionEvent {
         }
     }
 
+    #[allow(clippy::format_push_string)]
     /// Generates a random 64 bit ID from the formatted hash of the
     /// Step Function context object. We omit `retry_count` and `redrive_count`
     /// when both are 0 to maintain backwards compatibility.

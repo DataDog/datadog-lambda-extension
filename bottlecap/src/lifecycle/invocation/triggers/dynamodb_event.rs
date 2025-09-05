@@ -120,7 +120,7 @@ impl Trigger for DynamoDbRecord {
         );
 
         span.name = String::from("aws.dynamodb");
-        span.service = service_name.to_string();
+        span.service.clone_from(&service_name);
         span.resource = resource;
         span.r#type = String::from("web");
         span.start = start_time;
@@ -141,7 +141,7 @@ impl Trigger for DynamoDbRecord {
                 "stream_view_type".to_string(),
                 self.dynamodb.stream_view_type.clone(),
             ),
-            ("table_name".to_string(), table_name.to_string()),
+            ("table_name".to_string(), table_name.clone()),
         ]));
     }
 

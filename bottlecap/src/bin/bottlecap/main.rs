@@ -466,7 +466,7 @@ async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()
                 error!("Error getting next event: {e:?}");
                 return Err(e);
             }
-        };
+        }
     }
 }
 
@@ -481,11 +481,7 @@ async fn extension_loop_active(
 ) -> Result<()> {
     let mut event_bus = EventBus::run();
 
-    let account_id = r
-        .account_id
-        .as_ref()
-        .unwrap_or(&"none".to_string())
-        .to_string();
+    let account_id = r.account_id.as_ref().unwrap_or(&"none".to_string()).clone();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
@@ -613,11 +609,10 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await
+                            && let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                 break 'flush_end;
                             }
-                        }
                     }
                     _ = race_flush_interval.tick() => {
                         let mut locked_metrics = metrics_flushers.lock().await;

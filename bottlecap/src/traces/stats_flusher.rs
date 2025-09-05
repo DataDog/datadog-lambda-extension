@@ -114,7 +114,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
             Err(e) => {
                 error!("Error sending stats: {e:?}");
             }
-        };
+        }
     }
     async fn flush(&self) {
         let mut guard = self.aggregator.lock().await;

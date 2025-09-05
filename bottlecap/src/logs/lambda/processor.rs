@@ -81,6 +81,7 @@ impl LambdaProcessor {
     }
 
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::format_push_string)]
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
         match event.record {
@@ -301,15 +302,15 @@ impl LambdaProcessor {
         }
 
         // Check for nested ddtags inside a "message" field
-        if let Some(inner_message) = json_obj.get_mut("message") {
-            if let Some(serde_json::Value::String(message_tags)) = inner_message.get("ddtags") {
-                tags.push(',');
-                tags.push_str(message_tags);
-                if let Some(inner_obj) = inner_message.as_object_mut() {
-                    inner_obj.remove("ddtags");
-                }
-                return inner_message.to_string();
+        if let Some(inner_message) = json_obj.get_mut("message")
+            && let Some(serde_json::Value::String(message_tags)) = inner_message.get("ddtags")
+        {
+            tags.push(',');
+            tags.push_str(message_tags);
+            if let Some(inner_obj) = inner_message.as_object_mut() {
+                inner_obj.remove("ddtags");
             }
+            return inner_message.to_string();
         }
 
         // No ddtags found, use original message
@@ -328,24 +329,20 @@ impl LambdaProcessor {
         if let Ok(mut log) = self.make_log(event).await {
             let should_send_log = self.logs_enabled
                 && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-            if should_send_log {
-                if let Ok(serialized_log) = serde_json::to_string(&log) {
-                    // explicitly drop log so we don't accidentally re-use it and push
-                    // duplicate logs to the aggregator
-                    drop(log);
-                    self.ready_logs.push(serialized_log);
-                }
+            if should_send_log && let Ok(serialized_log) = serde_json::to_string(&log) {
+                // explicitly drop log so we don't accidentally re-use it and push
+                // duplicate logs to the aggregator
+                drop(log);
+                self.ready_logs.push(serialized_log);
             }
 
             // Process orphan logs, since we have a `request_id` now
             for mut orphan_log in self.orphan_logs.drain(..) {
                 orphan_log.message.lambda.request_id =
                     Some(self.invocation_context.request_id.clone());
-                if should_send_log {
-                    if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
-                        drop(orphan_log);
-                        self.ready_logs.push(serialized_log);
-                    }
+                if should_send_log && let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
+                    drop(orphan_log);
+                    self.ready_logs.push(serialized_log);
                 }
             }
         }

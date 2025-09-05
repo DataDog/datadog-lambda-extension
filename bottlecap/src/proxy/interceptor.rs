@@ -179,20 +179,19 @@ async fn invocation_next_proxy(
         if let Ok(body) = intercepted_completion_receiver.await {
             debug!("PROXY | invocation_next_proxy | intercepted body completed");
 
-            if let Some(appsec_processor) = appsec_processor {
-                if let Some(request_id) = intercepted_parts_clone
+            if let Some(appsec_processor) = appsec_processor
+                && let Some(request_id) = intercepted_parts_clone
                     .headers
                     .get("Lambda-Runtime-Aws-Request-Id")
                     .and_then(|v| v.to_str().ok())
+            {
                 {
-                    {
-                        if let Ok(trigger) = IdentifiedTrigger::from_slice(&body) {
-                            appsec_processor
-                                .lock()
-                                .await
-                                .process_invocation_next(request_id, &trigger)
-                                .await;
-                        }
+                    if let Ok(trigger) = IdentifiedTrigger::from_slice(&body) {
+                        appsec_processor
+                            .lock()
+                            .await
+                            .process_invocation_next(request_id, &trigger)
+                            .await;
                     }
                 }
             }

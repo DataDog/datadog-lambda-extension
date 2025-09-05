@@ -12,8 +12,7 @@ where
 {
     let s: String = String::deserialize(deserializer)?;
 
-    let map = s
-        .split(',')
+    s.split(',')
         .map(|pair| {
             let mut split = pair.split(':');
 
@@ -29,7 +28,5 @@ where
                 )))
             }
         })
-        .collect();
-
-    map
+        .collect()
 }
