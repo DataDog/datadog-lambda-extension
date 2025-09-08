@@ -102,6 +102,8 @@ pub struct TraceAgent {
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
+    stats_tx: Sender<pb::ClientStatsPayload>,
+    stats_rx: Arc<Mutex<Option<Receiver<pb::ClientStatsPayload>>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -123,7 +125,7 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
-    ) -> TraceAgent {
+    ) -> (TraceAgent, Sender<pb::ClientStatsPayload>) {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace aggregator.
@@ -138,7 +140,13 @@ impl TraceAgent {
             }
         });
 
-        TraceAgent {
+        // Set up a channel to send processed stats to our stats aggregator.
+        let (stats_tx, stats_rx): (
+            Sender<pb::ClientStatsPayload>,
+            Receiver<pb::ClientStatsPayload>,
+        ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
+
+        let agent = TraceAgent {
             config: config.clone(),
             trace_processor,
             stats_aggregator,
@@ -149,78 +157,78 @@ impl TraceAgent {
             tags_provider,
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
-        }
+            stats_tx: stats_tx.clone(),
+            stats_rx: Arc::new(Mutex::new(Some(stats_rx))),
+        };
+
+        (agent, stats_tx)
     }
 
     #[allow(clippy::cast_possible_truncation)]
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now: Instant = Instant::now();
 
-        // Set up a channel to send processed stats to our stats aggregator.
-        let (stats_tx, mut stats_rx): (
-            Sender<pb::ClientStatsPayload>,
-            Receiver<pb::ClientStatsPayload>,
-        ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
-
         // Start the stats aggregator, which receives and buffers stats payloads to be consumed by the stats flusher.
-        let stats_aggregator = self.stats_aggregator.clone();
-        tokio::spawn(async move {
-            while let Some(stats_payload) = stats_rx.recv().await {
-                let mut aggregator = stats_aggregator.lock().await;
-                aggregator.add(stats_payload);
-            }
-        });
+        if let Some(mut stats_rx) = self.stats_rx.lock().await.take() {
+            let stats_aggregator = self.stats_aggregator.clone();
+            tokio::spawn(async move {
+                while let Some(stats_payload) = stats_rx.recv().await {
+                    let mut aggregator = stats_aggregator.lock().await;
+                    aggregator.add(stats_payload);
+                }
+            });
+        }
 
-        stats_tx.clone().send(pb::ClientStatsPayload {
-            hostname: String::new(),
-            // TODO (Yiming): support setting this
-            env: "dev".to_string(),
-            // TODO (Yiming): support setting this
-            version: "version".to_string(),
-            lang: "rust".to_string(),
-            tracer_version: String::new(),
-            runtime_id: String::new(),
-            sequence: 0,
-            agent_aggregation: String::new(),
-            // TODO (Yiming): support setting this
-            service: "yiming_service".to_string(),
-            container_id: String::new(),
-            tags: vec![],
-            git_commit_sha: String::new(),
-            image_tag: String::new(),
-            stats: vec![
-                pb::ClientStatsBucket {
-                    start: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .expect("Time went backwards")
-                        .as_nanos() as u64,
-                    duration: 1_000_000_000,
-                    stats: vec![
-                        pb::ClientGroupedStats {
-                            service: "yiming_service".to_string(),
-                            name: "yiming_name".to_string(),
-                            resource: "yiming_resource".to_string(),
-                            http_status_code: 200,
-                            r#type: "yiming_type".to_string(),
-                            db_type: String::new(),
-                            hits: 1,
-                            errors: 0,
-                            duration: 1_000_000_000,
-                            ok_summary: vec![],
-                            error_summary: vec![],
-                            synthetics: false,
-                            top_level_hits: 0,
-                            span_kind: String::new(),
-                            peer_tags: vec![],
-                            is_trace_root: 1,
-                        },
-                    ],
-                    agent_time_shift: 0,
-                },
-            ],
-        }).await?;
+        // stats_tx.clone().send(pb::ClientStatsPayload {
+        //     hostname: String::new(),
+        //     // TODO (Yiming): support setting this
+        //     env: "dev".to_string(),
+        //     // TODO (Yiming): support setting this
+        //     version: "version".to_string(),
+        //     lang: "rust".to_string(),
+        //     tracer_version: String::new(),
+        //     runtime_id: String::new(),
+        //     sequence: 0,
+        //     agent_aggregation: String::new(),
+        //     // TODO (Yiming): support setting this
+        //     service: "yiming_service".to_string(),
+        //     container_id: String::new(),
+        //     tags: vec![],
+        //     git_commit_sha: String::new(),
+        //     image_tag: String::new(),
+        //     stats: vec![
+        //         pb::ClientStatsBucket {
+        //             start: std::time::SystemTime::now()
+        //                 .duration_since(std::time::UNIX_EPOCH)
+        //                 .expect("Time went backwards")
+        //                 .as_nanos() as u64,
+        //             duration: 1_000_000_000,
+        //             stats: vec![
+        //                 pb::ClientGroupedStats {
+        //                     service: "yiming_service".to_string(),
+        //                     name: "yiming_name".to_string(),
+        //                     resource: "yiming_resource".to_string(),
+        //                     http_status_code: 200,
+        //                     r#type: "yiming_type".to_string(),
+        //                     db_type: String::new(),
+        //                     hits: 1,
+        //                     errors: 0,
+        //                     duration: 1_000_000_000,
+        //                     ok_summary: vec![],
+        //                     error_summary: vec![],
+        //                     synthetics: false,
+        //                     top_level_hits: 0,
+        //                     span_kind: String::new(),
+        //                     peer_tags: vec![],
+        //                     is_trace_root: 1,
+        //                 },
+        //             ],
+        //             agent_time_shift: 0,
+        //         },
+        //     ],
+        // }).await?;
 
-        let router = self.make_router(stats_tx);
+        let router = self.make_router(self.stats_tx.clone());
 
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");

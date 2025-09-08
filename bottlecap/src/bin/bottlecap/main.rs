@@ -59,6 +59,7 @@ use bottlecap::{
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
+        stats_agent::{StatsEvent, StatsAgent},
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -92,11 +93,12 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
+use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::{self, Sender, Receiver}, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
+use datadog_trace_protobuf::pb;
 
 #[allow(clippy::struct_field_names)]
 struct PendingFlushHandles {
@@ -517,6 +519,7 @@ async fn extension_loop_active(
     )));
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
+    let (stats_tx, stats_rx) = mpsc::channel::<StatsEvent>(1000);
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -524,6 +527,7 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         metrics_aggr_handle.clone(),
         Arc::clone(&propagator),
+        stats_tx,
     )));
     // AppSec processor (if enabled)
     let appsec_processor = match AppSecProcessor::new(config) {
@@ -545,6 +549,7 @@ async fn extension_loop_active(
         stats_flusher,
         proxy_flusher,
         trace_agent_shutdown_token,
+        stats_aggregator_tx,
     ) = start_trace_agent(
         config,
         &api_key_factory,
@@ -553,6 +558,8 @@ async fn extension_loop_active(
         appsec_processor.clone(),
         Arc::clone(&trace_aggregator),
     );
+
+    start_stats_agent(stats_rx, stats_aggregator_tx, config, &tags_provider);
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
         config,
@@ -895,7 +902,7 @@ async fn handle_event_bus_event(
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
                     let mut p = invocation_processor.lock().await;
-                    p.on_platform_start(request_id, event.time);
+                    p.on_platform_start(request_id, event.time).await;
                     drop(p);
                 }
                 TelemetryRecord::PlatformRuntimeDone {
@@ -959,7 +966,7 @@ async fn handle_next_invocation(
                 invoked_function_arn.clone()
             );
             let mut p = invocation_processor.lock().await;
-            p.on_invoke_event(request_id.into());
+            p.on_invoke_event(request_id.into()).await;
             drop(p);
         }
         Ok(NextEventResponse::Shutdown {
@@ -1016,6 +1023,18 @@ fn start_logs_agent(
         logs_agent.spin().await;
     });
     (logs_agent_channel, logs_flusher)
+}
+
+fn start_stats_agent(
+    stats_rx: Receiver<StatsEvent>,
+    stats_aggregator_tx: Sender<pb::ClientStatsPayload>,
+    config: &Arc<Config>,
+    tags_provider: &Arc<TagProvider>,
+) {
+    let mut stats_agent = StatsAgent::new(stats_rx, stats_aggregator_tx, Arc::clone(config), Arc::clone(tags_provider));
+    tokio::spawn(async move {
+        stats_agent.spin().await;
+    });
 }
 
 fn start_metrics_flushers(
@@ -1098,6 +1117,7 @@ fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
+    Sender<pb::ClientStatsPayload>,
 ) {
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
@@ -1138,7 +1158,7 @@ fn start_trace_agent(
         Arc::clone(config),
     ));
 
-    let trace_agent = trace_agent::TraceAgent::new(
+    let (trace_agent, stats_aggregator_tx) = trace_agent::TraceAgent::new(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
@@ -1166,6 +1186,7 @@ fn start_trace_agent(
         stats_flusher,
         proxy_flusher,
         shutdown_token,
+        stats_aggregator_tx,
     )
 }
 

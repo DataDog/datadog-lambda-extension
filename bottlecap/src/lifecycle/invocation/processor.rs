@@ -9,7 +9,7 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use serde_json::Value;
 use tokio::sync::watch;
-use tracing::{debug, warn};
+use tracing::{debug, error, warn};
 
 use crate::{
     config::{self, aws::AwsConfig},
@@ -40,6 +40,9 @@ use crate::{
 };
 
 use crate::lifecycle::invocation::triggers::get_default_service_name;
+
+use crate::traces::stats_agent::StatsEvent;
+use tokio::sync::mpsc::Sender;
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
@@ -81,6 +84,7 @@ pub struct Processor {
     ///
     /// These tags are used to capture runtime and initialization.
     dynamic_tags: HashMap<String, String>,
+    stats_agent_tx: Sender<StatsEvent>,
 }
 
 impl Processor {
@@ -91,6 +95,7 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
+        stats_agent_tx: Sender<StatsEvent>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -114,12 +119,13 @@ impl Processor {
             service,
             resource,
             dynamic_tags: HashMap::new(),
+            stats_agent_tx,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
-    pub fn on_invoke_event(&mut self, request_id: String) {
+    pub async fn on_invoke_event(&mut self, request_id: String) {
         let invocation_span =
             create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
         // Important! Call set_init_tags() before adding the invocation to the context buffer
@@ -169,6 +175,17 @@ impl Processor {
             // Infer span
             self.inferrer.infer_span(&payload_value, &self.aws_config);
             self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
+        }
+
+        // Send stats event
+        let stats_event = StatsEvent;
+        match self.stats_agent_tx.send(stats_event).await {
+            Ok(()) => {
+                debug!("Successfully buffered stats event to be aggregated.");
+            }
+            Err(err) => {
+                error!("Error sending stats event to the stats aggregator: {err}");
+            }
         }
     }
 
@@ -269,7 +286,7 @@ impl Processor {
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
     ///
-    pub fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
+    pub async fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -277,6 +294,15 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
         self.context_buffer.add_start_time(&request_id, start_time);
+        let stats_event = StatsEvent;
+        match self.stats_agent_tx.send(stats_event).await {
+            Ok(()) => {
+                debug!("Successfully buffered stats event to be aggregated.");
+            }
+            Err(err) => {
+                error!("Error sending stats event to the stats aggregator: {err}");
+            }
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
