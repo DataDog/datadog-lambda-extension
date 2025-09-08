@@ -1,7 +1,6 @@
 use crate::traces::stats_agent::StatsEvent;
 use datadog_trace_protobuf::pb;
 use tracing::{debug, error};
-use tokio::sync::mpsc::Sender;
 
 use crate::config::Config;
 use std::sync::Arc;
@@ -11,7 +10,6 @@ use tokio::sync::Mutex;
 use crate::traces::stats_aggregator::StatsAggregator;
 
 pub struct MyStatsProcessor {
-    stats_aggregator_tx: Sender<pb::ClientStatsPayload>,
     config: Arc<Config>,
     resource: String,
     concentrator: Arc<Mutex<StatsConcentrator>>,
@@ -19,12 +17,12 @@ pub struct MyStatsProcessor {
 
 impl MyStatsProcessor {
     #[must_use]
-    pub fn new(stats_aggregator_tx: Sender<pb::ClientStatsPayload>, config: Arc<Config>, tags_provider: Arc<TagProvider>, stats_aggregator: Arc<Mutex<StatsAggregator>>) -> Self {
+    pub fn new(config: Arc<Config>, tags_provider: Arc<TagProvider>, stats_aggregator: Arc<Mutex<StatsAggregator>>) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
         let concentrator = StatsConcentrator::new(stats_aggregator);
-        Self { stats_aggregator_tx, config, resource, concentrator: Arc::new(Mutex::new(concentrator)) }
+        Self { config, resource, concentrator: Arc::new(Mutex::new(concentrator)) }
     }
 
     #[allow(clippy::cast_possible_truncation)]

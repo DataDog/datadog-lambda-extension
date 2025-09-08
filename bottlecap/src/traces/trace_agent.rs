@@ -103,7 +103,7 @@ pub struct TraceAgent {
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
     stats_tx: Sender<pb::ClientStatsPayload>,
-    stats_rx: Arc<Mutex<Option<Receiver<pb::ClientStatsPayload>>>>,
+    stats_rx: Arc<Mutex<Receiver<pb::ClientStatsPayload>>>,
 }
 
 #[derive(Clone, Copy)]
@@ -125,7 +125,7 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
-    ) -> (TraceAgent, Sender<pb::ClientStatsPayload>) {
+    ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
         // processed trace payloads to our trace aggregator.
@@ -146,7 +146,7 @@ impl TraceAgent {
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        let agent = TraceAgent {
+        TraceAgent {
             config: config.clone(),
             trace_processor,
             stats_aggregator,
@@ -155,13 +155,11 @@ impl TraceAgent {
             invocation_processor,
             appsec_processor,
             tags_provider,
-            tx: trace_tx,
             shutdown_token: CancellationToken::new(),
+            tx: trace_tx,
             stats_tx: stats_tx.clone(),
-            stats_rx: Arc::new(Mutex::new(Some(stats_rx))),
-        };
-
-        (agent, stats_tx)
+            stats_rx: Arc::new(Mutex::new(stats_rx)),
+        }
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -169,15 +167,15 @@ impl TraceAgent {
         let now: Instant = Instant::now();
 
         // Start the stats aggregator, which receives and buffers stats payloads to be consumed by the stats flusher.
-        if let Some(mut stats_rx) = self.stats_rx.lock().await.take() {
-            let stats_aggregator = self.stats_aggregator.clone();
-            tokio::spawn(async move {
-                while let Some(stats_payload) = stats_rx.recv().await {
-                    let mut aggregator = stats_aggregator.lock().await;
-                    aggregator.add(stats_payload);
-                }
-            });
-        }
+        let stats_aggregator = self.stats_aggregator.clone();
+        let stats_rx = self.stats_rx.clone();
+        tokio::spawn(async move {
+            let mut stats_rx = stats_rx.lock().await;
+            while let Some(stats_payload) = stats_rx.recv().await {
+                let mut aggregator = stats_aggregator.lock().await;
+                aggregator.add(stats_payload);
+            }
+        });
 
         // stats_tx.clone().send(pb::ClientStatsPayload {
         //     hostname: String::new(),
@@ -229,7 +227,6 @@ impl TraceAgent {
         // }).await?;
 
         let router = self.make_router(self.stats_tx.clone());
-
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));

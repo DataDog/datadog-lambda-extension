@@ -550,7 +550,6 @@ async fn extension_loop_active(
         stats_flusher,
         proxy_flusher,
         trace_agent_shutdown_token,
-        stats_aggregator_tx,
         stats_aggregator,
     ) = start_trace_agent(
         config,
@@ -561,7 +560,7 @@ async fn extension_loop_active(
         Arc::clone(&trace_aggregator),
     );
 
-    start_stats_agent(stats_rx, stats_aggregator_tx, config, &tags_provider, stats_aggregator.clone());
+    start_stats_agent(stats_rx, config, &tags_provider, stats_aggregator.clone());
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
         config,
@@ -1029,12 +1028,11 @@ fn start_logs_agent(
 
 fn start_stats_agent(
     stats_rx: Receiver<StatsEvent>,
-    stats_aggregator_tx: Sender<pb::ClientStatsPayload>,
     config: &Arc<Config>,
     tags_provider: &Arc<TagProvider>,
     stats_aggregator: Arc<Mutex<StatsAggregator>>,
 ) {
-    let mut stats_agent = StatsAgent::new(stats_rx, stats_aggregator_tx, Arc::clone(config), Arc::clone(tags_provider), stats_aggregator);
+    let mut stats_agent = StatsAgent::new(stats_rx, Arc::clone(config), Arc::clone(tags_provider), stats_aggregator);
     tokio::spawn(async move {
         stats_agent.spin().await;
     });
@@ -1120,7 +1118,6 @@ fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
-    Sender<pb::ClientStatsPayload>,
     Arc<Mutex<StatsAggregator>>,
 ) {
     // Stats
@@ -1162,7 +1159,7 @@ fn start_trace_agent(
         Arc::clone(config),
     ));
 
-    let (trace_agent, stats_aggregator_tx) = trace_agent::TraceAgent::new(
+    let trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
@@ -1190,7 +1187,6 @@ fn start_trace_agent(
         stats_flusher,
         proxy_flusher,
         shutdown_token,
-        stats_aggregator_tx,
         stats_aggregator,
     )
 }
