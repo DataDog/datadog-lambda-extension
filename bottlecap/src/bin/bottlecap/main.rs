@@ -550,7 +550,6 @@ async fn extension_loop_active(
         stats_flusher,
         proxy_flusher,
         trace_agent_shutdown_token,
-        stats_aggregator,
     ) = start_trace_agent(
         config,
         &api_key_factory,
@@ -558,9 +557,8 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
         appsec_processor.clone(),
         Arc::clone(&trace_aggregator),
+        stats_rx,
     );
-
-    start_stats_agent(stats_rx, config, &tags_provider, stats_aggregator.clone());
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
         config,
@@ -1111,6 +1109,7 @@ fn start_trace_agent(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
+    stats_rx: Receiver<StatsEvent>,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
@@ -1118,7 +1117,6 @@ fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
-    Arc<Mutex<StatsAggregator>>,
 ) {
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
@@ -1180,6 +1178,8 @@ fn start_trace_agent(
         }
     });
 
+    start_stats_agent(stats_rx, config, &tags_provider, stats_aggregator);
+
     (
         trace_agent_channel,
         trace_flusher,
@@ -1187,7 +1187,6 @@ fn start_trace_agent(
         stats_flusher,
         proxy_flusher,
         shutdown_token,
-        stats_aggregator,
     )
 }
 
