@@ -7,7 +7,6 @@ use std::sync::Arc;
 use crate::tags::provider::Provider as TagProvider;
 use crate::traces::stats_concentrator::StatsConcentrator;
 use tokio::sync::Mutex;
-use crate::traces::stats_aggregator::StatsAggregator;
 
 pub struct MyStatsProcessor {
     config: Arc<Config>,
@@ -17,12 +16,11 @@ pub struct MyStatsProcessor {
 
 impl MyStatsProcessor {
     #[must_use]
-    pub fn new(config: Arc<Config>, tags_provider: Arc<TagProvider>, stats_aggregator: Arc<Mutex<StatsAggregator>>) -> Self {
+    pub fn new(config: Arc<Config>, tags_provider: Arc<TagProvider>, stats_concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
-        let concentrator = StatsConcentrator::new(stats_aggregator);
-        Self { config, resource, concentrator: Arc::new(Mutex::new(concentrator)) }
+        Self { config, resource, concentrator: stats_concentrator }
     }
 
     #[allow(clippy::cast_possible_truncation)]
@@ -78,6 +76,6 @@ impl MyStatsProcessor {
                 },
             ],
         };
-        self.concentrator.lock().await.add(stats).await;
+        self.concentrator.lock().await.add(stats);
     }
 }

@@ -4,11 +4,11 @@ use tracing::debug;
 use datadog_trace_protobuf::pb;
 
 use super::my_stats_processor::MyStatsProcessor;
+use super::stats_concentrator::StatsConcentrator;
 
 use crate::config::Config;
 use std::sync::Arc;
 use crate::tags::provider::Provider as TagProvider;
-use crate::traces::stats_aggregator::StatsAggregator;
 use tokio::sync::Mutex;
 #[derive(Clone, Copy)]
 pub struct StatsEvent;
@@ -26,11 +26,12 @@ impl StatsAgent {
         rx: Receiver<StatsEvent>,
         config: Arc<Config>,
         tags_provider: Arc<TagProvider>,
-        stats_aggregator: Arc<Mutex<StatsAggregator>>,
+        stats_concentrator: Arc<Mutex<StatsConcentrator>>,
     ) -> StatsAgent {
+        let processor = MyStatsProcessor::new(config, tags_provider, stats_concentrator);
         StatsAgent {
             rx,
-            processor: MyStatsProcessor::new(config, tags_provider, stats_aggregator),
+            processor,
         }
     }
 

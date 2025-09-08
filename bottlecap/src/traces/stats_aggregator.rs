@@ -1,5 +1,8 @@
 use datadog_trace_protobuf::pb::ClientStatsPayload;
 use std::collections::VecDeque;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use crate::traces::stats_concentrator::StatsConcentrator;
 
 #[allow(clippy::empty_line_after_doc_comments)]
 /// Maximum number of entries in a stat payload.
@@ -24,28 +27,34 @@ pub struct StatsAggregator {
     queue: VecDeque<ClientStatsPayload>,
     max_content_size_bytes: usize,
     buffer: Vec<ClientStatsPayload>,
+    stats_concentrator: Arc<Mutex<StatsConcentrator>>,
 }
 
-impl Default for StatsAggregator {
-    fn default() -> Self {
-        StatsAggregator {
-            queue: VecDeque::new(),
-            max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
-            buffer: Vec::new(),
-        }
-    }
-}
+// impl Default for StatsAggregator {
+//     fn default() -> Self {
+//         StatsAggregator {
+//             queue: VecDeque::new(),
+//             max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
+//             buffer: Vec::new(),
+//         }
+//     }
+// }
 
 /// Takes in individual trace stats payloads and aggregates them into batches to be flushed to Datadog.
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
-    pub fn new(max_content_size_bytes: usize) -> Self {
+    pub fn new(max_content_size_bytes: usize, stats_concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,
             buffer: Vec::new(),
+            stats_concentrator,
         }
+    }
+
+    pub fn new_with_concentrator(stats_concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
+        Self::new(MAX_CONTENT_SIZE_BYTES, stats_concentrator)
     }
 
     /// Takes in an individual trace stats payload.
@@ -55,7 +64,15 @@ impl StatsAggregator {
     }
 
     /// Returns a batch of trace stats payloads, subject to the max content size.
-    pub fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
+    pub async fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
+        // Pull stats data from stats concentrator
+        let mut stats_concentrator = self.stats_concentrator.lock().await;
+        let mut stats = stats_concentrator.get_batch();
+        while !stats.is_empty() {
+            self.queue.extend(stats);
+            stats = stats_concentrator.get_batch();
+        }
+
         let mut batch_size = 0;
 
         // Fill the batch

@@ -4,27 +4,26 @@
  */
 
 use datadog_trace_protobuf::pb;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use crate::traces::stats_aggregator::StatsAggregator;
 
+#[derive(Default)]
 pub struct StatsConcentrator {
-    // pub storage: Vec<pb::ClientStatsPayload>,
-    stats_aggregator: Arc<Mutex<StatsAggregator>>,
+    pub storage: Vec<pb::ClientStatsPayload>,
 }
 
 impl StatsConcentrator {
-    pub fn new(stats_aggregator: Arc<Mutex<StatsAggregator>>) -> Self {
-        Self { stats_aggregator }
+    #[must_use]
+    pub fn new() -> Self {
+        Self { storage: Vec::new() }
     }
 
-    pub async fn add(&mut self, stats: pb::ClientStatsPayload) {
-        self.stats_aggregator.lock().await.add(stats);
+    pub fn add(&mut self, stats: pb::ClientStatsPayload) {
+        self.storage.push(stats);
     }
 
-    // pub fn get_batch(&mut self) -> Vec<pb::ClientStatsPayload> {
-    //     let ret = self.storage.clone();
-    //     self.storage.clear();
-    //     ret
-    // }
+    #[must_use]
+    pub fn get_batch(&mut self) -> Vec<pb::ClientStatsPayload> {
+        let ret = self.storage.clone();
+        self.storage.clear();
+        ret
+    }
 }

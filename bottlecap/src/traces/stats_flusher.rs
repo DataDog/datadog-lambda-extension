@@ -119,11 +119,11 @@ impl StatsFlusher for ServerlessStatsFlusher {
     async fn flush(&self) {
         let mut guard = self.aggregator.lock().await;
 
-        let mut stats = guard.get_batch();
+        let mut stats = guard.get_batch().await;
         while !stats.is_empty() {
             self.send(stats).await;
 
-            stats = guard.get_batch();
+            stats = guard.get_batch().await;
         }
     }
 }

@@ -60,6 +60,7 @@ use bottlecap::{
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
         stats_agent::{StatsEvent, StatsAgent},
+        stats_concentrator::StatsConcentrator,
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -98,8 +99,6 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
-use datadog_trace_protobuf::pb;
-use tokio::sync::Mutex;
 
 #[allow(clippy::struct_field_names)]
 struct PendingFlushHandles {
@@ -1024,17 +1023,17 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-fn start_stats_agent(
-    stats_rx: Receiver<StatsEvent>,
-    config: &Arc<Config>,
-    tags_provider: &Arc<TagProvider>,
-    stats_aggregator: Arc<Mutex<StatsAggregator>>,
-) {
-    let mut stats_agent = StatsAgent::new(stats_rx, Arc::clone(config), Arc::clone(tags_provider), stats_aggregator);
-    tokio::spawn(async move {
-        stats_agent.spin().await;
-    });
-}
+// fn start_stats_agent(
+//     stats_rx: Receiver<StatsEvent>,
+//     config: &Arc<Config>,
+//     tags_provider: &Arc<TagProvider>,
+//     stats_aggregator: Arc<Mutex<StatsAggregator>>,
+// ) {
+//     let mut stats_agent = StatsAgent::new(stats_rx, Arc::clone(config), Arc::clone(tags_provider), stats_aggregator);
+//     tokio::spawn(async move {
+//         stats_agent.spin().await;
+//     });
+// }
 
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
@@ -1119,7 +1118,8 @@ fn start_trace_agent(
     tokio_util::sync::CancellationToken,
 ) {
     // Stats
-    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
+    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new()));
+    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::new_with_concentrator(stats_concentrator.clone())));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         api_key_factory.clone(),
         stats_aggregator.clone(),
@@ -1167,6 +1167,9 @@ fn start_trace_agent(
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
+        // TODO: rename this
+        stats_rx,
+        stats_concentrator.clone(),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
@@ -1178,7 +1181,7 @@ fn start_trace_agent(
         }
     });
 
-    start_stats_agent(stats_rx, config, &tags_provider, stats_aggregator);
+    // start_stats_agent(stats_rx, config, &tags_provider, stats_aggregator);
 
     (
         trace_agent_channel,

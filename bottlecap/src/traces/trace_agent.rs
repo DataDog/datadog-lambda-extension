@@ -41,6 +41,10 @@ use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
+use crate::traces::stats_agent::StatsAgent;
+use crate::traces::stats_agent::StatsEvent;
+use crate::traces::stats_concentrator::StatsConcentrator;
+
 const TRACE_AGENT_PORT: usize = 8126;
 
 // Agent endpoints
@@ -104,6 +108,7 @@ pub struct TraceAgent {
     tx: Sender<SendDataBuilderInfo>,
     stats_tx: Sender<pb::ClientStatsPayload>,
     stats_rx: Arc<Mutex<Receiver<pb::ClientStatsPayload>>>,
+    stats_agent: Arc<Mutex<StatsAgent>>,
 }
 
 #[derive(Clone, Copy)]
@@ -125,6 +130,8 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
+        my_stats_rx: Receiver<StatsEvent>,
+        stats_concentrator: Arc<Mutex<StatsConcentrator>>,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -146,6 +153,8 @@ impl TraceAgent {
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
+        let stats_agent = StatsAgent::new(my_stats_rx, config.clone(), tags_provider.clone(), stats_concentrator.clone());
+
         TraceAgent {
             config: config.clone(),
             trace_processor,
@@ -159,6 +168,7 @@ impl TraceAgent {
             tx: trace_tx,
             stats_tx: stats_tx.clone(),
             stats_rx: Arc::new(Mutex::new(stats_rx)),
+            stats_agent: Arc::new(Mutex::new(stats_agent)),
         }
     }
 
@@ -175,6 +185,11 @@ impl TraceAgent {
                 let mut aggregator = stats_aggregator.lock().await;
                 aggregator.add(stats_payload);
             }
+        });
+
+        let stats_agent = self.stats_agent.clone();
+        tokio::spawn(async move {
+            stats_agent.lock().await.spin().await;
         });
 
         // stats_tx.clone().send(pb::ClientStatsPayload {
