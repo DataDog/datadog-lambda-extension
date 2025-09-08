@@ -99,6 +99,7 @@ use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 use datadog_trace_protobuf::pb;
+use tokio::sync::Mutex;
 
 #[allow(clippy::struct_field_names)]
 struct PendingFlushHandles {
@@ -550,6 +551,7 @@ async fn extension_loop_active(
         proxy_flusher,
         trace_agent_shutdown_token,
         stats_aggregator_tx,
+        stats_aggregator,
     ) = start_trace_agent(
         config,
         &api_key_factory,
@@ -559,7 +561,7 @@ async fn extension_loop_active(
         Arc::clone(&trace_aggregator),
     );
 
-    start_stats_agent(stats_rx, stats_aggregator_tx, config, &tags_provider);
+    start_stats_agent(stats_rx, stats_aggregator_tx, config, &tags_provider, stats_aggregator.clone());
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
         config,
@@ -1030,8 +1032,9 @@ fn start_stats_agent(
     stats_aggregator_tx: Sender<pb::ClientStatsPayload>,
     config: &Arc<Config>,
     tags_provider: &Arc<TagProvider>,
+    stats_aggregator: Arc<Mutex<StatsAggregator>>,
 ) {
-    let mut stats_agent = StatsAgent::new(stats_rx, stats_aggregator_tx, Arc::clone(config), Arc::clone(tags_provider));
+    let mut stats_agent = StatsAgent::new(stats_rx, stats_aggregator_tx, Arc::clone(config), Arc::clone(tags_provider), stats_aggregator);
     tokio::spawn(async move {
         stats_agent.spin().await;
     });
@@ -1118,6 +1121,7 @@ fn start_trace_agent(
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
     Sender<pb::ClientStatsPayload>,
+    Arc<Mutex<StatsAggregator>>,
 ) {
     // Stats
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
@@ -1162,7 +1166,7 @@ fn start_trace_agent(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
-        stats_aggregator,
+        stats_aggregator.clone(),
         stats_processor,
         proxy_aggregator,
         invocation_processor,
@@ -1187,6 +1191,7 @@ fn start_trace_agent(
         proxy_flusher,
         shutdown_token,
         stats_aggregator_tx,
+        stats_aggregator,
     )
 }
 

@@ -8,9 +8,11 @@ use super::my_stats_processor::MyStatsProcessor;
 use crate::config::Config;
 use std::sync::Arc;
 use crate::tags::provider::Provider as TagProvider;
-
+use crate::traces::stats_aggregator::StatsAggregator;
+use tokio::sync::Mutex;
 #[derive(Clone, Copy)]
 pub struct StatsEvent;
+
 
 #[allow(clippy::module_name_repetitions)]
 pub struct StatsAgent {
@@ -25,11 +27,11 @@ impl StatsAgent {
         stats_aggregator_tx: Sender<pb::ClientStatsPayload>,
         config: Arc<Config>,
         tags_provider: Arc<TagProvider>,
+        stats_aggregator: Arc<Mutex<StatsAggregator>>,
     ) -> StatsAgent {
-
         StatsAgent {
             rx,
-            processor: MyStatsProcessor::new(stats_aggregator_tx, config, tags_provider),
+            processor: MyStatsProcessor::new(stats_aggregator_tx, config, tags_provider, stats_aggregator),
         }
     }
 
