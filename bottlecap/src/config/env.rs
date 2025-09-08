@@ -114,13 +114,6 @@ pub struct EnvConfig {
     /// the individual component doesn't specify its own.
     pub compression_level: Option<i32>,
 
-    /// @env `DD_COMPRESSION_LEVEL`
-    ///
-    /// Global level `compression_level` parameter accepts values from 0 (no compression)
-    /// to 9 (maximum compression but higher resource usage). This value is effective only if
-    /// the individual component doesn't specify its own.
-    pub compression_level: Option<i32>,
-
     // Logs
     /// @env `DD_LOGS_CONFIG_LOGS_DD_URL`
     ///
@@ -402,8 +395,6 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, version);
     merge_hashmap!(config, env_config, tags);
 
-    merge_option_to_value!(config, env_config, compression_level);
-
     // Proxy
     merge_option!(config, env_config, proxy_https);
     merge_vec!(config, env_config, proxy_no_proxy);
@@ -413,6 +404,8 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_string!(config, env_config, dd_url);
     merge_string!(config, env_config, url);
     merge_hashmap!(config, env_config, additional_endpoints);
+
+    merge_option_to_value!(config, env_config, compression_level);
 
     // Logs
     merge_string!(config, env_config, logs_config_logs_dd_url);
@@ -632,8 +625,6 @@ mod tests {
             jail.set_env("DD_TAGS", "team:test-team,project:test-project");
             jail.set_env("DD_COMPRESSION_LEVEL", "4");
 
-            jail.set_env("DD_COMPRESSION_LEVEL", "4");
-
             // Logs
             jail.set_env("DD_LOGS_CONFIG_LOGS_DD_URL", "https://logs.datadoghq.com");
             jail.set_env(
@@ -677,15 +668,13 @@ mod tests {
                 "env:^test.*$ debug:^true$",
             );
 
+            jail.set_env("DD_METRICS_CONFIG_COMPRESSION_LEVEL", "3");
             // Trace Propagation
             jail.set_env("DD_TRACE_PROPAGATION_STYLE", "datadog");
             jail.set_env("DD_TRACE_PROPAGATION_STYLE_EXTRACT", "b3");
             jail.set_env("DD_TRACE_PROPAGATION_EXTRACT_FIRST", "true");
             jail.set_env("DD_TRACE_PROPAGATION_HTTP_BAGGAGE_ENABLED", "true");
             jail.set_env("DD_TRACE_AWS_SERVICE_REPRESENTATION_ENABLED", "true");
-
-            // Metrics
-            jail.set_env("DD_METRICS_CONFIG_COMPRESSION_LEVEL", "3");
 
             // OTLP
             jail.set_env("DD_OTLP_CONFIG_TRACES_ENABLED", "false");

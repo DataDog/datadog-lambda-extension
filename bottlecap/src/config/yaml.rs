@@ -388,7 +388,6 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_hashmap!(config, yaml_config, tags);
 
     merge_option_to_value!(config, yaml_config, compression_level);
-
     // Proxy
     merge_option!(config, proxy_https, yaml_config.proxy, https);
     merge_option_to_value!(config, proxy_no_proxy, yaml_config.proxy, no_proxy);
