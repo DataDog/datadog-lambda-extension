@@ -598,7 +598,6 @@ async fn extension_loop_active(
     let next_lambda_response = next_event(client, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
-    let mut last_continuous_flush_error = false;
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let maybe_shutdown_event;
@@ -651,18 +650,7 @@ async fn extension_loop_active(
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
-            if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
-                let tf = trace_flusher.clone();
-                // Await any previous flush handles. This
-                last_continuous_flush_error = pending_flush_handles
-                    .await_flush_handles(
-                        &logs_flusher.clone(),
-                        &tf,
-                        &metrics_flushers,
-                        &proxy_flusher,
-                    )
-                    .await;
-
+            if current_flush_decision == FlushDecision::Continuous {
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
@@ -723,7 +711,6 @@ async fn extension_loop_active(
                     &metrics_aggr_handle,
                 )
                 .await;
-                last_continuous_flush_error = false;
             }
             // NO FLUSH SCENARIO
             // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
