@@ -8,13 +8,20 @@ use crate::traces::stats_agent::StatsEvent;
 use crate::config::Config;
 use std::sync::Arc;
 use crate::tags::provider::Provider as TagProvider;
+use std::collections::HashMap;
+use crate::lifecycle::invocation::processor::S_TO_NS_U64;
 
+struct Bucket {
+    pub hits: u64,
+}
 
 pub struct StatsConcentrator {
-    pub storage: Vec<StatsEvent>,
-    pub config: Arc<Config>,
-    pub resource: String,
+    config: Arc<Config>,
+    resource: String,
+    buckets: HashMap<u64, Bucket>,
 }
+
+const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64;
 
 impl StatsConcentrator {
     #[must_use]
@@ -22,22 +29,28 @@ impl StatsConcentrator {
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
-        Self { storage: Vec::new(), config, resource }
+        Self { buckets: HashMap::new(), config, resource }
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
         // debug!("StatsConcentrator | adding stats payload to concentrator: {stats:?}");
-        self.storage.push(stats_event);
+        let bucket_timestamp = Self::get_bucket_timestamp(stats_event.time);
+        let bucket = self.buckets.entry(bucket_timestamp).or_insert(Bucket { hits: 0 });
+        bucket.hits += 1;
+    }
+
+    fn get_bucket_timestamp(timestamp: u64) -> u64 {
+        timestamp - timestamp % BUCKET_DURATION_NS
     }
 
     #[must_use]
     pub fn get_batch(&mut self) -> Vec<pb::ClientStatsPayload> {
-        let ret = self.storage.iter().map(|stats_event| self.construct_stats_payload(stats_event)).collect();
-        self.storage.clear();
+        let ret = self.buckets.iter().map(|(timestamp, bucket)| self.construct_stats_payload(*timestamp, bucket)).collect();
+        self.buckets.clear();
         ret
     }
 
-    fn construct_stats_payload(&self, stats_event: &StatsEvent) -> pb::ClientStatsPayload {
+    fn construct_stats_payload(&self, timestamp: u64, bucket: &Bucket) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
             // hostname: String::new(),
             hostname: "yiming7-hostname".to_string(),
@@ -56,7 +69,8 @@ impl StatsConcentrator {
             image_tag: String::new(),
             stats: vec![
                 pb::ClientStatsBucket {
-                    start: stats_event.time,
+                    start: timestamp,
+                    // TODO: consider changing this to 0
                     duration: 1_000_000_000,
                     stats: vec![
                         pb::ClientGroupedStats {
@@ -66,8 +80,9 @@ impl StatsConcentrator {
                             http_status_code: 200,
                             r#type: String::new(),
                             db_type: String::new(),
-                            hits: 1,
+                            hits: bucket.hits,
                             errors: 0,
+                            // TODO: consider changing this to 0
                             duration: 1_000_000_000,
                             ok_summary: vec![],
                             error_summary: vec![],

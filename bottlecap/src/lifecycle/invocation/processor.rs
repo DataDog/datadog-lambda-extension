@@ -47,7 +47,7 @@ use tokio::sync::mpsc::Sender;
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
-pub const S_TO_NS_I64: i64 = 1_000_000_000;
+pub const S_TO_NS_U64: u64 = 1_000_000_000;
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
 pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
@@ -137,9 +137,7 @@ impl Processor {
         let timestamp_secs = std::time::UNIX_EPOCH
             .elapsed()
             .expect("can't poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
+            .as_secs();
 
         if self.config.lambda_proc_enhanced_metrics {
             // Collect offsets for network and cpu metrics
@@ -168,7 +166,7 @@ impl Processor {
         }
 
         // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric(timestamp_secs);
+        self.enhanced_metrics.increment_invocation_metric(timestamp_secs.try_into().unwrap_or_default());
         self.enhanced_metrics.set_invoked_received();
 
         // If `UniversalInstrumentationStart` event happened first, process it
@@ -179,8 +177,8 @@ impl Processor {
         }
 
         // Send stats event
-        let timestamp_ns = timestamp_secs * S_TO_NS_I64;
-        let stats_event = StatsEvent { time: timestamp_ns.try_into().unwrap_or_default(), dummy: 0 };
+        let timestamp_ns = timestamp_secs * S_TO_NS_U64;
+        let stats_event = StatsEvent { time: timestamp_ns, dummy: 0 };
         match self.stats_agent_tx.send(stats_event).await {
             Ok(()) => {
                 debug!("Successfully buffered stats event to be aggregated.");
