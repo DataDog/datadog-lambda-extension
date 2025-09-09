@@ -123,7 +123,7 @@ impl PendingFlushHandles {
 
     async fn await_flush_handles(
         &mut self,
-        logs_flusher: &LogsFlusher,
+        logs_flusher: Option<&LogsFlusher>,
         trace_flusher: &ServerlessTraceFlusher,
         metrics_flushers: &Arc<TokioMutex<Vec<MetricsFlusher>>>,
         proxy_flusher: &Arc<ProxyFlusher>,
@@ -155,15 +155,17 @@ impl PendingFlushHandles {
                         debug!("redriving {:?} log payloads", retry.len());
                     }
                     for item in retry {
-                        let lf = logs_flusher.clone();
-                        match item.try_clone() {
-                            Some(item_clone) => {
-                                joinset.spawn(async move {
-                                    lf.flush(Some(item_clone)).await;
-                                });
-                            }
-                            None => {
-                                error!("can't clone redrive log payloads");
+                        if let Some(lf) = logs_flusher {
+                            let lf = lf.clone();
+                            match item.try_clone() {
+                                Some(item_clone) => {
+                                    joinset.spawn(async move {
+                                        lf.flush(Some(item_clone)).await;
+                                    });
+                                }
+                                None => {
+                                    error!("can't clone redrive log payloads");
+                                }
                             }
                         }
                     }
@@ -471,8 +473,6 @@ async fn extension_loop_active(
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
 ) -> Result<()> {
-    let mut event_bus = EventBus::run();
-
     let account_id = r
         .account_id
         .as_ref()
@@ -480,12 +480,22 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    let (logs_agent_channel, logs_flusher) = start_logs_agent(
-        config,
-        Arc::clone(&api_key_factory),
-        &tags_provider,
-        event_bus.get_sender_copy(),
-    );
+    let (mut event_bus, logs_agent_channel, logs_flusher) = if config.serverless_logs_enabled {
+        let event_bus = EventBus::run();
+        let (logs_agent_channel, logs_flusher) = start_logs_agent(
+            config,
+            Arc::clone(&api_key_factory),
+            &tags_provider,
+            event_bus.get_sender_copy(),
+        );
+        (
+            Some(event_bus),
+            Some(logs_agent_channel),
+            Some(logs_flusher),
+        )
+    } else {
+        (None, None, None)
+    };
 
     let metrics_aggr_init_start_time = Instant::now();
     let (metrics_aggr_service, metrics_aggr_handle) = MetricsAggregatorService::new(
@@ -577,8 +587,11 @@ async fn extension_loop_active(
 
     let dogstatsd_cancel_token = start_dogstatsd(metrics_aggr_handle.clone()).await;
 
-    let telemetry_listener_cancel_token =
-        setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
+    let telemetry_listener_cancel_token = if let Some(channel) = logs_agent_channel {
+        Some(setup_telemetry_client(&r.extension_id, channel).await?)
+    } else {
+        None
+    };
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -605,40 +618,58 @@ async fn extension_loop_active(
         let maybe_shutdown_event;
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
+        debug!(
+            "LTN current_flush_decision in loop:{current_flush_decision:?}, serverless_logs_enabled:{current_flush_decision:?}"
+        );
         if current_flush_decision == FlushDecision::End {
             // break loop after runtime done
             // flush everything
             // call next
             // optionally flush after tick for long running invos
-            'flush_end: loop {
-                tokio::select! {
-                biased;
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
-                                break 'flush_end;
+            if let Some(ref mut eb) = event_bus {
+                'flush_end: loop {
+                    tokio::select! {
+                    biased;
+                        Some(event) = eb.rx.recv() => {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                    break 'flush_end;
+                                }
                             }
                         }
-                    }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle.clone(),
-                        )
-                        .await;
+                        _ = race_flush_interval.tick() => {
+                            let flush_end_race_start = Instant::now();
+                            let lock_start = Instant::now();
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            debug!("LTN metrics_flushers.lock() (flush_end race) took: {:?}μs", lock_start.elapsed().as_micros());
+                            
+                            let flush_start = Instant::now();
+                            blocking_flush_all(
+                                logs_flusher.as_ref(),
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle.clone(),
+                            )
+                            .await;
+                            debug!("LTN blocking_flush_all (flush_end race) took: {:?}μs", flush_start.elapsed().as_micros());
+                            debug!("LTN flush_end race interval tick total took: {:?}μs", flush_end_race_start.elapsed().as_micros());
+                        }
                     }
                 }
             }
+            // No event bus means no PlatformRuntimeDone event to wait for, continue directly
             // flush
+            let flush_end_final_start = Instant::now();
+            let lock_start = Instant::now();
             let mut locked_metrics = metrics_flushers.lock().await;
+            debug!("LTN metrics_flushers.lock() (flush_end final) took: {:?}μs", lock_start.elapsed().as_micros());
+            
+            let flush_start = Instant::now();
             blocking_flush_all(
-                &logs_flusher,
+                logs_flusher.as_ref(),
                 &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
@@ -647,16 +678,19 @@ async fn extension_loop_active(
                 &metrics_aggr_handle.clone(),
             )
             .await;
+            debug!("LTN blocking_flush_all (flush_end final) took: {:?}μs", flush_start.elapsed().as_micros());
+            debug!("LTN flush_end final block total took: {:?}μs", flush_end_final_start.elapsed().as_micros());
             let next_response = next_event(client, &r.extension_id).await;
             maybe_shutdown_event =
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous {
-                let lf = logs_flusher.clone();
-                pending_flush_handles
-                    .log_flush_handles
-                    .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                if let Some(lf) = logs_flusher.clone() {
+                    pending_flush_handles
+                        .log_flush_handles
+                        .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                }
                 let tf = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
@@ -704,7 +738,7 @@ async fn extension_loop_active(
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
                 blocking_flush_all(
-                    &logs_flusher,
+                    logs_flusher.as_ref(),
                     &mut locked_metrics,
                     &*trace_flusher,
                     &*stats_flusher,
@@ -721,38 +755,107 @@ async fn extension_loop_active(
             // and then we break to determine if we'll flush or not
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
-            'next_invocation: loop {
-                tokio::select! {
-                biased;
-                    next_response = &mut next_lambda_response => {
-                        // Dear reader this is important, you may be tempted to remove this
-                        // after all, why reset the flush interval if we're not flushing?
-                        // It's because the race_flush_interval is only for the RACE FLUSH
-                        // For long-running txns. The call to `flush_control.should_flush_end()`
-                        // has its own interval which is not reset here.
-                        race_flush_interval.reset();
-                        // Thank you for not removing race_flush_interval.reset();
+            if let Some(ref mut eb) = event_bus {
+                debug!("LTN entering next_invocation loop WITH event_bus");
+                'next_invocation: loop {
+                    let loop_start = Instant::now();
+                    tokio::select! {
+                    biased;
+                        next_response = &mut next_lambda_response => {
+                            let branch_start = Instant::now();
+                            // Dear reader this is important, you may be tempted to remove this
+                            // after all, why reset the flush interval if we're not flushing?
+                            // It's because the race_flush_interval is only for the RACE FLUSH
+                            // For long-running txns. The call to `flush_control.should_flush_end()`
+                            // has its own interval which is not reset here.
+                            let reset_start = Instant::now();
+                            race_flush_interval.reset();
+                            debug!("LTN race_flush_interval.reset() (WITH event_bus) took: {:?}μs", reset_start.elapsed().as_micros());
+                            // Thank you for not removing race_flush_interval.reset();
 
-                        maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
-                        // Need to break here to re-call next
-                        break 'next_invocation;
+                            let handle_start = Instant::now();
+                            maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                            debug!("LTN handle_next_invocation (WITH event_bus) took: {:?}μs", handle_start.elapsed().as_micros());
+
+                            debug!("LTN next_response branch (WITH event_bus) total took: {:?}μs", branch_start.elapsed().as_micros());
+                            // Need to break here to re-call next
+                            break 'next_invocation;
+                        }
+                        Some(event) = eb.rx.recv() => {
+                            let branch_start = Instant::now();
+                            handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                            debug!("LTN event_bus_event branch took: {:?}μs", branch_start.elapsed().as_micros());
+                        }
+                        _ = race_flush_interval.tick() => {
+                            let branch_start = Instant::now();
+                            let lock_start = Instant::now();
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            debug!("LTN metrics_flushers.lock() (WITH event_bus) took: {:?}μs", lock_start.elapsed().as_micros());
+
+                            let flush_start = Instant::now();
+                            blocking_flush_all(
+                                logs_flusher.as_ref(),
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle,
+                            )
+                            .await;
+                            debug!("LTN blocking_flush_all (WITH event_bus) took: {:?}μs", flush_start.elapsed().as_micros());
+                            debug!("LTN race_flush_interval branch (WITH event_bus) total took: {:?}μs", branch_start.elapsed().as_micros());
+                        }
                     }
-                    Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                    debug!(
+                        "LTN next_invocation loop iteration (WITH event_bus) took: {:?}μs",
+                        loop_start.elapsed().as_micros()
+                    );
+                }
+            } else {
+                debug!("LTN entering next_invocation loop WITHOUT event_bus");
+                'next_invocation: loop {
+                    let loop_start = Instant::now();
+                    tokio::select! {
+                    biased;
+                        next_response = &mut next_lambda_response => {
+                            let branch_start = Instant::now();
+                            let reset_start = Instant::now();
+                            race_flush_interval.reset();
+                            debug!("LTN race_flush_interval.reset() (WITHOUT event_bus) took: {:?}μs", reset_start.elapsed().as_micros());
+
+                            let handle_start = Instant::now();
+                            maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                            debug!("LTN handle_next_invocation (WITHOUT event_bus) took: {:?}μs", handle_start.elapsed().as_micros());
+
+                            debug!("LTN next_response branch (WITHOUT event_bus) total took: {:?}μs", branch_start.elapsed().as_micros());
+                            break 'next_invocation;
+                        }
+                        _ = race_flush_interval.tick() => {
+                            let branch_start = Instant::now();
+                            let lock_start = Instant::now();
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            debug!("LTN metrics_flushers.lock() (WITHOUT event_bus) took: {:?}μs", lock_start.elapsed().as_micros());
+
+                            let flush_start = Instant::now();
+                            blocking_flush_all(
+                                logs_flusher.as_ref(),
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle,
+                            )
+                            .await;
+                            debug!("LTN blocking_flush_all (WITHOUT event_bus) took: {:?}μs", flush_start.elapsed().as_micros());
+                            debug!("LTN race_flush_interval branch (WITHOUT event_bus) total took: {:?}μs", branch_start.elapsed().as_micros());
+                        }
                     }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle,
-                        )
-                        .await;
-                    }
+                    debug!(
+                        "LTN next_invocation loop iteration (WITHOUT event_bus) took: {:?}μs",
+                        loop_start.elapsed().as_micros()
+                    );
                 }
             }
         }
@@ -762,26 +865,28 @@ async fn extension_loop_active(
             let tf = trace_flusher.clone();
             pending_flush_handles
                 .await_flush_handles(
-                    &logs_flusher.clone(),
+                    logs_flusher.as_ref(),
                     &tf,
                     &metrics_flushers,
                     &proxy_flusher,
                 )
                 .await;
             // Wait for tombstone event from telemetry listener to ensure all events are processed
-            'shutdown: loop {
-                tokio::select! {
-                    Some(event) = event_bus.rx.recv() => {
-                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
-                            debug!("Received tombstone event, proceeding with shutdown");
+            if let Some(ref mut eb) = event_bus {
+                'shutdown: loop {
+                    tokio::select! {
+                        Some(event) = eb.rx.recv() => {
+                        if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
+                                debug!("Received tombstone event, proceeding with shutdown");
+                                break 'shutdown;
+                            }
+                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        }
+                        // Add timeout to prevent hanging indefinitely
+                        () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
+                            debug!("Timeout waiting for tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
-                    }
-                    // Add timeout to prevent hanging indefinitely
-                    () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
-                        debug!("Timeout waiting for tombstone event, proceeding with shutdown");
-                        break 'shutdown;
                     }
                 }
             }
@@ -794,13 +899,15 @@ async fn extension_loop_active(
             }
             trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
-            telemetry_listener_cancel_token.cancel();
+            if let Some(token) = telemetry_listener_cancel_token {
+                token.cancel();
+            }
             lifecycle_listener_shutdown_token.cancel();
 
             // gotta lock here
             let mut locked_metrics = metrics_flushers.lock().await;
             blocking_flush_all(
-                &logs_flusher,
+                logs_flusher.as_ref(),
                 &mut locked_metrics,
                 &*trace_flusher,
                 &*stats_flusher,
@@ -815,7 +922,7 @@ async fn extension_loop_active(
 }
 
 async fn blocking_flush_all(
-    logs_flusher: &LogsFlusher,
+    logs_flusher: Option<&LogsFlusher>,
     metrics_flushers: &mut [MetricsFlusher],
     trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
@@ -837,8 +944,16 @@ async fn blocking_flush_all(
         })
         .collect();
 
+    let logs_flush_future = async {
+        if let Some(lf) = logs_flusher {
+            lf.flush(None).await
+        } else {
+            Vec::new()
+        }
+    };
+
     tokio::join!(
-        logs_flusher.flush(None),
+        logs_flush_future,
         futures::future::join_all(metrics_futures),
         trace_flusher.flush(None),
         stats_flusher.flush(),
