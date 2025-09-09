@@ -59,7 +59,7 @@ use bottlecap::{
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
-        stats_agent::{StatsEvent, StatsAgent},
+        stats_agent::StatsEvent,
         stats_concentrator::StatsConcentrator,
     },
 };
@@ -900,7 +900,7 @@ async fn handle_event_bus_event(
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
                     let mut p = invocation_processor.lock().await;
-                    p.on_platform_start(request_id, event.time).await;
+                    p.on_platform_start(request_id, event.time);
                     drop(p);
                 }
                 TelemetryRecord::PlatformRuntimeDone {
@@ -1118,7 +1118,7 @@ fn start_trace_agent(
     tokio_util::sync::CancellationToken,
 ) {
     // Stats
-    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new()));
+    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new(Arc::clone(config), Arc::clone(tags_provider))));
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::new_with_concentrator(stats_concentrator.clone())));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         api_key_factory.clone(),

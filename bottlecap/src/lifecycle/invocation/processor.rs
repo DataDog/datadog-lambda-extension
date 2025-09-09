@@ -47,6 +47,7 @@ use tokio::sync::mpsc::Sender;
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
+pub const S_TO_NS_I64: i64 = 1_000_000_000;
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
 pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
@@ -133,7 +134,7 @@ impl Processor {
         self.context_buffer
             .start_context(&request_id, invocation_span);
 
-        let timestamp = std::time::UNIX_EPOCH
+        let timestamp_secs = std::time::UNIX_EPOCH
             .elapsed()
             .expect("can't poll clock, unrecoverable")
             .as_secs()
@@ -167,7 +168,7 @@ impl Processor {
         }
 
         // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric(timestamp);
+        self.enhanced_metrics.increment_invocation_metric(timestamp_secs);
         self.enhanced_metrics.set_invoked_received();
 
         // If `UniversalInstrumentationStart` event happened first, process it
@@ -178,7 +179,8 @@ impl Processor {
         }
 
         // Send stats event
-        let stats_event = StatsEvent;
+        let timestamp_ns = timestamp_secs * S_TO_NS_I64;
+        let stats_event = StatsEvent { time: timestamp_ns.try_into().unwrap_or_default(), dummy: 0 };
         match self.stats_agent_tx.send(stats_event).await {
             Ok(()) => {
                 debug!("Successfully buffered stats event to be aggregated.");
@@ -286,7 +288,7 @@ impl Processor {
 
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
     ///
-    pub async fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
+    pub fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")

@@ -153,7 +153,7 @@ impl TraceAgent {
             Receiver<pb::ClientStatsPayload>,
         ) = mpsc::channel(STATS_PAYLOAD_CHANNEL_BUFFER_SIZE);
 
-        let stats_agent = StatsAgent::new(my_stats_rx, config.clone(), tags_provider.clone(), stats_concentrator.clone());
+        let stats_agent = StatsAgent::new(my_stats_rx, stats_concentrator.clone());
 
         TraceAgent {
             config: config.clone(),

@@ -1,17 +1,16 @@
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc::{self, Receiver};
 use tracing::debug;
-
-use datadog_trace_protobuf::pb;
 
 use super::my_stats_processor::MyStatsProcessor;
 use super::stats_concentrator::StatsConcentrator;
 
-use crate::config::Config;
 use std::sync::Arc;
-use crate::tags::provider::Provider as TagProvider;
 use tokio::sync::Mutex;
-#[derive(Clone, Copy)]
-pub struct StatsEvent;
+#[derive(Clone, Copy, Default)]
+pub struct StatsEvent {
+    pub time: u64,
+    pub dummy: u64,
+}
 
 
 #[allow(clippy::module_name_repetitions)]
@@ -24,11 +23,9 @@ impl StatsAgent {
     #[must_use]
     pub fn new(
         rx: Receiver<StatsEvent>,
-        config: Arc<Config>,
-        tags_provider: Arc<TagProvider>,
         stats_concentrator: Arc<Mutex<StatsConcentrator>>,
     ) -> StatsAgent {
-        let processor = MyStatsProcessor::new(config, tags_provider, stats_concentrator);
+        let processor = MyStatsProcessor::new(stats_concentrator);
         StatsAgent {
             rx,
             processor,
