@@ -65,6 +65,7 @@ impl StatsAggregator {
 
     /// Returns a batch of trace stats payloads, subject to the max content size.
     pub async fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
+        debug!("StatsAggregator | getting batch of stats payloads");
         // Pull stats data from stats concentrator
         let mut stats_concentrator = self.stats_concentrator.lock().await;
         let mut stats = stats_concentrator.get_batch();

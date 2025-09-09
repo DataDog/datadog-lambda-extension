@@ -4,6 +4,7 @@
  */
 
 use datadog_trace_protobuf::pb;
+use tracing::debug;
 
 #[derive(Default)]
 pub struct StatsConcentrator {
@@ -17,6 +18,7 @@ impl StatsConcentrator {
     }
 
     pub fn add(&mut self, stats: pb::ClientStatsPayload) {
+        debug!("StatsConcentrator | adding stats payload to concentrator: {stats:?}");
         self.storage.push(stats);
     }
 
