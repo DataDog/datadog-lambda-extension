@@ -174,7 +174,7 @@ impl Processor {
         if let Some((headers, payload_value)) = self.context_buffer.pair_invoke_event(&request_id) {
             // Infer span
             self.inferrer.infer_span(&payload_value, &self.aws_config);
-            self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
+            self.process_on_universal_instrumentation_start(request_id.clone(), headers, payload_value);
         }
 
         // Send stats event
@@ -294,15 +294,6 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
         self.context_buffer.add_start_time(&request_id, start_time);
-        let stats_event = StatsEvent;
-        match self.stats_agent_tx.send(stats_event).await {
-            Ok(()) => {
-                debug!("Successfully buffered stats event to be aggregated.");
-            }
-            Err(err) => {
-                error!("Error sending stats event to the stats aggregator: {err}");
-            }
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
