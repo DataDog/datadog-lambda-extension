@@ -144,6 +144,11 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_logs_additional_endpoints")]
     pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
 
+    /// @env `DD_ENABLE_OBSERVABILITY_PIPELINE_FORWARDING`
+    /// When true, emit plain Datadog v2 JSON suitable for Observability Pipelines
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub enable_observability_pipeline_forwarding: Option<bool>,
+
     // APM
     //
     /// @env `DD_SERVICE_MAPPING`
@@ -427,6 +432,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     );
     merge_option_to_value!(config, env_config, logs_config_compression_level);
     merge_vec!(config, env_config, logs_config_additional_endpoints);
+    merge_option_to_value!(config, env_config, enable_observability_pipeline_forwarding);
 
     // APM
     merge_hashmap!(config, env_config, service_mapping);
@@ -807,6 +813,7 @@ mod tests {
                     port: 443,
                     is_reliable: true,
                 }],
+                enable_observability_pipeline_forwarding: false,
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),

@@ -133,7 +133,7 @@ impl Flusher {
                         );
                         return Ok(());
                     }
-                    if status == 202 {
+                    if status.is_success() {
                         return Ok(());
                     }
                 }
@@ -165,16 +165,20 @@ impl Flusher {
                     "DD-API-KEY",
                     api_key.parse().expect("failed to parse header"),
                 );
-                headers.insert(
-                    "DD-PROTOCOL",
-                    "agent-json".parse().expect("failed to parse header"),
-                );
+                if !self.config.enable_observability_pipeline_forwarding {
+                    headers.insert(
+                        "DD-PROTOCOL",
+                        "agent-json".parse().expect("failed to parse header"),
+                    );
+                }
                 headers.insert(
                     "Content-Type",
                     "application/json".parse().expect("failed to parse header"),
                 );
 
-                if self.config.logs_config_use_compression {
+                if self.config.logs_config_use_compression
+                    && !self.config.enable_observability_pipeline_forwarding
+                {
                     headers.insert(
                         "Content-Encoding",
                         "zstd".parse().expect("failed to parse header"),
@@ -250,7 +254,9 @@ impl LogsFlusher {
                 let mut batches = Vec::new();
                 let mut current_batch = guard.get_batch();
                 while !current_batch.is_empty() {
-                    batches.push(self.compress(current_batch));
+                    // Temporarily disable flat transform to OPW v2 format
+                    let transformed = Self::to_flat_json(current_batch);
+                    batches.push(self.compress(transformed));
                     current_batch = guard.get_batch();
                 }
                 batches
@@ -272,7 +278,9 @@ impl LogsFlusher {
     }
 
     fn compress(&self, data: Vec<u8>) -> Vec<u8> {
-        if !self.config.logs_config_use_compression {
+        if !self.config.logs_config_use_compression
+            || self.config.enable_observability_pipeline_forwarding
+        {
             return data;
         }
 
@@ -289,5 +297,143 @@ impl LogsFlusher {
         let mut encoder = Encoder::new(Vec::new(), self.config.logs_config_compression_level)?;
         encoder.write_all(data)?;
         encoder.finish().map_err(|e| Box::new(e) as Box<dyn Error>)
+    }
+
+    /*
+    Transform aggregated IntakeLog array into Datadog v2 flat JSON array.
+    This is needed for sending logs to an Observability Pipeline.
+    Before:
+    {
+        "ddsource": "lambda",
+        "message": {
+            "message": "START RequestId: f301b84e-b59a-4f35-834a-aaded297f6b0 Version: $LATEST",
+            "status": "info",
+            "timestamp": 1757352915141
+        }
+    }
+    After:
+    {
+        "ddsource": "lambda",
+        "message": "START RequestId: f301b84e-b59a-4f35-834a-aaded297f6b0 Version: $LATEST",
+        "status": "info",
+        "timestamp": 1757352915141
+    }
+     */
+    pub(crate) fn to_flat_json(data: Vec<u8>) -> Vec<u8> {
+        let _input_bytes = data.len();
+        let parsed: Result<serde_json::Value, _> = serde_json::from_slice(&data);
+        let Ok(serde_json::Value::Array(items)) = parsed else {
+            return data;
+        };
+        let total_items = items.len();
+        let mut out = Vec::with_capacity(total_items);
+        for v in items {
+            let message = match v.get("message") {
+                Some(serde_json::Value::Object(m)) => m
+                    .get("message")
+                    .map(|inner| match inner {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                    .unwrap_or_default(),
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(other) => other.to_string(),
+                None => String::new(),
+            };
+            let status = v
+                .get("message")
+                .and_then(|m| m.get("status"))
+                .and_then(|m| m.as_str())
+                .or_else(|| v.get("status").and_then(|m| m.as_str()))
+                .unwrap_or("info")
+                .to_string();
+            let timestamp = v
+                .get("message")
+                .and_then(|m| m.get("timestamp"))
+                .and_then(serde_json::Value::as_i64)
+                .or_else(|| v.get("timestamp").and_then(serde_json::Value::as_i64))
+                .unwrap_or(0);
+            let ddsource = v
+                .get("ddsource")
+                .or_else(|| v.get("source"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let service = v
+                .get("service")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let hostname = v
+                .get("hostname")
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let ddtags = v
+                .get("ddtags")
+                .or_else(|| v.get("tags"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+            let mut obj = serde_json::Map::new();
+            obj.insert("message".to_string(), serde_json::Value::String(message));
+            obj.insert("status".to_string(), serde_json::Value::String(status));
+            obj.insert("timestamp".to_string(), serde_json::Value::from(timestamp));
+            obj.insert("ddsource".to_string(), serde_json::Value::String(ddsource));
+            obj.insert("service".to_string(), serde_json::Value::String(service));
+            obj.insert("hostname".to_string(), serde_json::Value::String(hostname));
+            obj.insert("ddtags".to_string(), serde_json::Value::String(ddtags));
+            out.push(serde_json::Value::Object(obj));
+        }
+        let _out_len = out.len();
+        serde_json::to_vec(&serde_json::Value::Array(out)).unwrap_or(data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LogsFlusher;
+    use serde_json::json;
+
+    #[test]
+    fn test_to_flat_json() {
+        let batch = json!([
+            {
+                "ddsource": "lambda",
+                "service": "svc",
+                "hostname": "host",
+                "ddtags": "env:dev",
+                "message": {
+                    "message": "hello",
+                    "status": "info",
+                    "timestamp": 1234
+                }
+            },
+            {
+                "message": "flat",
+                "status": "debug",
+                "timestamp": 5678,
+                "ddsource": "lambda"
+            }
+        ]);
+        let out = LogsFlusher::to_flat_json(
+            serde_json::to_vec(&batch).expect("Failed to serialize test batch"),
+        );
+        let v: serde_json::Value =
+            serde_json::from_slice(&out).expect("Failed to deserialize result");
+        assert!(v.is_array());
+        let item = &v[0];
+        assert_eq!(item.get("ddsource").expect("test field missing"), "lambda");
+        assert_eq!(item.get("service").expect("test field missing"), "svc");
+        assert_eq!(item.get("hostname").expect("test field missing"), "host");
+        assert_eq!(item.get("ddtags").expect("test field missing"), "env:dev");
+        assert_eq!(item.get("message").expect("test field missing"), "hello");
+        assert_eq!(item.get("status").expect("test field missing"), "info");
+        assert_eq!(item.get("timestamp").expect("test field missing"), 1234);
+        let item = &v[1];
+        assert_eq!(item.get("message").expect("test field missing"), "flat");
+        assert_eq!(item.get("status").expect("test field missing"), "debug");
+        assert_eq!(item.get("timestamp").expect("test field missing"), 5678);
+        assert_eq!(item.get("ddsource").expect("test field missing"), "lambda");
     }
 }
