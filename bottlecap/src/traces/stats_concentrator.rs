@@ -35,7 +35,6 @@ impl StatsConcentrator {
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
-        // debug!("StatsConcentrator | adding stats payload to concentrator: {stats:?}");
         let bucket_timestamp = Self::get_bucket_timestamp(stats_event.time);
         let bucket = self.buckets.entry(bucket_timestamp).or_insert(Bucket { hits: 0 });
         bucket.hits += 1;
@@ -71,8 +70,7 @@ impl StatsConcentrator {
 
     fn construct_stats_payload(&self, timestamp: u64, bucket: &Bucket) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
-            // hostname: String::new(),
-            hostname: "yiming7-hostname".to_string(),
+            hostname: String::new(),
             env: self.config.env.clone().unwrap_or_default(),
             version: self.config.version.clone().unwrap_or_default(),
             lang: "rust".to_string(),
@@ -80,7 +78,6 @@ impl StatsConcentrator {
             runtime_id: String::new(),
             sequence: 0,
             agent_aggregation: String::new(),
-            // service: self.config.service.clone().unwrap_or(String::new()),
             service: self.config.service.clone().unwrap_or_default(),
             container_id: String::new(),
             tags: vec![],
@@ -89,20 +86,18 @@ impl StatsConcentrator {
             stats: vec![
                 pb::ClientStatsBucket {
                     start: timestamp,
-                    // TODO: consider changing this to 0
-                    duration: 1_000_000_000,
+                    duration: 0,
                     stats: vec![
                         pb::ClientGroupedStats {
                             service: self.config.service.clone().unwrap_or_default(),
-                            name: "yiming_name".to_string(),
+                            name: "aws.lambda".to_string(),
                             resource: self.resource.clone(),
                             http_status_code: 200,
                             r#type: String::new(),
                             db_type: String::new(),
                             hits: bucket.hits,
                             errors: 0,
-                            // TODO: consider changing this to 0
-                            duration: 1_000_000_000,
+                            duration: 0,
                             ok_summary: vec![],
                             error_summary: vec![],
                             synthetics: false,
