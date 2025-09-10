@@ -156,8 +156,8 @@ impl TraceAgent {
             invocation_processor,
             appsec_processor,
             tags_provider,
-            shutdown_token: CancellationToken::new(),
             tx: trace_tx,
+            shutdown_token: CancellationToken::new(),
             stats_agent: Arc::new(Mutex::new(stats_agent)),
         }
     }
