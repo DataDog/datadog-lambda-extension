@@ -164,7 +164,7 @@ impl TraceAgent {
 
     #[allow(clippy::cast_possible_truncation)]
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let now: Instant = Instant::now();
+        let now = Instant::now();
 
         // Set up a channel to send processed stats to our stats aggregator.
         let (stats_tx, mut stats_rx): (

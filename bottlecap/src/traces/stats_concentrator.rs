@@ -60,12 +60,12 @@ impl StatsConcentrator {
             .as_nanos()
             .try_into()
             .expect("Failed to convert timestamp to u64");
-        let mut ret = Vec::new();
+        let mut stats = Vec::new();
         let mut to_remove = Vec::new();
 
         for (&timestamp, bucket) in &self.buckets {
             if force_flush || Self::should_flush_bucket(current_timestamp, timestamp) {
-                ret.push(self.construct_stats_payload(timestamp, bucket));
+                stats.push(self.construct_stats_payload(timestamp, bucket));
                 to_remove.push(timestamp);
             }
         }
@@ -74,7 +74,7 @@ impl StatsConcentrator {
             self.buckets.remove(&timestamp);
         }
 
-        ret
+        stats
     }
 
     fn should_flush_bucket(current_timestamp: u64, bucket_timestamp: u64) -> bool {
