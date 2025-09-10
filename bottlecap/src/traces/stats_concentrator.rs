@@ -10,6 +10,7 @@ use std::sync::Arc;
 use crate::tags::provider::Provider as TagProvider;
 use std::collections::HashMap;
 use crate::lifecycle::invocation::processor::S_TO_NS_U64;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Bucket {
     pub hits: u64,
@@ -22,6 +23,7 @@ pub struct StatsConcentrator {
 }
 
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64;
+const NO_FLUSH_BUCKET_COUNT: u64 = 2;
 
 impl StatsConcentrator {
     #[must_use]
@@ -44,10 +46,27 @@ impl StatsConcentrator {
     }
 
     #[must_use]
-    pub fn get_batch(&mut self) -> Vec<pb::ClientStatsPayload> {
-        let ret = self.buckets.iter().map(|(timestamp, bucket)| self.construct_stats_payload(*timestamp, bucket)).collect();
-        self.buckets.clear();
+    pub fn get_batch(&mut self, force_flush: bool) -> Vec<pb::ClientStatsPayload> {
+        let current_timestamp: u64 = SystemTime::now().duration_since(UNIX_EPOCH).expect("Failed to get current timestamp").as_nanos().try_into().expect("Failed to convert timestamp to u64");
+        let mut ret = Vec::new();
+        let mut to_remove = Vec::new();
+
+        for (&timestamp, bucket) in &self.buckets {
+            if force_flush || Self::should_flush_bucket(current_timestamp, timestamp) {
+                ret.push(self.construct_stats_payload(timestamp, bucket));
+                to_remove.push(timestamp);
+            }
+        }
+
+        for timestamp in to_remove {
+            self.buckets.remove(&timestamp);
+        }
+
         ret
+    }
+
+    fn should_flush_bucket(current_timestamp: u64, bucket_timestamp: u64) -> bool {
+        current_timestamp - bucket_timestamp >= BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT
     }
 
     fn construct_stats_payload(&self, timestamp: u64, bucket: &Bucket) -> pb::ClientStatsPayload {

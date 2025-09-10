@@ -634,6 +634,7 @@ async fn extension_loop_active(
                             &proxy_flusher,
                             &mut race_flush_interval,
                             &metrics_aggr_handle.clone(),
+                            false,
                         )
                         .await;
                     }
@@ -649,6 +650,7 @@ async fn extension_loop_active(
                 &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr_handle.clone(),
+                false,
             )
             .await;
             let next_response = next_event(client, &r.extension_id).await;
@@ -726,6 +728,7 @@ async fn extension_loop_active(
                     &proxy_flusher,
                     &mut race_flush_interval,
                     &metrics_aggr_handle,
+                    false,
                 )
                 .await;
                 last_continuous_flush_error = false;
@@ -766,6 +769,7 @@ async fn extension_loop_active(
                             &proxy_flusher,
                             &mut race_flush_interval,
                             &metrics_aggr_handle,
+                            false,
                         )
                         .await;
                     }
@@ -823,6 +827,7 @@ async fn extension_loop_active(
                 &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr_handle,
+                true,
             )
             .await;
             return Ok(());
@@ -830,6 +835,7 @@ async fn extension_loop_active(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn blocking_flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flushers: &mut [MetricsFlusher],
@@ -838,6 +844,7 @@ async fn blocking_flush_all(
     proxy_flusher: &ProxyFlusher,
     race_flush_interval: &mut tokio::time::Interval,
     metrics_aggr_handle: &MetricsAggregatorHandle,
+    force_flush: bool,
 ) {
     let flush_response = metrics_aggr_handle
         .flush()
@@ -857,7 +864,7 @@ async fn blocking_flush_all(
         logs_flusher.flush(None),
         futures::future::join_all(metrics_futures),
         trace_flusher.flush(None),
-        stats_flusher.flush(),
+        stats_flusher.flush(force_flush),
         proxy_flusher.flush(None),
     );
     race_flush_interval.reset();

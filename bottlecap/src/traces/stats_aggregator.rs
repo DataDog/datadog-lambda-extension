@@ -64,14 +64,14 @@ impl StatsAggregator {
     }
 
     /// Returns a batch of trace stats payloads, subject to the max content size.
-    pub async fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
+    pub async fn get_batch(&mut self, force_flush: bool) -> Vec<ClientStatsPayload> {
         debug!("StatsAggregator | getting batch of stats payloads");
         // Pull stats data from stats concentrator
         let mut stats_concentrator = self.stats_concentrator.lock().await;
-        let mut stats = stats_concentrator.get_batch();
+        let mut stats = stats_concentrator.get_batch(force_flush);
         while !stats.is_empty() {
             self.queue.extend(stats);
-            stats = stats_concentrator.get_batch();
+            stats = stats_concentrator.get_batch(force_flush);
         }
 
         let mut batch_size = 0;
@@ -179,12 +179,12 @@ mod tests {
         aggregator.add(payload.clone());
 
         // The batch should only contain the first 2 payloads
-        let first_batch = aggregator.get_batch();
+        let first_batch = aggregator.get_batch(false);
         assert_eq!(first_batch, vec![payload.clone(), payload.clone()]);
         assert_eq!(aggregator.queue.len(), 1);
 
         // The second batch should only contain the last log
-        let second_batch = aggregator.get_batch();
+        let second_batch = aggregator.get_batch(false);
         assert_eq!(second_batch, vec![payload]);
         assert_eq!(aggregator.queue.len(), 0);
     }
