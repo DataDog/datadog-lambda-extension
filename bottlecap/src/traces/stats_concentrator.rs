@@ -128,3 +128,29 @@ impl StatsConcentrator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_flush_bucket_false_when_not_enough_time_passed() {
+        let bucket_timestamp = 1_000_000_000;
+        let current_timestamp = bucket_timestamp + BUCKET_DURATION_NS * (NO_FLUSH_BUCKET_COUNT - 1);
+        assert!(
+            !StatsConcentrator::should_flush_bucket(current_timestamp, bucket_timestamp),
+            "Should not flush when current_timestamp is less than threshold ahead"
+        );
+    }
+
+    #[test]
+    fn test_should_flush_bucket_true_when_much_later() {
+        let bucket_timestamp = 1_000_000_000;
+        let current_timestamp = bucket_timestamp + BUCKET_DURATION_NS * (NO_FLUSH_BUCKET_COUNT + 5);
+        assert!(
+            StatsConcentrator::should_flush_bucket(current_timestamp, bucket_timestamp),
+            "Should flush when current_timestamp is much greater than threshold"
+        );
+    }
+}
+
