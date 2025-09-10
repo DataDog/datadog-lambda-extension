@@ -32,7 +32,7 @@ pub struct StatsAggregator {
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
-    pub fn new(max_content_size_bytes: usize, concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
+    fn new(max_content_size_bytes: usize, concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,

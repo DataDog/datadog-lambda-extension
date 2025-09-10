@@ -116,6 +116,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
             }
         };
     }
+
     async fn flush(&self, force_flush: bool) {
         let mut guard = self.aggregator.lock().await;
 

@@ -181,18 +181,15 @@ impl Processor {
             );
         }
 
-        // Send stats event
+        // Send stats event to the stats concentrator
         let timestamp_ns = timestamp_secs * S_TO_NS_U64;
-        let stats_event = StatsEvent {
-            time: timestamp_ns,
-            dummy: 0,
-        };
+        let stats_event = StatsEvent { time: timestamp_ns };
         match self.stats_tx.send(stats_event).await {
             Ok(()) => {
-                debug!("Successfully buffered stats event to be aggregated.");
+                debug!("Buffered stats event to be concentrated.");
             }
             Err(err) => {
-                error!("Error sending stats event to the stats aggregator: {err}");
+                error!("Error sending stats event to the concentrator: {err}");
             }
         }
     }

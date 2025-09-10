@@ -4,10 +4,10 @@ use super::stats_concentrator::StatsConcentrator;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
+
 #[derive(Clone, Copy, Default)]
 pub struct StatsEvent {
     pub time: u64,
-    pub dummy: u64,
 }
 
 #[allow(clippy::module_name_repetitions)]

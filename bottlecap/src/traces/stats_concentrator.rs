@@ -2,10 +2,6 @@ use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_NS_U64;
 use crate::tags::provider::Provider as TagProvider;
 use crate::traces::stats_agent::StatsEvent;
-/**
- * TODO:
- *
- */
 use datadog_trace_protobuf::pb;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,10 +18,17 @@ pub struct StatsConcentrator {
     buckets: HashMap<u64, Bucket>,
 }
 
-const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64;
-// TODO: comment
+// The duration of a bucket in nanoseconds.
+const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64; // 10 seconds
+
+// The number of latest buckets to not flush when force_flush is false.
+// For example, if we have buckets with timestamps 10, 20, 40, the current timestamp is 45,
+// and NO_FLUSH_BUCKET_COUNT is 3, then we will flush bucket 10 but not bucket 20 or 40.
+// Note that the bucket 30 is included in the 3 latest buckets even if it has no data.
+// This is to avoid flushing stats that are still being collected to save some cost.
 const NO_FLUSH_BUCKET_COUNT: u64 = 2;
 
+// Aggregates stats into buckets, which are then pulled by the stats aggregator.
 impl StatsConcentrator {
     #[must_use]
     pub fn new(config: Arc<Config>, tags_provider: Arc<TagProvider>) -> Self {
@@ -52,6 +55,8 @@ impl StatsConcentrator {
         timestamp - timestamp % BUCKET_DURATION_NS
     }
 
+    // force_flush: If true, flush all stats. If false, flush stats except for the few latest
+    // buckets, which may still be getting data.
     #[must_use]
     pub fn get_stats(&mut self, force_flush: bool) -> Vec<pb::ClientStatsPayload> {
         let current_timestamp: u64 = SystemTime::now()
@@ -77,6 +82,7 @@ impl StatsConcentrator {
         stats
     }
 
+    // Whether a bucket should be flushed based on the current timestamp and the bucket timestamp.
     fn should_flush_bucket(current_timestamp: u64, bucket_timestamp: u64) -> bool {
         current_timestamp - bucket_timestamp >= BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT
     }

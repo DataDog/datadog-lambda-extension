@@ -524,6 +524,7 @@ async fn extension_loop_active(
     )));
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
+    // Received by stats agent, which sends the stats to the stats concentrator
     let (stats_tx, stats_rx) = mpsc::channel::<StatsEvent>(1000);
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
@@ -733,7 +734,7 @@ async fn extension_loop_active(
                     &proxy_flusher,
                     &mut race_flush_interval,
                     &metrics_aggr_handle,
-                    false,
+                    false, // force_flush_trace_stats
                 )
                 .await;
                 last_continuous_flush_error = false;
@@ -774,7 +775,7 @@ async fn extension_loop_active(
                             &proxy_flusher,
                             &mut race_flush_interval,
                             &metrics_aggr_handle,
-                            false,
+                            false, // force_flush_trace_stats
                         )
                         .await;
                     }
@@ -832,7 +833,7 @@ async fn extension_loop_active(
                 &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr_handle,
-                true,
+                true, // force_flush_trace_stats
             )
             .await;
             return Ok(());
@@ -849,7 +850,7 @@ async fn blocking_flush_all(
     proxy_flusher: &ProxyFlusher,
     race_flush_interval: &mut tokio::time::Interval,
     metrics_aggr_handle: &MetricsAggregatorHandle,
-    force_flush: bool,
+    force_flush_trace_stats: bool,
 ) {
     let flush_response = metrics_aggr_handle
         .flush()
@@ -869,7 +870,7 @@ async fn blocking_flush_all(
         logs_flusher.flush(None),
         futures::future::join_all(metrics_futures),
         trace_flusher.flush(None),
-        stats_flusher.flush(force_flush),
+        stats_flusher.flush(force_flush_trace_stats),
         proxy_flusher.flush(None),
     );
     race_flush_interval.reset();
