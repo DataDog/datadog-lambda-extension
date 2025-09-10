@@ -30,16 +30,6 @@ pub struct StatsAggregator {
     stats_concentrator: Arc<Mutex<StatsConcentrator>>,
 }
 
-// impl Default for StatsAggregator {
-//     fn default() -> Self {
-//         StatsAggregator {
-//             queue: VecDeque::new(),
-//             max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
-//             buffer: Vec::new(),
-//         }
-//     }
-// }
-
 /// Takes in individual trace stats payloads and aggregates them into batches to be flushed to Datadog.
 impl StatsAggregator {
     #[allow(dead_code)]

@@ -192,55 +192,6 @@ impl TraceAgent {
             stats_agent.lock().await.spin().await;
         });
 
-        // stats_tx.clone().send(pb::ClientStatsPayload {
-        //     hostname: String::new(),
-        //     // TODO (Yiming): support setting this
-        //     env: "dev".to_string(),
-        //     // TODO (Yiming): support setting this
-        //     version: "version".to_string(),
-        //     lang: "rust".to_string(),
-        //     tracer_version: String::new(),
-        //     runtime_id: String::new(),
-        //     sequence: 0,
-        //     agent_aggregation: String::new(),
-        //     // TODO (Yiming): support setting this
-        //     service: "yiming_service".to_string(),
-        //     container_id: String::new(),
-        //     tags: vec![],
-        //     git_commit_sha: String::new(),
-        //     image_tag: String::new(),
-        //     stats: vec![
-        //         pb::ClientStatsBucket {
-        //             start: std::time::SystemTime::now()
-        //                 .duration_since(std::time::UNIX_EPOCH)
-        //                 .expect("Time went backwards")
-        //                 .as_nanos() as u64,
-        //             duration: 1_000_000_000,
-        //             stats: vec![
-        //                 pb::ClientGroupedStats {
-        //                     service: "yiming_service".to_string(),
-        //                     name: "yiming_name".to_string(),
-        //                     resource: "yiming_resource".to_string(),
-        //                     http_status_code: 200,
-        //                     r#type: "yiming_type".to_string(),
-        //                     db_type: String::new(),
-        //                     hits: 1,
-        //                     errors: 0,
-        //                     duration: 1_000_000_000,
-        //                     ok_summary: vec![],
-        //                     error_summary: vec![],
-        //                     synthetics: false,
-        //                     top_level_hits: 0,
-        //                     span_kind: String::new(),
-        //                     peer_tags: vec![],
-        //                     is_trace_root: 1,
-        //                 },
-        //             ],
-        //             agent_time_shift: 0,
-        //         },
-        //     ],
-        // }).await?;
-
         let router = self.make_router(self.stats_tx.clone());
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
@@ -357,7 +308,6 @@ impl TraceAgent {
     }
 
     async fn stats(State(state): State<StatsState>, request: Request) -> Response {
-        debug!("Trace Agent | stats()");
         match state
             .stats_processor
             .process_stats(request, state.stats_tx)

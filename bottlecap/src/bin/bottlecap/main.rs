@@ -1030,18 +1030,6 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-// fn start_stats_agent(
-//     stats_rx: Receiver<StatsEvent>,
-//     config: &Arc<Config>,
-//     tags_provider: &Arc<TagProvider>,
-//     stats_aggregator: Arc<Mutex<StatsAggregator>>,
-// ) {
-//     let mut stats_agent = StatsAgent::new(stats_rx, Arc::clone(config), Arc::clone(tags_provider), stats_aggregator);
-//     tokio::spawn(async move {
-//         stats_agent.spin().await;
-//     });
-// }
-
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
     metrics_aggr_handle: &MetricsAggregatorHandle,
@@ -1187,8 +1175,6 @@ fn start_trace_agent(
             error!("Error starting trace agent: {e:?}");
         }
     });
-
-    // start_stats_agent(stats_rx, config, &tags_provider, stats_aggregator);
 
     (
         trace_agent_channel,

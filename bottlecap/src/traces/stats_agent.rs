@@ -36,5 +36,4 @@ impl StatsAgent {
             self.concentrator.lock().await.add(event);
         }
     }
-
 }
