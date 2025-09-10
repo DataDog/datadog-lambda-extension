@@ -1,8 +1,8 @@
+use crate::traces::stats_concentrator::StatsConcentrator;
 use datadog_trace_protobuf::pb::ClientStatsPayload;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::traces::stats_concentrator::StatsConcentrator;
 
 #[allow(clippy::empty_line_after_doc_comments)]
 /// Maximum number of entries in a stat payload.
@@ -34,7 +34,10 @@ pub struct StatsAggregator {
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
-    pub fn new(max_content_size_bytes: usize, stats_concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
+    pub fn new(
+        max_content_size_bytes: usize,
+        stats_concentrator: Arc<Mutex<StatsConcentrator>>,
+    ) -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,

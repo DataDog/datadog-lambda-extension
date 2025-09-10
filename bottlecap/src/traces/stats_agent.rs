@@ -11,7 +11,6 @@ pub struct StatsEvent {
     pub dummy: u64,
 }
 
-
 #[allow(clippy::module_name_repetitions)]
 pub struct StatsAgent {
     rx: mpsc::Receiver<StatsEvent>,
@@ -24,10 +23,7 @@ impl StatsAgent {
         rx: Receiver<StatsEvent>,
         concentrator: Arc<Mutex<StatsConcentrator>>,
     ) -> StatsAgent {
-        StatsAgent {
-            rx,
-            concentrator,
-        }
+        StatsAgent { rx, concentrator }
     }
 
     pub async fn spin(&mut self) {

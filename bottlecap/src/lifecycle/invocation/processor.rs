@@ -166,19 +166,27 @@ impl Processor {
         }
 
         // Increment the invocation metric
-        self.enhanced_metrics.increment_invocation_metric(timestamp_secs.try_into().unwrap_or_default());
+        self.enhanced_metrics
+            .increment_invocation_metric(timestamp_secs.try_into().unwrap_or_default());
         self.enhanced_metrics.set_invoked_received();
 
         // If `UniversalInstrumentationStart` event happened first, process it
         if let Some((headers, payload_value)) = self.context_buffer.pair_invoke_event(&request_id) {
             // Infer span
             self.inferrer.infer_span(&payload_value, &self.aws_config);
-            self.process_on_universal_instrumentation_start(request_id.clone(), headers, payload_value);
+            self.process_on_universal_instrumentation_start(
+                request_id.clone(),
+                headers,
+                payload_value,
+            );
         }
 
         // Send stats event
         let timestamp_ns = timestamp_secs * S_TO_NS_U64;
-        let stats_event = StatsEvent { time: timestamp_ns, dummy: 0 };
+        let stats_event = StatsEvent {
+            time: timestamp_ns,
+            dummy: 0,
+        };
         match self.stats_agent_tx.send(stats_event).await {
             Ok(()) => {
                 debug!("Successfully buffered stats event to be aggregated.");

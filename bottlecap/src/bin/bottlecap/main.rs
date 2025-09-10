@@ -53,14 +53,14 @@ use bottlecap::{
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
+        stats_agent::StatsEvent,
         stats_aggregator::StatsAggregator,
+        stats_concentrator::StatsConcentrator,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
-        stats_agent::StatsEvent,
-        stats_concentrator::StatsConcentrator,
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -94,7 +94,12 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::{self, Sender, Receiver}, task::JoinHandle};
+use tokio::{
+    sync::Mutex as TokioMutex,
+    sync::RwLock,
+    sync::mpsc::{self, Receiver, Sender},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -1113,8 +1118,13 @@ fn start_trace_agent(
     tokio_util::sync::CancellationToken,
 ) {
     // Stats
-    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new(Arc::clone(config), Arc::clone(tags_provider))));
-    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::new_with_concentrator(stats_concentrator.clone())));
+    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new(
+        Arc::clone(config),
+        Arc::clone(tags_provider),
+    )));
+    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::new_with_concentrator(
+        stats_concentrator.clone(),
+    )));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         api_key_factory.clone(),
         stats_aggregator.clone(),

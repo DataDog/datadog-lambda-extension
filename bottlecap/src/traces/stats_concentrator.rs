@@ -1,15 +1,14 @@
+use crate::config::Config;
+use crate::lifecycle::invocation::processor::S_TO_NS_U64;
+use crate::tags::provider::Provider as TagProvider;
+use crate::traces::stats_agent::StatsEvent;
 /**
  * TODO:
- * 
+ *
  */
-
 use datadog_trace_protobuf::pb;
-use crate::traces::stats_agent::StatsEvent;
-use crate::config::Config;
-use std::sync::Arc;
-use crate::tags::provider::Provider as TagProvider;
 use std::collections::HashMap;
-use crate::lifecycle::invocation::processor::S_TO_NS_U64;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 struct Bucket {
@@ -31,12 +30,19 @@ impl StatsConcentrator {
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
-        Self { buckets: HashMap::new(), config, resource }
+        Self {
+            buckets: HashMap::new(),
+            config,
+            resource,
+        }
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
         let bucket_timestamp = Self::get_bucket_timestamp(stats_event.time);
-        let bucket = self.buckets.entry(bucket_timestamp).or_insert(Bucket { hits: 0 });
+        let bucket = self
+            .buckets
+            .entry(bucket_timestamp)
+            .or_insert(Bucket { hits: 0 });
         bucket.hits += 1;
     }
 
@@ -46,7 +52,12 @@ impl StatsConcentrator {
 
     #[must_use]
     pub fn get_batch(&mut self, force_flush: bool) -> Vec<pb::ClientStatsPayload> {
-        let current_timestamp: u64 = SystemTime::now().duration_since(UNIX_EPOCH).expect("Failed to get current timestamp").as_nanos().try_into().expect("Failed to convert timestamp to u64");
+        let current_timestamp: u64 = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Failed to get current timestamp")
+            .as_nanos()
+            .try_into()
+            .expect("Failed to convert timestamp to u64");
         let mut ret = Vec::new();
         let mut to_remove = Vec::new();
 
@@ -83,33 +94,29 @@ impl StatsConcentrator {
             tags: vec![],
             git_commit_sha: String::new(),
             image_tag: String::new(),
-            stats: vec![
-                pb::ClientStatsBucket {
-                    start: timestamp,
+            stats: vec![pb::ClientStatsBucket {
+                start: timestamp,
+                duration: 0,
+                stats: vec![pb::ClientGroupedStats {
+                    service: self.config.service.clone().unwrap_or_default(),
+                    name: "aws.lambda".to_string(),
+                    resource: self.resource.clone(),
+                    http_status_code: 200,
+                    r#type: String::new(),
+                    db_type: String::new(),
+                    hits: bucket.hits,
+                    errors: 0,
                     duration: 0,
-                    stats: vec![
-                        pb::ClientGroupedStats {
-                            service: self.config.service.clone().unwrap_or_default(),
-                            name: "aws.lambda".to_string(),
-                            resource: self.resource.clone(),
-                            http_status_code: 200,
-                            r#type: String::new(),
-                            db_type: String::new(),
-                            hits: bucket.hits,
-                            errors: 0,
-                            duration: 0,
-                            ok_summary: vec![],
-                            error_summary: vec![],
-                            synthetics: false,
-                            top_level_hits: 0,
-                            span_kind: String::new(),
-                            peer_tags: vec![],
-                            is_trace_root: 1,
-                        },
-                    ],
-                    agent_time_shift: 0,
-                },
-            ],
+                    ok_summary: vec![],
+                    error_summary: vec![],
+                    synthetics: false,
+                    top_level_hits: 0,
+                    span_kind: String::new(),
+                    peer_tags: vec![],
+                    is_trace_root: 1,
+                }],
+                agent_time_shift: 0,
+            }],
         }
     }
 }
