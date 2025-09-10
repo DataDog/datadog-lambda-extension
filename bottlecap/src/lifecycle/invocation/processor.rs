@@ -85,7 +85,7 @@ pub struct Processor {
     ///
     /// These tags are used to capture runtime and initialization.
     dynamic_tags: HashMap<String, String>,
-    stats_agent_tx: Sender<StatsEvent>,
+    stats_tx: Sender<StatsEvent>,
 }
 
 impl Processor {
@@ -96,7 +96,7 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
-        stats_agent_tx: Sender<StatsEvent>,
+        stats_tx: Sender<StatsEvent>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -120,7 +120,7 @@ impl Processor {
             service,
             resource,
             dynamic_tags: HashMap::new(),
-            stats_agent_tx,
+            stats_tx,
         }
     }
 
@@ -187,7 +187,7 @@ impl Processor {
             time: timestamp_ns,
             dummy: 0,
         };
-        match self.stats_agent_tx.send(stats_event).await {
+        match self.stats_tx.send(stats_event).await {
             Ok(()) => {
                 debug!("Successfully buffered stats event to be aggregated.");
             }

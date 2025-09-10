@@ -1,5 +1,4 @@
 use tokio::sync::mpsc::{self, Receiver};
-use tracing::debug;
 
 use super::stats_concentrator::StatsConcentrator;
 
@@ -28,7 +27,6 @@ impl StatsAgent {
 
     pub async fn spin(&mut self) {
         while let Some(event) = self.rx.recv().await {
-            debug!("In stats agent: Received stats event.");
             self.concentrator.lock().await.add(event);
         }
     }

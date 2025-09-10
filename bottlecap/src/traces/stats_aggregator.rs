@@ -20,52 +20,42 @@ use tokio::sync::Mutex;
 /// <https://github.com/DataDog/datadog-agent/blob/996dd54337908a6511948fabd2a41420ba919a8b/pkg/trace/writer/stats.go#L35-L41>
 const MAX_CONTENT_SIZE_BYTES: usize = 3 * 1024 * 1024; // ~3MB
 
-use tracing::debug;
-
 #[allow(clippy::module_name_repetitions)]
 pub struct StatsAggregator {
     queue: VecDeque<ClientStatsPayload>,
     max_content_size_bytes: usize,
     buffer: Vec<ClientStatsPayload>,
-    stats_concentrator: Arc<Mutex<StatsConcentrator>>,
+    concentrator: Arc<Mutex<StatsConcentrator>>,
 }
 
 /// Takes in individual trace stats payloads and aggregates them into batches to be flushed to Datadog.
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
-    pub fn new(
-        max_content_size_bytes: usize,
-        stats_concentrator: Arc<Mutex<StatsConcentrator>>,
-    ) -> Self {
+    pub fn new(max_content_size_bytes: usize, concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,
             buffer: Vec::new(),
-            stats_concentrator,
+            concentrator,
         }
     }
 
-    pub fn new_with_concentrator(stats_concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
-        Self::new(MAX_CONTENT_SIZE_BYTES, stats_concentrator)
+    pub fn new_with_concentrator(concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
+        Self::new(MAX_CONTENT_SIZE_BYTES, concentrator)
     }
 
     /// Takes in an individual trace stats payload.
     pub fn add(&mut self, payload: ClientStatsPayload) {
-        debug!("StatsAggregator | adding stats payload to aggregator: {payload:?}");
         self.queue.push_back(payload);
     }
 
     /// Returns a batch of trace stats payloads, subject to the max content size.
     pub async fn get_batch(&mut self, force_flush: bool) -> Vec<ClientStatsPayload> {
-        debug!("StatsAggregator | getting batch of stats payloads");
-        // Pull stats data from stats concentrator
-        let mut stats_concentrator = self.stats_concentrator.lock().await;
-        let mut stats = stats_concentrator.get_batch(force_flush);
-        while !stats.is_empty() {
-            self.queue.extend(stats);
-            stats = stats_concentrator.get_batch(force_flush);
-        }
+        // Pull stats data from concentrator
+        let mut concentrator = self.concentrator.lock().await;
+        let stats = concentrator.get_stats(force_flush);
+        self.queue.extend(stats);
 
         let mut batch_size = 0;
 

@@ -1172,7 +1172,6 @@ fn start_trace_agent(
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
-        // TODO: rename this
         stats_rx,
         stats_concentrator.clone(),
     );

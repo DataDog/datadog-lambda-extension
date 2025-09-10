@@ -11,8 +11,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[derive(Default)]
 struct Bucket {
-    pub hits: u64,
+    pub hits: u32,
 }
 
 pub struct StatsConcentrator {
@@ -22,6 +23,7 @@ pub struct StatsConcentrator {
 }
 
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64;
+// TODO: comment
 const NO_FLUSH_BUCKET_COUNT: u64 = 2;
 
 impl StatsConcentrator {
@@ -51,7 +53,7 @@ impl StatsConcentrator {
     }
 
     #[must_use]
-    pub fn get_batch(&mut self, force_flush: bool) -> Vec<pb::ClientStatsPayload> {
+    pub fn get_stats(&mut self, force_flush: bool) -> Vec<pb::ClientStatsPayload> {
         let current_timestamp: u64 = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("Failed to get current timestamp")
@@ -104,7 +106,7 @@ impl StatsConcentrator {
                     http_status_code: 200,
                     r#type: String::new(),
                     db_type: String::new(),
-                    hits: bucket.hits,
+                    hits: bucket.hits.into(),
                     errors: 0,
                     duration: 0,
                     ok_summary: vec![],
