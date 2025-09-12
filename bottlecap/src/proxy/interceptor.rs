@@ -492,7 +492,8 @@ mod tests {
 
         tokio::spawn(service.run());
 
-        let metrics_aggregator = handle;
+        let enhanced_metrics =
+            crate::metrics::enhanced::lambda::Lambda::new(handle, Arc::clone(&config));
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "arn:some-function".to_string(),
@@ -506,7 +507,7 @@ mod tests {
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             Arc::clone(&aws_config),
-            metrics_aggregator,
+            enhanced_metrics,
             Arc::clone(&propagator),
         )));
         let appsec_processor = match AppSecProcessor::new(&config) {
