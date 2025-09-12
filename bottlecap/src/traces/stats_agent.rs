@@ -5,9 +5,14 @@ use super::stats_concentrator::StatsConcentrator;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-#[derive(Clone, Copy, Default)]
+use super::stats_concentrator::AggregationKey;
+use super::stats_concentrator::Stats;
+
+#[derive(Clone)]
 pub struct StatsEvent {
     pub time: u64,
+    pub aggregation_key: AggregationKey,
+    pub stats: Stats,
 }
 
 #[allow(clippy::module_name_repetitions)]

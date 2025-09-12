@@ -8,14 +8,28 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::debug;
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AggregationKey {
+    // TODO: add more fields
+    pub name: String,
+    pub resource: String,
+}
+
+// Aggregated stats for a time interval across all the aggregation keys.
 #[derive(Default)]
 struct Bucket {
+    data: HashMap<AggregationKey, Stats>,
+}
+
+#[derive(Clone, Debug, Default, Copy)]
+pub struct Stats {
+    // TODO: add more fields
     pub hits: u32,
 }
 
 pub struct StatsConcentrator {
     config: Arc<Config>,
-    resource: String,
+    _resource: String,
     buckets: HashMap<u64, Bucket>,
 }
 
@@ -33,13 +47,14 @@ const NO_FLUSH_BUCKET_COUNT: u64 = 2;
 impl StatsConcentrator {
     #[must_use]
     pub fn new(config: Arc<Config>, tags_provider: Arc<TagProvider>) -> Self {
+        // TODO: delete resource
         let resource = tags_provider
             .get_canonical_resource_name()
             .unwrap_or(String::from("aws.lambda"));
         Self {
             buckets: HashMap::new(),
             config,
-            resource,
+            _resource: resource,
         }
     }
 
@@ -49,8 +64,11 @@ impl StatsConcentrator {
         let bucket = self
             .buckets
             .entry(bucket_timestamp)
-            .or_insert(Bucket { hits: 0 });
-        bucket.hits += 1;
+            .or_default();
+
+        let stats = bucket.data.entry(stats_event.aggregation_key).or_default();
+
+        stats.hits += stats_event.stats.hits;
     }
 
     fn get_bucket_timestamp(timestamp: u64) -> u64 {
@@ -67,21 +85,25 @@ impl StatsConcentrator {
             .as_nanos()
             .try_into()
             .expect("Failed to convert timestamp to u64");
-        let mut stats = Vec::new();
+        let mut ret = Vec::new();
         let mut to_remove = Vec::new();
 
         for (&timestamp, bucket) in &self.buckets {
-            if force_flush || Self::should_flush_bucket(current_timestamp, timestamp) {
-                stats.push(self.construct_stats_payload(timestamp, bucket));
-                to_remove.push(timestamp);
+            if !force_flush && !Self::should_flush_bucket(current_timestamp, timestamp) {
+                continue;
             }
+
+            for (aggregation_key, stats) in &bucket.data {
+                ret.push(self.construct_stats_payload(timestamp, aggregation_key, *stats));
+            }
+            to_remove.push(timestamp);
         }
 
         for timestamp in to_remove {
             self.buckets.remove(&timestamp);
         }
 
-        stats
+        ret
     }
 
     // Whether a bucket should be flushed based on the current timestamp and the bucket timestamp.
@@ -89,7 +111,7 @@ impl StatsConcentrator {
         current_timestamp - bucket_timestamp >= BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT
     }
 
-    fn construct_stats_payload(&self, timestamp: u64, bucket: &Bucket) -> pb::ClientStatsPayload {
+    fn construct_stats_payload(&self, timestamp: u64, aggregation_key: &AggregationKey, stats: Stats) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
             hostname: String::new(),
             env: self.config.env.clone().unwrap_or_default(),
@@ -109,12 +131,12 @@ impl StatsConcentrator {
                 duration: 0,
                 stats: vec![pb::ClientGroupedStats {
                     service: self.config.service.clone().unwrap_or_default(),
-                    name: "aws.lambda".to_string(),
-                    resource: self.resource.clone(),
+                    name: aggregation_key.name.clone(),
+                    resource: aggregation_key.resource.clone(),
                     http_status_code: 200,
                     r#type: String::new(),
                     db_type: String::new(),
-                    hits: bucket.hits.into(),
+                    hits: stats.hits.into(),
                     errors: 0,
                     duration: 0,
                     ok_summary: vec![],
