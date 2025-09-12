@@ -32,9 +32,9 @@ impl SendingTraceStatsProcessor {
                         resource: span.resource.clone(),
                     },
                     stats: Stats {
-                        // TODO: handle error == 1
                         hits: 1,
-                        duration: span.duration.try_into().unwrap_or_default(),
+                        error: span.error,
+                        duration: span.duration,
                     },
                 };
                 debug!("Sending single stats to the stats concentrator.");

@@ -533,7 +533,6 @@ impl TraceAgent {
             }
         }
 
-        // TODO (Yiming): maybe we don't need to send stats for some traces
         debug!("Sending stats to the stats aggregator. Traces: {traces:?}");
         if let Err(err) = stats_sender.send(&traces).await {
             return error_response(

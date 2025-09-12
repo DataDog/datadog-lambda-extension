@@ -24,8 +24,9 @@ struct Bucket {
 #[derive(Clone, Debug, Default, Copy)]
 pub struct Stats {
     // TODO: add more fields
-    pub hits: u32,
-    pub duration: u64, // in nanoseconds
+    pub hits: i32,
+    pub duration: i64, // in nanoseconds
+    pub error: i32,
 }
 
 pub struct StatsConcentrator {
@@ -137,12 +138,13 @@ impl StatsConcentrator {
                     http_status_code: 200,
                     r#type: String::new(),
                     db_type: String::new(),
-                    hits: stats.hits.into(),
-                    errors: 0,
+                    hits: stats.hits.try_into().unwrap_or_default(),
+                    errors: stats.error.try_into().unwrap_or_default(),
                     duration: 0,
                     ok_summary: vec![],
                     error_summary: vec![],
                     synthetics: false,
+                    // TODO: handle top_level_hits
                     top_level_hits: 0,
                     span_kind: String::new(),
                     peer_tags: vec![],
