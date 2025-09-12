@@ -42,8 +42,8 @@ use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
 use crate::traces::stats_agent::StatsAgent;
-use crate::traces::stats_agent::StatsEvent;
 use crate::traces::stats_concentrator::StatsConcentrator;
+use crate::traces::trace_stats_processor::SendingTraceStatsProcessor;
 
 const TRACE_AGENT_PORT: usize = 8126;
 
@@ -79,6 +79,7 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
+    pub stats_sender: Arc<SendingTraceStatsProcessor>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
 }
@@ -128,7 +129,6 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
-        stats_rx: Receiver<StatsEvent>,
         stats_concentrator: Arc<Mutex<StatsConcentrator>>,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
@@ -145,7 +145,7 @@ impl TraceAgent {
             }
         });
 
-        let stats_agent = StatsAgent::new(stats_rx, stats_concentrator.clone());
+        let stats_agent = StatsAgent::new(stats_concentrator.clone());
 
         TraceAgent {
             config: config.clone(),
@@ -187,7 +187,7 @@ impl TraceAgent {
             stats_agent.lock().await.spin().await;
         });
 
-        let router = self.make_router(stats_tx);
+        let router = self.make_router(stats_tx).await;
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
@@ -207,7 +207,8 @@ impl TraceAgent {
         Ok(())
     }
 
-    fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
+    async fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
+        let stats_agent_tx = self.stats_agent.lock().await.get_sender_copy();
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
             trace_sender: Arc::new(SendingTraceProcessor {
@@ -215,6 +216,7 @@ impl TraceAgent {
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
             }),
+            stats_sender: Arc::new(SendingTraceStatsProcessor::new(stats_agent_tx)),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
         };
@@ -279,10 +281,12 @@ impl TraceAgent {
     }
 
     async fn v04_traces(State(state): State<TraceState>, request: Request) -> Response {
+        debug!("Received v04 traces to process");
         Self::handle_traces(
             state.config,
             request,
             state.trace_sender,
+            state.stats_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V04,
@@ -291,10 +295,12 @@ impl TraceAgent {
     }
 
     async fn v05_traces(State(state): State<TraceState>, request: Request) -> Response {
+        debug!("Received v05 traces to process");
         Self::handle_traces(
             state.config,
             request,
             state.trace_sender,
+            state.stats_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V05,
@@ -434,6 +440,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         request: Request,
         trace_sender: Arc<SendingTraceProcessor>,
+        stats_sender: Arc<SendingTraceStatsProcessor>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -526,7 +533,16 @@ impl TraceAgent {
             }
         }
 
-        match trace_sender
+        // TODO (Yiming): maybe we don't need to send stats for some traces
+        debug!("Sending stats to the stats aggregator. Traces: {traces:?}");
+        if let Err(err) = stats_sender.send(&traces).await {
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Error sending stats to the stats aggregator: {err}"),
+            );
+        }
+
+        if let Err(err) = trace_sender
             .send_processed_traces(
                 config,
                 tags_provider,
@@ -537,12 +553,13 @@ impl TraceAgent {
             )
             .await
         {
-            Ok(()) => success_response("Successfully buffered traces to be aggregated."),
-            Err(err) => error_response(
+            return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error sending traces to the trace aggregator: {err}"),
-            ),
+            );
         }
+
+        success_response("Successfully buffered traces to be aggregated.")
     }
 
     #[allow(clippy::too_many_arguments)]

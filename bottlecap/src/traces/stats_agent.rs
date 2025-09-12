@@ -1,4 +1,4 @@
-use tokio::sync::mpsc::{self, Receiver};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use super::stats_concentrator::StatsConcentrator;
 
@@ -12,22 +12,28 @@ pub struct StatsEvent {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct StatsAgent {
-    rx: mpsc::Receiver<StatsEvent>,
+    tx: Sender<StatsEvent>,
+    rx: Receiver<StatsEvent>,
     concentrator: Arc<Mutex<StatsConcentrator>>,
 }
 
 impl StatsAgent {
     #[must_use]
     pub fn new(
-        rx: Receiver<StatsEvent>,
         concentrator: Arc<Mutex<StatsConcentrator>>,
     ) -> StatsAgent {
-        StatsAgent { rx, concentrator }
+        let (tx, rx) = mpsc::channel::<StatsEvent>(1000);
+        StatsAgent { tx, rx, concentrator }
     }
 
     pub async fn spin(&mut self) {
         while let Some(event) = self.rx.recv().await {
             self.concentrator.lock().await.add(event);
         }
+    }
+
+    #[must_use]
+    pub fn get_sender_copy(&self) -> Sender<StatsEvent> {
+        self.tx.clone()
     }
 }

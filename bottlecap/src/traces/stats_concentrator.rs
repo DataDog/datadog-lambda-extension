@@ -6,6 +6,7 @@ use datadog_trace_protobuf::pb;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::debug;
 
 #[derive(Default)]
 struct Bucket {
@@ -43,6 +44,7 @@ impl StatsConcentrator {
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
+        debug!("Adding stats to the stats concentrator");
         let bucket_timestamp = Self::get_bucket_timestamp(stats_event.time);
         let bucket = self
             .buckets

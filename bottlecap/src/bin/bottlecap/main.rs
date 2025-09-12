@@ -53,7 +53,6 @@ use bottlecap::{
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
-        stats_agent::StatsEvent,
         stats_aggregator::StatsAggregator,
         stats_concentrator::StatsConcentrator,
         stats_flusher::{self, StatsFlusher},
@@ -97,7 +96,7 @@ use std::{
 use tokio::{
     sync::Mutex as TokioMutex,
     sync::RwLock,
-    sync::mpsc::{self, Receiver, Sender},
+    sync::mpsc::Sender,
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
@@ -524,8 +523,6 @@ async fn extension_loop_active(
     )));
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
-    // Received by stats agent, which sends the stats to the stats concentrator
-    let (stats_tx, stats_rx) = mpsc::channel::<StatsEvent>(1000);
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
         Arc::clone(&tags_provider),
@@ -533,7 +530,6 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         metrics_aggr_handle.clone(),
         Arc::clone(&propagator),
-        stats_tx,
     )));
     // AppSec processor (if enabled)
     let appsec_processor = match AppSecProcessor::new(config) {
@@ -562,7 +558,6 @@ async fn extension_loop_active(
         Arc::clone(&invocation_processor),
         appsec_processor.clone(),
         Arc::clone(&trace_aggregator),
-        stats_rx,
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -977,7 +972,7 @@ async fn handle_next_invocation(
                 invoked_function_arn.clone()
             );
             let mut p = invocation_processor.lock().await;
-            p.on_invoke_event(request_id.into()).await;
+            p.on_invoke_event(request_id.into());
             drop(p);
         }
         Ok(NextEventResponse::Shutdown {
@@ -1109,7 +1104,6 @@ fn start_trace_agent(
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
-    stats_rx: Receiver<StatsEvent>,
 ) -> (
     Sender<SendDataBuilderInfo>,
     Arc<trace_flusher::ServerlessTraceFlusher>,
@@ -1173,7 +1167,6 @@ fn start_trace_agent(
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
-        stats_rx,
         stats_concentrator.clone(),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();

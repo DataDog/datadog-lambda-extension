@@ -9,7 +9,7 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use serde_json::Value;
 use tokio::sync::watch;
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 use crate::{
     config::{self, aws::AwsConfig},
@@ -40,9 +40,6 @@ use crate::{
 };
 
 use crate::lifecycle::invocation::triggers::get_default_service_name;
-
-use crate::traces::stats_agent::StatsEvent;
-use tokio::sync::mpsc::Sender;
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
@@ -85,7 +82,6 @@ pub struct Processor {
     ///
     /// These tags are used to capture runtime and initialization.
     dynamic_tags: HashMap<String, String>,
-    stats_tx: Sender<StatsEvent>,
 }
 
 impl Processor {
@@ -96,7 +92,6 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
-        stats_tx: Sender<StatsEvent>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -120,13 +115,12 @@ impl Processor {
             service,
             resource,
             dynamic_tags: HashMap::new(),
-            stats_tx,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
-    pub async fn on_invoke_event(&mut self, request_id: String) {
+    pub fn on_invoke_event(&mut self, request_id: String) {
         let invocation_span =
             create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
         // Important! Call set_init_tags() before adding the invocation to the context buffer
@@ -179,18 +173,6 @@ impl Processor {
                 headers,
                 payload_value,
             );
-        }
-
-        // Send stats event to the stats concentrator
-        let timestamp_ns = timestamp_secs * S_TO_NS_U64;
-        let stats_event = StatsEvent { time: timestamp_ns };
-        match self.stats_tx.send(stats_event).await {
-            Ok(()) => {
-                debug!("Buffered stats event to be concentrated.");
-            }
-            Err(err) => {
-                error!("Error sending stats event to the concentrator: {err}");
-            }
         }
     }
 
