@@ -625,7 +625,7 @@ async fn extension_loop_active(
                     }
                     _ = race_flush_interval.tick() => {
                         // Only trigger race flush if no continuous flush is in progress
-                        if !flush_in_progress.load(Ordering::SeqCst) {
+                        if !flush_in_progress.load(Ordering::Acquire) {
                             let mut locked_metrics = metrics_flushers.lock().await;
                             blocking_flush_all(
                                 &logs_flusher,
@@ -659,7 +659,7 @@ async fn extension_loop_active(
         } else {
             //Periodic flush scenario, flush at top of invocation
             if current_flush_decision == FlushDecision::Continuous && !last_continuous_flush_error {
-                flush_in_progress.store(true, Ordering::SeqCst);
+                flush_in_progress.store(true, Ordering::Release);
 
                 let tf = trace_flusher.clone();
                 // Await any previous flush handles. This
@@ -719,7 +719,7 @@ async fn extension_loop_active(
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
-                flush_in_progress.store(false, Ordering::SeqCst);
+                flush_in_progress.store(false, Ordering::Release);
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
@@ -762,7 +762,7 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        if !flush_in_progress.load(Ordering::SeqCst) {
+                        if !flush_in_progress.load(Ordering::Acquire) {
                             let mut locked_metrics = metrics_flushers.lock().await;
                             blocking_flush_all(
                                 &logs_flusher,
