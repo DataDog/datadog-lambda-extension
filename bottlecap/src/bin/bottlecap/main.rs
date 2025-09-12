@@ -17,18 +17,19 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 use bottlecap::{
-    DOGSTATSD_PORT, EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES, EXTENSION_HOST,
-    EXTENSION_HOST_IP, EXTENSION_ID_HEADER, EXTENSION_NAME, EXTENSION_NAME_HEADER, EXTENSION_ROUTE,
-    LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
     appsec::processor::{
         Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
     },
-    base_url,
     config::{
         self, Config,
         aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
     },
     event_bus::{Event, EventBus},
+    extension::{
+        self, EXTENSION_HOST, EXTENSION_HOST_IP, ExtensionError, NextEventResponse,
+        RegisterResponse,
+    },
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
         flush_control::{FlushControl, FlushDecision},
@@ -82,11 +83,9 @@ use dogstatsd::{
 };
 use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
-use serde::Deserialize;
 use std::{
-    collections::{HashMap, hash_map},
+    collections::hash_map,
     env,
-    io::{Error, Result},
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -229,113 +228,8 @@ impl PendingFlushHandles {
     }
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RegisterResponse {
-    // Skip deserialize because this field is not available in the response
-    // body, but as a header. Header is extracted and set manually.
-    #[serde(skip_deserializing)]
-    extension_id: String,
-    account_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "eventType")]
-enum NextEventResponse {
-    #[serde(rename(deserialize = "INVOKE"))]
-    Invoke {
-        #[serde(rename(deserialize = "deadlineMs"))]
-        deadline_ms: u64,
-        #[serde(rename(deserialize = "requestId"))]
-        request_id: String,
-        #[serde(rename(deserialize = "invokedFunctionArn"))]
-        invoked_function_arn: String,
-    },
-    #[serde(rename(deserialize = "SHUTDOWN"))]
-    Shutdown {
-        #[serde(rename(deserialize = "shutdownReason"))]
-        shutdown_reason: String,
-        #[serde(rename(deserialize = "deadlineMs"))]
-        deadline_ms: u64,
-    },
-}
-
-async fn next_event(client: &Client, ext_id: &str) -> Result<NextEventResponse> {
-    let base_url = base_url(EXTENSION_ROUTE)
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    let url = format!("{base_url}/event/next");
-
-    let response = client
-        .get(&url)
-        .header(EXTENSION_ID_HEADER, ext_id)
-        .send()
-        .await
-        .map_err(|e| {
-            error!("Next request failed: {}", e);
-            Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-        })?;
-
-    let status = response.status();
-    let text = response.text().await.map_err(|e| {
-        error!("Next response: Failed to read response body: {}", e);
-        Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-    })?;
-
-    if !status.is_success() {
-        error!("Next response HTTP Error {} - Response: {}", status, text);
-        return Err(Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("HTTP Error {status}"),
-        ));
-    }
-
-    serde_json::from_str(&text).map_err(|e| {
-        error!("Next JSON parse error on response: {}", text);
-        Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-    })
-}
-
-async fn register(client: &Client) -> Result<RegisterResponse> {
-    let mut map = HashMap::new();
-    let base_url = base_url(EXTENSION_ROUTE)
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-    map.insert("events", vec!["INVOKE", "SHUTDOWN"]);
-    let url = format!("{base_url}/register");
-
-    let resp = client
-        .post(&url)
-        .header(EXTENSION_NAME_HEADER, EXTENSION_NAME)
-        .header(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
-        .json(&map)
-        .send()
-        .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-
-    if resp.status() != 200 {
-        let err = resp.error_for_status_ref();
-        panic!("Can't register extension {err:?}");
-    }
-
-    let extension_id = resp
-        .headers()
-        .get(EXTENSION_ID_HEADER)
-        .expect("Extension ID header not found")
-        .to_str()
-        .expect("Can't convert header to string")
-        .to_string();
-    let mut register_response: RegisterResponse = resp
-        .json::<RegisterResponse>()
-        .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-
-    // Set manually since it's not part of the response body
-    register_response.extension_id = extension_id;
-
-    Ok(register_response)
-}
-
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
     let (aws_config, aws_credentials, config) = load_configs(start_time);
@@ -346,24 +240,14 @@ async fn main() -> Result<()> {
     debug!("Starting Datadog Extension {version_without_next}");
     prepare_client_provider()?;
     let client = create_reqwest_client_builder()
-        .map_err(|e| {
-            Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to create client builder: {e:?}"),
-            )
-        })?
+        .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
         .no_proxy()
         .build()
-        .map_err(|e| {
-            Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Failed to create client: {e:?}"),
-            )
-        })?;
+        .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
 
-    let r = register(&client)
+    let r = extension::register(&client, &aws_config.runtime_api)
         .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
 
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config, aws_credentials);
@@ -384,7 +268,7 @@ async fn main() -> Result<()> {
         }
         Err(e) => {
             error!("Extension loop failed: {e:?}, Calling /next without Datadog instrumentation");
-            extension_loop_idle(&client, &r).await
+            extension_loop_idle(&client, &r, &aws_config).await
         }
     }
 }
@@ -448,15 +332,19 @@ fn create_api_key_factory(
     })))
 }
 
-async fn extension_loop_idle(client: &Client, r: &RegisterResponse) -> Result<()> {
+async fn extension_loop_idle(
+    client: &Client,
+    r: &RegisterResponse,
+    aws_config: &AwsConfig,
+) -> anyhow::Result<()> {
     loop {
-        match next_event(client, &r.extension_id).await {
+        match extension::next_event(client, &r.extension_id, &aws_config.runtime_api).await {
             Ok(_) => {
                 debug!("Extension is idle, skipping next event");
             }
             Err(e) => {
                 error!("Error getting next event: {e:?}");
-                return Err(e);
+                return Err(e.into());
             }
         };
     }
@@ -470,7 +358,7 @@ async fn extension_loop_active(
     r: &RegisterResponse,
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
-) -> Result<()> {
+) -> anyhow::Result<()> {
     let mut event_bus = EventBus::run();
 
     let account_id = r
@@ -558,7 +446,7 @@ async fn extension_loop_active(
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
         config,
-        aws_config,
+        Arc::clone(&aws_config),
         &invocation_processor,
         appsec_processor.as_ref(),
         Arc::clone(&propagator),
@@ -578,7 +466,8 @@ async fn extension_loop_active(
     let dogstatsd_cancel_token = start_dogstatsd(metrics_aggr_handle.clone()).await;
 
     let telemetry_listener_cancel_token =
-        setup_telemetry_client(&r.extension_id, logs_agent_channel).await?;
+        setup_telemetry_client(&r.extension_id, &aws_config.runtime_api, logs_agent_channel)
+            .await?;
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -597,7 +486,8 @@ async fn extension_loop_active(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
-    let next_lambda_response = next_event(client, &r.extension_id).await;
+    let next_lambda_response =
+        extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
@@ -647,7 +537,8 @@ async fn extension_loop_active(
                 &metrics_aggr_handle.clone(),
             )
             .await;
-            let next_response = next_event(client, &r.extension_id).await;
+            let next_response =
+                extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
             maybe_shutdown_event =
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
@@ -719,7 +610,8 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
-            let next_lambda_response = next_event(client, &r.extension_id);
+            let next_lambda_response =
+                extension::next_event(client, &aws_config.runtime_api, &r.extension_id);
             tokio::pin!(next_lambda_response);
             'next_invocation: loop {
                 tokio::select! {
@@ -932,7 +824,7 @@ async fn handle_event_bus_event(
 }
 
 async fn handle_next_invocation(
-    next_response: Result<NextEventResponse>,
+    next_response: Result<NextEventResponse, ExtensionError>,
     invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
 ) -> NextEventResponse {
     match next_response {
@@ -1210,8 +1102,9 @@ async fn start_dogstatsd(metrics_aggr_handle: MetricsAggregatorHandle) -> Cancel
 
 async fn setup_telemetry_client(
     extension_id: &str,
+    runtime_api: &str,
     logs_agent_channel: Sender<TelemetryEvent>,
-) -> Result<CancellationToken> {
+) -> anyhow::Result<CancellationToken> {
     let telemetry_listener =
         TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
 
@@ -1222,11 +1115,15 @@ async fn setup_telemetry_client(
         }
     });
 
-    let telemetry_client = TelemetryApiClient::new(extension_id.to_string(), TELEMETRY_PORT);
+    let telemetry_client = TelemetryApiClient::new(
+        extension_id.to_string(),
+        TELEMETRY_PORT,
+        runtime_api.to_string(),
+    );
     telemetry_client
         .subscribe()
         .await
-        .map_err(|e| Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;
     Ok(cancel_token)
 }
 
