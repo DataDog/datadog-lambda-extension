@@ -605,103 +605,38 @@ async fn extension_loop_active(
         let maybe_shutdown_event;
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
-        if current_flush_decision == FlushDecision::End {
-            // break loop after runtime done
-            // flush everything
-            // call next
-            // optionally flush after tick for long running invos
-            'flush_end: loop {
-                tokio::select! {
-                biased;
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
-                                break 'flush_end;
+        match current_flush_decision {
+            FlushDecision::End => {
+                // break loop after runtime done
+                // flush everything
+                // call next
+                // optionally flush after tick for long running invos
+                'flush_end: loop {
+                    tokio::select! {
+                    biased;
+                        Some(event) = event_bus.rx.recv() => {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                    break 'flush_end;
+                                }
                             }
                         }
-                    }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle.clone(),
-                        )
-                        .await;
-                    }
-                }
-            }
-            // flush
-            let mut locked_metrics = metrics_flushers.lock().await;
-            blocking_flush_all(
-                &logs_flusher,
-                &mut locked_metrics,
-                &*trace_flusher,
-                &*stats_flusher,
-                &proxy_flusher,
-                &mut race_flush_interval,
-                &metrics_aggr_handle.clone(),
-            )
-            .await;
-            let next_response = next_event(client, &r.extension_id).await;
-            maybe_shutdown_event =
-                handle_next_invocation(next_response, invocation_processor.clone()).await;
-        } else {
-            //Periodic flush scenario, flush at top of invocation
-            if current_flush_decision == FlushDecision::Continuous {
-                let lf = logs_flusher.clone();
-                pending_flush_handles
-                    .log_flush_handles
-                    .push_back(tokio::spawn(async move { lf.flush(None).await }));
-                let tf = trace_flusher.clone();
-                pending_flush_handles
-                    .trace_flush_handles
-                    .push_back(tokio::spawn(async move {
-                        tf.flush(None).await.unwrap_or_default()
-                    }));
-                let (metrics_flushers_copy, series, sketches) = {
-                    let locked_metrics = metrics_flushers.lock().await;
-                    let flush_response = metrics_aggr_handle
-                        .clone()
-                        .flush()
-                        .await
-                        .expect("can't flush metrics handle");
-                    (
-                        locked_metrics.clone(),
-                        flush_response.series,
-                        flush_response.distributions,
-                    )
-                };
-                for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
-                    let series_clone = series.clone();
-                    let sketches_clone = sketches.clone();
-                    let handle = tokio::spawn(async move {
-                        let (retry_series, retry_sketches) = flusher
-                            .flush_metrics(series_clone.clone(), sketches_clone.clone())
-                            .await
-                            .unwrap_or_default();
-                        MetricsRetryBatch {
-                            flusher_id: idx,
-                            series: retry_series,
-                            sketches: retry_sketches,
+                        _ = race_flush_interval.tick() => {
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            blocking_flush_all(
+                                &logs_flusher,
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle.clone(),
+                            )
+                            .await;
                         }
-                    });
-                    pending_flush_handles.metric_flush_handles.push_back(handle);
+                    }
                 }
-
-                let pf = proxy_flusher.clone();
-                pending_flush_handles
-                    .proxy_flush_handles
-                    .push_back(tokio::spawn(async move {
-                        pf.flush(None).await.unwrap_or_default()
-                    }));
-
-                race_flush_interval.reset();
-            } else if current_flush_decision == FlushDecision::Periodic {
+                // flush
                 let mut locked_metrics = metrics_flushers.lock().await;
                 blocking_flush_all(
                     &logs_flusher,
@@ -710,37 +645,68 @@ async fn extension_loop_active(
                     &*stats_flusher,
                     &proxy_flusher,
                     &mut race_flush_interval,
-                    &metrics_aggr_handle,
+                    &metrics_aggr_handle.clone(),
                 )
                 .await;
+                let next_response = next_event(client, &r.extension_id).await;
+                maybe_shutdown_event =
+                    handle_next_invocation(next_response, invocation_processor.clone()).await;
             }
-            // NO FLUSH SCENARIO
-            // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
-            // If we get platform.runtimeDone or platform.runtimeReport
-            // That's fine, we still wait to break until we get the response from next
-            // and then we break to determine if we'll flush or not
-            let next_lambda_response = next_event(client, &r.extension_id);
-            tokio::pin!(next_lambda_response);
-            'next_invocation: loop {
-                tokio::select! {
-                biased;
-                    next_response = &mut next_lambda_response => {
-                        // Dear reader this is important, you may be tempted to remove this
-                        // after all, why reset the flush interval if we're not flushing?
-                        // It's because the race_flush_interval is only for the RACE FLUSH
-                        // For long-running txns. The call to `flush_control.should_flush_end()`
-                        // has its own interval which is not reset here.
-                        race_flush_interval.reset();
-                        // Thank you for not removing race_flush_interval.reset();
+            FlushDecision::Continuous | FlushDecision::Periodic | FlushDecision::Dont => {
+                // Handle the specific flush logic first
+                match current_flush_decision {
+                    FlushDecision::Continuous => {
+                        //Continuous flush scenario, flush at top of invocation
+                        let lf = logs_flusher.clone();
+                        pending_flush_handles
+                            .log_flush_handles
+                            .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                        let tf = trace_flusher.clone();
+                        pending_flush_handles
+                            .trace_flush_handles
+                            .push_back(tokio::spawn(async move {
+                                tf.flush(None).await.unwrap_or_default()
+                            }));
+                        let (metrics_flushers_copy, series, sketches) = {
+                            let locked_metrics = metrics_flushers.lock().await;
+                            let flush_response = metrics_aggr_handle
+                                .clone()
+                                .flush()
+                                .await
+                                .expect("can't flush metrics handle");
+                            (
+                                locked_metrics.clone(),
+                                flush_response.series,
+                                flush_response.distributions,
+                            )
+                        };
+                        for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
+                            let series_clone = series.clone();
+                            let sketches_clone = sketches.clone();
+                            let handle = tokio::spawn(async move {
+                                let (retry_series, retry_sketches) = flusher
+                                    .flush_metrics(series_clone.clone(), sketches_clone.clone())
+                                    .await
+                                    .unwrap_or_default();
+                                MetricsRetryBatch {
+                                    flusher_id: idx,
+                                    series: retry_series,
+                                    sketches: retry_sketches,
+                                }
+                            });
+                            pending_flush_handles.metric_flush_handles.push_back(handle);
+                        }
 
-                        maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
-                        // Need to break here to re-call next
-                        break 'next_invocation;
+                        let pf = proxy_flusher.clone();
+                        pending_flush_handles
+                            .proxy_flush_handles
+                            .push_back(tokio::spawn(async move {
+                                pf.flush(None).await.unwrap_or_default()
+                            }));
+
+                        race_flush_interval.reset();
                     }
-                    Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
-                    }
-                    _ = race_flush_interval.tick() => {
+                    FlushDecision::Periodic => {
                         let mut locked_metrics = metrics_flushers.lock().await;
                         blocking_flush_all(
                             &logs_flusher,
@@ -752,6 +718,52 @@ async fn extension_loop_active(
                             &metrics_aggr_handle,
                         )
                         .await;
+                    }
+                    _ => {
+                        // No specific flush logic for Dont or End (End already handled above)
+                    }
+                }
+
+                // All non-End cases continue to the event loop
+                // NO FLUSH SCENARIO (for Dont) or CONTINUE PROCESSING (for Continuous/Periodic)
+                // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
+                // If we get platform.runtimeDone or platform.runtimeReport
+                // That's fine, we still wait to break until we get the response from next
+                // and then we break to determine if we'll flush or not
+                let next_lambda_response = next_event(client, &r.extension_id);
+                tokio::pin!(next_lambda_response);
+                'next_invocation: loop {
+                    tokio::select! {
+                    biased;
+                        next_response = &mut next_lambda_response => {
+                            // Dear reader this is important, you may be tempted to remove this
+                            // after all, why reset the flush interval if we're not flushing?
+                            // It's because the race_flush_interval is only for the RACE FLUSH
+                            // For long-running txns. The call to `flush_control.should_flush_end()`
+                            // has its own interval which is not reset here.
+                            race_flush_interval.reset();
+                            // Thank you for not removing race_flush_interval.reset();
+
+                            maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                            // Need to break here to re-call next
+                            break 'next_invocation;
+                        }
+                        Some(event) = event_bus.rx.recv() => {
+                            handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        }
+                        _ = race_flush_interval.tick() => {
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            blocking_flush_all(
+                                &logs_flusher,
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle,
+                            )
+                            .await;
+                        }
                     }
                 }
             }
