@@ -25,6 +25,7 @@ struct Bucket {
 pub struct Stats {
     // TODO: add more fields
     pub hits: u32,
+    pub duration: u64, // in nanoseconds
 }
 
 pub struct StatsConcentrator {

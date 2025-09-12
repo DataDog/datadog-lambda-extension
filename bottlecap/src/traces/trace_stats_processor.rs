@@ -34,6 +34,7 @@ impl SendingTraceStatsProcessor {
                     stats: Stats {
                         // TODO: handle error == 1
                         hits: 1,
+                        duration: span.duration.try_into().unwrap_or_default(),
                     },
                 };
                 debug!("Sending single stats to the stats concentrator.");
