@@ -22,6 +22,7 @@
 pub mod appsec;
 pub mod config;
 pub mod event_bus;
+pub mod extension;
 pub mod fips;
 pub mod http;
 pub mod lifecycle;
@@ -37,16 +38,6 @@ pub mod tags;
 pub mod telemetry;
 pub mod traces;
 
-use std::{env, io};
-
-pub const EXTENSION_HOST: &str = "0.0.0.0";
-pub const EXTENSION_HOST_IP: [u8; 4] = [0, 0, 0, 0];
-pub const EXTENSION_NAME: &str = "datadog-agent";
-pub const EXTENSION_FEATURES: &str = "accountId";
-pub const EXTENSION_NAME_HEADER: &str = "Lambda-Extension-Name";
-pub const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
-pub const EXTENSION_ACCEPT_FEATURE_HEADER: &str = "Lambda-Extension-Accept-Feature";
-pub const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";
 
 // todo: consider making this configurable
@@ -60,18 +51,3 @@ pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
 // telemetry is implemented on a raw socket now and
 // does not multiplex routes on the same port.
 pub const TELEMETRY_PORT: u16 = 8999;
-
-/// Return the base URL for the lambda runtime API
-///
-/// # Errors
-///
-/// Function will error if the envar `AWS_LAMBDA_RUNTIME_API` is not set in the
-/// environment.
-pub fn base_url(route: &str) -> io::Result<String> {
-    Ok(format!(
-        "http://{}/{}",
-        env::var("AWS_LAMBDA_RUNTIME_API")
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
-        route
-    ))
-}
