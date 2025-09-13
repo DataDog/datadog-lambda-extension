@@ -178,11 +178,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 None => trace.clone(),
             };
             let proxy_https = proxy_https.clone();
-            tasks.push(tokio::spawn(async move {
-                trace_with_endpoint
-                    .send_proxy(proxy_https.as_deref())
-                    .await
-                    .last_result
+            tasks.push(tokio::task::spawn_blocking(move || {
+                tokio::runtime::Handle::current().block_on(async move {
+                    trace_with_endpoint
+                        .send_proxy(proxy_https.as_deref())
+                        .await
+                        .last_result
+                })
             }));
         }
 
