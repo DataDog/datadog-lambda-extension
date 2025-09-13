@@ -169,28 +169,30 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let start = std::time::Instant::now();
 
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
-        let mut tasks = Vec::with_capacity(coalesced_traces.len());
         debug!("Flushing {} traces", coalesced_traces.len());
 
+        let mut join_set = JoinSet::new();
         for trace in &coalesced_traces {
             let trace_with_endpoint = match endpoint {
                 Some(additional_endpoint) => trace.with_endpoint(additional_endpoint.clone()),
                 None => trace.clone(),
             };
             let proxy_https = proxy_https.clone();
-            tasks.push(tokio::task::spawn_blocking(move || {
-                tokio::runtime::Handle::current().block_on(async move {
+            join_set.spawn(tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to create runtime");
+
+                // Send proxy has some kind of blocking call inside which refuses to yield
+                // so we run this in another thread/RT
+                rt.block_on(async move {
                     trace_with_endpoint
                         .send_proxy(proxy_https.as_deref())
                         .await
                         .last_result
                 })
             }));
-        }
-
-        let mut join_set = JoinSet::new();
-        for task in tasks {
-            join_set.spawn(task);
         }
 
         while let Some(result) = join_set.join_next().await {
