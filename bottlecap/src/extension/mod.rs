@@ -1,6 +1,5 @@
 use reqwest::Client;
 use serde::Deserialize;
-use std::env;
 use tracing::error;
 
 pub const EXTENSION_HOST: &str = "0.0.0.0";
@@ -15,10 +14,6 @@ pub const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 /// Error conditions that can arise from extension operations
 #[derive(thiserror::Error, Debug)]
 pub enum ExtensionError {
-    /// Environment variable error
-    #[error("Environment variable error: {0}")]
-    EnvVarError(#[from] env::VarError),
-
     /// HTTP request error
     #[error("HTTP request error: {0}")]
     HttpError(#[from] reqwest::Error),
