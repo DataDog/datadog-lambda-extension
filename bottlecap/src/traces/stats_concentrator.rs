@@ -13,6 +13,7 @@ pub struct AggregationKey {
     pub service: String,
     pub name: String,
     pub resource: String,
+    pub r#type: String,
 }
 
 // Aggregated stats for a time interval across all the aggregation keys.
@@ -131,7 +132,7 @@ impl StatsConcentrator {
                     name: aggregation_key.name.clone(),
                     resource: aggregation_key.resource.clone(),
                     http_status_code: 0,
-                    r#type: String::new(),
+                    r#type: aggregation_key.r#type.clone(),
                     db_type: String::new(),
                     hits: stats.hits.try_into().unwrap_or_default(),
                     errors: stats.error.try_into().unwrap_or_default(),

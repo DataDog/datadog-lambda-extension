@@ -29,6 +29,7 @@ impl SendingTraceStatsProcessor {
                         service: span.service.clone(),
                         name: span.name.clone(),
                         resource: span.resource.clone(),
+                        r#type: span.r#type.clone(),
                     },
                     stats: Stats {
                         hits: 1,
