@@ -80,7 +80,6 @@ use dogstatsd::{
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
 };
-use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
 use serde::Deserialize;
 use std::{
@@ -88,10 +87,7 @@ use std::{
     env,
     io::{Error, Result},
     path::Path,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
@@ -102,10 +98,10 @@ use ustr::Ustr;
 
 #[allow(clippy::struct_field_names)]
 struct PendingFlushHandles {
-    trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
-    log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
-    metric_flush_handles: FuturesOrdered<JoinHandle<MetricsRetryBatch>>,
-    proxy_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
+    trace_flush_handles: Vec<JoinHandle<Vec<SendData>>>,
+    log_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
+    metric_flush_handles: Vec<JoinHandle<MetricsRetryBatch>>,
+    proxy_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
 }
 
 struct MetricsRetryBatch {
@@ -117,11 +113,20 @@ struct MetricsRetryBatch {
 impl PendingFlushHandles {
     fn new() -> Self {
         Self {
-            trace_flush_handles: FuturesOrdered::new(),
-            log_flush_handles: FuturesOrdered::new(),
-            metric_flush_handles: FuturesOrdered::new(),
-            proxy_flush_handles: FuturesOrdered::new(),
+            trace_flush_handles: Vec::new(),
+            log_flush_handles: Vec::new(),
+            metric_flush_handles: Vec::new(),
+            proxy_flush_handles: Vec::new(),
         }
+    }
+
+    fn has_pending_handles(&self) -> bool {
+        let trace_pending = self.trace_flush_handles.iter().any(|h| !h.is_finished());
+        let log_pending = self.log_flush_handles.iter().any(|h| !h.is_finished());
+        let metric_pending = self.metric_flush_handles.iter().any(|h| !h.is_finished());
+        let proxy_pending = self.proxy_flush_handles.iter().any(|h| !h.is_finished());
+
+        trace_pending || log_pending || metric_pending || proxy_pending
     }
 
     async fn await_flush_handles(
@@ -134,8 +139,8 @@ impl PendingFlushHandles {
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
 
-        while let Some(retries) = self.trace_flush_handles.next().await {
-            match retries {
+        for handle in self.trace_flush_handles.drain(..) {
+            match handle.await {
                 Ok(retry) => {
                     let tf = trace_flusher.clone();
                     if !retry.is_empty() {
@@ -151,8 +156,8 @@ impl PendingFlushHandles {
             }
         }
 
-        while let Some(retries) = self.log_flush_handles.next().await {
-            match retries {
+        for handle in self.log_flush_handles.drain(..) {
+            match handle.await {
                 Ok(retry) => {
                     if !retry.is_empty() {
                         debug!("redriving {:?} log payloads", retry.len());
@@ -177,9 +182,9 @@ impl PendingFlushHandles {
             }
         }
 
-        while let Some(retries) = self.metric_flush_handles.next().await {
+        for handle in self.metric_flush_handles.drain(..) {
             let mf = metrics_flushers.clone();
-            match retries {
+            match handle.await {
                 Ok(retry_batch) => {
                     if !retry_batch.series.is_empty() || !retry_batch.sketches.is_empty() {
                         debug!(
@@ -203,8 +208,8 @@ impl PendingFlushHandles {
             }
         }
 
-        while let Some(retries) = self.proxy_flush_handles.next().await {
-            match retries {
+        for handle in self.proxy_flush_handles.drain(..) {
+            match handle.await {
                 Ok(batch) => {
                     if !batch.is_empty() {
                         debug!("Redriving {:?} APM proxy payloads", batch.len());
@@ -603,7 +608,6 @@ async fn extension_loop_active(
     let next_lambda_response = next_event(client, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
-    let flush_in_progress = Arc::new(AtomicBool::new(false));
     handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
     loop {
         let maybe_shutdown_event;
@@ -625,20 +629,17 @@ async fn extension_loop_active(
                         }
                     }
                     _ = race_flush_interval.tick() => {
-                        // Only trigger race flush if no continuous flush is in progress
-                        if !flush_in_progress.load(Ordering::Acquire) {
-                            let mut locked_metrics = metrics_flushers.lock().await;
-                            blocking_flush_all(
-                                &logs_flusher,
-                                &mut locked_metrics,
-                                &*trace_flusher,
-                                &*stats_flusher,
-                                &proxy_flusher,
-                                &mut race_flush_interval,
-                                &metrics_aggr_handle.clone(),
-                            )
-                            .await;
-                        }
+                        let mut locked_metrics = metrics_flushers.lock().await;
+                        blocking_flush_all(
+                            &logs_flusher,
+                            &mut locked_metrics,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &proxy_flusher,
+                            &mut race_flush_interval,
+                            &metrics_aggr_handle.clone(),
+                        )
+                        .await;
                     }
                 }
             }
@@ -659,19 +660,25 @@ async fn extension_loop_active(
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
-            if current_flush_decision == FlushDecision::Continuous {
-                flush_in_progress.store(true, Ordering::Release);
+            if current_flush_decision == FlushDecision::Continuous
+                && !pending_flush_handles.has_pending_handles()
+            {
+                println!("aj decided to flush now");
+                let total_spawn = Instant::now();
 
+                let lf_spawn = Instant::now();
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
-                    .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                    .push(tokio::spawn(async move { lf.flush(None).await }));
                 let tf = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
-                    .push_back(tokio::spawn(async move {
+                    .push(tokio::spawn(async move {
                         tf.flush(None).await.unwrap_or_default()
                     }));
+                println!("log spawn: {:?}", lf_spawn.elapsed());
+                let m_spawn = Instant::now();
                 let (metrics_flushers_copy, series, sketches) = {
                     let locked_metrics = metrics_flushers.lock().await;
                     let flush_response = metrics_aggr_handle
@@ -685,6 +692,8 @@ async fn extension_loop_active(
                         flush_response.distributions,
                     )
                 };
+                println!("metrics aggr collect: {:?}", m_spawn.elapsed());
+                let m_task = Instant::now();
                 for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
                     let series_clone = series.clone();
                     let sketches_clone = sketches.clone();
@@ -699,18 +708,21 @@ async fn extension_loop_active(
                             sketches: retry_sketches,
                         }
                     });
-                    pending_flush_handles.metric_flush_handles.push_back(handle);
+                    pending_flush_handles.metric_flush_handles.push(handle);
                 }
+                println!("metrics req spawn: {:?}", m_task.elapsed());
 
+                let pf_spawn = Instant::now();
                 let pf = proxy_flusher.clone();
                 pending_flush_handles
                     .proxy_flush_handles
-                    .push_back(tokio::spawn(async move {
+                    .push(tokio::spawn(async move {
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
-                flush_in_progress.store(false, Ordering::Release);
+                println!("pfspawn: {:?}", pf_spawn.elapsed());
                 race_flush_interval.reset();
+                println!("flush spawn time: {:?}", total_spawn.elapsed());
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
                 blocking_flush_all(
@@ -731,10 +743,12 @@ async fn extension_loop_active(
             // and then we break to determine if we'll flush or not
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
+            println!("calling for next or eventbus");
             'next_invocation: loop {
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
+                        println!("aj got next");
                         // Dear reader this is important, you may be tempted to remove this
                         // after all, why reset the flush interval if we're not flushing?
                         // It's because the race_flush_interval is only for the RACE FLUSH
@@ -751,7 +765,8 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        if !flush_in_progress.load(Ordering::Acquire) {
+                        if !pending_flush_handles.has_pending_handles() {
+                            println!("aj race flush called but shouldn't");
                             let mut locked_metrics = metrics_flushers.lock().await;
                             blocking_flush_all(
                                 &logs_flusher,
@@ -959,8 +974,12 @@ async fn handle_next_invocation(
                 deadline_ms,
                 invoked_function_arn.clone()
             );
+            let now = Instant::now();
             let mut p = invocation_processor.lock().await;
+            println!("/next lock wait time: {:?}", now.elapsed());
+            let now = Instant::now();
             p.on_invoke_event(request_id.into());
+            println!("on invoke event wait time: {:?}", now.elapsed());
             drop(p);
         }
         Ok(NextEventResponse::Shutdown {
