@@ -8,13 +8,12 @@ use hyper::StatusCode;
 use reqwest::header::HeaderMap;
 use std::error::Error;
 use std::time::Instant;
-use std::{
-    io::Write,
-    sync::{Arc, Mutex},
-};
+use std::{io::Write, sync::Arc};
 use thiserror::Error as ThisError;
-use tokio::sync::OnceCell;
-use tokio::task::JoinSet;
+use tokio::{
+    sync::{Mutex, OnceCell},
+    task::JoinSet,
+};
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -247,7 +246,7 @@ impl LogsFlusher {
         } else {
             // Get batches from primary flusher's aggregator
             let logs_batches = Arc::new({
-                let mut guard = self.flushers[0].aggregator.lock().expect("lock poisoned");
+                let mut guard = self.flushers[0].aggregator.lock().await;
                 let mut batches = Vec::new();
                 let mut current_batch = guard.get_batch();
                 while !current_batch.is_empty() {

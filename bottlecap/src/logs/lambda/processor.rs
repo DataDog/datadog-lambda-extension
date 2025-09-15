@@ -1,6 +1,6 @@
 use std::error::Error;
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::Sender;
+use std::sync::Arc;
+use tokio::sync::{Mutex, mpsc::Sender};
 
 use tracing::{debug, error};
 
@@ -353,7 +353,7 @@ impl LambdaProcessor {
         if self.ready_logs.is_empty() {
             return;
         }
-        let mut aggregator = aggregator.lock().expect("lock poisoned");
+        let mut aggregator = aggregator.lock().await;
         aggregator.add_batch(std::mem::take(&mut self.ready_logs));
     }
 }
@@ -752,7 +752,7 @@ mod tests {
 
         processor.process(event.clone(), &aggregator).await;
 
-        let mut aggregator_lock = aggregator.lock().unwrap();
+        let mut aggregator_lock = aggregator.lock().await;
         let batch = aggregator_lock.get_batch();
         let log = IntakeLog {
             message: Message {
@@ -804,7 +804,7 @@ mod tests {
 
         processor.process(event.clone(), &aggregator).await;
 
-        let mut aggregator_lock = aggregator.lock().unwrap();
+        let mut aggregator_lock = aggregator.lock().await;
         let batch = aggregator_lock.get_batch();
         assert_eq!(batch.len(), 0);
     }
@@ -836,7 +836,7 @@ mod tests {
         processor.process(event.clone(), &aggregator).await;
         assert_eq!(processor.orphan_logs.len(), 1);
 
-        let mut aggregator_lock = aggregator.lock().unwrap();
+        let mut aggregator_lock = aggregator.lock().await;
         let batch = aggregator_lock.get_batch();
         assert!(batch.is_empty());
     }
@@ -884,7 +884,7 @@ mod tests {
         processor.process(event.clone(), &aggregator).await;
 
         // Verify aggregator logs
-        let mut aggregator_lock = aggregator.lock().unwrap();
+        let mut aggregator_lock = aggregator.lock().await;
         let batch = aggregator_lock.get_batch();
         let start_log = IntakeLog {
             message: Message {
