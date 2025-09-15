@@ -30,6 +30,7 @@ pub struct Stats {
     pub hits: i32,
     pub duration: i64, // in nanoseconds
     pub error: i32,
+    pub top_level_hits: f64,
 }
 
 pub struct StatsConcentrator {
@@ -67,6 +68,7 @@ impl StatsConcentrator {
         stats.hits += stats_event.stats.hits;
         stats.error += stats_event.stats.error;
         stats.duration += stats_event.stats.duration;
+        stats.top_level_hits += stats_event.stats.top_level_hits;
     }
 
     fn get_bucket_timestamp(timestamp: u64) -> u64 {
@@ -119,6 +121,8 @@ impl StatsConcentrator {
         current_timestamp - bucket_timestamp >= BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT
     }
 
+    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::cast_sign_loss)]
     fn construct_stats_payload(
         config: &Config,
         timestamp: u64,
@@ -155,8 +159,7 @@ impl StatsConcentrator {
                     ok_summary: vec![],
                     error_summary: vec![],
                     synthetics: false,
-                    // TODO: handle top_level_hits
-                    top_level_hits: 0,
+                    top_level_hits: stats.top_level_hits.round() as u64,
                     span_kind: String::new(),
                     peer_tags: vec![],
                     is_trace_root: 1,

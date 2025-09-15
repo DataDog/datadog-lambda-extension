@@ -35,6 +35,7 @@ impl SendingTraceStatsProcessor {
                         hits: 1,
                         error: span.error,
                         duration: span.duration,
+                        top_level_hits: span.metrics.get("_dd.top_level").map_or(0.0, |v| *v),
                     },
                 };
                 debug!("Sending single stats to the stats concentrator.");
