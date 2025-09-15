@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(
             response,
             NextEventResponse::Invoke {
-                deadline_ms: 676051,
+                deadline_ms: 676_051,
                 request_id: "3da1f2dc-3222-475e-9205-e2e6c6318895".to_string(),
                 invoked_function_arn:
                     "arn:aws:lambda:us-east-1:123456789012:function:ExtensionTest".to_string()
@@ -200,7 +200,7 @@ mod tests {
             response,
             NextEventResponse::Shutdown {
                 shutdown_reason: "SPINDOWN".to_string(),
-                deadline_ms: 676051,
+                deadline_ms: 676_051,
             }
         );
     }
