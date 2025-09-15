@@ -9,6 +9,7 @@ use tracing::debug;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AggregationKey {
+    pub env: String,
     pub service: String,
     pub name: String,
     pub resource: String,
@@ -110,7 +111,7 @@ impl StatsConcentrator {
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
             hostname: String::new(),
-            env: self.config.env.clone().unwrap_or_default(),
+            env: aggregation_key.env.clone(),
             version: self.config.version.clone().unwrap_or_default(),
             lang: "rust".to_string(),
             tracer_version: String::new(),
