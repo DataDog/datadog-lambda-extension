@@ -1307,7 +1307,7 @@ mod tests {
         };
         let lib = OtelInstrumentationScope {
             name: "opentelemetry_instrumentation_aws_lambda".to_string(),
-            version: "".to_string(),
+            version: String::new(),
             attributes: [].to_vec(),
             dropped_attributes_count: 0,
         };
