@@ -82,22 +82,19 @@ impl StatsConcentrator {
             .try_into()
             .expect("Failed to convert timestamp to u64");
         let mut ret = Vec::new();
-        let mut to_remove = Vec::new();
 
-        for (&timestamp, bucket) in &self.buckets {
-            if !force_flush && !Self::should_flush_bucket(current_timestamp, timestamp) {
-                continue;
+        self.buckets.retain(|&timestamp, bucket| {
+            if force_flush || Self::should_flush_bucket(current_timestamp, timestamp) {
+                // Flush and remove this bucket
+                for (aggregation_key, stats) in &bucket.data {
+                    ret.push(Self::construct_stats_payload(&self.config, timestamp, aggregation_key, *stats));
+                }
+                false
+            } else {
+                // Keep this bucket
+                true
             }
-
-            for (aggregation_key, stats) in &bucket.data {
-                ret.push(self.construct_stats_payload(timestamp, aggregation_key, *stats));
-            }
-            to_remove.push(timestamp);
-        }
-
-        for timestamp in to_remove {
-            self.buckets.remove(&timestamp);
-        }
+        });
 
         ret
     }
@@ -108,7 +105,7 @@ impl StatsConcentrator {
     }
 
     fn construct_stats_payload(
-        &self,
+        config: &Config,
         timestamp: u64,
         aggregation_key: &AggregationKey,
         stats: Stats,
@@ -116,7 +113,7 @@ impl StatsConcentrator {
         pb::ClientStatsPayload {
             hostname: String::new(),
             env: aggregation_key.env.clone(),
-            version: self.config.version.clone().unwrap_or_default(),
+            version: config.version.clone().unwrap_or_default(),
             lang: "rust".to_string(),
             tracer_version: String::new(),
             runtime_id: String::new(),
