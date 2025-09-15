@@ -11,8 +11,11 @@ use tracing::debug;
 pub struct AggregationKey {
     pub env: String,
     pub service: String,
+    // e.g. "aws.lambda.load", "aws.lambda.import"
     pub name: String,
+    // e.g. "my-lambda-function-name", "datadog_lambda.handler", "urllib.request"
     pub resource: String,
+    // e.g. "aws.lambda.load", "aws.lambda.import"
     pub r#type: String,
 }
 
