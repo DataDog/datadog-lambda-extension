@@ -9,7 +9,7 @@ use tracing::debug;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AggregationKey {
-    // TODO: add more fields
+    pub service: String,
     pub name: String,
     pub resource: String,
 }
@@ -22,7 +22,6 @@ struct Bucket {
 
 #[derive(Clone, Debug, Default, Copy)]
 pub struct Stats {
-    // TODO: add more fields
     pub hits: i32,
     pub duration: i64, // in nanoseconds
     pub error: i32,
@@ -118,7 +117,7 @@ impl StatsConcentrator {
             runtime_id: String::new(),
             sequence: 0,
             agent_aggregation: String::new(),
-            service: self.config.service.clone().unwrap_or_default(),
+            service: aggregation_key.service.clone(),
             container_id: String::new(),
             tags: vec![],
             git_commit_sha: String::new(),
@@ -127,7 +126,7 @@ impl StatsConcentrator {
                 start: timestamp,
                 duration: BUCKET_DURATION_NS,
                 stats: vec![pb::ClientGroupedStats {
-                    service: self.config.service.clone().unwrap_or_default(),
+                    service: aggregation_key.service.clone(),
                     name: aggregation_key.name.clone(),
                     resource: aggregation_key.resource.clone(),
                     http_status_code: 0,

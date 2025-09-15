@@ -25,6 +25,7 @@ impl SendingTraceStatsProcessor {
                 let stats = StatsEvent {
                     time: span.start.try_into().unwrap_or_default(),
                     aggregation_key: AggregationKey {
+                        service: span.service.clone(),
                         name: span.name.clone(),
                         resource: span.resource.clone(),
                     },
