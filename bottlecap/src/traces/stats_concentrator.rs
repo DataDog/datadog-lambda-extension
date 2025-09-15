@@ -5,7 +5,7 @@ use datadog_trace_protobuf::pb;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::debug;
+use tracing::{debug, error};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct AggregationKey {
@@ -75,19 +75,32 @@ impl StatsConcentrator {
     // buckets, which may still be getting data.
     #[must_use]
     pub fn get_stats(&mut self, force_flush: bool) -> Vec<pb::ClientStatsPayload> {
-        let current_timestamp: u64 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("Failed to get current timestamp")
-            .as_nanos()
-            .try_into()
-            .expect("Failed to convert timestamp to u64");
-        let mut ret = Vec::new();
+        let current_timestamp: u64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
+            Ok(duration) => {
+                if let Ok(ts) = duration.as_nanos().try_into() {
+                    ts
+                } else {
+                    error!("Timestamp overflow, skipping stats flush");
+                    return Vec::new();
+                }
+            }
+            Err(e) => {
+                error!("Failed to get current timestamp: {e}, skipping stats flush");
+                return Vec::new();
+            }
+        };
 
+        let mut ret = Vec::new();
         self.buckets.retain(|&timestamp, bucket| {
             if force_flush || Self::should_flush_bucket(current_timestamp, timestamp) {
                 // Flush and remove this bucket
                 for (aggregation_key, stats) in &bucket.data {
-                    ret.push(Self::construct_stats_payload(&self.config, timestamp, aggregation_key, *stats));
+                    ret.push(Self::construct_stats_payload(
+                        &self.config,
+                        timestamp,
+                        aggregation_key,
+                        *stats,
+                    ));
                 }
                 false
             } else {
