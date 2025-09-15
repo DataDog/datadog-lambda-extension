@@ -1,4 +1,5 @@
 use crate::{
+    event_bus::Event,
     http::{extract_request_body, handler_not_found},
     telemetry::events::{TelemetryEvent, TelemetryRecord},
 };
@@ -22,12 +23,12 @@ pub struct TelemetryListener {
     host: [u8; 4],
     port: u16,
     cancel_token: CancellationToken,
-    event_bus: Sender<TelemetryEvent>,
+    event_bus: Sender<Event>,
 }
 
 impl TelemetryListener {
     #[must_use]
-    pub fn new(host: [u8; 4], port: u16, event_bus: Sender<TelemetryEvent>) -> Self {
+    pub fn new(host: [u8; 4], port: u16, event_bus: Sender<Event>) -> Self {
         let cancel_token = CancellationToken::new();
         Self {
             host,
@@ -74,15 +75,15 @@ impl TelemetryListener {
             .with_state(event_bus)
     }
 
-    async fn graceful_shutdown(cancel_token: CancellationToken, event_bus: Sender<TelemetryEvent>) {
+    async fn graceful_shutdown(cancel_token: CancellationToken, event_bus: Sender<Event>) {
         cancel_token.cancelled().await;
         debug!("Telemetry API | Shutdown signal received, sending tombstone event");
 
         // Send tombstone event to signal shutdown
-        let tombstone_event = TelemetryEvent {
+        let tombstone_event = Event::Telemetry(TelemetryEvent {
             time: Utc::now(),
             record: TelemetryRecord::PlatformTombstone,
-        };
+        });
 
         if let Err(e) = event_bus.send(tombstone_event).await {
             debug!("Failed to send tombstone event: {:?}", e);
@@ -91,7 +92,7 @@ impl TelemetryListener {
         debug!("Telemetry API | Shutting down");
     }
 
-    async fn handle(State(event_bus): State<Sender<TelemetryEvent>>, request: Request) -> Response {
+    async fn handle(State(event_bus): State<Sender<Event>>, request: Request) -> Response {
         let (_, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -119,7 +120,10 @@ impl TelemetryListener {
         };
 
         for event in telemetry_events.drain(..) {
-            event_bus.send(event).await.expect("infallible");
+            event_bus
+                .send(Event::Telemetry(event))
+                .await
+                .expect("infallible");
         }
 
         (StatusCode::OK, "OK").into_response()
@@ -158,9 +162,15 @@ mod tests {
         // Check that the response is OK
         assert_eq!(response.status(), axum::http::StatusCode::OK);
 
-        let telemetry_event = rx.recv().await.unwrap();
+        let event = rx.recv().await.unwrap();
         let expected_time =
             DateTime::parse_from_rfc3339("2024-04-25T17:35:59.944Z").expect("failed to parse time");
+
+        let telemetry_event = match event {
+            Event::Telemetry(event) => event,
+            _ => panic!("Expected telemetry event"),
+        };
+
         assert_eq!(telemetry_event.time, expected_time);
         assert_eq!(telemetry_event.record, TelemetryRecord::PlatformInitStart {
             initialization_type: InitType::OnDemand,

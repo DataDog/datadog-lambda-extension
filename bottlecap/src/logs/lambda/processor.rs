@@ -82,7 +82,6 @@ impl LambdaProcessor {
 
     #[allow(clippy::too_many_lines)]
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
-        let copy = event.clone();
         match event.record {
             TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
                 let message = match v {
@@ -115,10 +114,6 @@ impl LambdaProcessor {
                 runtime_version_arn,
                 .. // TODO: check if we could do something with this metrics: `initialization_type` and `phase`
             } => {
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
-                    error!("Failed to send PlatformInitStart to the main event bus: {}", e);
-                }
-
                 let rv = runtime_version.unwrap_or("?".to_string()); // TODO: check what does containers display
                 let rv_arn = runtime_version_arn.unwrap_or("?".to_string()); // TODO: check what do containers display
 
@@ -130,23 +125,12 @@ impl LambdaProcessor {
                     None,
                 ))
             },
-            // TODO: check if we could do anything with the fields from `PlatformInitReport`
-            TelemetryRecord::PlatformInitReport { .. } => {
-                if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
-                    error!("Failed to send PlatformInitReport to the main event bus: {}", e);
-                }
-                // We don't need to process any log for this event
-                Err("Unsupported event type".into())
-            }
             // This is the first log where `request_id` is available
             // So we set it here and use it in the unprocessed and following logs.
             TelemetryRecord::PlatformStart {
                 request_id,
                 version,
             } => {
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
-                    error!("Failed to send PlatformStart to the main event bus: {}", e);
-                }
                 // Set request_id for unprocessed and future logs
                 self.invocation_context.request_id.clone_from(&request_id);
 
@@ -160,10 +144,6 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformRuntimeDone { request_id, status, metrics, error_type, .. } => {  // TODO: check what to do with rest of the fields
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
-                    error!("Failed to send PlatformRuntimeDone to the main event bus: {}", e);
-                }
-
                 let mut message = format!("END RequestId: {request_id}"); 
                 let mut result_status = "info".to_string();
                 if let Some(metrics) = metrics {
@@ -188,10 +168,6 @@ impl LambdaProcessor {
                 ))
             },
             TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
-                if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
-                    error!("Failed to send PlatformReport to the main event bus: {}", e);
-                }
-
                 let mut post_runtime_duration_ms = 0.0;
                 // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
                 if self.invocation_context.runtime_duration_ms > 0.0 {
@@ -222,6 +198,7 @@ impl LambdaProcessor {
                     None,
                 ))
             },
+            // TODO: PlatformInitReport
             // TODO: PlatformInitRuntimeDone
             // TODO: PlatformExtension
             // TODO: PlatformTelemetrySubscription
