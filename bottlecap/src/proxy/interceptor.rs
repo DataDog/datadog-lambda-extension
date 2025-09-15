@@ -1,9 +1,9 @@
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::propagation::DatadogCompositePropagator;
 use crate::{
-    EXTENSION_HOST, appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
-    lifecycle::invocation::processor::Processor as InvocationProcessor, lwa,
-    proxy::tee_body::TeeBodyWithCompletion,
+    appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
+    extension::EXTENSION_HOST, lifecycle::invocation::processor::Processor as InvocationProcessor,
+    lwa, proxy::tee_body::TeeBodyWithCompletion,
 };
 use axum::{
     Router,

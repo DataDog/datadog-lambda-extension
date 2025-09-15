@@ -4,22 +4,30 @@ use serde_json;
 use std::error::Error;
 use tracing::{debug, error};
 
-use crate::{EXTENSION_ID_HEADER, TELEMETRY_SUBSCRIPTION_ROUTE, base_url};
+use crate::{
+    TELEMETRY_SUBSCRIPTION_ROUTE,
+    extension::{EXTENSION_ID_HEADER, base_url},
+};
 
 #[allow(clippy::module_name_repetitions)]
 pub struct TelemetryApiClient {
     pub extension_id: String,
     pub port: u16,
+    pub runtime_api: String,
 }
 
 impl TelemetryApiClient {
     #[must_use]
-    pub fn new(extension_id: String, port: u16) -> Self {
-        TelemetryApiClient { extension_id, port }
+    pub fn new(extension_id: String, port: u16, runtime_api: String) -> Self {
+        TelemetryApiClient {
+            extension_id,
+            port,
+            runtime_api,
+        }
     }
 
     pub async fn subscribe(&self) -> Result<Response, Box<dyn Error>> {
-        let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE)?;
+        let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE, &self.runtime_api);
         let resp = create_reqwest_client_builder()?
             .no_proxy()
             .build()
