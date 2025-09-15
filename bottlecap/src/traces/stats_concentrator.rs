@@ -130,7 +130,7 @@ impl StatsConcentrator {
             image_tag: String::new(),
             stats: vec![pb::ClientStatsBucket {
                 start: timestamp,
-                duration: 0,
+                duration: BUCKET_DURATION_NS,
                 stats: vec![pb::ClientGroupedStats {
                     service: self.config.service.clone().unwrap_or_default(),
                     name: aggregation_key.name.clone(),
@@ -140,7 +140,7 @@ impl StatsConcentrator {
                     db_type: String::new(),
                     hits: stats.hits.try_into().unwrap_or_default(),
                     errors: stats.error.try_into().unwrap_or_default(),
-                    duration: 0,
+                    duration: stats.duration.try_into().unwrap_or_default(),
                     ok_summary: vec![],
                     error_summary: vec![],
                     synthetics: false,
