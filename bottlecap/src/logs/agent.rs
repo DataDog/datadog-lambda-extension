@@ -1,5 +1,8 @@
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc::{self, Sender};
+use std::sync::Arc;
+use tokio::sync::{
+    Mutex,
+    mpsc::{self, Sender},
+};
 
 use crate::event_bus::Event;
 use crate::logs::{aggregator::Aggregator, processor::LogsProcessor};
