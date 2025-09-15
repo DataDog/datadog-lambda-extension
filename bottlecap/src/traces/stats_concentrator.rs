@@ -65,6 +65,8 @@ impl StatsConcentrator {
         let stats = bucket.data.entry(stats_event.aggregation_key).or_default();
 
         stats.hits += stats_event.stats.hits;
+        stats.error += stats_event.stats.error;
+        stats.duration += stats_event.stats.duration;
     }
 
     fn get_bucket_timestamp(timestamp: u64) -> u64 {
