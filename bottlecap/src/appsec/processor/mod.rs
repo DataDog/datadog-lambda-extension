@@ -3,7 +3,7 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::Read;
 use std::num::NonZero;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -12,6 +12,7 @@ use datadog_trace_protobuf::pb::Span;
 use itertools::Itertools;
 use libddwaf::object::{WafMap, WafOwned};
 use libddwaf::{Builder, Config as WafConfig, Handle};
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 use crate::appsec::processor::context::Context;
@@ -114,14 +115,7 @@ impl Processor {
         // Taking the sampler first, as it implies a temporary immutable borrow...
         let api_sec_sampler = self.api_sec_sampler.as_ref().map(Arc::clone);
         let api_sec_sampler = if let Some(api_sec_sampler) = &api_sec_sampler {
-            if let Ok(api_sec_sampler) = api_sec_sampler.lock() {
-                Some(api_sec_sampler)
-            } else {
-                warn!(
-                    "aap: API Security sampler was panic-poisoned, skipping API Security sampling decision..."
-                );
-                None
-            }
+            Some(api_sec_sampler.lock().await)
         } else {
             None
         };
