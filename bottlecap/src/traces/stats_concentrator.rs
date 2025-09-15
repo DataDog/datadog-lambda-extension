@@ -135,7 +135,7 @@ impl StatsConcentrator {
                     service: self.config.service.clone().unwrap_or_default(),
                     name: aggregation_key.name.clone(),
                     resource: aggregation_key.resource.clone(),
-                    http_status_code: 200,
+                    http_status_code: 0,
                     r#type: String::new(),
                     db_type: String::new(),
                     hits: stats.hits.try_into().unwrap_or_default(),
