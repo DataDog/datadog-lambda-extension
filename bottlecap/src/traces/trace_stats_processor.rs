@@ -18,10 +18,7 @@ impl SendingTraceStatsProcessor {
         Self { stats_tx }
     }
 
-    pub async fn send(
-        &self,
-        traces: &[Vec<pb::Span>],
-    ) -> Result<(), SendError<StatsEvent>> {
+    pub async fn send(&self, traces: &[Vec<pb::Span>]) -> Result<(), SendError<StatsEvent>> {
         debug!("Sending stats to the stats concentrator");
         for trace in traces {
             for span in trace {

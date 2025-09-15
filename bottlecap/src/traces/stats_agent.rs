@@ -24,11 +24,13 @@ pub struct StatsAgent {
 
 impl StatsAgent {
     #[must_use]
-    pub fn new(
-        concentrator: Arc<Mutex<StatsConcentrator>>,
-    ) -> StatsAgent {
+    pub fn new(concentrator: Arc<Mutex<StatsConcentrator>>) -> StatsAgent {
         let (tx, rx) = mpsc::channel::<StatsEvent>(1000);
-        StatsAgent { tx, rx, concentrator }
+        StatsAgent {
+            tx,
+            rx,
+            concentrator,
+        }
     }
 
     pub async fn spin(&mut self) {

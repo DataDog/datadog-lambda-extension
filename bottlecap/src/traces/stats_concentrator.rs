@@ -1,6 +1,5 @@
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_NS_U64;
-use crate::tags::provider::Provider as TagProvider;
 use crate::traces::stats_agent::StatsEvent;
 use datadog_trace_protobuf::pb;
 use std::collections::HashMap;
@@ -31,7 +30,6 @@ pub struct Stats {
 
 pub struct StatsConcentrator {
     config: Arc<Config>,
-    _resource: String,
     buckets: HashMap<u64, Bucket>,
 }
 
@@ -42,31 +40,23 @@ const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64; // 10 seconds
 // For example, if we have buckets with timestamps 10, 20, 40, the current timestamp is 45,
 // and NO_FLUSH_BUCKET_COUNT is 3, then we will flush bucket 10 but not bucket 20 or 40.
 // Note that the bucket 30 is included in the 3 latest buckets even if it has no data.
-// This is to avoid flushing stats that are still being collected to save some cost.
+// This is to reduce the chance of flushing stats that are still being collected to save some cost.
 const NO_FLUSH_BUCKET_COUNT: u64 = 2;
 
 // Aggregates stats into buckets, which are then pulled by the stats aggregator.
 impl StatsConcentrator {
     #[must_use]
-    pub fn new(config: Arc<Config>, tags_provider: Arc<TagProvider>) -> Self {
-        // TODO: delete resource
-        let resource = tags_provider
-            .get_canonical_resource_name()
-            .unwrap_or(String::from("aws.lambda"));
+    pub fn new(config: Arc<Config>) -> Self {
         Self {
             buckets: HashMap::new(),
             config,
-            _resource: resource,
         }
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
         debug!("Adding stats to the stats concentrator");
         let bucket_timestamp = Self::get_bucket_timestamp(stats_event.time);
-        let bucket = self
-            .buckets
-            .entry(bucket_timestamp)
-            .or_default();
+        let bucket = self.buckets.entry(bucket_timestamp).or_default();
 
         let stats = bucket.data.entry(stats_event.aggregation_key).or_default();
 
@@ -113,7 +103,12 @@ impl StatsConcentrator {
         current_timestamp - bucket_timestamp >= BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT
     }
 
-    fn construct_stats_payload(&self, timestamp: u64, aggregation_key: &AggregationKey, stats: Stats) -> pb::ClientStatsPayload {
+    fn construct_stats_payload(
+        &self,
+        timestamp: u64,
+        aggregation_key: &AggregationKey,
+        stats: Stats,
+    ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
             hostname: String::new(),
             env: self.config.env.clone().unwrap_or_default(),

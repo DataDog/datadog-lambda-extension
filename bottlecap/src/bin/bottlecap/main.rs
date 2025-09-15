@@ -93,12 +93,7 @@ use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::{
-    sync::Mutex as TokioMutex,
-    sync::RwLock,
-    sync::mpsc::Sender,
-    task::JoinHandle,
-};
+use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -1113,10 +1108,7 @@ fn start_trace_agent(
     tokio_util::sync::CancellationToken,
 ) {
     // Stats
-    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new(
-        Arc::clone(config),
-        Arc::clone(tags_provider),
-    )));
+    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new(Arc::clone(config))));
     let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::new_with_concentrator(
         stats_concentrator.clone(),
     )));
