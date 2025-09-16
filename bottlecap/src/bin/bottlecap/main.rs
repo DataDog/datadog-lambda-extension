@@ -56,6 +56,7 @@ use bottlecap::{
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
+        stats_concentrator_service::StatsConcentratorService,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_aggregator::{self, SendDataBuilderInfo},
@@ -520,6 +521,7 @@ async fn extension_loop_active(
                             &proxy_flusher,
                             &mut race_flush_interval,
                             &metrics_aggr_handle.clone(),
+                            false,
                         )
                         .await;
                     }
@@ -535,6 +537,7 @@ async fn extension_loop_active(
                 &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr_handle.clone(),
+                false,
             )
             .await;
             let next_response =
@@ -602,6 +605,7 @@ async fn extension_loop_active(
                     &proxy_flusher,
                     &mut race_flush_interval,
                     &metrics_aggr_handle,
+                    false, // force_flush_trace_stats
                 )
                 .await;
             }
@@ -642,6 +646,7 @@ async fn extension_loop_active(
                             &proxy_flusher,
                             &mut race_flush_interval,
                             &metrics_aggr_handle,
+                            false, // force_flush_trace_stats
                         )
                         .await;
                     }
@@ -699,6 +704,7 @@ async fn extension_loop_active(
                 &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr_handle,
+                true, // force_flush_trace_stats
             )
             .await;
             return Ok(());
@@ -706,6 +712,7 @@ async fn extension_loop_active(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn blocking_flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flushers: &mut [MetricsFlusher],
@@ -714,6 +721,7 @@ async fn blocking_flush_all(
     proxy_flusher: &ProxyFlusher,
     race_flush_interval: &mut tokio::time::Interval,
     metrics_aggr_handle: &MetricsAggregatorHandle,
+    force_flush_trace_stats: bool,
 ) {
     let flush_response = metrics_aggr_handle
         .flush()
@@ -733,7 +741,7 @@ async fn blocking_flush_all(
         logs_flusher.flush(None),
         futures::future::join_all(metrics_futures),
         trace_flusher.flush(None),
-        stats_flusher.flush(),
+        stats_flusher.flush(force_flush_trace_stats),
         proxy_flusher.flush(None),
     );
     race_flush_interval.reset();
@@ -983,7 +991,12 @@ fn start_trace_agent(
     tokio_util::sync::CancellationToken,
 ) {
     // Stats
-    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
+    let (stats_concentrator_service, stats_concentrator_handle) =
+        StatsConcentratorService::new(Arc::clone(config));
+    tokio::spawn(stats_concentrator_service.run());
+    let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
+        StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
+    ));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         api_key_factory.clone(),
         stats_aggregator.clone(),
@@ -1025,12 +1038,13 @@ fn start_trace_agent(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
-        stats_aggregator,
+        stats_aggregator.clone(),
         stats_processor,
         proxy_aggregator,
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
+        stats_concentrator_handle.clone(),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();

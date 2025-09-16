@@ -1,5 +1,7 @@
+use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use datadog_trace_protobuf::pb::ClientStatsPayload;
 use std::collections::VecDeque;
+use tracing::error;
 
 #[allow(clippy::empty_line_after_doc_comments)]
 /// Maximum number of entries in a stat payload.
@@ -22,28 +24,25 @@ pub struct StatsAggregator {
     queue: VecDeque<ClientStatsPayload>,
     max_content_size_bytes: usize,
     buffer: Vec<ClientStatsPayload>,
-}
-
-impl Default for StatsAggregator {
-    fn default() -> Self {
-        StatsAggregator {
-            queue: VecDeque::new(),
-            max_content_size_bytes: MAX_CONTENT_SIZE_BYTES,
-            buffer: Vec::new(),
-        }
-    }
+    concentrator: StatsConcentratorHandle,
 }
 
 /// Takes in individual trace stats payloads and aggregates them into batches to be flushed to Datadog.
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
-    pub fn new(max_content_size_bytes: usize) -> Self {
+    fn new(max_content_size_bytes: usize, concentrator: StatsConcentratorHandle) -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,
             buffer: Vec::new(),
+            concentrator,
         }
+    }
+
+    #[must_use]
+    pub fn new_with_concentrator(concentrator: StatsConcentratorHandle) -> Self {
+        Self::new(MAX_CONTENT_SIZE_BYTES, concentrator)
     }
 
     /// Takes in an individual trace stats payload.
@@ -52,7 +51,17 @@ impl StatsAggregator {
     }
 
     /// Returns a batch of trace stats payloads, subject to the max content size.
-    pub fn get_batch(&mut self) -> Vec<ClientStatsPayload> {
+    pub async fn get_batch(&mut self, force_flush: bool) -> Vec<ClientStatsPayload> {
+        // Pull stats data from concentrator
+        match self.concentrator.get_stats(force_flush).await {
+            Ok(stats) => {
+                self.queue.extend(stats);
+            }
+            Err(e) => {
+                error!("Error getting stats from the stats concentrator: {e:?}");
+            }
+        }
+
         let mut batch_size = 0;
 
         // Fill the batch
@@ -158,12 +167,12 @@ mod tests {
         aggregator.add(payload.clone());
 
         // The batch should only contain the first 2 payloads
-        let first_batch = aggregator.get_batch();
+        let first_batch = aggregator.get_batch(false);
         assert_eq!(first_batch, vec![payload.clone(), payload.clone()]);
         assert_eq!(aggregator.queue.len(), 1);
 
         // The second batch should only contain the last log
-        let second_batch = aggregator.get_batch();
+        let second_batch = aggregator.get_batch(false);
         assert_eq!(second_batch, vec![payload]);
         assert_eq!(aggregator.queue.len(), 0);
     }

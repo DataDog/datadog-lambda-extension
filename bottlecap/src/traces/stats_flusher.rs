@@ -28,7 +28,7 @@ pub trait StatsFlusher {
     /// Flushes stats to the Datadog trace stats intake.
     async fn send(&self, traces: Vec<pb::ClientStatsPayload>);
 
-    async fn flush(&self);
+    async fn flush(&self, force_flush: bool);
 }
 
 #[allow(clippy::module_name_repetitions)]
@@ -116,14 +116,15 @@ impl StatsFlusher for ServerlessStatsFlusher {
             }
         };
     }
-    async fn flush(&self) {
+
+    async fn flush(&self, force_flush: bool) {
         let mut guard = self.aggregator.lock().await;
 
-        let mut stats = guard.get_batch();
+        let mut stats = guard.get_batch(force_flush).await;
         while !stats.is_empty() {
             self.send(stats).await;
 
-            stats = guard.get_batch();
+            stats = guard.get_batch(force_flush).await;
         }
     }
 }
