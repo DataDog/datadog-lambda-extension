@@ -42,7 +42,7 @@ use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
 use crate::traces::stats_agent::StatsAgent;
-use crate::traces::stats_concentrator::StatsConcentrator;
+use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use crate::traces::trace_stats_processor::SendingTraceStatsProcessor;
 
 const TRACE_AGENT_PORT: usize = 8126;
@@ -129,7 +129,7 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
-        stats_concentrator: Arc<Mutex<StatsConcentrator>>,
+        stats_concentrator: StatsConcentratorHandle,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized

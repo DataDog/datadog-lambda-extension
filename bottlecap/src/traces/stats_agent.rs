@@ -1,9 +1,7 @@
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tracing::error;
 
-use super::stats_concentrator::StatsConcentrator;
-
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use super::stats_concentrator_service::StatsConcentratorHandle;
 
 use super::stats_concentrator::AggregationKey;
 use super::stats_concentrator::Stats;
@@ -19,12 +17,12 @@ pub struct StatsEvent {
 pub struct StatsAgent {
     tx: Sender<StatsEvent>,
     rx: Receiver<StatsEvent>,
-    concentrator: Arc<Mutex<StatsConcentrator>>,
+    concentrator: StatsConcentratorHandle,
 }
 
 impl StatsAgent {
     #[must_use]
-    pub fn new(concentrator: Arc<Mutex<StatsConcentrator>>) -> StatsAgent {
+    pub fn new(concentrator: StatsConcentratorHandle) -> StatsAgent {
         let (tx, rx) = mpsc::channel::<StatsEvent>(1000);
         StatsAgent {
             tx,
@@ -35,7 +33,9 @@ impl StatsAgent {
 
     pub async fn spin(&mut self) {
         while let Some(event) = self.rx.recv().await {
-            self.concentrator.lock().await.add(event);
+            if let Err(e) = self.concentrator.add(event) {
+                error!("Error adding stats event to the stats concentrator: {e}");
+            }
         }
     }
 

@@ -54,7 +54,7 @@ use bottlecap::{
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
-        stats_concentrator::StatsConcentrator,
+        stats_concentrator_service::StatsConcentratorService,
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_aggregator::{self, SendDataBuilderInfo},
@@ -1110,10 +1110,12 @@ fn start_trace_agent(
     tokio_util::sync::CancellationToken,
 ) {
     // Stats
-    let stats_concentrator = Arc::new(TokioMutex::new(StatsConcentrator::new(Arc::clone(config))));
-    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::new_with_concentrator(
-        stats_concentrator.clone(),
-    )));
+    let (stats_concentrator_service, stats_concentrator_handle) =
+        StatsConcentratorService::new(Arc::clone(config));
+    tokio::spawn(stats_concentrator_service.run());
+    let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
+        StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
+    ));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         api_key_factory.clone(),
         stats_aggregator.clone(),
@@ -1161,7 +1163,7 @@ fn start_trace_agent(
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
-        stats_concentrator.clone(),
+        stats_concentrator_handle.clone(),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();

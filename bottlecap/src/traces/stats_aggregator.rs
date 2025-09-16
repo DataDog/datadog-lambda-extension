@@ -1,8 +1,7 @@
-use crate::traces::stats_concentrator::StatsConcentrator;
+use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use datadog_trace_protobuf::pb::ClientStatsPayload;
 use std::collections::VecDeque;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use tracing::error;
 
 #[allow(clippy::empty_line_after_doc_comments)]
 /// Maximum number of entries in a stat payload.
@@ -25,14 +24,14 @@ pub struct StatsAggregator {
     queue: VecDeque<ClientStatsPayload>,
     max_content_size_bytes: usize,
     buffer: Vec<ClientStatsPayload>,
-    concentrator: Arc<Mutex<StatsConcentrator>>,
+    concentrator: StatsConcentratorHandle,
 }
 
 /// Takes in individual trace stats payloads and aggregates them into batches to be flushed to Datadog.
 impl StatsAggregator {
     #[allow(dead_code)]
     #[allow(clippy::must_use_candidate)]
-    fn new(max_content_size_bytes: usize, concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
+    fn new(max_content_size_bytes: usize, concentrator: StatsConcentratorHandle) -> Self {
         StatsAggregator {
             queue: VecDeque::new(),
             max_content_size_bytes,
@@ -41,7 +40,8 @@ impl StatsAggregator {
         }
     }
 
-    pub fn new_with_concentrator(concentrator: Arc<Mutex<StatsConcentrator>>) -> Self {
+    #[must_use]
+    pub fn new_with_concentrator(concentrator: StatsConcentratorHandle) -> Self {
         Self::new(MAX_CONTENT_SIZE_BYTES, concentrator)
     }
 
@@ -53,9 +53,14 @@ impl StatsAggregator {
     /// Returns a batch of trace stats payloads, subject to the max content size.
     pub async fn get_batch(&mut self, force_flush: bool) -> Vec<ClientStatsPayload> {
         // Pull stats data from concentrator
-        let mut concentrator = self.concentrator.lock().await;
-        let stats = concentrator.get_stats(force_flush);
-        self.queue.extend(stats);
+        match self.concentrator.get_stats(force_flush).await {
+            Ok(stats) => {
+                self.queue.extend(stats);
+            }
+            Err(e) => {
+                error!("Error getting stats from the stats concentrator: {e:?}");
+            }
+        }
 
         let mut batch_size = 0;
 
