@@ -337,6 +337,11 @@ pub struct EnvConfig {
     /// The maximum depth of the Lambda payload to capture.
     /// Default is `10`. Requires `capture_lambda_payload` to be `true`.
     pub capture_lambda_payload_max_depth: Option<u32>,
+    /// @env `DD_COMPUTE_TRACE_STATS`
+    ///
+    /// Enable computation of trace stats for AWS Lambda.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub compute_trace_stats: Option<bool>,
     /// @env `DD_SERVERLESS_APPSEC_ENABLED`
     ///
     /// Enable Application and API Protection (AAP), previously known as AppSec/ASM, for AWS Lambda.
@@ -513,6 +518,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, lambda_proc_enhanced_metrics);
     merge_option_to_value!(config, env_config, capture_lambda_payload);
     merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
+    merge_option_to_value!(config, env_config, compute_trace_stats);
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
     merge_option!(config, env_config, appsec_rules);
     merge_option_to_value!(config, env_config, appsec_waf_timeout);

@@ -533,11 +533,17 @@ impl TraceAgent {
             }
         }
 
-        debug!("Sending stats to the stats aggregator. Traces: {traces:?}");
-        if let Err(err) = stats_sender.send(&traces).await {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error sending stats to the stats aggregator: {err}"),
+        if config.compute_trace_stats {
+            debug!("Sending stats to the stats aggregator. Traces: {traces:?}");
+            if let Err(err) = stats_sender.send(&traces).await {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Error sending stats to the stats aggregator: {err}"),
+                );
+            }
+        } else {
+            debug!(
+                "compute_trace_stats is disabled. Skipping sending stats to the stats aggregator."
             );
         }
 
