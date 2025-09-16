@@ -281,7 +281,6 @@ impl TraceAgent {
     }
 
     async fn v04_traces(State(state): State<TraceState>, request: Request) -> Response {
-        debug!("Received v04 traces to process");
         Self::handle_traces(
             state.config,
             request,
@@ -295,7 +294,6 @@ impl TraceAgent {
     }
 
     async fn v05_traces(State(state): State<TraceState>, request: Request) -> Response {
-        debug!("Received v05 traces to process");
         Self::handle_traces(
             state.config,
             request,
@@ -534,17 +532,12 @@ impl TraceAgent {
         }
 
         if config.compute_trace_stats {
-            debug!("Sending stats to the stats aggregator. Traces: {traces:?}");
             if let Err(err) = stats_sender.send(&traces).await {
                 return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Error sending stats to the stats aggregator: {err}"),
                 );
             }
-        } else {
-            debug!(
-                "compute_trace_stats is disabled. Skipping sending stats to the stats aggregator."
-            );
         }
 
         if let Err(err) = trace_sender

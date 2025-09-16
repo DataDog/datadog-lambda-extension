@@ -19,7 +19,7 @@ impl SendingTraceStatsProcessor {
     }
 
     pub async fn send(&self, traces: &[Vec<pb::Span>]) -> Result<(), SendError<StatsEvent>> {
-        debug!("Sending stats to the stats concentrator");
+        debug!("Sending trace stats to the concentrator");
         for trace in traces {
             for span in trace {
                 let stats = StatsEvent {
@@ -38,7 +38,6 @@ impl SendingTraceStatsProcessor {
                         top_level_hits: span.metrics.get("_dd.top_level").map_or(0.0, |v| *v),
                     },
                 };
-                debug!("Sending single stats to the stats concentrator.");
                 self.stats_tx.send(stats).await?;
             }
         }

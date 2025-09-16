@@ -413,8 +413,6 @@ fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>)
         }
     };
 
-    debug!("Config.compute_trace_stats: {}", config.compute_trace_stats);
-
     (aws_config, aws_credentials, config)
 }
 
