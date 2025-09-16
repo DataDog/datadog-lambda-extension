@@ -27,6 +27,7 @@ use bottlecap::{
     config::{
         self, Config,
         aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
+        flush_strategy::FlushStrategy,
     },
     event_bus::{Event, EventBus},
     fips::{log_fips_status, prepare_client_provider},
@@ -663,10 +664,6 @@ async fn extension_loop_active(
             if current_flush_decision == FlushDecision::Continuous
                 && !pending_flush_handles.has_pending_handles()
             {
-                println!("aj decided to flush now");
-                let total_spawn = Instant::now();
-
-                let lf_spawn = Instant::now();
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
@@ -677,8 +674,6 @@ async fn extension_loop_active(
                     .push(tokio::spawn(async move {
                         tf.flush(None).await.unwrap_or_default()
                     }));
-                println!("log spawn: {:?}", lf_spawn.elapsed());
-                let m_spawn = Instant::now();
                 let (metrics_flushers_copy, series, sketches) = {
                     let locked_metrics = metrics_flushers.lock().await;
                     let flush_response = metrics_aggr_handle
@@ -692,8 +687,6 @@ async fn extension_loop_active(
                         flush_response.distributions,
                     )
                 };
-                println!("metrics aggr collect: {:?}", m_spawn.elapsed());
-                let m_task = Instant::now();
                 for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
                     let series_clone = series.clone();
                     let sketches_clone = sketches.clone();
@@ -710,9 +703,7 @@ async fn extension_loop_active(
                     });
                     pending_flush_handles.metric_flush_handles.push(handle);
                 }
-                println!("metrics req spawn: {:?}", m_task.elapsed());
 
-                let pf_spawn = Instant::now();
                 let pf = proxy_flusher.clone();
                 pending_flush_handles
                     .proxy_flush_handles
@@ -720,9 +711,7 @@ async fn extension_loop_active(
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
-                println!("pfspawn: {:?}", pf_spawn.elapsed());
                 race_flush_interval.reset();
-                println!("flush spawn time: {:?}", total_spawn.elapsed());
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
                 blocking_flush_all(
@@ -743,19 +732,10 @@ async fn extension_loop_active(
             // and then we break to determine if we'll flush or not
             let next_lambda_response = next_event(client, &r.extension_id);
             tokio::pin!(next_lambda_response);
-            println!("calling for next or eventbus");
             'next_invocation: loop {
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
-                        println!("aj got next");
-                        // Dear reader this is important, you may be tempted to remove this
-                        // after all, why reset the flush interval if we're not flushing?
-                        // It's because the race_flush_interval is only for the RACE FLUSH
-                        // For long-running txns. The call to `flush_control.should_flush_end()`
-                        // has its own interval which is not reset here.
-                        race_flush_interval.reset();
-                        // Thank you for not removing race_flush_interval.reset();
 
                         maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
@@ -765,8 +745,7 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        if !pending_flush_handles.has_pending_handles() {
-                            println!("aj race flush called but shouldn't");
+                        if flush_control.flush_strategy == FlushStrategy::Default {
                             let mut locked_metrics = metrics_flushers.lock().await;
                             blocking_flush_all(
                                 &logs_flusher,
@@ -974,12 +953,8 @@ async fn handle_next_invocation(
                 deadline_ms,
                 invoked_function_arn.clone()
             );
-            let now = Instant::now();
             let mut p = invocation_processor.lock().await;
-            println!("/next lock wait time: {:?}", now.elapsed());
-            let now = Instant::now();
             p.on_invoke_event(request_id.into());
-            println!("on invoke event wait time: {:?}", now.elapsed());
             drop(p);
         }
         Ok(NextEventResponse::Shutdown {
