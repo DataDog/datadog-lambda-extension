@@ -41,7 +41,6 @@ impl StatsProcessor for ServerlessStatsProcessor {
         req: Request,
         tx: Sender<pb::ClientStatsPayload>,
     ) -> Result<Response, Box<dyn std::error::Error + Send + Sync>> {
-        debug!("Received trace stats to process");
         let (parts, body) = match extract_request_body(req).await {
             Ok(r) => r,
             Err(e) => {

@@ -83,13 +83,9 @@ use dogstatsd::{
     metric::{EMPTY_TAGS, SortedTags},
 };
 use reqwest::Client;
-use std::{
-    collections::hash_map,
-    env,
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::hash_map, env, path::Path, sync::Arc};
+use tokio::runtime::Handle;
+use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
@@ -239,6 +235,8 @@ impl PendingFlushHandles {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let metrics = Handle::current().metrics();
+    println!("workers: {:?}", metrics.num_workers());
     let start_time = Instant::now();
     init_ustr();
     let (aws_config, aws_credentials, config) = load_configs(start_time);
@@ -511,7 +509,6 @@ async fn extension_loop_active(
             // optionally flush after tick for long running invos
             'flush_end: loop {
                 tokio::select! {
-                biased;
                     Some(event) = event_bus.rx.recv() => {
                         if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
                             if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
@@ -555,6 +552,8 @@ async fn extension_loop_active(
             if current_flush_decision == FlushDecision::Continuous
                 && !pending_flush_handles.has_pending_handles()
             {
+                println!("decided to flush now");
+                let start = Instant::now();
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
@@ -602,6 +601,7 @@ async fn extension_loop_active(
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
+                println!("flush spawn done: {:?}", start.elapsed());
                 race_flush_interval.reset();
             } else if current_flush_decision == FlushDecision::Periodic {
                 let mut locked_metrics = metrics_flushers.lock().await;
@@ -621,15 +621,23 @@ async fn extension_loop_active(
             // If we get platform.runtimeDone or platform.runtimeReport
             // That's fine, we still wait to break until we get the response from next
             // and then we break to determine if we'll flush or not
+            let metrics = Handle::current().metrics();
+            println!(
+                "next - active tasks: {}, queue depth: {}",
+                metrics.num_alive_tasks(),
+                metrics.global_queue_depth()
+            );
             let next_lambda_response =
                 extension::next_event(client, &aws_config.runtime_api, &r.extension_id);
             tokio::pin!(next_lambda_response);
+            println!("calling for next");
             'next_invocation: loop {
                 tokio::select! {
-                biased;
                     next_response = &mut next_lambda_response => {
-
+                        println!("got next");
+                        let start = Instant::now();
                         maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                        println!("handle_next_invocation: {:?}", start.elapsed());
                         // Need to break here to re-call next
                         break 'next_invocation;
                     }

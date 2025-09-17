@@ -148,6 +148,7 @@ impl Listener {
         State((invocation_processor, _, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
+        let now = std::time::Instant::now();
         let mut join_set = tasks.lock().await;
         join_set.spawn(async move {
             let (parts, body) = match extract_request_body(request).await {
@@ -160,6 +161,7 @@ impl Listener {
 
             Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await;
         });
+        println!("end invocation took: {:?}", now.elapsed());
 
         (StatusCode::OK, json!({}).to_string()).into_response()
     }
@@ -177,8 +179,10 @@ impl Listener {
     ) {
         debug!("Received start invocation request");
 
+        let now = std::time::Instant::now();
         let mut processor = invocation_processor.lock().await;
         processor.on_universal_instrumentation_start(headers, payload_value);
+        println!("start invocation request took:{:?}", now.elapsed());
     }
 
     // If a `SpanContext` exists, then tell the tracer to use it.
