@@ -254,7 +254,6 @@ impl LogsFlusher {
                 let mut batches = Vec::new();
                 let mut current_batch = guard.get_batch();
                 while !current_batch.is_empty() {
-                    // Temporarily disable flat transform to OPW v2 format
                     let transformed = Self::to_flat_json(current_batch);
                     batches.push(self.compress(transformed));
                     current_batch = guard.get_batch();
