@@ -351,7 +351,9 @@ pub struct EnvConfig {
     pub capture_lambda_payload_max_depth: Option<u32>,
     /// @env `DD_COMPUTE_TRACE_STATS`
     ///
-    /// Enable computation of trace stats for AWS Lambda.
+    /// If true, enable computation of trace stats on the extension side.
+    /// If false, trace stats will be computed on the backend side.
+    /// Default is `false`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub compute_trace_stats: Option<bool>,
     /// @env `DD_SERVERLESS_APPSEC_ENABLED`
