@@ -341,6 +341,7 @@ pub struct Config {
     pub lambda_proc_enhanced_metrics: bool,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
+    pub compute_trace_stats: bool,
 
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
@@ -441,6 +442,7 @@ impl Default for Config {
             lambda_proc_enhanced_metrics: true,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
+            compute_trace_stats: false,
 
             serverless_appsec_enabled: false,
             appsec_rules: None,
