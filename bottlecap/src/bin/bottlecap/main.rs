@@ -17,7 +17,7 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 use bottlecap::{
-    DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG,
     appsec::processor::{
         Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
     },
@@ -48,7 +48,7 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     telemetry::{
-        client::TelemetryApiClient,
+        self, TELEMETRY_PORT,
         events::{TelemetryEvent, TelemetryRecord},
         listener::TelemetryListener,
     },
@@ -474,9 +474,14 @@ async fn extension_loop_active(
 
     let dogstatsd_cancel_token = start_dogstatsd(metrics_aggr_handle.clone()).await;
 
-    let telemetry_listener_cancel_token =
-        setup_telemetry_client(&r.extension_id, &aws_config.runtime_api, logs_agent_channel)
-            .await?;
+    let telemetry_listener_cancel_token = setup_telemetry_client(
+        client,
+        &r.extension_id,
+        &aws_config.runtime_api,
+        logs_agent_channel,
+        config.serverless_logs_enabled,
+    )
+    .await?;
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -1107,9 +1112,11 @@ async fn start_dogstatsd(metrics_aggr_handle: MetricsAggregatorHandle) -> Cancel
 }
 
 async fn setup_telemetry_client(
+    client: &Client,
     extension_id: &str,
     runtime_api: &str,
     logs_agent_channel: Sender<TelemetryEvent>,
+    logs_enabled: bool,
 ) -> anyhow::Result<CancellationToken> {
     let telemetry_listener =
         TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
@@ -1121,15 +1128,16 @@ async fn setup_telemetry_client(
         }
     });
 
-    let telemetry_client = TelemetryApiClient::new(
-        extension_id.to_string(),
+    telemetry::subscribe(
+        client,
+        runtime_api,
+        extension_id,
         TELEMETRY_PORT,
-        runtime_api.to_string(),
-    );
-    telemetry_client
-        .subscribe()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;
+        logs_enabled,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;
+
     Ok(cancel_token)
 }
 
