@@ -127,6 +127,7 @@ fn tags_from_env(
         tags_map.extend(config.tags.clone());
     }
 
+    // The value of _dd.compute_stats is the opposite of config.compute_trace_stats.
     // "config.compute_trace_stats == true" means computing stats on the extension side,
     // so we set _dd.compute_stats to 0 so stats won't be computed on the backend side.
     let compute_stats = i32::from(!config.compute_trace_stats);
