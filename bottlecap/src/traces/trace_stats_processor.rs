@@ -10,6 +10,7 @@ pub struct SendingTraceStatsProcessor {
     stats_concentrator: StatsConcentratorHandle,
 }
 
+// Extracts information from traces related to stats and sends it to the stats concentrator
 impl SendingTraceStatsProcessor {
     #[must_use]
     pub fn new(stats_concentrator: StatsConcentratorHandle) -> Self {

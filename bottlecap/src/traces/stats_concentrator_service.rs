@@ -60,6 +60,8 @@ pub struct StatsConcentratorService {
     rx: mpsc::UnboundedReceiver<ConcentratorCommand>,
 }
 
+// A service that handles add() and get_stats() requests in the same queue,
+// to avoid using mutex, which may cause lock contention.
 impl StatsConcentratorService {
     #[must_use]
     pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {

@@ -1036,13 +1036,13 @@ fn start_trace_agent(
         Arc::clone(config),
         trace_aggregator,
         trace_processor.clone(),
-        stats_aggregator.clone(),
+        stats_aggregator,
         stats_processor,
         proxy_aggregator,
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
-        stats_concentrator_handle.clone(),
+        stats_concentrator_handle,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();

@@ -2,6 +2,7 @@ use crate::config::Config;
 use datadog_trace_protobuf::pb;
 use std::sync::Arc;
 
+// Event sent to the stats concentrator
 #[derive(Clone, Copy)]
 pub struct StatsEvent {
     pub time: u64,
