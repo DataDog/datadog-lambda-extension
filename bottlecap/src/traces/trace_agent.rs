@@ -41,7 +41,6 @@ use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
-use crate::traces::stats_agent::StatsAgent;
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use crate::traces::trace_stats_processor::SendingTraceStatsProcessor;
 
@@ -107,7 +106,7 @@ pub struct TraceAgent {
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
-    stats_agent: Arc<Mutex<StatsAgent>>,
+    stats_concentrator: StatsConcentratorHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -145,8 +144,6 @@ impl TraceAgent {
             }
         });
 
-        let stats_agent = StatsAgent::new(stats_concentrator.clone());
-
         TraceAgent {
             config: config.clone(),
             trace_processor,
@@ -158,7 +155,7 @@ impl TraceAgent {
             tags_provider,
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
-            stats_agent: Arc::new(Mutex::new(stats_agent)),
+            stats_concentrator,
         }
     }
 
@@ -181,13 +178,7 @@ impl TraceAgent {
             }
         });
 
-        // Start the stats agent, which receives stats events and sends them to the stats concentrator
-        let stats_agent = self.stats_agent.clone();
-        tokio::spawn(async move {
-            stats_agent.lock().await.spin().await;
-        });
-
-        let router = self.make_router(stats_tx).await;
+        let router = self.make_router(stats_tx);
 
         let port = u16::try_from(TRACE_AGENT_PORT).expect("TRACE_AGENT_PORT is too large");
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
@@ -207,8 +198,7 @@ impl TraceAgent {
         Ok(())
     }
 
-    async fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
-        let stats_agent_tx = self.stats_agent.lock().await.get_sender_copy();
+    fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
             trace_sender: Arc::new(SendingTraceProcessor {
@@ -216,7 +206,7 @@ impl TraceAgent {
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
             }),
-            stats_sender: Arc::new(SendingTraceStatsProcessor::new(stats_agent_tx)),
+            stats_sender: Arc::new(SendingTraceStatsProcessor::new(self.stats_concentrator.clone())),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
         };
@@ -532,7 +522,7 @@ impl TraceAgent {
         }
 
         if config.compute_trace_stats {
-            if let Err(err) = stats_sender.send(&traces).await {
+            if let Err(err) = stats_sender.send(&traces) {
                 return error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Error sending stats to the stats aggregator: {err}"),

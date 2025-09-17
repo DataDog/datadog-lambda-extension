@@ -1,24 +1,22 @@
-use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
+
 use tracing::debug;
 
-use super::stats_agent::StatsEvent;
-use super::stats_concentrator::AggregationKey;
-use super::stats_concentrator::Stats;
-
+use crate::traces::stats_concentrator::{StatsEvent, AggregationKey, Stats};
+use crate::traces::stats_concentrator_service::{ConcentratorCommand, StatsConcentratorHandle};
 use datadog_trace_protobuf::pb;
 
 pub struct SendingTraceStatsProcessor {
-    stats_tx: Sender<StatsEvent>,
+    stats_concentrator: StatsConcentratorHandle,
 }
 
 impl SendingTraceStatsProcessor {
     #[must_use]
-    pub fn new(stats_tx: Sender<StatsEvent>) -> Self {
-        Self { stats_tx }
+    pub fn new(stats_concentrator: StatsConcentratorHandle) -> Self {
+        Self { stats_concentrator }
     }
 
-    pub async fn send(&self, traces: &[Vec<pb::Span>]) -> Result<(), SendError<StatsEvent>> {
+    pub fn send(&self, traces: &[Vec<pb::Span>]) -> Result<(), SendError<ConcentratorCommand>> {
         debug!("Sending trace stats to the concentrator");
         for trace in traces {
             for span in trace {
@@ -27,7 +25,7 @@ impl SendingTraceStatsProcessor {
                     aggregation_key: AggregationKey {},
                     stats: Stats {},
                 };
-                self.stats_tx.send(stats).await?;
+                self.stats_concentrator.add(stats)?;
             }
         }
         Ok(())

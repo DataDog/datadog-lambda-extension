@@ -1,7 +1,13 @@
 use crate::config::Config;
-use crate::traces::stats_agent::StatsEvent;
 use datadog_trace_protobuf::pb;
 use std::sync::Arc;
+
+#[derive(Clone, Copy)]
+pub struct StatsEvent {
+    pub time: u64,
+    pub aggregation_key: AggregationKey,
+    pub stats: Stats,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub struct AggregationKey {}
