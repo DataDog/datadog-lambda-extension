@@ -83,13 +83,8 @@ use dogstatsd::{
     metric::{EMPTY_TAGS, SortedTags},
 };
 use reqwest::Client;
-use std::{
-    collections::hash_map,
-    env,
-    path::Path,
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::{collections::hash_map, env, path::Path, sync::Arc};
+use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
@@ -633,7 +628,6 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
-
                         maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
                         break 'next_invocation;

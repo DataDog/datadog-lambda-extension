@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
@@ -9,6 +9,7 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use serde_json::Value;
 use tokio::sync::watch;
+use tokio::time::Instant;
 use tracing::{debug, warn};
 
 use crate::{
