@@ -15,12 +15,12 @@ use opentelemetry_proto::tonic::trace::v1::{
     status::StatusCode,
 };
 use opentelemetry_semantic_conventions::attribute::{
-    DB_QUERY_TEXT, DB_STATEMENT, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT,
+    DB_COLLECTION_NAME, DB_NAMESPACE, DB_OPERATION_NAME, DB_QUERY_SUMMARY, DB_QUERY_TEXT, DB_STATEMENT, DB_STORED_PROCEDURE_NAME, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT,
     DEPLOYMENT_ENVIRONMENT_NAME, FAAS_INVOKED_NAME, FAAS_INVOKED_PROVIDER, FAAS_TRIGGER,
     GRAPHQL_OPERATION_NAME, GRAPHQL_OPERATION_TYPE, HTTP_ROUTE, HTTP_STATUS_CODE,
     MESSAGING_DESTINATION_NAME, MESSAGING_OPERATION, MESSAGING_SYSTEM, OTEL_LIBRARY_NAME,
     OTEL_LIBRARY_VERSION, OTEL_STATUS_CODE, OTEL_STATUS_DESCRIPTION, RPC_METHOD, RPC_SERVICE,
-    RPC_SYSTEM,
+    RPC_SYSTEM, SERVER_ADDRESS, SERVER_PORT,
 };
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION}; // CONTAINER_ID, SERVICE_VERSION, TELEMETRY_SDK_LANGUAGE, TELEMETRY_SDK_VERSION,
 use opentelemetry_semantic_conventions::trace::{
@@ -273,9 +273,36 @@ fn get_otel_operation_name_v2(otel_span: &OtelSpan) -> String {
     }
 
     // Database
+    let db_summary = get_otel_attribute_value_as_string(&otel_span.attributes, DB_QUERY_SUMMARY, true);
+    if !db_summary.is_empty() {
+        return db_summary;
+    }
+
+    let get = |k| {
+        let v = get_otel_attribute_value_as_string(&otel_span.attributes, k, true);
+        (!v.is_empty()).then_some(v)
+    };
+    let target = get(DB_COLLECTION_NAME)
+        .or_else(|| get(DB_STORED_PROCEDURE_NAME))
+        .or_else(|| get(DB_NAMESPACE))
+        .or_else(|| {
+            let addr = get(SERVER_ADDRESS)?;
+            let port = get(SERVER_PORT)?;
+            Some(format!("{addr}:{port}"))
+        })
+        .unwrap_or_default();
+
+    let db_operation = get_otel_attribute_value_as_string(&otel_span.attributes, DB_OPERATION_NAME, true);
+    if !target.is_empty() {
+        if !db_operation.is_empty() {
+            return format!("{db_operation} {target}");
+        }
+        return target;
+    }
+
     let db_system = get_otel_attribute_value_as_string(&otel_span.attributes, DB_SYSTEM_NAME, true);
-    if !db_system.is_empty() && is_client {
-        return format!("{db_system}.query");
+    if !db_system.is_empty() {
+        return db_system;
     }
 
     // Messaging
