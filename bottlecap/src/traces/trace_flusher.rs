@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+use tokio::time::{Duration, interval};
 use tracing::{debug, error};
 
 use datadog_trace_utils::{
@@ -164,7 +165,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         if traces.is_empty() {
             return None;
         }
-        let start = std::time::Instant::now();
+        let start = tokio::time::Instant::now();
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
         tokio::task::yield_now().await;
         debug!("Flushing {} traces", coalesced_traces.len());
@@ -175,10 +176,22 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 None => trace.clone(),
             };
 
-            let send_result = trace_with_endpoint
-                .send_proxy(proxy_https.as_deref())
-                .await
-                .last_result;
+            let mut counter = 0;
+            let mut tick_interval = interval(Duration::from_millis(100));
+            let send_future = trace_with_endpoint.send_proxy(proxy_https.as_deref());
+            tokio::pin!(send_future);
+            let send_result = loop {
+                tokio::select! {
+                    result = &mut send_future => {
+                        break result.last_result;
+                    }
+                    _ = tick_interval.tick() => {
+                        counter += 1;
+                        debug!("Waiting for trace send completion, tick #{}", counter);
+                        tokio::task::yield_now().await;
+                    }
+                }
+            };
 
             if let Err(e) = send_result {
                 error!("Error sending trace: {e:?}");
