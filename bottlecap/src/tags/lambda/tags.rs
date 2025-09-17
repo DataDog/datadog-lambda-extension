@@ -293,10 +293,7 @@ mod tests {
         let metadata = HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
         assert_eq!(tags.tags_map.len(), 3);
-        assert_eq!(
-            tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
-            "1"
-        );
+        assert_eq!(tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(), "1");
         let arch = arch_to_platform();
         assert_eq!(
             tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),

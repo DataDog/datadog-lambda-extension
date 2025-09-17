@@ -360,7 +360,7 @@ pub struct EnvConfig {
     ///
     /// Enable Application and API Protection (AAP), previously known as AppSec/ASM, for AWS Lambda.
     /// Default is `false`.
-    /// 
+    ///
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
     /// @env `DD_APPSEC_RULES`
