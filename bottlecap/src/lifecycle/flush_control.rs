@@ -27,9 +27,13 @@ pub enum FlushDecision {
 impl FlushControl {
     #[must_use]
     pub fn new(flush_strategy: FlushStrategy, flush_timeout: u64) -> FlushControl {
+        let now = time::SystemTime::now()
+            .duration_since(time::UNIX_EPOCH)
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs();
         FlushControl {
             flush_strategy,
-            last_flush: 0,
+            last_flush: now,
             invocation_times: InvocationTimes::new(),
             flush_timeout,
         }
