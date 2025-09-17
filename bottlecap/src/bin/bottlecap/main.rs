@@ -24,6 +24,7 @@ use bottlecap::{
     config::{
         self, Config,
         aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
+        flush_strategy::FlushStrategy,
     },
     event_bus::{Event, EventBus},
     extension::{
@@ -81,7 +82,6 @@ use dogstatsd::{
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
 };
-use futures::stream::{FuturesOrdered, StreamExt};
 use reqwest::Client;
 use std::{
     collections::hash_map,
@@ -98,10 +98,10 @@ use ustr::Ustr;
 
 #[allow(clippy::struct_field_names)]
 struct PendingFlushHandles {
-    trace_flush_handles: FuturesOrdered<JoinHandle<Vec<SendData>>>,
-    log_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
-    metric_flush_handles: FuturesOrdered<JoinHandle<MetricsRetryBatch>>,
-    proxy_flush_handles: FuturesOrdered<JoinHandle<Vec<reqwest::RequestBuilder>>>,
+    trace_flush_handles: Vec<JoinHandle<Vec<SendData>>>,
+    log_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
+    metric_flush_handles: Vec<JoinHandle<MetricsRetryBatch>>,
+    proxy_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
 }
 
 struct MetricsRetryBatch {
@@ -113,11 +113,20 @@ struct MetricsRetryBatch {
 impl PendingFlushHandles {
     fn new() -> Self {
         Self {
-            trace_flush_handles: FuturesOrdered::new(),
-            log_flush_handles: FuturesOrdered::new(),
-            metric_flush_handles: FuturesOrdered::new(),
-            proxy_flush_handles: FuturesOrdered::new(),
+            trace_flush_handles: Vec::new(),
+            log_flush_handles: Vec::new(),
+            metric_flush_handles: Vec::new(),
+            proxy_flush_handles: Vec::new(),
         }
+    }
+
+    fn has_pending_handles(&self) -> bool {
+        let trace_pending = self.trace_flush_handles.iter().any(|h| !h.is_finished());
+        let log_pending = self.log_flush_handles.iter().any(|h| !h.is_finished());
+        let metric_pending = self.metric_flush_handles.iter().any(|h| !h.is_finished());
+        let proxy_pending = self.proxy_flush_handles.iter().any(|h| !h.is_finished());
+
+        trace_pending || log_pending || metric_pending || proxy_pending
     }
 
     async fn await_flush_handles(
@@ -130,8 +139,8 @@ impl PendingFlushHandles {
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
 
-        while let Some(retries) = self.trace_flush_handles.next().await {
-            match retries {
+        for handle in self.trace_flush_handles.drain(..) {
+            match handle.await {
                 Ok(retry) => {
                     let tf = trace_flusher.clone();
                     if !retry.is_empty() {
@@ -147,8 +156,8 @@ impl PendingFlushHandles {
             }
         }
 
-        while let Some(retries) = self.log_flush_handles.next().await {
-            match retries {
+        for handle in self.log_flush_handles.drain(..) {
+            match handle.await {
                 Ok(retry) => {
                     if !retry.is_empty() {
                         debug!("redriving {:?} log payloads", retry.len());
@@ -173,9 +182,9 @@ impl PendingFlushHandles {
             }
         }
 
-        while let Some(retries) = self.metric_flush_handles.next().await {
+        for handle in self.metric_flush_handles.drain(..) {
             let mf = metrics_flushers.clone();
-            match retries {
+            match handle.await {
                 Ok(retry_batch) => {
                     if !retry_batch.series.is_empty() || !retry_batch.sketches.is_empty() {
                         debug!(
@@ -199,8 +208,8 @@ impl PendingFlushHandles {
             }
         }
 
-        while let Some(retries) = self.proxy_flush_handles.next().await {
-            match retries {
+        for handle in self.proxy_flush_handles.drain(..) {
+            match handle.await {
                 Ok(batch) => {
                     if !batch.is_empty() {
                         debug!("Redriving {:?} APM proxy payloads", batch.len());
@@ -543,15 +552,17 @@ async fn extension_loop_active(
                 handle_next_invocation(next_response, invocation_processor.clone()).await;
         } else {
             //Periodic flush scenario, flush at top of invocation
-            if current_flush_decision == FlushDecision::Continuous {
+            if current_flush_decision == FlushDecision::Continuous
+                && !pending_flush_handles.has_pending_handles()
+            {
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
-                    .push_back(tokio::spawn(async move { lf.flush(None).await }));
+                    .push(tokio::spawn(async move { lf.flush(None).await }));
                 let tf = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
-                    .push_back(tokio::spawn(async move {
+                    .push(tokio::spawn(async move {
                         tf.flush(None).await.unwrap_or_default()
                     }));
                 let (metrics_flushers_copy, series, sketches) = {
@@ -581,13 +592,13 @@ async fn extension_loop_active(
                             sketches: retry_sketches,
                         }
                     });
-                    pending_flush_handles.metric_flush_handles.push_back(handle);
+                    pending_flush_handles.metric_flush_handles.push(handle);
                 }
 
                 let pf = proxy_flusher.clone();
                 pending_flush_handles
                     .proxy_flush_handles
-                    .push_back(tokio::spawn(async move {
+                    .push(tokio::spawn(async move {
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
@@ -617,13 +628,6 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     next_response = &mut next_lambda_response => {
-                        // Dear reader this is important, you may be tempted to remove this
-                        // after all, why reset the flush interval if we're not flushing?
-                        // It's because the race_flush_interval is only for the RACE FLUSH
-                        // For long-running txns. The call to `flush_control.should_flush_end()`
-                        // has its own interval which is not reset here.
-                        race_flush_interval.reset();
-                        // Thank you for not removing race_flush_interval.reset();
 
                         maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
                         // Need to break here to re-call next
@@ -633,17 +637,19 @@ async fn extension_loop_active(
                         handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle,
-                        )
-                        .await;
+                        if flush_control.flush_strategy == FlushStrategy::Default {
+                            let mut locked_metrics = metrics_flushers.lock().await;
+                            blocking_flush_all(
+                                &logs_flusher,
+                                &mut locked_metrics,
+                                &*trace_flusher,
+                                &*stats_flusher,
+                                &proxy_flusher,
+                                &mut race_flush_interval,
+                                &metrics_aggr_handle,
+                            )
+                            .await;
+                        }
                     }
                 }
             }
