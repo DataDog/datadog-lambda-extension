@@ -349,10 +349,18 @@ pub struct EnvConfig {
     /// The maximum depth of the Lambda payload to capture.
     /// Default is `10`. Requires `capture_lambda_payload` to be `true`.
     pub capture_lambda_payload_max_depth: Option<u32>,
+    /// @env `DD_COMPUTE_TRACE_STATS`
+    ///
+    /// If true, enable computation of trace stats on the extension side.
+    /// If false, trace stats will be computed on the backend side.
+    /// Default is `false`.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub compute_trace_stats: Option<bool>,
     /// @env `DD_SERVERLESS_APPSEC_ENABLED`
     ///
     /// Enable Application and API Protection (AAP), previously known as AppSec/ASM, for AWS Lambda.
     /// Default is `false`.
+    ///
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
     /// @env `DD_APPSEC_RULES`
@@ -548,6 +556,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, lambda_proc_enhanced_metrics);
     merge_option_to_value!(config, env_config, capture_lambda_payload);
     merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
+    merge_option_to_value!(config, env_config, compute_trace_stats);
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
     merge_option!(config, env_config, appsec_rules);
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
@@ -741,6 +750,7 @@ mod tests {
             jail.set_env("DD_LAMBDA_PROC_ENHANCED_METRICS", "false");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "true");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD_MAX_DEPTH", "5");
+            jail.set_env("DD_COMPUTE_TRACE_STATS", "true");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
             jail.set_env("DD_APPSEC_RULES", "/path/to/rules.json");
             jail.set_env("DD_APPSEC_WAF_TIMEOUT", "1000000"); // Microseconds
@@ -888,6 +898,7 @@ mod tests {
                 lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
+                compute_trace_stats: true,
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
                 appsec_waf_timeout: Duration::from_secs(1),
