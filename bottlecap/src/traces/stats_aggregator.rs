@@ -89,10 +89,15 @@ impl StatsAggregator {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use std::sync::Arc;
+    use crate::traces::stats_concentrator_service::StatsConcentratorService;
 
     #[test]
     fn test_add() {
-        let mut aggregator = StatsAggregator::default();
+        let config = Arc::new(Config::default());
+        let (_, concentrator) = StatsConcentratorService::new(config);
+        let mut aggregator = StatsAggregator::new_with_concentrator(concentrator);
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
             env: "dev".to_string(),
@@ -115,9 +120,11 @@ mod tests {
         assert_eq!(aggregator.queue[0], payload);
     }
 
-    #[test]
-    fn test_get_batch() {
-        let mut aggregator = StatsAggregator::default();
+    #[tokio::test]
+    async fn test_get_batch() {
+        let config = Arc::new(Config::default());
+        let (_, concentrator) = StatsConcentratorService::new(config);
+        let mut aggregator = StatsAggregator::new_with_concentrator(concentrator);
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
             env: "dev".to_string(),
@@ -136,13 +143,15 @@ mod tests {
         };
         aggregator.add(payload.clone());
         assert_eq!(aggregator.queue.len(), 1);
-        let batch = aggregator.get_batch();
+        let batch = aggregator.get_batch(false).await;
         assert_eq!(batch, vec![payload]);
     }
 
-    #[test]
-    fn test_get_batch_full_entries() {
-        let mut aggregator = StatsAggregator::new(640);
+    #[tokio::test]
+    async fn test_get_batch_full_entries() {
+        let config = Arc::new(Config::default());
+        let (_, concentrator) = StatsConcentratorService::new(config);
+        let mut aggregator = StatsAggregator::new(640, concentrator);
         // Payload below is 115 bytes
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
@@ -167,12 +176,12 @@ mod tests {
         aggregator.add(payload.clone());
 
         // The batch should only contain the first 2 payloads
-        let first_batch = aggregator.get_batch(false);
+        let first_batch = aggregator.get_batch(false).await;
         assert_eq!(first_batch, vec![payload.clone(), payload.clone()]);
         assert_eq!(aggregator.queue.len(), 1);
 
         // The second batch should only contain the last log
-        let second_batch = aggregator.get_batch(false);
+        let second_batch = aggregator.get_batch(false).await;
         assert_eq!(second_batch, vec![payload]);
         assert_eq!(aggregator.queue.len(), 0);
     }
