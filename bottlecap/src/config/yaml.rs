@@ -99,6 +99,8 @@ pub struct YamlConfig {
     pub capture_lambda_payload: Option<bool>,
     pub capture_lambda_payload_max_depth: Option<u32>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub compute_trace_stats: Option<bool>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
     pub appsec_rules: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
@@ -654,6 +656,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(config, yaml_config, lambda_proc_enhanced_metrics);
     merge_option_to_value!(config, yaml_config, capture_lambda_payload);
     merge_option_to_value!(config, yaml_config, capture_lambda_payload_max_depth);
+    merge_option_to_value!(config, yaml_config, compute_trace_stats);
     merge_option_to_value!(config, yaml_config, serverless_appsec_enabled);
     merge_option!(config, yaml_config, appsec_rules);
     merge_option_to_value!(config, yaml_config, appsec_waf_timeout);
@@ -823,6 +826,7 @@ enhanced_metrics: false
 lambda_proc_enhanced_metrics: false
 capture_lambda_payload: true
 capture_lambda_payload_max_depth: 5
+compute_trace_stats: true
 serverless_appsec_enabled: true
 appsec_rules: "/path/to/rules.json"
 appsec_waf_timeout: 1000000 # Microseconds
@@ -953,6 +957,7 @@ extension_version: "compatibility"
                 lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
+                compute_trace_stats: true,
 
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
