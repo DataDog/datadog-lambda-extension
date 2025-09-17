@@ -2,7 +2,7 @@ use tokio::sync::mpsc::error::SendError;
 
 use tracing::debug;
 
-use crate::traces::stats_concentrator::{StatsEvent, AggregationKey, Stats};
+use crate::traces::stats_concentrator::{AggregationKey, Stats, StatsEvent};
 use crate::traces::stats_concentrator_service::{ConcentratorCommand, StatsConcentratorHandle};
 use datadog_trace_protobuf::pb;
 

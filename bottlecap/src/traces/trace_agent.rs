@@ -206,7 +206,9 @@ impl TraceAgent {
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
             }),
-            stats_sender: Arc::new(SendingTraceStatsProcessor::new(self.stats_concentrator.clone())),
+            stats_sender: Arc::new(SendingTraceStatsProcessor::new(
+                self.stats_concentrator.clone(),
+            )),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
         };

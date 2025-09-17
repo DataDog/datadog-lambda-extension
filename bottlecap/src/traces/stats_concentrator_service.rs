@@ -1,8 +1,8 @@
 use tokio::sync::{mpsc, oneshot};
 
-use crate::traces::stats_concentrator::StatsEvent;
-use crate::traces::stats_concentrator::StatsConcentrator;
 use crate::config::Config;
+use crate::traces::stats_concentrator::StatsConcentrator;
+use crate::traces::stats_concentrator::StatsEvent;
 use datadog_trace_protobuf::pb;
 use std::sync::Arc;
 use tracing::error;
