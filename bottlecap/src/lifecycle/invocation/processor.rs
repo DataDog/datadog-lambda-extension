@@ -45,7 +45,6 @@ use crate::lifecycle::invocation::triggers::get_default_service_name;
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
-pub const S_TO_NS_U64: u64 = 1_000_000_000;
 pub const PROACTIVE_INITIALIZATION_THRESHOLD_MS: u64 = 10_000;
 
 pub const DATADOG_INVOCATION_ERROR_MESSAGE_KEY: &str = "x-datadog-invocation-error-msg";
@@ -129,10 +128,12 @@ impl Processor {
         self.context_buffer
             .start_context(&request_id, invocation_span);
 
-        let timestamp_secs = std::time::UNIX_EPOCH
+        let timestamp = std::time::UNIX_EPOCH
             .elapsed()
             .expect("can't poll clock, unrecoverable")
-            .as_secs();
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
 
         if self.config.lambda_proc_enhanced_metrics {
             // Collect offsets for network and cpu metrics
@@ -161,19 +162,14 @@ impl Processor {
         }
 
         // Increment the invocation metric
-        self.enhanced_metrics
-            .increment_invocation_metric(timestamp_secs.try_into().unwrap_or_default());
+        self.enhanced_metrics.increment_invocation_metric(timestamp);
         self.enhanced_metrics.set_invoked_received();
 
         // If `UniversalInstrumentationStart` event happened first, process it
         if let Some((headers, payload_value)) = self.context_buffer.pair_invoke_event(&request_id) {
             // Infer span
             self.inferrer.infer_span(&payload_value, &self.aws_config);
-            self.process_on_universal_instrumentation_start(
-                request_id.clone(),
-                headers,
-                payload_value,
-            );
+            self.process_on_universal_instrumentation_start(request_id, headers, payload_value);
         }
     }
 

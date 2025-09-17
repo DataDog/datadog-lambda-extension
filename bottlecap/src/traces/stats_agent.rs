@@ -1,10 +1,7 @@
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::error;
 
-use super::stats_concentrator_service::StatsConcentratorHandle;
-
-use super::stats_concentrator::AggregationKey;
-use super::stats_concentrator::Stats;
+use crate::traces::{stats_concentrator_service::StatsConcentratorHandle, stats_concentrator::{AggregationKey, Stats}};
 
 #[derive(Clone, Copy)]
 pub struct StatsEvent {
