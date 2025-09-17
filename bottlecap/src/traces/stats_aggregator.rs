@@ -90,8 +90,8 @@ impl StatsAggregator {
 mod tests {
     use super::*;
     use crate::config::Config;
-    use std::sync::Arc;
     use crate::traces::stats_concentrator_service::StatsConcentratorService;
+    use std::sync::Arc;
 
     #[test]
     fn test_add() {
