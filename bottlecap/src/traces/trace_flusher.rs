@@ -188,6 +188,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     _ = tick_interval.tick() => {
                         counter += 1;
                         if counter % 10 == 0 {
+                            let metrics = tokio::runtime::Handle::current().metrics();
+                            println!("queue: {:?}", metrics.global_queue_depth());
+                            println!("tasks: {:?}", metrics.num_alive_tasks());
                             debug!("Waiting for trace send completion, tick #{}", counter);
                         }
                         tokio::task::yield_now().await;
