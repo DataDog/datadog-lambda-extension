@@ -47,6 +47,7 @@ mod tests {
             runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+            max_concurrency: None,
         });
         assert!(should_start_proxy(&config, aws_config));
     }
@@ -61,6 +62,7 @@ mod tests {
             runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
+            max_concurrency: None,
         });
         assert!(should_start_proxy(&config, aws_config));
     }
@@ -79,6 +81,7 @@ mod tests {
             runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+            max_concurrency: None,
         });
         assert!(should_start_proxy(&config, aws_config));
     }
@@ -97,6 +100,7 @@ mod tests {
             runtime_api: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: Some("/opt/datadog_wrapper".to_string()),
+            max_concurrency: None,
         });
         assert!(!should_start_proxy(&config, aws_config));
     }
@@ -116,6 +120,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             // Datadog wrapper is not set, so we should not start the proxy
             exec_wrapper: Some("/opt/not_datadog".to_string()),
+            max_concurrency: None,
         });
         assert!(!should_start_proxy(&config, aws_config));
     }

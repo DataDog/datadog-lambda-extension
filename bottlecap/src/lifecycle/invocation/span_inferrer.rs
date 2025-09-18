@@ -542,6 +542,7 @@ mod tests {
             function_name: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
+            max_concurrency: None,
         });
 
         inferrer.infer_span(&payload, &aws_config);

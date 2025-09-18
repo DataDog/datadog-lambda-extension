@@ -1031,6 +1031,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             runtime_api: "***".into(),
             exec_wrapper: None,
+            max_concurrency: None,
         });
 
         let config = Arc::new(config::Config {

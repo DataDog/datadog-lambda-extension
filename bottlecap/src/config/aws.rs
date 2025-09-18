@@ -11,6 +11,7 @@ const AWS_LAMBDA_FUNCTION_NAME: &str = "AWS_LAMBDA_FUNCTION_NAME";
 const AWS_LAMBDA_RUNTIME_API: &str = "AWS_LAMBDA_RUNTIME_API";
 const AWS_LWA_LAMBDA_RUNTIME_API_PROXY: &str = "AWS_LWA_LAMBDA_RUNTIME_API_PROXY";
 const AWS_LAMBDA_EXEC_WRAPPER: &str = "AWS_LAMBDA_EXEC_WRAPPER";
+const AWS_LAMBDA_MAX_CONCURRENCY: &str = "AWS_LAMBDA_MAX_CONCURRENCY";
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone)]
@@ -21,6 +22,7 @@ pub struct AwsConfig {
     pub runtime_api: String,
     pub sandbox_init_time: Instant,
     pub exec_wrapper: Option<String>,
+    pub max_concurrency: Option<String>,
 }
 
 impl AwsConfig {
@@ -33,6 +35,7 @@ impl AwsConfig {
             runtime_api: env::var(AWS_LAMBDA_RUNTIME_API).unwrap_or_default(),
             sandbox_init_time: start_time,
             exec_wrapper: env::var(AWS_LAMBDA_EXEC_WRAPPER).ok(),
+            max_concurrency: env::var(AWS_LAMBDA_MAX_CONCURRENCY).ok(),
         }
     }
 }
