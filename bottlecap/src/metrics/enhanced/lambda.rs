@@ -20,7 +20,10 @@ use tokio::{
 };
 use tracing::debug;
 use tracing::error;
-
+// tmp/proc enhanced metrics tasks open and/or read files in the /proc directory using blocking I/O.
+// These tasks can block the async context the task is called under and thus delay other important work.
+// In rare cases, if the tasks start taking longer than the typical invocations take, these tasks can pile up and cause timeouts.
+// So we ensure only one task to measure these is ever running at the same time
 static TMP_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 static PROCESS_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 
