@@ -661,7 +661,7 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
                     },
                     // Logging these as INFO as the user is often unable to do anything about these issues, and hence
                     // WARN is excessive.
-                    Err(e) => info!("aap: failed to parse body, it will not be analyzed for security activity: {e}"),
+                    Err(e) => info!("aap: unable to parse body, it will not be analyzed for security activity: {e}"),
                 }
             }
         };
@@ -824,18 +824,18 @@ impl From<std::io::Error> for BodyParseError {
 impl std::fmt::Display for BodyParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ContentTypeParseError(e) => write!(f, "aap: failed to parse content type: {e}"),
+            Self::ContentTypeParseError(e) => write!(f, "failed to parse content type: {e}"),
             Self::MissingBoundary(mime_type) => {
                 write!(
                     f,
-                    "aap: cannot parse {mime_type} body: missing boundary parameter"
+                    "cannot parse {mime_type} body: missing boundary parameter"
                 )
             }
             Self::UnsupportedMimeType(mime_type) => {
-                write!(f, "aap: unsupported MIME type: {mime_type}")
+                write!(f, "unsupported MIME type: {mime_type}")
             }
-            Self::IOError(e) => write!(f, "aap: failed to read body: {e}"),
-            Self::SerdeError(e) => write!(f, "aap: failed to parse body: {e}"),
+            Self::IOError(e) => write!(f, "failed to read body: {e}"),
+            Self::SerdeError(e) => write!(f, "failed to parse body: {e}"),
         }
     }
 }
