@@ -14,6 +14,7 @@ use tracing::{debug, warn};
 
 use crate::{
     config::{self, aws::AwsConfig},
+    extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
     lifecycle::invocation::{
         base64_to_string,
         context::{Context, ContextBuffer, ReparentingInfo},
@@ -26,7 +27,6 @@ use crate::{
         constants::{ETC_PATH, PROC_PATH},
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
-    telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{
