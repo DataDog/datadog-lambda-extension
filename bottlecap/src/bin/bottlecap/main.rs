@@ -283,8 +283,9 @@ async fn main() -> anyhow::Result<()> {
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
+    let elevator_mode = aws_config.is_elevator_mode();
     let response = tokio::task::spawn(async move {
-        extension::register(&cloned_client, &runtime_api, extension::EXTENSION_NAME).await
+        extension::register(&cloned_client, &runtime_api, extension::EXTENSION_NAME, elevator_mode).await
     });
     // First load the AWS configuration
     let lambda_directory: String =

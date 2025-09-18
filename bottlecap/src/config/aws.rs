@@ -38,6 +38,11 @@ impl AwsConfig {
             max_concurrency: env::var(AWS_LAMBDA_MAX_CONCURRENCY).ok(),
         }
     }
+
+    #[must_use]
+    pub fn is_elevator_mode(&self) -> bool {
+        self.max_concurrency.is_some()
+    }
 }
 
 #[allow(clippy::module_name_repetitions)]
