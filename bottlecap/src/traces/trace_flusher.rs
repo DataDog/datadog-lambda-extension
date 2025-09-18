@@ -177,7 +177,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             };
 
             let mut counter = 0;
-            let mut tick_interval = interval(Duration::from_millis(100));
+            let mut tick_interval = interval(Duration::from_millis(10));
             let send_future = trace_with_endpoint.send_proxy(proxy_https.as_deref());
             tokio::pin!(send_future);
             let send_result = loop {
@@ -187,7 +187,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     }
                     _ = tick_interval.tick() => {
                         counter += 1;
-                        debug!("Waiting for trace send completion, tick #{}", counter);
+                        if counter % 10 == 0 {
+                            debug!("Waiting for trace send completion, tick #{}", counter);
+                        }
                         tokio::task::yield_now().await;
                     }
                 }
