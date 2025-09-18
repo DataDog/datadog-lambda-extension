@@ -30,6 +30,11 @@ use bottlecap::{
     extension::{
         self, EXTENSION_HOST, EXTENSION_HOST_IP, ExtensionError, NextEventResponse,
         RegisterResponse,
+        telemetry::{
+            self, TELEMETRY_PORT,
+            events::{TelemetryEvent, TelemetryRecord},
+            listener::TelemetryListener,
+        },
     },
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
@@ -46,11 +51,6 @@ use bottlecap::{
     tags::{
         lambda::{self, tags::EXTENSION_VERSION},
         provider::Provider as TagProvider,
-    },
-    telemetry::{
-        self, TELEMETRY_PORT,
-        events::{TelemetryEvent, TelemetryRecord},
-        listener::TelemetryListener,
     },
     traces::{
         propagation::DatadogCompositePropagator,

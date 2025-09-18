@@ -2,6 +2,8 @@ use reqwest::Client;
 use serde::Deserialize;
 use tracing::error;
 
+pub mod telemetry;
+
 pub const EXTENSION_HOST: &str = "0.0.0.0";
 pub const EXTENSION_HOST_IP: [u8; 4] = [0, 0, 0, 0];
 pub const EXTENSION_NAME: &str = "datadog-agent";

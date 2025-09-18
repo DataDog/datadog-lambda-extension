@@ -1,9 +1,9 @@
+use crate::extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
 use crate::metrics::enhanced::{
     constants::{self, BASE_LAMBDA_INVOCATION_PRICE},
     statfs::statfs_info,
 };
 use crate::proc::{self, CPUData, NetworkData};
-use crate::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
 use dogstatsd::metric::SortedTags;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator_service::AggregatorHandle, metric};

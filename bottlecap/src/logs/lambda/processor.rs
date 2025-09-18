@@ -7,11 +7,11 @@ use tracing::{debug, error};
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
 use crate::event_bus::Event;
+use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator::Aggregator;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
-use crate::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 
 use crate::logs::lambda::{IntakeLog, Message};
 
@@ -367,10 +367,10 @@ mod tests {
     use serde_json::{Number, Value};
     use std::collections::hash_map::HashMap;
 
-    use crate::logs::lambda::Lambda;
-    use crate::telemetry::events::{
+    use crate::extension::telemetry::events::{
         InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
     };
+    use crate::logs::lambda::Lambda;
 
     macro_rules! get_message_tests {
         ($($name:ident: $value:expr,)*) => {

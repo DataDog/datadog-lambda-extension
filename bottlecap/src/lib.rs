@@ -35,7 +35,6 @@ pub mod proc;
 pub mod proxy;
 pub mod secrets;
 pub mod tags;
-pub mod telemetry;
 pub mod traces;
 
 pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";

@@ -1,6 +1,6 @@
 use crate::{
+    extension::telemetry::events::{TelemetryEvent, TelemetryRecord},
     http::{extract_request_body, handler_not_found},
-    telemetry::events::{TelemetryEvent, TelemetryRecord},
 };
 
 use axum::{
@@ -133,7 +133,7 @@ mod tests {
     use axum::http::Request;
     use chrono::DateTime;
 
-    use crate::telemetry::events::{InitPhase, InitType, TelemetryRecord};
+    use crate::extension::telemetry::events::{InitPhase, InitType, TelemetryRecord};
 
     #[tokio::test]
     #[allow(clippy::unwrap_used)]
