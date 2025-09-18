@@ -13,14 +13,13 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::Error;
 use std::sync::Arc;
-use tokio::{sync::RwLock, time::Instant};
+use tokio::time::Instant;
 use tracing::debug;
 use tracing::error;
 
 pub async fn resolve_secrets(
     config: Arc<Config>,
     aws_config: Arc<AwsConfig>,
-    aws_credentials: Arc<RwLock<AwsCredentials>>,
 ) -> Option<String> {
     let api_key_candidate =
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
@@ -42,36 +41,35 @@ pub async fn resolve_secrets(
                 }
             };
 
-            let aws_credentials_read = aws_credentials.read().await;
+            let mut aws_credentials = AwsCredentials::from_env();
 
-            if aws_credentials_read.aws_secret_access_key.is_empty()
-                && aws_credentials_read.aws_access_key_id.is_empty()
-                && !aws_credentials_read
+            if aws_credentials.aws_secret_access_key.is_empty()
+                && aws_credentials.aws_access_key_id.is_empty()
+                && !aws_credentials
                     .aws_container_credentials_full_uri
                     .is_empty()
-                && !aws_credentials_read
+                && !aws_credentials
                     .aws_container_authorization_token
                     .is_empty()
             {
                 // We're in Snap Start
                 let credentials =
-                    match get_snapstart_credentials(&aws_credentials_read, &client).await {
+                    match get_snapstart_credentials(&aws_credentials, &client).await {
                         Ok(credentials) => credentials,
                         Err(err) => {
                             error!("Error getting Snap Start credentials: {}", err);
                             return None;
                         }
                     };
-                let mut aws_credentials_write = aws_credentials.write().await;
-                aws_credentials_write.aws_access_key_id = credentials["AccessKeyId"]
+                aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                aws_credentials_write.aws_secret_access_key = credentials["SecretAccessKey"]
+                aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
-                aws_credentials_write.aws_session_token = credentials["Token"]
+                aws_credentials.aws_session_token = credentials["Token"]
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
@@ -82,7 +80,7 @@ pub async fn resolve_secrets(
                     &client,
                     config.api_key_secret_arn.clone(),
                     aws_config,
-                    &aws_credentials_read,
+                    &aws_credentials,
                 )
                 .await
             } else {
@@ -90,7 +88,7 @@ pub async fn resolve_secrets(
                     &client,
                     config.kms_api_key.clone(),
                     aws_config,
-                    &aws_credentials_read,
+                    &aws_credentials,
                 )
                 .await
             };
