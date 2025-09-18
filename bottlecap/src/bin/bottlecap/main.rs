@@ -317,10 +317,7 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
     debug!("Logging subsystem enabled");
 }
 
-fn create_api_key_factory(
-    config: &Arc<Config>,
-    aws_config: &Arc<AwsConfig>,
-) -> Arc<ApiKeyFactory> {
+fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
 

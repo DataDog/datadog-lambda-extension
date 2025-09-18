@@ -17,10 +17,7 @@ use tokio::time::Instant;
 use tracing::debug;
 use tracing::error;
 
-pub async fn resolve_secrets(
-    config: Arc<Config>,
-    aws_config: Arc<AwsConfig>,
-) -> Option<String> {
+pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) -> Option<String> {
     let api_key_candidate =
         if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
             let before_decrypt = Instant::now();
@@ -48,19 +45,16 @@ pub async fn resolve_secrets(
                 && !aws_credentials
                     .aws_container_credentials_full_uri
                     .is_empty()
-                && !aws_credentials
-                    .aws_container_authorization_token
-                    .is_empty()
+                && !aws_credentials.aws_container_authorization_token.is_empty()
             {
                 // We're in Snap Start
-                let credentials =
-                    match get_snapstart_credentials(&aws_credentials, &client).await {
-                        Ok(credentials) => credentials,
-                        Err(err) => {
-                            error!("Error getting Snap Start credentials: {}", err);
-                            return None;
-                        }
-                    };
+                let credentials = match get_snapstart_credentials(&aws_credentials, &client).await {
+                    Ok(credentials) => credentials,
+                    Err(err) => {
+                        error!("Error getting Snap Start credentials: {}", err);
+                        return None;
+                    }
+                };
                 aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
                     .as_str()
                     .unwrap_or_default()
