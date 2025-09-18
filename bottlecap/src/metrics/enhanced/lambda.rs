@@ -9,7 +9,10 @@ use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator_service::AggregatorHandle, metric};
 use std::collections::HashMap;
 use std::env::consts::ARCH;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 use tokio::{
     sync::watch::{Receiver, Sender},
@@ -17,6 +20,12 @@ use tokio::{
 };
 use tracing::debug;
 use tracing::error;
+// tmp/proc enhanced metrics tasks open and/or read files in the /proc directory using blocking I/O.
+// These tasks can block the async context the task is called under and thus delay other important work.
+// In rare cases, if the tasks start taking longer than the typical invocations take, these tasks can pile up and cause timeouts.
+// So we ensure only one task to measure these is ever running at the same time
+static TMP_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
+static PROCESS_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 
 pub struct Lambda {
     pub aggr_handle: AggregatorHandle,
@@ -538,6 +547,14 @@ impl Lambda {
             return;
         }
 
+        if TMP_TASK_RUNNING
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            debug!("Tmp enhanced metrics task already running, skipping");
+            return;
+        }
+
         let aggr = self.aggr_handle.clone();
         let tags = self.get_dynamic_value_tags();
 
@@ -547,6 +564,7 @@ impl Lambda {
                 Ok(stats) => stats,
                 Err(err) => {
                     debug!("Could not emit tmp enhanced metrics. {:?}", err);
+                    TMP_TASK_RUNNING.store(false, Ordering::Release);
                     return;
                 }
             };
@@ -560,6 +578,7 @@ impl Lambda {
                     // When the stop signal is received, generate final metrics
                     _ = send_metrics.changed() => {
                         Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &aggr, tags);
+                        TMP_TASK_RUNNING.store(false, Ordering::Release);
                         return;
                     }
                     // Otherwise keep monitoring tmp usage periodically
@@ -568,6 +587,7 @@ impl Lambda {
                             Ok(stats) => stats,
                             Err(err) => {
                                 debug!("Could not emit tmp enhanced metrics. {:?}", err);
+                                TMP_TASK_RUNNING.store(false, Ordering::Release);
                                 return;
                             }
                         };
@@ -648,6 +668,14 @@ impl Lambda {
             return;
         }
 
+        if PROCESS_TASK_RUNNING
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            debug!("Process enhanced metrics task already running, skipping");
+            return;
+        }
+
         let aggr = self.aggr_handle.clone();
         let tags = self.get_dynamic_value_tags();
 
@@ -670,6 +698,7 @@ impl Lambda {
                     // When the stop signal is received, generate final metrics
                     _ = send_metrics.changed() => {
                         Self::generate_process_metrics(fd_max, fd_use, threads_max, threads_use, &aggr, tags.clone());
+                        PROCESS_TASK_RUNNING.store(false, Ordering::Release);
                         return;
                     }
                     // Otherwise keep monitoring file descriptor and thread usage periodically
