@@ -434,11 +434,8 @@ where
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
-    use std::{
-        collections::HashMap,
-        time::{Duration, Instant},
-    };
-    use tokio::sync::Mutex as TokioMutex;
+    use std::{collections::HashMap, time::Duration};
+    use tokio::{sync::Mutex as TokioMutex, time::Instant};
 
     use dogstatsd::{aggregator_service::AggregatorService, metric::EMPTY_TAGS};
     use http_body_util::Full;

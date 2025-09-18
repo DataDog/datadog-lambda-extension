@@ -367,12 +367,11 @@ pub fn extract_generated_span_context(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
     use serde_json::json;
     use std::sync::Arc;
-    use std::time::Instant;
-
-    use super::*;
+    use tokio::time::Instant;
 
     fn test_context_source(payload: &Value, expected_source: &str) {
         let propagator = Arc::new(DatadogHeaderPropagator);
