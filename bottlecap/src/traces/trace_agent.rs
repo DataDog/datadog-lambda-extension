@@ -519,17 +519,17 @@ impl TraceAgent {
                     .await;
             }
         }
-        
+
         if let Err(err) = trace_sender
-        .send_processed_traces(
-            config,
-            tags_provider,
-            tracer_header_tags,
-            traces,
-            body_size,
-            None,
-        )
-        .await
+            .send_processed_traces(
+                config,
+                tags_provider,
+                tracer_header_tags,
+                traces,
+                body_size,
+                None,
+            )
+            .await
         {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,

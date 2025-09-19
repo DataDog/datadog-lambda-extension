@@ -171,8 +171,7 @@ impl Agent {
                 traces,
                 body_size,
                 None,
-            )
-            .await;
+            );
 
         match trace_tx.send(send_data_builder).await {
             Ok(()) => {

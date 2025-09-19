@@ -57,7 +57,7 @@ use bottlecap::{
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
-        stats_concentrator_service::StatsConcentratorService,
+        stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
         stats_flusher::{self, StatsFlusher},
         stats_processor, trace_agent,
         trace_aggregator::{self, SendDataBuilderInfo},
@@ -434,6 +434,7 @@ async fn extension_loop_active(
         stats_flusher,
         proxy_flusher,
         trace_agent_shutdown_token,
+        stats_concentrator,
     ) = start_trace_agent(
         config,
         &api_key_factory,
@@ -508,7 +509,7 @@ async fn extension_loop_active(
                 tokio::select! {
                 biased;
                     Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
+                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
                             if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                 break 'flush_end;
                             }
@@ -631,7 +632,7 @@ async fn extension_loop_active(
                         break 'next_invocation;
                     }
                     Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     _ = race_flush_interval.tick() => {
                         if flush_control.flush_strategy == FlushStrategy::Default {
@@ -672,7 +673,7 @@ async fn extension_loop_active(
                             debug!("Received tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
@@ -753,6 +754,7 @@ async fn handle_event_bus_event(
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
+    stats_concentrator: StatsConcentratorHandle,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::OutOfMemory(event_timestamp) => {
@@ -804,7 +806,9 @@ async fn handle_event_bus_event(
                             appsec: appsec_processor.clone(),
                             processor: trace_processor.clone(),
                             trace_tx: trace_agent_channel.clone(),
-                            stats_sender: Arc::new(SendingTraceStatsProcessor::new(stats_agent_channel.clone())),
+                            stats_sender: Arc::new(SendingTraceStatsProcessor::new(
+                                stats_concentrator.clone(),
+                            )),
                         }),
                         event.time.timestamp(),
                     )
@@ -989,6 +993,7 @@ fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
+    StatsConcentratorHandle,
 ) {
     // Stats
     let (stats_concentrator_service, stats_concentrator_handle) =
@@ -1044,7 +1049,7 @@ fn start_trace_agent(
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
-        stats_concentrator_handle,
+        stats_concentrator_handle.clone(),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
@@ -1063,6 +1068,7 @@ fn start_trace_agent(
         stats_flusher,
         proxy_flusher,
         shutdown_token,
+        stats_concentrator_handle,
     )
 }
 

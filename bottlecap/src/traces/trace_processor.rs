@@ -24,13 +24,13 @@ use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
 use ddcommon::Endpoint;
 use regex::Regex;
+use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
-use std::fmt::Display;
 
 use super::stats_concentrator_service::ConcentratorCommand;
 use super::trace_aggregator::SendDataBuilderInfo;
@@ -310,7 +310,7 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
 #[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait TraceProcessor {
-    async fn process_traces(
+    fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
@@ -318,12 +318,12 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> (SendDataBuilderInfo, Vec<Vec<pb::Span>>);
+    ) -> (SendDataBuilderInfo, TracerPayloadCollection);
 }
 
 #[async_trait]
 impl TraceProcessor for ServerlessTraceProcessor {
-    async fn process_traces(
+    fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
@@ -331,7 +331,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> (SendDataBuilderInfo, Vec<Vec<pb::Span>>) {
+    ) -> (SendDataBuilderInfo, TracerPayloadCollection) {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -363,7 +363,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
+        let builder = SendDataBuilder::new(body_size, payload.clone(), header_tags, &endpoint)
             .with_compression(Compression::Zstd(config.apm_config_compression_level))
             .with_retry_strategy(RetryStrategy::new(
                 1,
@@ -372,7 +372,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 None,
             ));
 
-        (SendDataBuilderInfo::new(builder, body_size), traces)
+        (SendDataBuilderInfo::new(builder, body_size), payload)
     }
 }
 
@@ -471,7 +471,7 @@ impl SendingTraceProcessor {
 
         if traces.is_empty() {
             debug!("TRACE_PROCESSOR | no traces left to be sent, skipping...");
-            return Ok(vec![]);
+            return Ok(());
         }
 
         let (payload, processed_traces) = self
@@ -483,16 +483,15 @@ impl SendingTraceProcessor {
                 traces,
                 body_size,
                 span_pointers,
-            )
-            .await;
+            );
         self.trace_tx.send(payload).await?;
 
         // This needs to be after send_processed_traces() because send_processed_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if config.compute_trace_stats {
-            self.stats_sender.send(&processed_traces)?;
+            self.stats_sender.send(&processed_traces);
         }
-        Ok()
+        Ok(())
     }
 }
 
@@ -614,14 +613,15 @@ mod tests {
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
-        let tracer_payload = trace_processor.process_traces(
-            config,
-            tags_provider.clone(),
-            header_tags,
-            traces,
-            100,
-            None,
-        );
+        let (tracer_payload, _processed_traces) = trace_processor
+            .process_traces(
+                config,
+                tags_provider.clone(),
+                header_tags,
+                traces,
+                100,
+                None,
+            );
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
@@ -643,7 +643,7 @@ mod tests {
         };
 
         let received_payload = if let TracerPayloadCollection::V07(payload) =
-            tracer_payload.await.builder.build().get_payloads()
+            tracer_payload.builder.build().get_payloads()
         {
             Some(payload[0].clone())
         } else {
