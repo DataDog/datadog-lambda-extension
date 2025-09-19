@@ -63,6 +63,7 @@ use bottlecap::{
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
+        trace_stats_processor::SendingTraceStatsProcessor,
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -803,6 +804,7 @@ async fn handle_event_bus_event(
                             appsec: appsec_processor.clone(),
                             processor: trace_processor.clone(),
                             trace_tx: trace_agent_channel.clone(),
+                            stats_sender: Arc::new(SendingTraceStatsProcessor::new(stats_agent_channel.clone())),
                         }),
                         event.time.timestamp(),
                     )
