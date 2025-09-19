@@ -23,7 +23,7 @@ use bottlecap::{
     },
     config::{
         self, Config,
-        aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
+        aws::{AwsConfig, build_lambda_function_arn},
         flush_strategy::FlushStrategy,
     },
     event_bus::{Event, EventBus},
@@ -85,7 +85,7 @@ use dogstatsd::{
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, sync::Arc};
 use tokio::time::{Duration, Instant};
-use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
+use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -236,7 +236,7 @@ impl PendingFlushHandles {
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
-    let (aws_config, aws_credentials, config) = load_configs(start_time);
+    let (aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -254,7 +254,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
 
     let aws_config = Arc::new(aws_config);
-    let api_key_factory = create_api_key_factory(&config, &aws_config, aws_credentials);
+    let api_key_factory = create_api_key_factory(&config, &aws_config);
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -285,14 +285,13 @@ fn init_ustr() {
     });
 }
 
-fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     // First load the AWS configuration
     let aws_config = AwsConfig::from_env(start_time);
-    let aws_credentials = AwsCredentials::from_env();
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
-    (aws_config, aws_credentials, config)
+    (aws_config, config)
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
@@ -318,21 +317,15 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
     debug!("Logging subsystem enabled");
 }
 
-fn create_api_key_factory(
-    config: &Arc<Config>,
-    aws_config: &Arc<AwsConfig>,
-    aws_credentials: AwsCredentials,
-) -> Arc<ApiKeyFactory> {
+fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
-    let aws_credentials = Arc::new(RwLock::new(aws_credentials));
 
     Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
         let config = Arc::clone(&config);
         let aws_config = Arc::clone(&aws_config);
-        let aws_credentials = Arc::clone(&aws_credentials);
 
-        Box::pin(async move { resolve_secrets(config, aws_config, aws_credentials).await })
+        Box::pin(async move { resolve_secrets(config, aws_config).await })
     })))
 }
 
