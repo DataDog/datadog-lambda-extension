@@ -33,8 +33,19 @@ impl StatsGenerator {
                     for span in &chunk.spans {
                         let stats = StatsEvent {
                             time: span.start.try_into().unwrap_or_default(),
-                            aggregation_key: AggregationKey {},
-                            stats: Stats {},
+                            aggregation_key: AggregationKey {
+                                env: span.meta.get("env").cloned().unwrap_or_default(),
+                                service: span.service.clone(),
+                                name: span.name.clone(),
+                                resource: span.resource.clone(),
+                                r#type: span.r#type.clone(),
+                            },
+                            stats: Stats {
+                                hits: 1,
+                                error: span.error,
+                                duration: span.duration,
+                                top_level_hits: span.metrics.get("_dd.top_level").map_or(0.0, |v| *v),
+                            },
                         };
                         if let Err(err) = self.stats_concentrator.add(stats) {
                             error!("Failed to send trace stats: {err}");
