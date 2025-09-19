@@ -442,7 +442,7 @@ impl Default for Config {
             lambda_proc_enhanced_metrics: true,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
-            compute_trace_stats: false,
+            compute_trace_stats: true,
 
             serverless_appsec_enabled: false,
             appsec_rules: None,
