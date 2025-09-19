@@ -10,7 +10,7 @@ use libddwaf::object::{Keyed, WafMap, WafObject};
 use libddwaf::{Context as WafContext, Handle, RunError, RunOutput, RunResult, waf_map};
 use mime::Mime;
 use multipart::server::Multipart;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::appsec::processor::response::ExpectedResponseFormat;
 use crate::appsec::processor::{InvocationPayload, Processor};
@@ -169,9 +169,16 @@ impl Context {
         }
 
         if self.waf_timeout.is_zero() {
-            warn!(
-                "aap: WAF execution time budget for this request is exhausted, skipping WAF ruleset evaluation (consider tweaking DD_APPSEC_WAF_TIMEOUT)"
+            // Logging as INFO and not as WARN as users may find this an acceptable trade-off in
+            // situations where extending the WAF timeout is not acceptable. Issuing a WARN here
+            // would lead to excessive log spam for these customers, who then can't do anything
+            // about it.
+            info!(
+                "aap: WAF execution time budget for this request is exhausted, skipping WAF ruleset evaluation entirely (consider tweaking DD_APPSEC_WAF_TIMEOUT)"
             );
+            // This still counts as a WAF timeout even though we did not actually call it... The
+            // budget would have been 0 here.
+            self.waf_timed_out_occurrences += 1;
             return;
         }
 
@@ -427,7 +434,11 @@ impl Context {
             duration, self.waf_timeout, self.waf_duration
         );
         if result.timeout() {
-            warn!(
+            // Logging as INFO and not as WARN as users may find this an acceptable trade-off in
+            // situations where extending the WAF timeout is not acceptable. Issuing a WARN here
+            // would lead to excessive log spam for these customers, who then can't do anything
+            // about it.
+            info!(
                 "aap: time out reached while evaluating the WAF ruleset; detections may be incomplete. Consider tuning DD_APPSEC_WAF_TIMEOUT"
             );
             self.waf_timed_out_occurrences += 1;
@@ -648,7 +659,9 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
                     Ok(value) => {
                         addresses.push(($name, value).into());
                     },
-                    Err(e) => warn!("aap: failed to parse body: {e}"),
+                    // Logging these as INFO as the user is often unable to do anything about these issues, and hence
+                    // WARN is excessive.
+                    Err(e) => info!("aap: unable to parse body, it will not be analyzed for security activity: {e}"),
                 }
             }
         };
@@ -708,18 +721,12 @@ fn to_address_data(payload: &dyn InvocationPayload) -> Option<WafMap> {
     Some(result)
 }
 
-fn try_parse_body(
-    body: impl Read,
-    content_type: &str,
-) -> Result<WafObject, Box<dyn std::error::Error>> {
+fn try_parse_body(body: impl Read, content_type: &str) -> Result<WafObject, BodyParseError> {
     let mime_type: Mime = content_type.parse()?;
     try_parse_body_with_mime(body, mime_type)
 }
 
-fn try_parse_body_with_mime(
-    body: impl Read,
-    mime_type: Mime,
-) -> Result<WafObject, Box<dyn std::error::Error>> {
+fn try_parse_body_with_mime(body: impl Read, mime_type: Mime) -> Result<WafObject, BodyParseError> {
     match (mime_type.type_(), mime_type.subtype(), mime_type.suffix()) {
         (typ, sub, suff)
             if ((typ == mime::TEXT || typ == mime::APPLICATION)
@@ -739,10 +746,7 @@ fn try_parse_body_with_mime(
         }
         (mime::MULTIPART, mime::FORM_DATA, None) => {
             let Some(boundary) = mime_type.get_param("boundary") else {
-                return Err(format!(
-                    "aap: cannot parse {mime_type} body: missing boundary parameter"
-                )
-                .into());
+                return Err(BodyParseError::MissingBoundary(mime_type));
             };
             let mut multipart = Multipart::with_body(body, boundary.as_str());
             let mut items = Vec::new();
@@ -756,7 +760,9 @@ fn try_parse_body_with_mime(
                         {
                             Ok(value) => value,
                             Err(e) => {
-                                warn!(
+                                // Logging as INFO as this is often not directly actionnable by the
+                                // customer and can lead to excessive log spam if sent as WARN.
+                                info!(
                                     "aap: failed to parse multipart body entry {name}: {e}",
                                     name = entry.headers.name
                                 );
@@ -783,9 +789,31 @@ fn try_parse_body_with_mime(
             let body = read_to_string(body)?;
             Ok(body.as_str().into())
         }
-        _ => Err(
-            format!("aap: unsupported MIME type, the body will not be parsed: {mime_type}").into(),
-        ),
+        _ => Err(BodyParseError::UnsupportedMimeType(mime_type)),
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum BodyParseError {
+    #[error("failed to parse content type: {0}")]
+    ContentTypeParseError(#[from] mime::FromStrError),
+    #[error("cannot parse {0} body: missing boundary parameter")]
+    MissingBoundary(Mime),
+    #[error("unsupported MIME type: {0}")]
+    UnsupportedMimeType(Mime),
+    #[error("failed to read body: {0}")]
+    IOError(#[from] std::io::Error),
+    #[error("failed to parse body: {0}")]
+    SerdeError(Box<dyn std::error::Error>),
+}
+impl From<serde_json::Error> for BodyParseError {
+    fn from(e: serde_json::Error) -> Self {
+        Self::SerdeError(Box::new(e))
+    }
+}
+impl From<serde_html_form::de::Error> for BodyParseError {
+    fn from(e: serde_html_form::de::Error) -> Self {
+        Self::SerdeError(Box::new(e))
     }
 }
 
