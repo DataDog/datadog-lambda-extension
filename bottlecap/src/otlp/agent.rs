@@ -196,7 +196,7 @@ impl Agent {
             }
         };
 
-        // This needs to be after send_processed_traces() because send_processed_traces()
+        // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if compute_trace_stats {
             if let Err(err) = stats_sender.send(&processed_traces) {
