@@ -7,22 +7,12 @@ use datadog_trace_protobuf::pb;
 use std::sync::Arc;
 use tracing::error;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum StatsError {
+    #[error("Failed to send command to concentrator: {0}")]
     SendError(mpsc::error::SendError<ConcentratorCommand>),
+    #[error("Failed to receive response from concentrator: {0}")]
     RecvError(oneshot::error::RecvError),
-}
-
-impl From<mpsc::error::SendError<ConcentratorCommand>> for StatsError {
-    fn from(err: mpsc::error::SendError<ConcentratorCommand>) -> Self {
-        StatsError::SendError(err)
-    }
-}
-
-impl From<oneshot::error::RecvError> for StatsError {
-    fn from(err: oneshot::error::RecvError) -> Self {
-        StatsError::RecvError(err)
-    }
 }
 
 pub enum ConcentratorCommand {
@@ -49,8 +39,9 @@ impl StatsConcentratorHandle {
     ) -> Result<Vec<pb::ClientStatsPayload>, StatsError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
-            .send(ConcentratorCommand::Flush(force_flush, response_tx))?;
-        let stats = response_rx.await?;
+            .send(ConcentratorCommand::Flush(force_flush, response_tx))
+            .map_err(StatsError::SendError)?;
+        let stats = response_rx.await.map_err(StatsError::RecvError)?;
         Ok(stats)
     }
 }
