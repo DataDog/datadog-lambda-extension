@@ -164,6 +164,9 @@ pub enum InitType {
     ProvisionedConcurrency,
     /// `SnapStart`
     SnapStart,
+    /// Elevator mode
+    #[serde(rename = "ec2-capacity-provider")]
+    EC2CapacityProvider,
 }
 
 impl Display for InitType {
@@ -172,6 +175,7 @@ impl Display for InitType {
             InitType::OnDemand => "on-demand",
             InitType::ProvisionedConcurrency => "provisioned-concurrency",
             InitType::SnapStart => "SnapStart",
+            InitType::EC2CapacityProvider => "ec2-capacity-provider",
         };
         write!(f, "{style}")
     }
