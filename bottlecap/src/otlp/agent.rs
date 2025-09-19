@@ -199,7 +199,13 @@ impl Agent {
         // This needs to be after send_processed_traces() because send_processed_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if compute_trace_stats {
-            stats_sender.send(&processed_traces);
+            if let Err(err) = stats_sender.send(&processed_traces) {
+                error!("OTLP | Error sending traces to the stats concentrator: {err}");
+                return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                    json!({ "message": format!("Error sending traces to the stats concentrator: {err}") }).to_string()
+                ).into_response();
+            }
         }
 
         (

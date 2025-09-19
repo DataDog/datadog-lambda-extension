@@ -31,9 +31,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
-use super::stats_concentrator_service::ConcentratorCommand;
 use super::trace_aggregator::SendDataBuilderInfo;
-use super::trace_stats_processor::SendingTraceStatsProcessor;
+use super::trace_stats_processor::{SendingTraceStatsProcessor, SendingTraceStatsProcessorError};
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -379,8 +378,8 @@ impl TraceProcessor for ServerlessTraceProcessor {
 pub enum SendingTraceProcessorError {
     #[error("Error sending traces to the trace aggregator: {0}")]
     SendDataBuilderInfoError(SendError<SendDataBuilderInfo>),
-    #[error("Error sending traces to the stats concentrator: {0}")]
-    ConcentratorCommandError(SendError<ConcentratorCommand>),
+    #[error("Error sending traces to the stats concentrator")]
+    SendStatsError(SendingTraceStatsProcessorError),
 }
 
 /// A utility that is used to process, then send traces to the trace aggregator.
@@ -465,12 +464,18 @@ impl SendingTraceProcessor {
             body_size,
             span_pointers,
         );
-        self.trace_tx.send(payload).await.map_err(SendingTraceProcessorError::SendDataBuilderInfoError)?;
+        self.trace_tx
+            .send(payload)
+            .await
+            .map_err(SendingTraceProcessorError::SendDataBuilderInfoError)?;
 
         // This needs to be after send_processed_traces() because send_processed_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if config.compute_trace_stats {
-            self.stats_sender.send(&processed_traces);
+            if let Err(err) = self.stats_sender.send(&processed_traces) {
+                error!("TRACE_PROCESSOR | Error sending traces to the stats concentrator: {err}");
+                return Err(SendingTraceProcessorError::SendStatsError(err));
+            }
         }
         Ok(())
     }

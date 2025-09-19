@@ -3,8 +3,20 @@ use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use datadog_trace_utils::tracer_payload::TracerPayloadCollection;
 use tracing::error;
 
+use tokio::sync::mpsc::error::SendError;
+
+use crate::traces::stats_concentrator_service::ConcentratorCommand;
+
 pub struct SendingTraceStatsProcessor {
     stats_concentrator: StatsConcentratorHandle,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SendingTraceStatsProcessorError {
+    #[error("Error sending trace stats to the stats concentrator: {0}")]
+    ConcentratorCommandError(SendError<ConcentratorCommand>),
+    #[error("Unsupported trace payload version. Failed to send trace stats.")]
+    TracePayloadVersionError,
 }
 
 // Extracts information from traces related to stats and sends it to the stats concentrator
@@ -14,27 +26,32 @@ impl SendingTraceStatsProcessor {
         Self { stats_concentrator }
     }
 
-    pub fn send(&self, traces: &TracerPayloadCollection) {
-        match traces {
-            TracerPayloadCollection::V07(traces) => {
-                for trace in traces {
-                    for chunk in &trace.chunks {
-                        for span in &chunk.spans {
-                            let stats = StatsEvent {
-                                time: span.start.try_into().unwrap_or_default(),
-                                aggregation_key: AggregationKey {},
-                                stats: Stats {},
-                            };
-                            if let Err(err) = self.stats_concentrator.add(stats) {
-                                error!("Failed to send trace stats: {err}");
-                            }
+    pub fn send(
+        &self,
+        traces: &TracerPayloadCollection,
+    ) -> Result<(), SendingTraceStatsProcessorError> {
+        if let TracerPayloadCollection::V07(traces) = traces {
+            for trace in traces {
+                for chunk in &trace.chunks {
+                    for span in &chunk.spans {
+                        let stats = StatsEvent {
+                            time: span.start.try_into().unwrap_or_default(),
+                            aggregation_key: AggregationKey {},
+                            stats: Stats {},
+                        };
+                        if let Err(err) = self.stats_concentrator.add(stats) {
+                            error!("Failed to send trace stats: {err}");
+                            return Err(SendingTraceStatsProcessorError::ConcentratorCommandError(
+                                err,
+                            ));
                         }
                     }
                 }
             }
-            _ => {
-                error!("Unsupported trace payload version. Failed to send trace stats.");
-            }
+            Ok(())
+        } else {
+            error!("Unsupported trace payload version. Failed to send trace stats.");
+            Err(SendingTraceStatsProcessorError::TracePayloadVersionError)
         }
     }
 }
