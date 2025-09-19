@@ -18,7 +18,7 @@ use crate::{
     http::{extract_request_body, handler_not_found},
     otlp::processor::Processor as OtlpProcessor,
     tags::provider,
-    traces::{trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor},
+    traces::{trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor, trace_stats_processor::SendingTraceStatsProcessor},
 };
 
 const OTLP_AGENT_HTTP_PORT: u16 = 4318;
@@ -29,6 +29,7 @@ type AgentState = (
     OtlpProcessor,
     Arc<dyn TraceProcessor + Send + Sync>,
     Sender<SendDataBuilderInfo>,
+    Arc<SendingTraceStatsProcessor>,
 );
 
 pub struct Agent {
@@ -37,6 +38,7 @@ pub struct Agent {
     processor: OtlpProcessor,
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendDataBuilderInfo>,
+    stats_sender: Arc<SendingTraceStatsProcessor>,
     port: u16,
     cancel_token: CancellationToken,
 }
@@ -47,6 +49,7 @@ impl Agent {
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendDataBuilderInfo>,
+        stats_sender: Arc<SendingTraceStatsProcessor>,
     ) -> Self {
         let port = Self::parse_port(
             config.otlp_config_receiver_protocols_http_endpoint.as_ref(),
@@ -60,6 +63,7 @@ impl Agent {
             processor: OtlpProcessor::new(Arc::clone(&config)),
             trace_processor,
             trace_tx,
+            stats_sender,
             port,
             cancel_token,
         }
@@ -112,6 +116,7 @@ impl Agent {
             self.processor.clone(),
             Arc::clone(&self.trace_processor),
             self.trace_tx.clone(),
+            Arc::clone(&self.stats_sender),
         );
 
         Router::new()
@@ -126,7 +131,7 @@ impl Agent {
     }
 
     async fn v1_traces(
-        State((config, tags_provider, processor, trace_processor, trace_tx)): State<AgentState>,
+        State((config, tags_provider, processor, trace_processor, trace_tx, stats_sender)): State<AgentState>,
         request: Request,
     ) -> Response {
         let (parts, body) = match extract_request_body(request).await {
@@ -163,7 +168,8 @@ impl Agent {
                 .into_response();
         }
 
-        let (send_data_builder, _traces) = trace_processor
+        let compute_trace_stats = config.compute_trace_stats;
+        let (send_data_builder, processed_traces) = trace_processor
             .process_traces(
                 config,
                 tags_provider,
@@ -176,22 +182,27 @@ impl Agent {
         match trace_tx.send(send_data_builder).await {
             Ok(()) => {
                 debug!("OTLP | Successfully buffered traces to be aggregated.");
-                (
-                    StatusCode::OK,
-                    json!({"rate_by_service":{"service:,env:":1}}).to_string(),
-                )
-                    .into_response()
             }
             Err(err) => {
                 error!("OTLP | Error sending traces to the trace aggregator: {err}");
-                (
+                return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     json!({ "message": format!("Error sending traces to the trace aggregator: {err}") }).to_string()
-                ).into_response()
+                ).into_response();
             }
+        };
+
+        // This needs to be after send_processed_traces() because send_processed_traces()
+        // performs obfuscation, and we need to compute stats on the obfuscated traces.
+        if compute_trace_stats {
+            stats_sender.send(&processed_traces);
         }
 
-        // TODO: send trace stats
+        (
+            StatusCode::OK,
+            json!({"rate_by_service":{"service:,env:":1}}).to_string(),
+        )
+            .into_response()
     }
 }
 

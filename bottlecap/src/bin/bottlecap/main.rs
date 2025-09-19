@@ -479,6 +479,7 @@ async fn extension_loop_active(
         tags_provider.clone(),
         trace_processor.clone(),
         trace_agent_channel.clone(),
+        stats_concentrator.clone(),
     );
 
     let mut flush_control =
@@ -1153,12 +1154,13 @@ fn start_otlp_agent(
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendDataBuilderInfo>,
+    stats_concentrator: StatsConcentratorHandle,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;
     }
-
-    let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
+    let stats_sender = Arc::new(SendingTraceStatsProcessor::new(stats_concentrator));
+    let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx, stats_sender);
     let cancel_token = agent.cancel_token();
     if let Err(e) = agent.start() {
         error!("Error starting OTLP agent: {e:?}");
