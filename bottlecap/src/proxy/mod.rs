@@ -31,7 +31,7 @@ pub fn should_start_proxy(config: &Arc<Config>, aws_config: Arc<AwsConfig>) -> b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Instant;
+    use tokio::time::Instant;
 
     #[test]
     fn test_should_start_proxy_everything_set() {

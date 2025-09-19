@@ -3,11 +3,11 @@ use tokio::sync::{Mutex, mpsc::Sender};
 
 use tracing::debug;
 
-use crate::config::processing_rule;
+use crate::LAMBDA_RUNTIME_SLUG;
+use crate::config::{self, processing_rule};
 use crate::event_bus::Event;
+use crate::extension::telemetry::events::TelemetryEvent;
 use crate::tags;
-use crate::telemetry::events::TelemetryEvent;
-use crate::{LAMBDA_RUNTIME_SLUG, config};
 
 use crate::logs::aggregator::Aggregator;
 use crate::logs::lambda::processor::LambdaProcessor;

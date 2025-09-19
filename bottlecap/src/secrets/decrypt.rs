@@ -13,8 +13,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::io::Error;
 use std::sync::Arc;
-use std::time::Instant;
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, time::Instant};
 use tracing::debug;
 use tracing::error;
 
