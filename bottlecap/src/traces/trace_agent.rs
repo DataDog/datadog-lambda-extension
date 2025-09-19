@@ -41,6 +41,9 @@ use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
+use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
+use crate::traces::trace_stats_processor::SendingTraceStatsProcessor;
+
 const TRACE_AGENT_PORT: usize = 8126;
 
 // Agent endpoints
@@ -75,6 +78,7 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
+    pub stats_sender: Arc<SendingTraceStatsProcessor>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
 }
@@ -102,6 +106,7 @@ pub struct TraceAgent {
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
+    stats_concentrator: StatsConcentratorHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -123,6 +128,7 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
+        stats_concentrator: StatsConcentratorHandle,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -149,9 +155,11 @@ impl TraceAgent {
             tags_provider,
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
+            stats_concentrator,
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
@@ -198,6 +206,9 @@ impl TraceAgent {
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
             }),
+            stats_sender: Arc::new(SendingTraceStatsProcessor::new(
+                self.stats_concentrator.clone(),
+            )),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
         };
@@ -266,6 +277,7 @@ impl TraceAgent {
             state.config,
             request,
             state.trace_sender,
+            state.stats_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V04,
@@ -278,6 +290,7 @@ impl TraceAgent {
             state.config,
             request,
             state.trace_sender,
+            state.stats_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V05,
@@ -417,6 +430,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         request: Request,
         trace_sender: Arc<SendingTraceProcessor>,
+        stats_sender: Arc<SendingTraceStatsProcessor>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
@@ -509,7 +523,16 @@ impl TraceAgent {
             }
         }
 
-        match trace_sender
+        if config.compute_trace_stats {
+            if let Err(err) = stats_sender.send(&traces) {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Error sending stats to the stats aggregator: {err}"),
+                );
+            }
+        }
+
+        if let Err(err) = trace_sender
             .send_processed_traces(
                 config,
                 tags_provider,
@@ -520,12 +543,13 @@ impl TraceAgent {
             )
             .await
         {
-            Ok(()) => success_response("Successfully buffered traces to be aggregated."),
-            Err(err) => error_response(
+            return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error sending traces to the trace aggregator: {err}"),
-            ),
+            );
         }
+
+        success_response("Successfully buffered traces to be aggregated.")
     }
 
     #[allow(clippy::too_many_arguments)]
