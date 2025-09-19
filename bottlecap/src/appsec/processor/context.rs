@@ -793,18 +793,18 @@ fn try_parse_body_with_mime(body: impl Read, mime_type: Mime) -> Result<WafObjec
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 enum BodyParseError {
-    ContentTypeParseError(mime::FromStrError),
+    #[error("failed to parse content type: {0}")]
+    ContentTypeParseError(#[from] mime::FromStrError),
+    #[error("cannot parse {0} body: missing boundary parameter")]
     MissingBoundary(Mime),
+    #[error("unsupported MIME type: {0}")]
     UnsupportedMimeType(Mime),
-    IOError(std::io::Error),
+    #[error("failed to read body: {0}")]
+    IOError(#[from] std::io::Error),
+    #[error("failed to parse body: {0}")]
     SerdeError(Box<dyn std::error::Error>),
-}
-impl From<mime::FromStrError> for BodyParseError {
-    fn from(e: mime::FromStrError) -> Self {
-        Self::ContentTypeParseError(e)
-    }
 }
 impl From<serde_json::Error> for BodyParseError {
     fn from(e: serde_json::Error) -> Self {
@@ -816,30 +816,6 @@ impl From<serde_html_form::de::Error> for BodyParseError {
         Self::SerdeError(Box::new(e))
     }
 }
-impl From<std::io::Error> for BodyParseError {
-    fn from(e: std::io::Error) -> Self {
-        Self::IOError(e)
-    }
-}
-impl std::fmt::Display for BodyParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ContentTypeParseError(e) => write!(f, "failed to parse content type: {e}"),
-            Self::MissingBoundary(mime_type) => {
-                write!(
-                    f,
-                    "cannot parse {mime_type} body: missing boundary parameter"
-                )
-            }
-            Self::UnsupportedMimeType(mime_type) => {
-                write!(f, "unsupported MIME type: {mime_type}")
-            }
-            Self::IOError(e) => write!(f, "failed to read body: {e}"),
-            Self::SerdeError(e) => write!(f, "failed to parse body: {e}"),
-        }
-    }
-}
-impl std::error::Error for BodyParseError {}
 
 /// Logs a WAF run error.
 ///
