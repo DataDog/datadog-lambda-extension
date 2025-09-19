@@ -32,6 +32,7 @@ use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
 use super::trace_aggregator::SendDataBuilderInfo;
+use super::trace_stats_processor::{SendingTraceStatsProcessor, SendingTraceStatsProcessorError};
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -307,7 +308,7 @@ fn filter_span_from_lambda_library_or_runtime(span: &Span) -> bool {
 #[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait TraceProcessor {
-    async fn process_traces(
+    fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
@@ -315,12 +316,12 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendDataBuilderInfo;
+    ) -> (SendDataBuilderInfo, TracerPayloadCollection);
 }
 
 #[async_trait]
 impl TraceProcessor for ServerlessTraceProcessor {
-    async fn process_traces(
+    fn process_traces(
         &self,
         config: Arc<config::Config>,
         tags_provider: Arc<provider::Provider>,
@@ -328,7 +329,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendDataBuilderInfo {
+    ) -> (SendDataBuilderInfo, TracerPayloadCollection) {
         let mut payload = trace_utils::collect_pb_trace_chunks(
             traces,
             &header_tags,
@@ -360,7 +361,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             test_token: None,
         };
 
-        let builder = SendDataBuilder::new(body_size, payload, header_tags, &endpoint)
+        let builder = SendDataBuilder::new(body_size, payload.clone(), header_tags, &endpoint)
             .with_compression(Compression::Zstd(config.apm_config_compression_level))
             .with_retry_strategy(RetryStrategy::new(
                 1,
@@ -369,8 +370,16 @@ impl TraceProcessor for ServerlessTraceProcessor {
                 None,
             ));
 
-        SendDataBuilderInfo::new(builder, body_size)
+        (SendDataBuilderInfo::new(builder, body_size), payload)
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SendingTraceProcessorError {
+    #[error("Error sending traces to the trace aggregator: {0}")]
+    SendDataBuilderInfoError(SendError<SendDataBuilderInfo>),
+    #[error("Error sending traces to the stats concentrator")]
+    SendStatsError(SendingTraceStatsProcessorError),
 }
 
 /// A utility that is used to process, then send traces to the trace aggregator.
@@ -390,6 +399,8 @@ pub struct SendingTraceProcessor {
     pub processor: Arc<dyn TraceProcessor + Send + Sync>,
     /// The [`Sender`] to use for flushing the traces to the trace aggregator.
     pub trace_tx: Sender<SendDataBuilderInfo>,
+    /// The [`SendingTraceStatsProcessor`] to use for sending stats to the stats concentrator.
+    pub stats_sender: Arc<SendingTraceStatsProcessor>,
 }
 impl SendingTraceProcessor {
     /// Processes the provided traces, then flushes them to the trace aggregator
@@ -402,7 +413,7 @@ impl SendingTraceProcessor {
         mut traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> Result<(), SendError<SendDataBuilderInfo>> {
+    ) -> Result<(), SendingTraceProcessorError> {
         traces = if let Some(appsec) = &self.appsec {
             let mut appsec = appsec.lock().await;
             traces.into_iter().filter_map(|mut trace| {
@@ -415,7 +426,7 @@ impl SendingTraceProcessor {
                     Some(trace)
                 } else if let Some(ctx) = ctx{
                     debug!("TRACE_PROCESSOR | holding trace for App & API Protection additional data");
-                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone() }, HoldArguments{
+                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_sender: self.stats_sender.clone() }, HoldArguments{
                         config:Arc::clone(&config),
                         tags_provider:Arc::clone(&tags_provider),
                         body_size,
@@ -445,18 +456,28 @@ impl SendingTraceProcessor {
             return Ok(());
         }
 
-        let payload = self
-            .processor
-            .process_traces(
-                config,
-                tags_provider,
-                header_tags,
-                traces,
-                body_size,
-                span_pointers,
-            )
-            .await;
-        self.trace_tx.send(payload).await
+        let (payload, processed_traces) = self.processor.process_traces(
+            config.clone(),
+            tags_provider,
+            header_tags,
+            traces,
+            body_size,
+            span_pointers,
+        );
+        self.trace_tx
+            .send(payload)
+            .await
+            .map_err(SendingTraceProcessorError::SendDataBuilderInfoError)?;
+
+        // This needs to be after process_traces() because process_traces()
+        // performs obfuscation, and we need to compute stats on the obfuscated traces.
+        if config.compute_trace_stats {
+            if let Err(err) = self.stats_sender.send(&processed_traces) {
+                error!("TRACE_PROCESSOR | Error sending traces to the stats concentrator: {err}");
+                return Err(SendingTraceProcessorError::SendStatsError(err));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -578,7 +599,7 @@ mod tests {
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
-        let tracer_payload = trace_processor.process_traces(
+        let (tracer_payload, _processed_traces) = trace_processor.process_traces(
             config,
             tags_provider.clone(),
             header_tags,
@@ -607,7 +628,7 @@ mod tests {
         };
 
         let received_payload = if let TracerPayloadCollection::V07(payload) =
-            tracer_payload.await.builder.build().get_payloads()
+            tracer_payload.builder.build().get_payloads()
         {
             Some(payload[0].clone())
         } else {
