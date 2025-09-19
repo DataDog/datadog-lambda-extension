@@ -536,7 +536,7 @@ impl TraceAgent {
         {
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error sending traces to the trace aggregator: {err}"),
+                format!("Error sending traces to the trace aggregator: {err:?}"),
             );
         }
 

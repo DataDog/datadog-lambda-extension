@@ -135,8 +135,12 @@ impl Context {
                 )
                 .await
             {
-                Ok(()) => debug!("aap: successfully sent trace to aggregator buffer"),
-                Err(e) => warn!("aap: failed to send trace to aggregator buffer: {e}"),
+                Ok(processed_traces) => {
+                    for _trace in processed_traces {
+                        // TODO: send trace stats
+                    }
+                }
+                Err(e) => warn!("aap: failed to send trace to aggregator buffer: {e:?}"),
             }
         }
 

@@ -30,6 +30,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
+use std::fmt::Display;
 
 use super::stats_concentrator_service::ConcentratorCommand;
 use super::trace_aggregator::SendDataBuilderInfo;
@@ -317,7 +318,7 @@ pub trait TraceProcessor {
         traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> SendDataBuilderInfo;
+    ) -> (SendDataBuilderInfo, Vec<Vec<pb::Span>>);
 }
 
 #[async_trait]
@@ -381,6 +382,12 @@ pub enum SendingTraceProcessorError {
     ConcentratorCommandError(SendError<ConcentratorCommand>),
 }
 
+impl Display for SendingTraceProcessorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
 impl From<SendError<ConcentratorCommand>> for SendingTraceProcessorError {
     fn from(err: SendError<ConcentratorCommand>) -> Self {
         SendingTraceProcessorError::ConcentratorCommandError(err)
@@ -424,7 +431,7 @@ impl SendingTraceProcessor {
         mut traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> Result<(), SendingTraceProcessorError> {
+    ) -> Result<Vec<Vec<pb::Span>>, SendingTraceProcessorError> {
         traces = if let Some(appsec) = &self.appsec {
             let mut appsec = appsec.lock().await;
             traces.into_iter().filter_map(|mut trace| {
@@ -464,10 +471,10 @@ impl SendingTraceProcessor {
 
         if traces.is_empty() {
             debug!("TRACE_PROCESSOR | no traces left to be sent, skipping...");
-            return Ok(());
+            return Ok(vec![]);
         }
 
-        let payload = self
+        let (payload, processed_traces) = self
             .processor
             .process_traces(
                 config.clone(),
@@ -483,9 +490,9 @@ impl SendingTraceProcessor {
         // This needs to be after send_processed_traces() because send_processed_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if config.compute_trace_stats {
-            self.stats_sender.send(&traces)?;
+            self.stats_sender.send(&processed_traces)?;
         }
-        Ok(())
+        Ok(processed_traces)
     }
 }
 

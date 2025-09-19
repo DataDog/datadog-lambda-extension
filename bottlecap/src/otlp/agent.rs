@@ -163,7 +163,7 @@ impl Agent {
                 .into_response();
         }
 
-        let send_data_builder = trace_processor
+        let (send_data_builder, _traces) = trace_processor
             .process_traces(
                 config,
                 tags_provider,
@@ -191,6 +191,8 @@ impl Agent {
                 ).into_response()
             }
         }
+
+        // TODO: send trace stats
     }
 }
 
