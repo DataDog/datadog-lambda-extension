@@ -47,7 +47,10 @@ impl SendingTraceStatsProcessor {
                                 hits: 1,
                                 error: span.error,
                                 duration: span.duration,
-                                top_level_hits: span.metrics.get("_dd.top_level").map_or(0.0, |v| *v),
+                                top_level_hits: span
+                                    .metrics
+                                    .get("_dd.top_level")
+                                    .map_or(0.0, |v| *v),
                             },
                         };
                         if let Err(err) = self.stats_concentrator.add(stats) {

@@ -1,6 +1,10 @@
 use crate::config::Config;
 use datadog_trace_protobuf::pb;
-use std::{collections::HashMap, sync::Arc, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tracing::error;
 
 // Event sent to the stats concentrator
@@ -42,7 +46,6 @@ pub struct StatsConcentrator {
     buckets: HashMap<u64, Bucket>,
 }
 
-
 // The number of latest buckets to not flush when force_flush is false.
 // For example, if we have buckets with timestamps 10, 20, 40, the current timestamp is 45,
 // and NO_FLUSH_BUCKET_COUNT is 3, then we will flush bucket 10 but not bucket 20 or 40.
@@ -55,12 +58,14 @@ const S_TO_NS_U64: u64 = 1_000_000_000;
 // The duration of a bucket in nanoseconds.
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64; // 10 seconds
 
-
 // Aggregates stats into buckets, which are then pulled by the stats aggregator.
 impl StatsConcentrator {
     #[must_use]
     pub fn new(config: Arc<Config>) -> Self {
-        Self { config, buckets: HashMap::new() }
+        Self {
+            config,
+            buckets: HashMap::new(),
+        }
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
