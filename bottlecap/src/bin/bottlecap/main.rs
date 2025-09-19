@@ -1116,11 +1116,9 @@ async fn setup_telemetry_client(
         TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
 
     let cancel_token = telemetry_listener.cancel_token();
-    tokio::spawn(async move {
-        if let Err(e) = telemetry_listener.start() {
-            error!("Error starting telemetry listener: {e:?}");
-        }
-    });
+    if let Err(e) = telemetry_listener.start() {
+        error!("Error starting telemetry listener: {e:?}");
+    }
 
     telemetry::subscribe(
         client,
@@ -1147,11 +1145,9 @@ fn start_otlp_agent(
 
     let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
     let cancel_token = agent.cancel_token();
-    tokio::spawn(async move {
-        if let Err(e) = agent.start() {
-            error!("Error starting OTLP agent: {e:?}");
-        }
-    });
+    if let Err(e) = agent.start() {
+        error!("Error starting OTLP agent: {e:?}");
+    }
 
     Some(cancel_token)
 }
