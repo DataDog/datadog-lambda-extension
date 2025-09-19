@@ -1160,7 +1160,13 @@ fn start_otlp_agent(
         return None;
     }
     let stats_sender = Arc::new(SendingTraceStatsProcessor::new(stats_concentrator));
-    let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx, stats_sender);
+    let agent = OtlpAgent::new(
+        config.clone(),
+        tags_provider,
+        trace_processor,
+        trace_tx,
+        stats_sender,
+    );
     let cancel_token = agent.cancel_token();
     if let Err(e) = agent.start() {
         error!("Error starting OTLP agent: {e:?}");

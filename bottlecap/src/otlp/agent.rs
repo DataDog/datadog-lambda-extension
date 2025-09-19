@@ -18,7 +18,10 @@ use crate::{
     http::{extract_request_body, handler_not_found},
     otlp::processor::Processor as OtlpProcessor,
     tags::provider,
-    traces::{trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor, trace_stats_processor::SendingTraceStatsProcessor},
+    traces::{
+        trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor,
+        trace_stats_processor::SendingTraceStatsProcessor,
+    },
 };
 
 const OTLP_AGENT_HTTP_PORT: u16 = 4318;
@@ -131,7 +134,9 @@ impl Agent {
     }
 
     async fn v1_traces(
-        State((config, tags_provider, processor, trace_processor, trace_tx, stats_sender)): State<AgentState>,
+        State((config, tags_provider, processor, trace_processor, trace_tx, stats_sender)): State<
+            AgentState,
+        >,
         request: Request,
     ) -> Response {
         let (parts, body) = match extract_request_body(request).await {
@@ -169,15 +174,14 @@ impl Agent {
         }
 
         let compute_trace_stats = config.compute_trace_stats;
-        let (send_data_builder, processed_traces) = trace_processor
-            .process_traces(
-                config,
-                tags_provider,
-                tracer_header_tags,
-                traces,
-                body_size,
-                None,
-            );
+        let (send_data_builder, processed_traces) = trace_processor.process_traces(
+            config,
+            tags_provider,
+            tracer_header_tags,
+            traces,
+            body_size,
+            None,
+        );
 
         match trace_tx.send(send_data_builder).await {
             Ok(()) => {

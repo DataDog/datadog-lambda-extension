@@ -474,16 +474,14 @@ impl SendingTraceProcessor {
             return Ok(());
         }
 
-        let (payload, processed_traces) = self
-            .processor
-            .process_traces(
-                config.clone(),
-                tags_provider,
-                header_tags,
-                traces,
-                body_size,
-                span_pointers,
-            );
+        let (payload, processed_traces) = self.processor.process_traces(
+            config.clone(),
+            tags_provider,
+            header_tags,
+            traces,
+            body_size,
+            span_pointers,
+        );
         self.trace_tx.send(payload).await?;
 
         // This needs to be after send_processed_traces() because send_processed_traces()
@@ -613,15 +611,14 @@ mod tests {
         };
         let config = create_test_config();
         let tags_provider = create_tags_provider(config.clone());
-        let (tracer_payload, _processed_traces) = trace_processor
-            .process_traces(
-                config,
-                tags_provider.clone(),
-                header_tags,
-                traces,
-                100,
-                None,
-            );
+        let (tracer_payload, _processed_traces) = trace_processor.process_traces(
+            config,
+            tags_provider.clone(),
+            header_tags,
+            traces,
+            100,
+            None,
+        );
 
         let expected_tracer_payload = pb::TracerPayload {
             container_id: "33".to_string(),
