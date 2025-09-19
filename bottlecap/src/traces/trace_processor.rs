@@ -431,7 +431,7 @@ impl SendingTraceProcessor {
         mut traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> Result<Vec<Vec<pb::Span>>, SendingTraceProcessorError> {
+    ) -> Result<(), SendingTraceProcessorError> {
         traces = if let Some(appsec) = &self.appsec {
             let mut appsec = appsec.lock().await;
             traces.into_iter().filter_map(|mut trace| {
@@ -492,7 +492,7 @@ impl SendingTraceProcessor {
         if config.compute_trace_stats {
             self.stats_sender.send(&processed_traces)?;
         }
-        Ok(processed_traces)
+        Ok()
     }
 }
 

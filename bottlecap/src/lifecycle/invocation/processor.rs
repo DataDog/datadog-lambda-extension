@@ -508,7 +508,7 @@ impl Processor {
             dropped_p0_spans: 0,
         };
 
-        match trace_sender
+        if let Err(err) = trace_sender
             .send_processed_traces(
                 self.config.clone(),
                 tags_provider.clone(),
@@ -519,12 +519,7 @@ impl Processor {
             )
             .await
         {
-            Ok(processed_traces) => {
-                for _trace in processed_traces {
-                    // TODO: send trace stats
-                }
-            }
-            Err(e) => debug!("Failed to send context spans to agent: {e:?}"),
+            debug!("Failed to send context spans to agent: {err:?}");
         }
     }
 

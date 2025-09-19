@@ -78,7 +78,6 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
-    pub stats_sender: Arc<SendingTraceStatsProcessor>,
     pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
     pub tags_provider: Arc<provider::Provider>,
 }
@@ -199,16 +198,17 @@ impl TraceAgent {
     }
 
     fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
+        let stats_sender = Arc::new(SendingTraceStatsProcessor::new(
+            self.stats_concentrator.clone(),
+        ));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
             trace_sender: Arc::new(SendingTraceProcessor {
                 appsec: self.appsec_processor.clone(),
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
+                stats_sender,
             }),
-            stats_sender: Arc::new(SendingTraceStatsProcessor::new(
-                self.stats_concentrator.clone(),
-            )),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
         };
@@ -277,7 +277,6 @@ impl TraceAgent {
             state.config,
             request,
             state.trace_sender,
-            state.stats_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V04,
@@ -290,7 +289,6 @@ impl TraceAgent {
             state.config,
             request,
             state.trace_sender,
-            state.stats_sender,
             state.invocation_processor,
             state.tags_provider,
             ApiVersion::V05,
@@ -430,7 +428,6 @@ impl TraceAgent {
         config: Arc<config::Config>,
         request: Request,
         trace_sender: Arc<SendingTraceProcessor>,
-        stats_sender: Arc<SendingTraceStatsProcessor>,
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,

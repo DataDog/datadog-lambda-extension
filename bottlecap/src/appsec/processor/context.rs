@@ -112,7 +112,7 @@ impl Context {
             }
 
             debug!("aap: flushing out trace for request {}", self.rid);
-            match sender
+            if let Err(err) = sender
                 .send_processed_traces(
                     args.config,
                     args.tags_provider,
@@ -135,12 +135,7 @@ impl Context {
                 )
                 .await
             {
-                Ok(processed_traces) => {
-                    for _trace in processed_traces {
-                        // TODO: send trace stats
-                    }
-                }
-                Err(e) => warn!("aap: failed to send trace to aggregator buffer: {e:?}"),
+                warn!("aap: failed to send trace to aggregator buffer: {err:?}");
             }
         }
 
