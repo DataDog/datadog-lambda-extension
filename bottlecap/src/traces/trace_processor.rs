@@ -24,7 +24,6 @@ use datadog_trace_utils::tracer_header_tags;
 use datadog_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
 use ddcommon::Endpoint;
 use regex::Regex;
-use std::fmt::Display;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -376,28 +375,12 @@ impl TraceProcessor for ServerlessTraceProcessor {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SendingTraceProcessorError {
+    #[error("Error sending traces to the trace aggregator: {0}")]
     SendDataBuilderInfoError(SendError<SendDataBuilderInfo>),
+    #[error("Error sending traces to the stats concentrator: {0}")]
     ConcentratorCommandError(SendError<ConcentratorCommand>),
-}
-
-impl Display for SendingTraceProcessorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl From<SendError<ConcentratorCommand>> for SendingTraceProcessorError {
-    fn from(err: SendError<ConcentratorCommand>) -> Self {
-        SendingTraceProcessorError::ConcentratorCommandError(err)
-    }
-}
-
-impl From<SendError<SendDataBuilderInfo>> for SendingTraceProcessorError {
-    fn from(err: SendError<SendDataBuilderInfo>) -> Self {
-        SendingTraceProcessorError::SendDataBuilderInfoError(err)
-    }
 }
 
 /// A utility that is used to process, then send traces to the trace aggregator.
@@ -482,7 +465,7 @@ impl SendingTraceProcessor {
             body_size,
             span_pointers,
         );
-        self.trace_tx.send(payload).await?;
+        self.trace_tx.send(payload).await.map_err(SendingTraceProcessorError::SendDataBuilderInfoError)?;
 
         // This needs to be after send_processed_traces() because send_processed_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
