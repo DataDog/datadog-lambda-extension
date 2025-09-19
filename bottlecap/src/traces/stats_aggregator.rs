@@ -53,7 +53,7 @@ impl StatsAggregator {
     /// Returns a batch of trace stats payloads, subject to the max content size.
     pub async fn get_batch(&mut self, force_flush: bool) -> Vec<ClientStatsPayload> {
         // Pull stats data from concentrator
-        match self.concentrator.get_stats(force_flush).await {
+        match self.concentrator.flush(force_flush).await {
             Ok(stats) => {
                 self.queue.extend(stats);
             }

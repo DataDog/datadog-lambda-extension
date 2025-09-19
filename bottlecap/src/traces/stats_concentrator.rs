@@ -32,7 +32,7 @@ impl StatsConcentrator {
     // force_flush: If true, flush all stats. If false, flush stats except for the few latest
     // buckets, which may still be getting data.
     #[must_use]
-    pub fn get_stats(&mut self, _force_flush: bool) -> Vec<pb::ClientStatsPayload> {
+    pub fn flush(&mut self, _force_flush: bool) -> Vec<pb::ClientStatsPayload> {
         vec![]
     }
 }

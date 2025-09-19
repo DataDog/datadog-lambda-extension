@@ -27,7 +27,7 @@ impl From<oneshot::error::RecvError> for StatsError {
 
 pub enum ConcentratorCommand {
     Add(StatsEvent),
-    GetStats(bool, oneshot::Sender<Vec<pb::ClientStatsPayload>>),
+    Flush(bool, oneshot::Sender<Vec<pb::ClientStatsPayload>>),
 }
 
 #[derive(Clone)]
@@ -43,13 +43,13 @@ impl StatsConcentratorHandle {
         self.tx.send(ConcentratorCommand::Add(stats_event))
     }
 
-    pub async fn get_stats(
+    pub async fn flush(
         &self,
         force_flush: bool,
     ) -> Result<Vec<pb::ClientStatsPayload>, StatsError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
-            .send(ConcentratorCommand::GetStats(force_flush, response_tx))?;
+            .send(ConcentratorCommand::Flush(force_flush, response_tx))?;
         let stats = response_rx.await?;
         Ok(stats)
     }
@@ -60,7 +60,7 @@ pub struct StatsConcentratorService {
     rx: mpsc::UnboundedReceiver<ConcentratorCommand>,
 }
 
-// A service that handles add() and get_stats() requests in the same queue,
+// A service that handles add() and flush() requests in the same queue,
 // to avoid using mutex, which may cause lock contention.
 impl StatsConcentratorService {
     #[must_use]
@@ -76,8 +76,8 @@ impl StatsConcentratorService {
         while let Some(command) = self.rx.recv().await {
             match command {
                 ConcentratorCommand::Add(stats_event) => self.concentrator.add(stats_event),
-                ConcentratorCommand::GetStats(force_flush, response_tx) => {
-                    let stats = self.concentrator.get_stats(force_flush);
+                ConcentratorCommand::Flush(force_flush, response_tx) => {
+                    let stats = self.concentrator.flush(force_flush);
                     if let Err(e) = response_tx.send(stats) {
                         error!("Failed to return trace stats: {e:?}");
                     }
