@@ -271,6 +271,7 @@ pub struct Config {
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
     pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
+    pub enable_observability_pipeline_forwarding: bool,
 
     // APM
     //
@@ -384,6 +385,7 @@ impl Default for Config {
             logs_config_use_compression: true,
             logs_config_compression_level: 6,
             logs_config_additional_endpoints: Vec::new(),
+            enable_observability_pipeline_forwarding: false,
 
             // APM
             service_mapping: HashMap::new(),

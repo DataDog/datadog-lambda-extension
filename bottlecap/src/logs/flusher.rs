@@ -98,7 +98,11 @@ impl Flusher {
     }
 
     async fn create_request(&self, data: Vec<u8>, api_key: &str) -> reqwest::RequestBuilder {
-        let url = format!("{}/api/v2/logs", self.endpoint);
+        let url = if self.config.enable_observability_pipeline_forwarding {
+            self.endpoint.clone()
+        } else {
+            format!("{}/api/v2/logs", self.endpoint)
+        };
         let headers = self.get_headers(api_key).await;
         self.client
             .post(&url)
@@ -133,7 +137,7 @@ impl Flusher {
                         );
                         return Ok(());
                     }
-                    if status == 202 {
+                    if status.is_success() {
                         return Ok(());
                     }
                 }
@@ -165,16 +169,20 @@ impl Flusher {
                     "DD-API-KEY",
                     api_key.parse().expect("failed to parse header"),
                 );
-                headers.insert(
-                    "DD-PROTOCOL",
-                    "agent-json".parse().expect("failed to parse header"),
-                );
+                if !self.config.enable_observability_pipeline_forwarding {
+                    headers.insert(
+                        "DD-PROTOCOL",
+                        "agent-json".parse().expect("failed to parse header"),
+                    );
+                }
                 headers.insert(
                     "Content-Type",
                     "application/json".parse().expect("failed to parse header"),
                 );
 
-                if self.config.logs_config_use_compression {
+                if self.config.logs_config_use_compression
+                    && !self.config.enable_observability_pipeline_forwarding
+                {
                     headers.insert(
                         "Content-Encoding",
                         "zstd".parse().expect("failed to parse header"),
@@ -272,7 +280,9 @@ impl LogsFlusher {
     }
 
     fn compress(&self, data: Vec<u8>) -> Vec<u8> {
-        if !self.config.logs_config_use_compression {
+        if !self.config.logs_config_use_compression
+            || self.config.enable_observability_pipeline_forwarding
+        {
             return data;
         }
 
