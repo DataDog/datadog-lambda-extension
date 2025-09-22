@@ -63,7 +63,7 @@ use bottlecap::{
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
-        trace_stats_processor::SendingTraceStatsProcessor,
+        stats_generator::StatsGenerator,
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
@@ -813,7 +813,7 @@ async fn handle_event_bus_event(
                             appsec: appsec_processor.clone(),
                             processor: trace_processor.clone(),
                             trace_tx: trace_agent_channel.clone(),
-                            stats_sender: Arc::new(SendingTraceStatsProcessor::new(
+                            stats_generator: Arc::new(StatsGenerator::new(
                                 stats_concentrator.clone(),
                             )),
                         }),
@@ -1165,13 +1165,13 @@ fn start_otlp_agent(
     if !should_enable_otlp_agent(config) {
         return None;
     }
-    let stats_sender = Arc::new(SendingTraceStatsProcessor::new(stats_concentrator));
+    let stats_generator = Arc::new(StatsGenerator::new(stats_concentrator));
     let agent = OtlpAgent::new(
         config.clone(),
         tags_provider,
         trace_processor,
         trace_tx,
-        stats_sender,
+        stats_generator,
     );
     let cancel_token = agent.cancel_token();
     if let Err(e) = agent.start() {

@@ -20,7 +20,7 @@ use crate::{
     tags::provider,
     traces::{
         trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor,
-        trace_stats_processor::SendingTraceStatsProcessor,
+        stats_generator::StatsGenerator,
     },
 };
 
@@ -32,7 +32,7 @@ type AgentState = (
     OtlpProcessor,
     Arc<dyn TraceProcessor + Send + Sync>,
     Sender<SendDataBuilderInfo>,
-    Arc<SendingTraceStatsProcessor>,
+    Arc<StatsGenerator>,
 );
 
 pub struct Agent {
@@ -41,7 +41,7 @@ pub struct Agent {
     processor: OtlpProcessor,
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendDataBuilderInfo>,
-    stats_sender: Arc<SendingTraceStatsProcessor>,
+    stats_sender: Arc<StatsGenerator>,
     port: u16,
     cancel_token: CancellationToken,
 }
@@ -52,7 +52,7 @@ impl Agent {
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendDataBuilderInfo>,
-        stats_sender: Arc<SendingTraceStatsProcessor>,
+        stats_sender: Arc<StatsGenerator>,
     ) -> Self {
         let port = Self::parse_port(
             config.otlp_config_receiver_protocols_http_endpoint.as_ref(),

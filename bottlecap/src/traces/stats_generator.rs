@@ -7,12 +7,12 @@ use tokio::sync::mpsc::error::SendError;
 
 use crate::traces::stats_concentrator_service::ConcentratorCommand;
 
-pub struct SendingTraceStatsProcessor {
+pub struct StatsGenerator {
     stats_concentrator: StatsConcentratorHandle,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum SendingTraceStatsProcessorError {
+pub enum StatsGeneratorError {
     #[error("Error sending trace stats to the stats concentrator: {0}")]
     ConcentratorCommandError(SendError<ConcentratorCommand>),
     #[error("Unsupported trace payload version. Failed to send trace stats.")]
@@ -20,7 +20,7 @@ pub enum SendingTraceStatsProcessorError {
 }
 
 // Extracts information from traces related to stats and sends it to the stats concentrator
-impl SendingTraceStatsProcessor {
+impl StatsGenerator {
     #[must_use]
     pub fn new(stats_concentrator: StatsConcentratorHandle) -> Self {
         Self { stats_concentrator }
@@ -29,7 +29,7 @@ impl SendingTraceStatsProcessor {
     pub fn send(
         &self,
         traces: &TracerPayloadCollection,
-    ) -> Result<(), SendingTraceStatsProcessorError> {
+    ) -> Result<(), StatsGeneratorError> {
         if let TracerPayloadCollection::V07(traces) = traces {
             for trace in traces {
                 for chunk in &trace.chunks {
@@ -41,7 +41,7 @@ impl SendingTraceStatsProcessor {
                         };
                         if let Err(err) = self.stats_concentrator.add(stats) {
                             error!("Failed to send trace stats: {err}");
-                            return Err(SendingTraceStatsProcessorError::ConcentratorCommandError(
+                            return Err(StatsGeneratorError::ConcentratorCommandError(
                                 err,
                             ));
                         }
@@ -51,7 +51,7 @@ impl SendingTraceStatsProcessor {
             Ok(())
         } else {
             error!("Unsupported trace payload version. Failed to send trace stats.");
-            Err(SendingTraceStatsProcessorError::TracePayloadVersionError)
+            Err(StatsGeneratorError::TracePayloadVersionError)
         }
     }
 }
