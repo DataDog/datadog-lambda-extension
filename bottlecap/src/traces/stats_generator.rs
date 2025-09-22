@@ -26,10 +26,7 @@ impl StatsGenerator {
         Self { stats_concentrator }
     }
 
-    pub fn send(
-        &self,
-        traces: &TracerPayloadCollection,
-    ) -> Result<(), StatsGeneratorError> {
+    pub fn send(&self, traces: &TracerPayloadCollection) -> Result<(), StatsGeneratorError> {
         if let TracerPayloadCollection::V07(traces) = traces {
             for trace in traces {
                 for chunk in &trace.chunks {
@@ -41,9 +38,7 @@ impl StatsGenerator {
                         };
                         if let Err(err) = self.stats_concentrator.add(stats) {
                             error!("Failed to send trace stats: {err}");
-                            return Err(StatsGeneratorError::ConcentratorCommandError(
-                                err,
-                            ));
+                            return Err(StatsGeneratorError::ConcentratorCommandError(err));
                         }
                     }
                 }

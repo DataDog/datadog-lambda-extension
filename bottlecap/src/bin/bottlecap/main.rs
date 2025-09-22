@@ -59,11 +59,11 @@ use bottlecap::{
         stats_aggregator::StatsAggregator,
         stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
         stats_flusher::{self, StatsFlusher},
+        stats_generator::StatsGenerator,
         stats_processor, trace_agent,
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
-        stats_generator::StatsGenerator,
     },
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;

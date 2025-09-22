@@ -31,8 +31,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
-use super::trace_aggregator::SendDataBuilderInfo;
 use super::stats_generator::StatsGenerator;
+use super::trace_aggregator::SendDataBuilderInfo;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -391,7 +391,7 @@ pub struct SendingTraceProcessor {
     pub processor: Arc<dyn TraceProcessor + Send + Sync>,
     /// The [`Sender`] to use for flushing the traces to the trace aggregator.
     pub trace_tx: Sender<SendDataBuilderInfo>,
-    /// The [`StatsGenerator`] to use for generating stats and sending them to 
+    /// The [`StatsGenerator`] to use for generating stats and sending them to
     /// the stats concentrator.
     pub stats_generator: Arc<StatsGenerator>,
 }

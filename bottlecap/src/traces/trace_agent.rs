@@ -32,10 +32,11 @@ use crate::{
     traces::{
         INVOCATION_SPAN_RESOURCE,
         proxy_aggregator::{self, ProxyRequest},
-        stats_aggregator, stats_processor,
+        stats_aggregator,
+        stats_generator::StatsGenerator,
+        stats_processor,
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_processor,
-        stats_generator::StatsGenerator,
     },
 };
 use datadog_trace_protobuf::pb;
@@ -198,9 +199,7 @@ impl TraceAgent {
     }
 
     fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
-        let stats_generator = Arc::new(StatsGenerator::new(
-            self.stats_concentrator.clone(),
-        ));
+        let stats_generator = Arc::new(StatsGenerator::new(self.stats_concentrator.clone()));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
             trace_sender: Arc::new(SendingTraceProcessor {

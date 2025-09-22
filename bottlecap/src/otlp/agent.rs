@@ -19,8 +19,8 @@ use crate::{
     otlp::processor::Processor as OtlpProcessor,
     tags::provider,
     traces::{
-        trace_aggregator::SendDataBuilderInfo, trace_processor::TraceProcessor,
-        stats_generator::StatsGenerator,
+        stats_generator::StatsGenerator, trace_aggregator::SendDataBuilderInfo,
+        trace_processor::TraceProcessor,
     },
 };
 
