@@ -98,7 +98,7 @@ impl Flusher {
     }
 
     async fn create_request(&self, data: Vec<u8>, api_key: &str) -> reqwest::RequestBuilder {
-        let url = if self.config.enable_observability_pipeline_forwarding {
+        let url = if self.config.observability_pipelines_worker_logs_enabled {
             self.endpoint.clone()
         } else {
             format!("{}/api/v2/logs", self.endpoint)
@@ -169,7 +169,7 @@ impl Flusher {
                     "DD-API-KEY",
                     api_key.parse().expect("failed to parse header"),
                 );
-                if !self.config.enable_observability_pipeline_forwarding {
+                if !self.config.observability_pipelines_worker_logs_enabled {
                     headers.insert(
                         "DD-PROTOCOL",
                         "agent-json".parse().expect("failed to parse header"),
@@ -181,7 +181,7 @@ impl Flusher {
                 );
 
                 if self.config.logs_config_use_compression
-                    && !self.config.enable_observability_pipeline_forwarding
+                    && !self.config.observability_pipelines_worker_logs_enabled
                 {
                     headers.insert(
                         "Content-Encoding",
@@ -209,10 +209,16 @@ impl LogsFlusher {
     ) -> Self {
         let mut flushers = Vec::new();
 
+        let endpoint = if config.observability_pipelines_worker_logs_enabled {
+            config.observability_pipelines_worker_logs_url.clone()
+        } else {
+            config.logs_config_logs_dd_url.clone()
+        };
+
         // Create primary flusher
         flushers.push(Flusher::new(
             Arc::clone(&api_key_factory),
-            config.logs_config_logs_dd_url.clone(),
+            endpoint,
             aggregator.clone(),
             config.clone(),
         ));
@@ -281,7 +287,7 @@ impl LogsFlusher {
 
     fn compress(&self, data: Vec<u8>) -> Vec<u8> {
         if !self.config.logs_config_use_compression
-            || self.config.enable_observability_pipeline_forwarding
+            || self.config.observability_pipelines_worker_logs_enabled
         {
             return data;
         }
