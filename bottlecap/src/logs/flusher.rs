@@ -210,6 +210,9 @@ impl LogsFlusher {
         let mut flushers = Vec::new();
 
         let endpoint = if config.observability_pipelines_worker_logs_enabled {
+            if config.observability_pipelines_worker_logs_url.is_empty() {
+                error!("Observability Pipelines Worker Logs are enabled but the URL is empty");
+            }
             config.observability_pipelines_worker_logs_url.clone()
         } else {
             config.logs_config_logs_dd_url.clone()
