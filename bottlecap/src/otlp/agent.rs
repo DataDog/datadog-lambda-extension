@@ -200,11 +200,9 @@ impl Agent {
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if compute_trace_stats {
             if let Err(err) = stats_sender.send(&processed_traces) {
+                // Just log the error. We don't think trace stats are critical, so we don't want to
+                // return an error if only stats fail to send.
                 error!("OTLP | Error sending traces to the stats concentrator: {err}");
-                return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({ "message": format!("Error sending traces to the stats concentrator: {err}") }).to_string()
-                ).into_response();
             }
         }
 

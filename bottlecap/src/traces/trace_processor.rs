@@ -32,7 +32,7 @@ use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
 use super::trace_aggregator::SendDataBuilderInfo;
-use super::trace_stats_processor::{SendingTraceStatsProcessor, SendingTraceStatsProcessorError};
+use super::trace_stats_processor::SendingTraceStatsProcessor;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -374,14 +374,6 @@ impl TraceProcessor for ServerlessTraceProcessor {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum SendingTraceProcessorError {
-    #[error("Error sending traces to the trace aggregator: {0}")]
-    SendDataBuilderInfoError(SendError<SendDataBuilderInfo>),
-    #[error("Error sending traces to the stats concentrator")]
-    SendStatsError(SendingTraceStatsProcessorError),
-}
-
 /// A utility that is used to process, then send traces to the trace aggregator.
 ///
 /// This applies [`AppSecProcessor::process_span`] on the `aws.lambda` span
@@ -413,7 +405,7 @@ impl SendingTraceProcessor {
         mut traces: Vec<Vec<pb::Span>>,
         body_size: usize,
         span_pointers: Option<Vec<SpanPointer>>,
-    ) -> Result<(), SendingTraceProcessorError> {
+    ) -> Result<(), SendError<SendDataBuilderInfo>> {
         traces = if let Some(appsec) = &self.appsec {
             let mut appsec = appsec.lock().await;
             traces.into_iter().filter_map(|mut trace| {
@@ -464,17 +456,15 @@ impl SendingTraceProcessor {
             body_size,
             span_pointers,
         );
-        self.trace_tx
-            .send(payload)
-            .await
-            .map_err(SendingTraceProcessorError::SendDataBuilderInfoError)?;
+        self.trace_tx.send(payload).await?;
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if config.compute_trace_stats {
             if let Err(err) = self.stats_sender.send(&processed_traces) {
+                // Just log the error. We don't think trace stats are critical, so we don't want to
+                // return an error if only stats fail to send.
                 error!("TRACE_PROCESSOR | Error sending traces to the stats concentrator: {err}");
-                return Err(SendingTraceProcessorError::SendStatsError(err));
             }
         }
         Ok(())
