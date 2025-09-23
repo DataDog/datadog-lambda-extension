@@ -53,10 +53,10 @@ pub struct StatsConcentrator {
 // This is to reduce the chance of flushing stats that are still being collected to save some cost.
 const NO_FLUSH_BUCKET_COUNT: u64 = 2;
 
-const S_TO_NS_U64: u64 = 1_000_000_000;
+const S_TO_NS: u64 = 1_000_000_000;
 
 // The duration of a bucket in nanoseconds.
-const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS_U64; // 10 seconds
+const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
 
 // Aggregates stats into buckets, which are then pulled by the stats aggregator.
 impl StatsConcentrator {
@@ -84,18 +84,13 @@ impl StatsConcentrator {
         timestamp - timestamp % BUCKET_DURATION_NS
     }
 
-    // force_flush: If true, flush all stats. If false, flush stats except for the few latest
+    // force: If true, flush all stats. If false, flush stats except for the few latest
     // buckets, which may still be getting data.
     #[must_use]
-    pub fn flush(&mut self, force_flush: bool) -> Vec<pb::ClientStatsPayload> {
+    pub fn flush(&mut self, force: bool) -> Vec<pb::ClientStatsPayload> {
         let current_timestamp: u64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
             Ok(duration) => {
-                if let Ok(ts) = duration.as_nanos().try_into() {
-                    ts
-                } else {
-                    error!("Timestamp overflow, skipping stats flush");
-                    return Vec::new();
-                }
+                u64::try_from(duration.as_nanos()).unwrap_or_default()
             }
             Err(e) => {
                 error!("Failed to get current timestamp: {e}, skipping stats flush");
@@ -105,7 +100,7 @@ impl StatsConcentrator {
 
         let mut ret = Vec::new();
         self.buckets.retain(|&timestamp, bucket| {
-            if force_flush || Self::should_flush_bucket(current_timestamp, timestamp) {
+            if force || Self::should_flush_bucket(current_timestamp, timestamp) {
                 // Flush and remove this bucket
                 for (aggregation_key, stats) in &bucket.data {
                     ret.push(Self::construct_stats_payload(
@@ -125,7 +120,6 @@ impl StatsConcentrator {
         ret
     }
 
-    // Whether a bucket should be flushed based on the current timestamp and the bucket timestamp.
     fn should_flush_bucket(current_timestamp: u64, bucket_timestamp: u64) -> bool {
         current_timestamp - bucket_timestamp >= BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT
     }
@@ -139,18 +133,29 @@ impl StatsConcentrator {
         stats: Stats,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
+            // TODO: handle this
             hostname: String::new(),
             env: aggregation_key.env.clone(),
+            // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
+            // TODO: handle this
             lang: "rust".to_string(),
+            // TODO: handle this
             tracer_version: String::new(),
+            // TODO: handle this
             runtime_id: String::new(),
+            // TODO: handle this
             sequence: 0,
+            // TODO: handle this
             agent_aggregation: String::new(),
             service: aggregation_key.service.clone(),
+            // TODO: handle this
             container_id: String::new(),
+            // TODO: handle this
             tags: vec![],
+            // TODO: handle this
             git_commit_sha: String::new(),
+            // TODO: handle this
             image_tag: String::new(),
             stats: vec![pb::ClientStatsBucket {
                 start: timestamp,
@@ -159,22 +164,56 @@ impl StatsConcentrator {
                     service: aggregation_key.service.clone(),
                     name: aggregation_key.name.clone(),
                     resource: aggregation_key.resource.clone(),
+                    // TODO: handle this
                     http_status_code: 0,
                     r#type: aggregation_key.r#type.clone(),
+                    // TODO: handle this
                     db_type: String::new(),
                     hits: stats.hits.try_into().unwrap_or_default(),
                     errors: stats.error.try_into().unwrap_or_default(),
                     duration: stats.duration.try_into().unwrap_or_default(),
+                    // TODO: handle this
                     ok_summary: vec![],
+                    // TODO: handle this
                     error_summary: vec![],
+                    // TODO: handle this
                     synthetics: false,
                     top_level_hits: stats.top_level_hits.round() as u64,
+                    // TODO: handle this
                     span_kind: String::new(),
+                    // TODO: handle this
                     peer_tags: vec![],
+                    // TODO: handle this
                     is_trace_root: 1,
                 }],
+                // TODO: handle this
                 agent_time_shift: 0,
             }],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_should_flush_bucket_false_when_not_enough_time_passed() {
+        let bucket_timestamp = 1_000_000_000;
+        let current_timestamp = bucket_timestamp + BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT - 1;
+        assert!(
+            !StatsConcentrator::should_flush_bucket(current_timestamp, bucket_timestamp),
+            "Should not flush when current_timestamp is less than threshold ahead"
+        );
+    }
+
+    #[test]
+    fn test_should_flush_bucket_true_when_much_later() {
+        let bucket_timestamp = 1_000_000_000;
+        let current_timestamp = bucket_timestamp + BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT + 1;
+        assert!(
+            StatsConcentrator::should_flush_bucket(current_timestamp, bucket_timestamp),
+            "Should flush when current_timestamp is greater than threshold"
+        );
     }
 }

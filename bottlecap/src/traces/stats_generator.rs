@@ -1,7 +1,7 @@
 use crate::traces::stats_concentrator::{AggregationKey, Stats, StatsEvent};
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use datadog_trace_utils::tracer_payload::TracerPayloadCollection;
-use tracing::error;
+use tracing::{debug, error};
 
 use tokio::sync::mpsc::error::SendError;
 
