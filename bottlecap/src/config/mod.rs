@@ -271,6 +271,8 @@ pub struct Config {
     pub logs_config_use_compression: bool,
     pub logs_config_compression_level: i32,
     pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
+    pub observability_pipelines_worker_logs_enabled: bool,
+    pub observability_pipelines_worker_logs_url: String,
 
     // APM
     //
@@ -384,6 +386,8 @@ impl Default for Config {
             logs_config_use_compression: true,
             logs_config_compression_level: 6,
             logs_config_additional_endpoints: Vec::new(),
+            observability_pipelines_worker_logs_enabled: false,
+            observability_pipelines_worker_logs_url: String::default(),
 
             // APM
             service_mapping: HashMap::new(),
