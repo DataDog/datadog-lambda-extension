@@ -89,9 +89,7 @@ impl StatsConcentrator {
     #[must_use]
     pub fn flush(&mut self, force: bool) -> Vec<pb::ClientStatsPayload> {
         let current_timestamp: u64 = match SystemTime::now().duration_since(UNIX_EPOCH) {
-            Ok(duration) => {
-                u64::try_from(duration.as_nanos()).unwrap_or_default()
-            }
+            Ok(duration) => u64::try_from(duration.as_nanos()).unwrap_or_default(),
             Err(e) => {
                 error!("Failed to get current timestamp: {e}, skipping stats flush");
                 return Vec::new();
