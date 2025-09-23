@@ -39,7 +39,7 @@ impl StatsGenerator {
                         let stats = StatsEvent {
                             time: span.start.try_into().unwrap_or_default(),
                             aggregation_key: AggregationKey {
-                                env: span.meta.get("env").cloned().unwrap_or_default(),
+                                env: span.meta.get("env").cloned().unwrap_or("unknown-env".to_string()),
                                 service: span.service.clone(),
                                 name: span.name.clone(),
                                 resource: span.resource.clone(),
