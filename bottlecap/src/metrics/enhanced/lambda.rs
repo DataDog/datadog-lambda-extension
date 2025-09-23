@@ -27,9 +27,6 @@ use tracing::error;
 static TMP_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 static PROCESS_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 
-static TMP_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
-static PROCESS_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
-
 pub struct Lambda {
     pub aggr_handle: AggregatorHandle,
     pub config: Arc<crate::config::Config>,
@@ -562,6 +559,9 @@ impl Lambda {
         let tags = self.get_dynamic_value_tags();
 
         tokio::spawn(async move {
+            let metrics = tokio::runtime::Handle::current().metrics();
+            println!("(tmp) queue: {:?}", metrics.global_queue_depth());
+            println!("(tmp) tasks: {:?}", metrics.num_alive_tasks());
             // Set tmp_max and initial value for tmp_used
             let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
                 Ok(stats) => stats,
@@ -683,6 +683,9 @@ impl Lambda {
         let tags = self.get_dynamic_value_tags();
 
         tokio::spawn(async move {
+            let metrics = tokio::runtime::Handle::current().metrics();
+            println!("(fd) queue: {:?}", metrics.global_queue_depth());
+            println!("(fd) tasks: {:?}", metrics.num_alive_tasks());
             // get list of all process ids
             let mut pids = proc::get_pid_list();
 

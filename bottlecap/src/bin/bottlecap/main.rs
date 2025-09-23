@@ -558,7 +558,15 @@ async fn extension_loop_active(
                 let lf = logs_flusher.clone();
                 pending_flush_handles
                     .log_flush_handles
-                    .push(tokio::spawn(async move { lf.flush(None).await }));
+                    .push(tokio::spawn(async move {
+                        let metrics = tokio::runtime::Handle::current().metrics();
+                        println!(
+                            "(logs_flush) queue: {:?} tasks: {:?}",
+                            metrics.global_queue_depth(),
+                            metrics.num_alive_tasks()
+                        );
+                        lf.flush(None).await
+                    }));
                 let tf = trace_flusher.clone();
                 pending_flush_handles
                     .trace_flush_handles
@@ -582,6 +590,12 @@ async fn extension_loop_active(
                     let series_clone = series.clone();
                     let sketches_clone = sketches.clone();
                     let handle = tokio::spawn(async move {
+                        let metrics = tokio::runtime::Handle::current().metrics();
+                        println!(
+                            "(metrics_flush) queue: {:?} tasks: {:?}",
+                            metrics.global_queue_depth(),
+                            metrics.num_alive_tasks()
+                        );
                         let (retry_series, retry_sketches) = flusher
                             .flush_metrics(series_clone.clone(), sketches_clone.clone())
                             .await
@@ -599,6 +613,12 @@ async fn extension_loop_active(
                 pending_flush_handles
                     .proxy_flush_handles
                     .push(tokio::spawn(async move {
+                        let metrics = tokio::runtime::Handle::current().metrics();
+                        println!(
+                            "(proxy_flush) queue: {:?} tasks: {:?}",
+                            metrics.global_queue_depth(),
+                            metrics.num_alive_tasks()
+                        );
                         pf.flush(None).await.unwrap_or_default()
                     }));
 
@@ -1081,6 +1101,12 @@ fn send_config_issue_metric(issue_reasons: &[String], lambda_enhanced_metrics: &
 
 fn start_dogstatsd_aggregator(aggr_service: MetricsAggregatorService) {
     tokio::spawn(async move {
+        let metrics = tokio::runtime::Handle::current().metrics();
+        println!(
+            "(aggr) queue: {:?} tasks: {:?}",
+            metrics.global_queue_depth(),
+            metrics.num_alive_tasks()
+        );
         aggr_service.run().await;
     });
 }
@@ -1116,11 +1142,9 @@ async fn setup_telemetry_client(
         TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
 
     let cancel_token = telemetry_listener.cancel_token();
-    tokio::spawn(async move {
-        if let Err(e) = telemetry_listener.start() {
-            error!("Error starting telemetry listener: {e:?}");
-        }
-    });
+    if let Err(e) = telemetry_listener.start() {
+        error!("Error starting telemetry listener: {e:?}");
+    }
 
     telemetry::subscribe(
         client,
@@ -1147,11 +1171,9 @@ fn start_otlp_agent(
 
     let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
     let cancel_token = agent.cancel_token();
-    tokio::spawn(async move {
-        if let Err(e) = agent.start() {
-            error!("Error starting OTLP agent: {e:?}");
-        }
-    });
+    if let Err(e) = agent.start() {
+        error!("Error starting OTLP agent: {e:?}");
+    }
 
     Some(cancel_token)
 }

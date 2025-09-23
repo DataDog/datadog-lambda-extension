@@ -165,6 +165,12 @@ impl TraceAgent {
         let stats_aggregator = self.stats_aggregator.clone();
         tokio::spawn(async move {
             while let Some(stats_payload) = stats_rx.recv().await {
+                let metrics = tokio::runtime::Handle::current().metrics();
+                println!(
+                    "(trace_stats) queue: {:?} tasks: {:?}",
+                    metrics.global_queue_depth(),
+                    metrics.num_alive_tasks()
+                );
                 let mut aggregator = stats_aggregator.lock().await;
                 aggregator.add(stats_payload);
             }

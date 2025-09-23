@@ -6,7 +6,7 @@ use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+use tokio::task::JoinSet;
 use tokio::time::{Duration, interval};
 use tracing::{debug, error};
 
@@ -116,7 +116,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let mut trace_builders = guard.get_batch();
 
         // Collect all batches and their tasks
-        let mut batch_tasks: Vec<JoinHandle<Option<Vec<SendData>>>> = Vec::new();
+        let mut batch_tasks = JoinSet::new();
 
         while !trace_builders.is_empty() {
             let traces: Vec<_> = trace_builders
@@ -129,23 +129,26 @@ impl TraceFlusher for ServerlessTraceFlusher {
             tokio::task::yield_now().await;
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
-            batch_tasks.push(tokio::spawn(async move {
-                Self::send(traces_clone, None, &proxy_https).await
-            }));
+            batch_tasks.spawn(async move {
+                println!("Task starting on thread {:?}", std::thread::current().id());
+                let res = Self::send(traces_clone, None, &proxy_https).await;
+                println!("Task ended on thread {:?}", std::thread::current().id());
+                res
+            });
 
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
                 let proxy_https = self.config.proxy_https.clone();
-                batch_tasks.push(tokio::spawn(async move {
+                batch_tasks.spawn(async move {
                     Self::send(traces_clone, Some(&endpoint), &proxy_https).await
-                }));
+                });
             }
 
             trace_builders = guard.get_batch();
         }
 
-        for handle in batch_tasks {
-            if let Ok(Some(mut failed)) = handle.await {
+        while let Some(result) = batch_tasks.join_next().await {
+            if let Ok(Some(mut failed)) = result {
                 failed_batch.append(&mut failed);
             }
         }
@@ -177,7 +180,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             };
 
             let mut counter = 0;
-            let mut tick_interval = interval(Duration::from_millis(10));
+            let mut tick_interval = interval(Duration::from_millis(1000));
             let send_future = trace_with_endpoint.send_proxy(proxy_https.as_deref());
             tokio::pin!(send_future);
             let send_result = loop {
@@ -187,12 +190,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     }
                     _ = tick_interval.tick() => {
                         counter += 1;
-                        if counter % 10 == 0 {
                             let metrics = tokio::runtime::Handle::current().metrics();
-                            println!("queue: {:?}", metrics.global_queue_depth());
-                            println!("tasks: {:?}", metrics.num_alive_tasks());
+                            println!("(trace flush) queue: {:?} tasks: {:?}", metrics.global_queue_depth(), metrics.num_alive_tasks());
                             debug!("Waiting for trace send completion, tick #{}", counter);
-                        }
                         tokio::task::yield_now().await;
                     }
                 }
