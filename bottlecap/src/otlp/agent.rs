@@ -41,7 +41,7 @@ pub struct Agent {
     processor: OtlpProcessor,
     trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendDataBuilderInfo>,
-    stats_sender: Arc<StatsGenerator>,
+    stats_generator: Arc<StatsGenerator>,
     port: u16,
     cancel_token: CancellationToken,
 }
@@ -52,7 +52,7 @@ impl Agent {
         tags_provider: Arc<provider::Provider>,
         trace_processor: Arc<dyn TraceProcessor + Send + Sync>,
         trace_tx: Sender<SendDataBuilderInfo>,
-        stats_sender: Arc<StatsGenerator>,
+        stats_generator: Arc<StatsGenerator>,
     ) -> Self {
         let port = Self::parse_port(
             config.otlp_config_receiver_protocols_http_endpoint.as_ref(),
@@ -66,7 +66,7 @@ impl Agent {
             processor: OtlpProcessor::new(Arc::clone(&config)),
             trace_processor,
             trace_tx,
-            stats_sender,
+            stats_generator,
             port,
             cancel_token,
         }
@@ -119,7 +119,7 @@ impl Agent {
             self.processor.clone(),
             Arc::clone(&self.trace_processor),
             self.trace_tx.clone(),
-            Arc::clone(&self.stats_sender),
+            Arc::clone(&self.stats_generator),
         );
 
         Router::new()
@@ -134,7 +134,7 @@ impl Agent {
     }
 
     async fn v1_traces(
-        State((config, tags_provider, processor, trace_processor, trace_tx, stats_sender)): State<
+        State((config, tags_provider, processor, trace_processor, trace_tx, stats_generator)): State<
             AgentState,
         >,
         request: Request,
@@ -199,7 +199,7 @@ impl Agent {
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if compute_trace_stats {
-            if let Err(err) = stats_sender.send(&processed_traces) {
+            if let Err(err) = stats_generator.send(&processed_traces) {
                 // Just log the error. We don't think trace stats are critical, so we don't want to
                 // return an error if only stats fail to send.
                 error!("OTLP | Error sending traces to the stats concentrator: {err}");
