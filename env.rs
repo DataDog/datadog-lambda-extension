@@ -144,6 +144,15 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_logs_additional_endpoints")]
     pub logs_config_additional_endpoints: Vec<LogsAdditionalEndpoint>,
 
+    /// @env `DD_OBSERVABILITY_PIPELINES_WORKER_LOGS_ENABLED`
+    /// When true, emit plain json suitable for Observability Pipelines
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub observability_pipelines_worker_logs_enabled: Option<bool>,
+    /// @env `DD_OBSERVABILITY_PIPELINES_WORKER_LOGS_URL`
+    ///
+    /// The URL endpoint for sending logs to Observability Pipelines Worker
+    pub observability_pipelines_worker_logs_url: Option<String>,
+
     // APM
     //
     /// @env `DD_SERVICE_MAPPING`
@@ -427,6 +436,12 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     );
     merge_option_to_value!(config, env_config, logs_config_compression_level);
     merge_vec!(config, env_config, logs_config_additional_endpoints);
+    merge_option_to_value!(
+        config,
+        env_config,
+        observability_pipelines_worker_logs_enabled
+    );
+    merge_string!(config, env_config, observability_pipelines_worker_logs_url);
 
     // APM
     merge_hashmap!(config, env_config, service_mapping);
@@ -807,6 +822,8 @@ mod tests {
                     port: 443,
                     is_reliable: true,
                 }],
+                observability_pipelines_worker_logs_enabled: false,
+                observability_pipelines_worker_logs_url: String::default(),
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),

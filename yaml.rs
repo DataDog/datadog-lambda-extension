@@ -887,6 +887,8 @@ extension_version: "compatibility"
                     port: 443,
                     is_reliable: true,
                 }],
+                observability_pipelines_worker_logs_enabled: false,
+                observability_pipelines_worker_logs_url: String::default(),
                 service_mapping: HashMap::from([(
                     "old-service".to_string(),
                     "new-service".to_string(),
