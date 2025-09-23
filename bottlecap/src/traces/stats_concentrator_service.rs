@@ -11,6 +11,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 use tracing::error;
+use crate::tags::provider::Provider as TagProvider;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StatsError {

@@ -3,6 +3,7 @@ use datadog_trace_protobuf::pb;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Arc};
 use tracing::error;
+use crate::tags::provider::Provider as TagProvider;
 
 // Event sent to the stats concentrator
 #[derive(Clone)]
@@ -150,10 +151,10 @@ impl StatsConcentrator {
         aggregation_key: &AggregationKey,
         stats: Stats,
         tracer_metadata: &TracerMetadata,
-        function_arn: &String,
+        function_arn: &str,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
-            hostname: function_arn.clone(),
+            hostname: function_arn.to_string(),
             env: aggregation_key.env.clone(),
             // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
