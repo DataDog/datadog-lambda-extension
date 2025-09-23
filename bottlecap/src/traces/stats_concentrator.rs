@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[test]
-    fn test_should_flush_bucket_true_when_much_later() {
+    fn test_should_flush_bucket_true_when_later() {
         let bucket_timestamp = 1_000_000_000;
         let current_timestamp = bucket_timestamp + BUCKET_DURATION_NS * NO_FLUSH_BUCKET_COUNT + 1;
         assert!(
