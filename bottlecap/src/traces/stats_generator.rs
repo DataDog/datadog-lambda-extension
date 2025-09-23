@@ -40,6 +40,9 @@ impl StatsGenerator {
                     self.is_tracer_metadata_set.store(true, Ordering::Release);
                     let tracer_metadata = TracerMetadata {
                         language: trace.language_name.clone(),
+                        tracer_version: trace.tracer_version.clone(),
+                        runtime_id: trace.runtime_id.clone(),
+                        hostname: trace.hostname.clone(),
                     };
                     if let Err(err) = self
                         .stats_concentrator

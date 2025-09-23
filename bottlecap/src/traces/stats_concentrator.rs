@@ -43,6 +43,9 @@ pub struct Stats {
 #[derive(Clone, Debug, Default)]
 pub struct TracerMetadata {
     pub language: String,
+    pub tracer_version: String,
+    pub runtime_id: String,
+    pub hostname: String,
 }
 
 pub struct StatsConcentrator {
@@ -71,7 +74,6 @@ impl StatsConcentrator {
             config,
             buckets: HashMap::new(),
             tracer_metadata: TracerMetadata::default(), // to be set when a trace is processed
-            function_arn,
         }
     }
 
@@ -117,7 +119,6 @@ impl StatsConcentrator {
                         timestamp,
                         aggregation_key,
                         *stats,
-                        &self.function_arn,
                         &self.tracer_metadata,
                     ));
                 }
@@ -142,20 +143,16 @@ impl StatsConcentrator {
         timestamp: u64,
         aggregation_key: &AggregationKey,
         stats: Stats,
-        function_arn: &str,
         tracer_metadata: &TracerMetadata,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
-            // TODO: handle this
-            hostname: String::new(),
+            hostname: tracer_metadata.hostname.clone(),
             env: aggregation_key.env.clone(),
             // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
             lang: tracer_metadata.language.clone(),
-            // TODO: handle this
-            tracer_version: String::new(),
-            // TODO: handle this
-            runtime_id: String::new(),
+            tracer_version: tracer_metadata.tracer_version.clone(),
+            runtime_id: tracer_metadata.runtime_id.clone(),
             // TODO: handle this
             sequence: 0,
             // TODO: handle this
