@@ -10,12 +10,12 @@ pub mod stats_aggregator;
 pub mod stats_concentrator;
 pub mod stats_concentrator_service;
 pub mod stats_flusher;
+pub mod stats_generator;
 pub mod stats_processor;
 pub mod trace_agent;
 pub mod trace_aggregator;
 pub mod trace_flusher;
 pub mod trace_processor;
-pub mod trace_stats_processor;
 
 // URL for a call to the Lambda runtime API. The value may be replaced if `AWS_LAMBDA_RUNTIME_API` is set.
 const LAMBDA_RUNTIME_URL_PREFIX: &str = "http://127.0.0.1:9001";

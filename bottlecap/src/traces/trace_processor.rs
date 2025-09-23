@@ -31,8 +31,8 @@ use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::SendError;
 use tracing::{debug, error};
 
+use super::stats_generator::StatsGenerator;
 use super::trace_aggregator::SendDataBuilderInfo;
-use super::trace_stats_processor::SendingTraceStatsProcessor;
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -391,8 +391,9 @@ pub struct SendingTraceProcessor {
     pub processor: Arc<dyn TraceProcessor + Send + Sync>,
     /// The [`Sender`] to use for flushing the traces to the trace aggregator.
     pub trace_tx: Sender<SendDataBuilderInfo>,
-    /// The [`SendingTraceStatsProcessor`] to use for sending stats to the stats concentrator.
-    pub stats_sender: Arc<SendingTraceStatsProcessor>,
+    /// The [`StatsGenerator`] to use for generating stats and sending them to
+    /// the stats concentrator.
+    pub stats_generator: Arc<StatsGenerator>,
 }
 impl SendingTraceProcessor {
     /// Processes the provided traces, then flushes them to the trace aggregator
@@ -418,7 +419,7 @@ impl SendingTraceProcessor {
                     Some(trace)
                 } else if let Some(ctx) = ctx{
                     debug!("TRACE_PROCESSOR | holding trace for App & API Protection additional data");
-                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_sender: self.stats_sender.clone() }, HoldArguments{
+                    ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_generator: self.stats_generator.clone() }, HoldArguments{
                         config:Arc::clone(&config),
                         tags_provider:Arc::clone(&tags_provider),
                         body_size,
@@ -461,7 +462,7 @@ impl SendingTraceProcessor {
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
         if config.compute_trace_stats {
-            if let Err(err) = self.stats_sender.send(&processed_traces) {
+            if let Err(err) = self.stats_generator.send(&processed_traces) {
                 // Just log the error. We don't think trace stats are critical, so we don't want to
                 // return an error if only stats fail to send.
                 error!("TRACE_PROCESSOR | Error sending traces to the stats concentrator: {err}");

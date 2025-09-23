@@ -32,7 +32,9 @@ use crate::{
     traces::{
         INVOCATION_SPAN_RESOURCE,
         proxy_aggregator::{self, ProxyRequest},
-        stats_aggregator, stats_processor,
+        stats_aggregator,
+        stats_generator::StatsGenerator,
+        stats_processor,
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_processor,
     },
@@ -42,7 +44,6 @@ use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
 
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
-use crate::traces::trace_stats_processor::SendingTraceStatsProcessor;
 
 const TRACE_AGENT_PORT: usize = 8126;
 
@@ -198,16 +199,14 @@ impl TraceAgent {
     }
 
     fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
-        let stats_sender = Arc::new(SendingTraceStatsProcessor::new(
-            self.stats_concentrator.clone(),
-        ));
+        let stats_generator = Arc::new(StatsGenerator::new(self.stats_concentrator.clone()));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
             trace_sender: Arc::new(SendingTraceProcessor {
                 appsec: self.appsec_processor.clone(),
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
-                stats_sender,
+                stats_generator,
             }),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
