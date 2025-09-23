@@ -16,6 +16,7 @@ pub enum StatsError {
 }
 
 pub enum ConcentratorCommand {
+    SetLanguage(String),
     Add(StatsEvent),
     Flush(bool, oneshot::Sender<Vec<pb::ClientStatsPayload>>),
 }
@@ -26,6 +27,14 @@ pub struct StatsConcentratorHandle {
 }
 
 impl StatsConcentratorHandle {
+    pub fn set_language(
+        &self,
+        language: &str,
+    ) -> Result<(), mpsc::error::SendError<ConcentratorCommand>> {
+        self.tx
+            .send(ConcentratorCommand::SetLanguage(language.to_string()))
+    }
+
     pub fn add(
         &self,
         stats_event: StatsEvent,
@@ -66,6 +75,9 @@ impl StatsConcentratorService {
     pub async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
             match command {
+                ConcentratorCommand::SetLanguage(language) => {
+                    self.concentrator.set_language(&language)
+                }
                 ConcentratorCommand::Add(stats_event) => self.concentrator.add(stats_event),
                 ConcentratorCommand::Flush(force_flush, response_tx) => {
                     let stats = self.concentrator.flush(force_flush);

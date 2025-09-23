@@ -3,12 +3,13 @@ use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use datadog_trace_utils::tracer_payload::TracerPayloadCollection;
 use tracing::error;
 
-use tokio::sync::mpsc::error::SendError;
-
 use crate::traces::stats_concentrator_service::ConcentratorCommand;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::mpsc::error::SendError;
 
 pub struct StatsGenerator {
     stats_concentrator: StatsConcentratorHandle,
+    is_language_set: AtomicBool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -23,12 +24,26 @@ pub enum StatsGeneratorError {
 impl StatsGenerator {
     #[must_use]
     pub fn new(stats_concentrator: StatsConcentratorHandle) -> Self {
-        Self { stats_concentrator }
+        Self {
+            stats_concentrator,
+            is_language_set: AtomicBool::new(false),
+        }
     }
 
     pub fn send(&self, traces: &TracerPayloadCollection) -> Result<(), StatsGeneratorError> {
         if let TracerPayloadCollection::V07(traces) = traces {
             for trace in traces {
+                // Set the tracer language only once for the first trace because
+                // it is the same for all traces.
+                if !self.is_language_set.load(Ordering::Acquire) {
+                    self.is_language_set.store(true, Ordering::Release);
+                    if let Err(err) = self.stats_concentrator.set_language(&trace.language_name) {
+                        error!("Failed to set tracer language: {err}");
+                        return Err(StatsGeneratorError::ConcentratorCommandError(err));
+                    }
+                }
+
+                // Generate stats for each span in the trace
                 for chunk in &trace.chunks {
                     for span in &chunk.spans {
                         let stats = StatsEvent {

@@ -42,6 +42,7 @@ pub struct Stats {
 
 pub struct StatsConcentrator {
     config: Arc<Config>,
+    tracer_language: String,
     buckets: HashMap<u64, Bucket>,
 }
 
@@ -65,6 +66,10 @@ impl StatsConcentrator {
             config,
             buckets: HashMap::new(),
         }
+    }
+
+    pub fn set_language(&mut self, language: &str) {
+        self.tracer_language = language.to_string();
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
@@ -105,6 +110,7 @@ impl StatsConcentrator {
                         timestamp,
                         aggregation_key,
                         *stats,
+                        &self.tracer_metadata,
                     ));
                 }
                 false
@@ -128,6 +134,7 @@ impl StatsConcentrator {
         timestamp: u64,
         aggregation_key: &AggregationKey,
         stats: Stats,
+        tracer_metadata: &TracerMetadata,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
             // TODO: handle this
@@ -135,8 +142,7 @@ impl StatsConcentrator {
             env: aggregation_key.env.clone(),
             // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
-            // TODO: handle this
-            lang: "rust".to_string(),
+            lang: tracer_language.to_string(),
             // TODO: handle this
             tracer_version: String::new(),
             // TODO: handle this
