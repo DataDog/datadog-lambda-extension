@@ -42,7 +42,6 @@ impl StatsGenerator {
                         language: trace.language_name.clone(),
                         tracer_version: trace.tracer_version.clone(),
                         runtime_id: trace.runtime_id.clone(),
-                        hostname: trace.hostname.clone(),
                     };
                     if let Err(err) = self
                         .stats_concentrator

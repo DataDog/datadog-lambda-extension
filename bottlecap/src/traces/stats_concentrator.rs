@@ -42,10 +42,12 @@ pub struct Stats {
 
 #[derive(Clone, Debug, Default)]
 pub struct TracerMetadata {
+    // e.g. "python"
     pub language: String,
+    // e.g. "3.11.0"
     pub tracer_version: String,
+    // e.g. "f45568ad09d5480b99087d86ebda26e6"
     pub runtime_id: String,
-    pub hostname: String,
 }
 
 pub struct StatsConcentrator {
@@ -146,7 +148,8 @@ impl StatsConcentrator {
         tracer_metadata: &TracerMetadata,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
-            hostname: tracer_metadata.hostname.clone(),
+            // TODO: handle this
+            hostname: String::new(),
             env: aggregation_key.env.clone(),
             // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
