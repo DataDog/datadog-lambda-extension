@@ -40,9 +40,14 @@ pub struct Stats {
     pub top_level_hits: f64,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct TracerMetadata {
+    pub language: String,
+}
+
 pub struct StatsConcentrator {
     config: Arc<Config>,
-    tracer_language: String,
+    tracer_metadata: TracerMetadata,
     buckets: HashMap<u64, Bucket>,
 }
 
@@ -65,11 +70,13 @@ impl StatsConcentrator {
         Self {
             config,
             buckets: HashMap::new(),
+            tracer_metadata: TracerMetadata::default(), // to be set when a trace is processed
+            function_arn,
         }
     }
 
-    pub fn set_language(&mut self, language: &str) {
-        self.tracer_language = language.to_string();
+    pub fn set_tracer_metadata(&mut self, tracer_metadata: &TracerMetadata) {
+        self.tracer_metadata = tracer_metadata.clone();
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
@@ -110,6 +117,7 @@ impl StatsConcentrator {
                         timestamp,
                         aggregation_key,
                         *stats,
+                        &self.function_arn,
                         &self.tracer_metadata,
                     ));
                 }
@@ -134,6 +142,7 @@ impl StatsConcentrator {
         timestamp: u64,
         aggregation_key: &AggregationKey,
         stats: Stats,
+        function_arn: &str,
         tracer_metadata: &TracerMetadata,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
@@ -142,7 +151,7 @@ impl StatsConcentrator {
             env: aggregation_key.env.clone(),
             // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
-            lang: tracer_language.to_string(),
+            lang: tracer_metadata.language.clone(),
             // TODO: handle this
             tracer_version: String::new(),
             // TODO: handle this

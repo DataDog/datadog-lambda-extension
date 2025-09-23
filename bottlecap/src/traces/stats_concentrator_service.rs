@@ -3,6 +3,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::config::Config;
 use crate::traces::stats_concentrator::StatsConcentrator;
 use crate::traces::stats_concentrator::StatsEvent;
+use crate::traces::stats_concentrator::TracerMetadata;
 use datadog_trace_protobuf::pb;
 use std::sync::Arc;
 use tracing::error;
@@ -16,7 +17,7 @@ pub enum StatsError {
 }
 
 pub enum ConcentratorCommand {
-    SetLanguage(String),
+    SetTracerMetadata(TracerMetadata),
     Add(StatsEvent),
     Flush(bool, oneshot::Sender<Vec<pb::ClientStatsPayload>>),
 }
@@ -27,12 +28,13 @@ pub struct StatsConcentratorHandle {
 }
 
 impl StatsConcentratorHandle {
-    pub fn set_language(
+    pub fn set_tracer_metadata(
         &self,
-        language: &str,
+        tracer_metadata: &TracerMetadata,
     ) -> Result<(), mpsc::error::SendError<ConcentratorCommand>> {
-        self.tx
-            .send(ConcentratorCommand::SetLanguage(language.to_string()))
+        self.tx.send(ConcentratorCommand::SetTracerMetadata(
+            tracer_metadata.clone(),
+        ))
     }
 
     pub fn add(
@@ -75,8 +77,8 @@ impl StatsConcentratorService {
     pub async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
             match command {
-                ConcentratorCommand::SetLanguage(language) => {
-                    self.concentrator.set_language(&language)
+                ConcentratorCommand::SetTracerMetadata(tracer_metadata) => {
+                    self.concentrator.set_tracer_metadata(&tracer_metadata);
                 }
                 ConcentratorCommand::Add(stats_event) => self.concentrator.add(stats_event),
                 ConcentratorCommand::Flush(force_flush, response_tx) => {
