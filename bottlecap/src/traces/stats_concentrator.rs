@@ -1,9 +1,9 @@
 use crate::config::Config;
+use crate::tags::provider::Provider as TagProvider;
 use datadog_trace_protobuf::pb;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Arc};
 use tracing::error;
-use crate::tags::provider::Provider as TagProvider;
 
 // Event sent to the stats concentrator
 #[derive(Clone)]
