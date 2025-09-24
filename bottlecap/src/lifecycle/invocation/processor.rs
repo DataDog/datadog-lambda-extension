@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use serde_json::Value;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
@@ -42,6 +42,78 @@ use crate::{
 
 use crate::lifecycle::invocation::triggers::get_default_service_name;
 
+#[allow(clippy::large_enum_variant)]
+pub enum ProcessorCommand {
+    // Fire-and-forget commands (no response needed)
+    OnInvokeEvent {
+        request_id: String,
+    },
+    OnPlatformInitStart {
+        time: DateTime<Utc>,
+    },
+    OnPlatformInitReport {
+        init_type: InitType,
+        duration_ms: f64,
+        timestamp: i64,
+    },
+    OnPlatformStart {
+        request_id: String,
+        time: DateTime<Utc>,
+    },
+    OnPlatformRuntimeDone {
+        request_id: String,
+        metrics: RuntimeDoneMetrics,
+        status: Status,
+        error_type: Option<String>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+        timestamp: i64,
+    },
+    OnPlatformReport {
+        request_id: String,
+        metrics: ReportMetrics,
+        timestamp: i64,
+    },
+    OnShutdownEvent,
+    OnUniversalInstrumentationStart {
+        headers: HashMap<String, String>,
+        payload_value: Value,
+    },
+    OnUniversalInstrumentationEnd {
+        headers: HashMap<String, String>,
+        payload_value: Value,
+    },
+    AddReparenting {
+        request_id: String,
+        span_id: u64,
+        parent_id: u64,
+    },
+    AddTracerSpan {
+        span: Span,
+    },
+    OnOutOfMemoryError {
+        timestamp: i64,
+    },
+    SendCtxSpans {
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+        context: Context,
+    },
+
+    // Commands that need responses
+    SetColdStartSpanTraceId {
+        trace_id: u64,
+        respond_to: oneshot::Sender<Option<u64>>,
+    },
+    GetReparentingInfo {
+        respond_to: oneshot::Sender<VecDeque<ReparentingInfo>>,
+    },
+    UpdateReparenting {
+        reparenting_info: VecDeque<ReparentingInfo>,
+        respond_to: oneshot::Sender<Vec<Context>>,
+    },
+}
+
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
 pub const S_TO_NS: f64 = 1_000_000_000.0;
@@ -52,6 +124,313 @@ pub const DATADOG_INVOCATION_ERROR_TYPE_KEY: &str = "x-datadog-invocation-error-
 pub const DATADOG_INVOCATION_ERROR_STACK_KEY: &str = "x-datadog-invocation-error-stack";
 pub const DATADOG_INVOCATION_ERROR_KEY: &str = "x-datadog-invocation-error";
 const TAG_SAMPLING_PRIORITY: &str = "_sampling_priority_v1";
+
+#[derive(Clone)]
+pub struct ProcessorHandle {
+    sender: mpsc::UnboundedSender<ProcessorCommand>,
+}
+
+impl ProcessorHandle {
+    #[must_use]
+    pub fn new(sender: mpsc::UnboundedSender<ProcessorCommand>) -> Self {
+        Self { sender }
+    }
+
+    pub fn on_invoke_event(&self, request_id: String) {
+        let _ = self
+            .sender
+            .send(ProcessorCommand::OnInvokeEvent { request_id });
+    }
+
+    pub fn on_platform_init_start(&self, time: DateTime<Utc>) {
+        let _ = self
+            .sender
+            .send(ProcessorCommand::OnPlatformInitStart { time });
+    }
+
+    pub fn on_platform_init_report(&self, init_type: InitType, duration_ms: f64, timestamp: i64) {
+        let _ = self.sender.send(ProcessorCommand::OnPlatformInitReport {
+            init_type,
+            duration_ms,
+            timestamp,
+        });
+    }
+
+    pub fn on_platform_start(&self, request_id: String, time: DateTime<Utc>) {
+        let _ = self
+            .sender
+            .send(ProcessorCommand::OnPlatformStart { request_id, time });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn on_platform_runtime_done(
+        &self,
+        request_id: String,
+        metrics: RuntimeDoneMetrics,
+        status: Status,
+        error_type: Option<String>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+        timestamp: i64,
+    ) {
+        let _ = self.sender.send(ProcessorCommand::OnPlatformRuntimeDone {
+            request_id,
+            metrics,
+            status,
+            error_type,
+            tags_provider,
+            trace_sender,
+            timestamp,
+        });
+    }
+
+    pub fn on_platform_report(&self, request_id: String, metrics: ReportMetrics, timestamp: i64) {
+        let _ = self.sender.send(ProcessorCommand::OnPlatformReport {
+            request_id,
+            metrics,
+            timestamp,
+        });
+    }
+
+    pub fn on_shutdown_event(&self) {
+        let _ = self.sender.send(ProcessorCommand::OnShutdownEvent);
+    }
+
+    pub fn on_universal_instrumentation_start(
+        &self,
+        headers: HashMap<String, String>,
+        payload_value: Value,
+    ) {
+        let _ = self
+            .sender
+            .send(ProcessorCommand::OnUniversalInstrumentationStart {
+                headers,
+                payload_value,
+            });
+    }
+
+    pub fn on_universal_instrumentation_end(
+        &self,
+        headers: HashMap<String, String>,
+        payload_value: Value,
+    ) {
+        let _ = self
+            .sender
+            .send(ProcessorCommand::OnUniversalInstrumentationEnd {
+                headers,
+                payload_value,
+            });
+    }
+
+    pub async fn set_cold_start_span_trace_id(&self, trace_id: u64) -> Option<u64> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.sender.send(ProcessorCommand::SetColdStartSpanTraceId {
+            trace_id,
+            respond_to: tx,
+        });
+        rx.await.unwrap_or(None)
+    }
+
+    pub fn add_reparenting(&self, request_id: String, span_id: u64, parent_id: u64) {
+        let _ = self.sender.send(ProcessorCommand::AddReparenting {
+            request_id,
+            span_id,
+            parent_id,
+        });
+    }
+
+    pub async fn get_reparenting_info(&self) -> VecDeque<ReparentingInfo> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self
+            .sender
+            .send(ProcessorCommand::GetReparentingInfo { respond_to: tx });
+        rx.await.unwrap_or_default()
+    }
+
+    pub async fn update_reparenting(
+        &self,
+        reparenting_info: VecDeque<ReparentingInfo>,
+    ) -> Vec<Context> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.sender.send(ProcessorCommand::UpdateReparenting {
+            reparenting_info,
+            respond_to: tx,
+        });
+        rx.await.unwrap_or_default()
+    }
+
+    pub fn add_tracer_span(&self, span: Span) {
+        let _ = self.sender.send(ProcessorCommand::AddTracerSpan { span });
+    }
+
+    pub fn on_out_of_memory_error(&self, timestamp: i64) {
+        let _ = self
+            .sender
+            .send(ProcessorCommand::OnOutOfMemoryError { timestamp });
+    }
+
+    pub fn send_ctx_spans(
+        &self,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+        context: Context,
+    ) {
+        let _ = self.sender.send(ProcessorCommand::SendCtxSpans {
+            tags_provider,
+            trace_sender,
+            context,
+        });
+    }
+}
+
+pub struct ProcessorService {
+    processor: Processor,
+    receiver: mpsc::UnboundedReceiver<ProcessorCommand>,
+}
+
+impl ProcessorService {
+    #[must_use]
+    pub fn new(
+        tags_provider: Arc<provider::Provider>,
+        config: Arc<config::Config>,
+        aws_config: Arc<AwsConfig>,
+        enhanced_metrics: EnhancedMetrics,
+        propagator: Arc<DatadogCompositePropagator>,
+    ) -> (Self, ProcessorHandle) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let processor = Processor::new(
+            tags_provider,
+            config,
+            aws_config,
+            enhanced_metrics,
+            propagator,
+        );
+
+        let service = Self {
+            processor,
+            receiver,
+        };
+        let handle = ProcessorHandle::new(sender);
+
+        (service, handle)
+    }
+
+    pub async fn run(mut self) {
+        while let Some(command) = self.receiver.recv().await {
+            self.handle_command(command).await;
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    async fn handle_command(&mut self, command: ProcessorCommand) {
+        match command {
+            ProcessorCommand::OnInvokeEvent { request_id } => {
+                self.processor.on_invoke_event(request_id);
+            }
+            ProcessorCommand::OnPlatformInitStart { time } => {
+                self.processor.on_platform_init_start(time);
+            }
+            ProcessorCommand::OnPlatformInitReport {
+                init_type,
+                duration_ms,
+                timestamp,
+            } => {
+                self.processor
+                    .on_platform_init_report(init_type, duration_ms, timestamp);
+            }
+            ProcessorCommand::OnPlatformStart { request_id, time } => {
+                self.processor.on_platform_start(request_id, time);
+            }
+            ProcessorCommand::OnPlatformRuntimeDone {
+                request_id,
+                metrics,
+                status,
+                error_type,
+                tags_provider,
+                trace_sender,
+                timestamp,
+            } => {
+                self.processor
+                    .on_platform_runtime_done(
+                        &request_id,
+                        metrics,
+                        status,
+                        error_type,
+                        tags_provider,
+                        trace_sender,
+                        timestamp,
+                    )
+                    .await;
+            }
+            ProcessorCommand::OnPlatformReport {
+                request_id,
+                metrics,
+                timestamp,
+            } => {
+                self.processor
+                    .on_platform_report(&request_id, metrics, timestamp);
+            }
+            ProcessorCommand::OnShutdownEvent => {
+                self.processor.on_shutdown_event();
+            }
+            ProcessorCommand::OnUniversalInstrumentationStart {
+                headers,
+                payload_value,
+            } => {
+                self.processor
+                    .on_universal_instrumentation_start(headers, payload_value);
+            }
+            ProcessorCommand::OnUniversalInstrumentationEnd {
+                headers,
+                payload_value,
+            } => {
+                self.processor
+                    .on_universal_instrumentation_end(headers, payload_value);
+            }
+            ProcessorCommand::SetColdStartSpanTraceId {
+                trace_id,
+                respond_to,
+            } => {
+                let result = self.processor.set_cold_start_span_trace_id(trace_id);
+                let _ = respond_to.send(result);
+            }
+            ProcessorCommand::AddReparenting {
+                request_id,
+                span_id,
+                parent_id,
+            } => {
+                self.processor
+                    .add_reparenting(request_id, span_id, parent_id);
+            }
+            ProcessorCommand::GetReparentingInfo { respond_to } => {
+                let result = self.processor.get_reparenting_info();
+                let _ = respond_to.send(result);
+            }
+            ProcessorCommand::UpdateReparenting {
+                reparenting_info,
+                respond_to,
+            } => {
+                let result = self.processor.update_reparenting(reparenting_info);
+                let _ = respond_to.send(result);
+            }
+            ProcessorCommand::AddTracerSpan { span } => {
+                self.processor.add_tracer_span(&span);
+            }
+            ProcessorCommand::OnOutOfMemoryError { timestamp } => {
+                self.processor.on_out_of_memory_error(timestamp);
+            }
+            ProcessorCommand::SendCtxSpans {
+                tags_provider,
+                trace_sender,
+                context,
+            } => {
+                self.processor
+                    .send_ctx_spans(&tags_provider, &trace_sender, context)
+                    .await;
+            }
+        }
+    }
+}
 
 pub struct Processor {
     /// Buffer containing context of the previous 5 invocations
