@@ -378,13 +378,13 @@ impl Default for Config {
             version: None,
             tags: HashMap::new(),
 
-            compression_level: 6,
+            compression_level: 3,
 
             // Logs
             logs_config_logs_dd_url: String::default(),
             logs_config_processing_rules: None,
             logs_config_use_compression: true,
-            logs_config_compression_level: 6,
+            logs_config_compression_level: 3,
             logs_config_additional_endpoints: Vec::new(),
             observability_pipelines_worker_logs_enabled: false,
             observability_pipelines_worker_logs_url: String::default(),
@@ -395,7 +395,7 @@ impl Default for Config {
             apm_replace_tags: None,
             apm_config_obfuscation_http_remove_query_string: false,
             apm_config_obfuscation_http_remove_paths_with_digits: false,
-            apm_config_compression_level: 6,
+            apm_config_compression_level: 3,
             apm_features: vec![],
             apm_additional_endpoints: HashMap::new(),
             apm_filter_tags_require: None,
@@ -412,7 +412,7 @@ impl Default for Config {
             trace_propagation_http_baggage_enabled: false,
 
             // Metrics
-            metrics_config_compression_level: 6,
+            metrics_config_compression_level: 3,
 
             // OTLP
             otlp_config_traces_enabled: true,
