@@ -83,6 +83,7 @@ name = "bottlecap"
 opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
+strip = "debuginfo"
 panic = "abort"
 
 [profile.release-alpine-arm64-fips]
