@@ -129,8 +129,8 @@ impl TraceFlusher for ServerlessTraceFlusher {
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
             batch_tasks.spawn(async move {
-                let res = Self::send(traces_clone, None, &proxy_https).await;
-                res
+                
+                Self::send(traces_clone, None, &proxy_https).await
             });
 
             for endpoint in self.additional_endpoints.clone() {
