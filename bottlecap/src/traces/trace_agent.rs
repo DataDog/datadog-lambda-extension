@@ -26,7 +26,7 @@ use crate::{
     config,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{
-        context::ReparentingInfo, processor::Processor as InvocationProcessor,
+        context::ReparentingInfo, processor::ProcessorHandle as InvocationProcessor,
     },
     tags::provider,
     traces::{
@@ -79,7 +79,7 @@ const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
-    pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    pub invocation_processor: InvocationProcessor,
     pub tags_provider: Arc<provider::Provider>,
 }
 
@@ -102,7 +102,7 @@ pub struct TraceAgent {
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
-    invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    invocation_processor: InvocationProcessor,
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
@@ -125,7 +125,7 @@ impl TraceAgent {
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        invocation_processor: InvocationProcessor,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
         stats_concentrator: StatsConcentratorHandle,
@@ -208,7 +208,7 @@ impl TraceAgent {
                 trace_tx: self.tx.clone(),
                 stats_generator,
             }),
-            invocation_processor: Arc::clone(&self.invocation_processor),
+            invocation_processor: self.invocation_processor.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
         };
 
@@ -427,7 +427,7 @@ impl TraceAgent {
         config: Arc<config::Config>,
         request: Request,
         trace_sender: Arc<SendingTraceProcessor>,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        invocation_processor: InvocationProcessor,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
     ) -> Response {
@@ -482,10 +482,7 @@ impl TraceAgent {
             },
         };
 
-        let mut reparenting_info = {
-            let invocation_processor = invocation_processor.lock().await;
-            invocation_processor.get_reparenting_info()
-        };
+        let mut reparenting_info = invocation_processor.get_reparenting_info().await;
 
         for chunk in &mut traces {
             for span in chunk.iter_mut() {
@@ -493,29 +490,32 @@ impl TraceAgent {
                 // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
                 // span to the cold start span, and eventually send the cold start span.
                 if span.name == LAMBDA_LOAD_SPAN {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    if let Some(cold_start_span_id) =
-                        invocation_processor.set_cold_start_span_trace_id(span.trace_id)
+                    if let Some(cold_start_span_id) = invocation_processor
+                        .set_cold_start_span_trace_id(span.trace_id)
+                        .await
                     {
                         span.parent_id = cold_start_span_id;
                     }
                 }
 
                 if span.resource == INVOCATION_SPAN_RESOURCE {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    invocation_processor.add_tracer_span(span);
+                    invocation_processor.add_tracer_span(span.clone());
                 }
                 handle_reparenting(&mut reparenting_info, span);
             }
         }
 
         {
-            let mut invocation_processor = invocation_processor.lock().await;
-            for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
+            for ctx_to_send in invocation_processor
+                .update_reparenting(reparenting_info)
+                .await
+            {
                 debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
-                invocation_processor
-                    .send_ctx_spans(&tags_provider, &trace_sender, ctx_to_send)
-                    .await;
+                invocation_processor.send_ctx_spans(
+                    tags_provider.clone(),
+                    trace_sender.clone(),
+                    ctx_to_send,
+                );
             }
         }
 
