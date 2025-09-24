@@ -125,13 +125,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 .map(SendDataBuilder::build)
                 .collect();
 
-            tokio::task::yield_now().await;
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
-            batch_tasks.spawn(async move {
-                
-                Self::send(traces_clone, None, &proxy_https).await
-            });
+            batch_tasks.spawn(async move { Self::send(traces_clone, None, &proxy_https).await });
 
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
