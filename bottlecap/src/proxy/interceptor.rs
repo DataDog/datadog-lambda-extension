@@ -2,8 +2,9 @@ use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::propagation::DatadogCompositePropagator;
 use crate::{
     appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
-    extension::EXTENSION_HOST, lifecycle::invocation::processor::Processor as InvocationProcessor,
-    lwa, proxy::tee_body::TeeBodyWithCompletion,
+    extension::EXTENSION_HOST,
+    lifecycle::invocation::processor::ProcessorHandle as InvocationProcessor, lwa,
+    proxy::tee_body::TeeBodyWithCompletion,
 };
 use axum::{
     Router,
@@ -31,7 +32,7 @@ const INTERCEPTOR_DEFAULT_PORT: u16 = 9000;
 type InterceptorState = (
     Arc<AwsConfig>,
     Arc<Client<HttpConnector, Body>>,
-    Arc<Mutex<InvocationProcessor>>,
+    InvocationProcessor,
     Option<Arc<Mutex<AppSecProcessor>>>,
     Arc<DatadogCompositePropagator>,
     Arc<Mutex<JoinSet<()>>>,
@@ -39,7 +40,7 @@ type InterceptorState = (
 
 pub fn start(
     aws_config: Arc<AwsConfig>,
-    invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    invocation_processor: InvocationProcessor,
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     propagator: Arc<DatadogCompositePropagator>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
@@ -203,8 +204,7 @@ async fn invocation_next_proxy(
                     &intercepted_parts_clone,
                     &body,
                     Arc::clone(&propagator),
-                )
-                .await;
+                );
             }
         }
     });
@@ -251,7 +251,7 @@ async fn invocation_response_proxy(
             }
 
             if aws_config_clone.aws_lwa_proxy_lambda_runtime_api.is_some() {
-                lwa::process_invocation_response(&invocation_processor, &body).await;
+                lwa::process_invocation_response(&invocation_processor, &body);
             }
         }
     });
@@ -500,13 +500,20 @@ mod tests {
             exec_wrapper: None,
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
-            Arc::clone(&tags_provider),
-            Arc::clone(&config),
-            Arc::clone(&aws_config),
-            enhanced_metrics,
-            Arc::clone(&propagator),
-        )));
+        let (invocation_processor_service, invocation_processor) =
+            crate::lifecycle::invocation::processor::ProcessorService::new(
+                Arc::clone(&tags_provider),
+                Arc::clone(&config),
+                Arc::clone(&aws_config),
+                enhanced_metrics,
+                Arc::clone(&propagator),
+            );
+
+        // Start the processor service
+        tokio::spawn(async move {
+            invocation_processor_service.run().await;
+        });
+
         let appsec_processor = match AppSecProcessor::new(&config) {
             Ok(p) => Some(Arc::new(TokioMutex::new(p))),
             Err(AppSecFeatureDisabled) => None,
