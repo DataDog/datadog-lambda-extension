@@ -6,7 +6,7 @@ use ddcommon::Endpoint;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
+use tokio::task::JoinSet;
 use tracing::{debug, error};
 
 use datadog_trace_utils::{
@@ -115,7 +115,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let mut trace_builders = guard.get_batch();
 
         // Collect all batches and their tasks
-        let mut batch_tasks: Vec<JoinHandle<Option<Vec<SendData>>>> = Vec::new();
+        let mut batch_tasks = JoinSet::new();
 
         while !trace_builders.is_empty() {
             let traces: Vec<_> = trace_builders
@@ -128,23 +128,24 @@ impl TraceFlusher for ServerlessTraceFlusher {
             tokio::task::yield_now().await;
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
-            batch_tasks.push(tokio::spawn(async move {
-                Self::send(traces_clone, None, &proxy_https).await
-            }));
+            batch_tasks.spawn(async move {
+                let res = Self::send(traces_clone, None, &proxy_https).await;
+                res
+            });
 
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
                 let proxy_https = self.config.proxy_https.clone();
-                batch_tasks.push(tokio::spawn(async move {
+                batch_tasks.spawn(async move {
                     Self::send(traces_clone, Some(&endpoint), &proxy_https).await
-                }));
+                });
             }
 
             trace_builders = guard.get_batch();
         }
 
-        for handle in batch_tasks {
-            if let Ok(Some(mut failed)) = handle.await {
+        while let Some(result) = batch_tasks.join_next().await {
+            if let Ok(Some(mut failed)) = result {
                 failed_batch.append(&mut failed);
             }
         }
@@ -164,7 +165,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         if traces.is_empty() {
             return None;
         }
-        let start = std::time::Instant::now();
+        let start = tokio::time::Instant::now();
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
         tokio::task::yield_now().await;
         debug!("Flushing {} traces", coalesced_traces.len());
