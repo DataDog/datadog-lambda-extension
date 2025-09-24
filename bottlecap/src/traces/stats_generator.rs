@@ -42,7 +42,7 @@ impl StatsGenerator {
                             },
                             stats: Stats {
                                 hits: 1,
-                                error: span.error,
+                                errors: span.error,
                                 duration: span.duration,
                                 top_level_hits: span
                                     .metrics

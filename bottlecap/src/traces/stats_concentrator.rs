@@ -1,10 +1,7 @@
 use crate::config::Config;
 use datadog_trace_protobuf::pb;
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::{collections::HashMap, sync::Arc};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::error;
 
 // Event sent to the stats concentrator
@@ -36,8 +33,10 @@ struct Bucket {
 #[derive(Clone, Debug, Default, Copy)]
 pub struct Stats {
     pub hits: i32,
-    pub duration: i64, // in nanoseconds
-    pub error: i32,
+     // in nanoseconds
+    pub duration: i64,
+    // error count
+    pub errors: i32,
     pub top_level_hits: f64,
 }
 
@@ -75,7 +74,7 @@ impl StatsConcentrator {
         let stats = bucket.data.entry(stats_event.aggregation_key).or_default();
 
         stats.hits += stats_event.stats.hits;
-        stats.error += stats_event.stats.error;
+        stats.errors += stats_event.stats.errors;
         stats.duration += stats_event.stats.duration;
         stats.top_level_hits += stats_event.stats.top_level_hits;
     }
@@ -168,7 +167,7 @@ impl StatsConcentrator {
                     // TODO: handle this
                     db_type: String::new(),
                     hits: stats.hits.try_into().unwrap_or_default(),
-                    errors: stats.error.try_into().unwrap_or_default(),
+                    errors: stats.errors.try_into().unwrap_or_default(),
                     duration: stats.duration.try_into().unwrap_or_default(),
                     // TODO: handle this
                     ok_summary: vec![],
