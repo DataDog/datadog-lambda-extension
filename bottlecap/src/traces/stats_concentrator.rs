@@ -40,8 +40,19 @@ pub struct Stats {
     pub top_level_hits: f64,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct TracerMetadata {
+    // e.g. "python"
+    pub language: String,
+    // e.g. "3.11.0"
+    pub tracer_version: String,
+    // e.g. "f45568ad09d5480b99087d86ebda26e6"
+    pub runtime_id: String,
+}
+
 pub struct StatsConcentrator {
     config: Arc<Config>,
+    tracer_metadata: TracerMetadata,
     buckets: HashMap<u64, Bucket>,
 }
 
@@ -64,7 +75,12 @@ impl StatsConcentrator {
         Self {
             config,
             buckets: HashMap::new(),
+            tracer_metadata: TracerMetadata::default(), // to be set when a trace is processed
         }
+    }
+
+    pub fn set_tracer_metadata(&mut self, tracer_metadata: &TracerMetadata) {
+        self.tracer_metadata = tracer_metadata.clone();
     }
 
     pub fn add(&mut self, stats_event: StatsEvent) {
@@ -105,6 +121,7 @@ impl StatsConcentrator {
                         timestamp,
                         aggregation_key,
                         *stats,
+                        &self.tracer_metadata,
                     ));
                 }
                 false
@@ -128,6 +145,7 @@ impl StatsConcentrator {
         timestamp: u64,
         aggregation_key: &AggregationKey,
         stats: Stats,
+        tracer_metadata: &TracerMetadata,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
             // TODO: handle this
@@ -135,12 +153,9 @@ impl StatsConcentrator {
             env: aggregation_key.env.clone(),
             // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
-            // TODO: handle this
-            lang: "rust".to_string(),
-            // TODO: handle this
-            tracer_version: String::new(),
-            // TODO: handle this
-            runtime_id: String::new(),
+            lang: tracer_metadata.language.clone(),
+            tracer_version: tracer_metadata.tracer_version.clone(),
+            runtime_id: tracer_metadata.runtime_id.clone(),
             // TODO: handle this
             sequence: 0,
             // TODO: handle this
