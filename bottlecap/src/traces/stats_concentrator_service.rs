@@ -1,6 +1,7 @@
 use tokio::sync::{mpsc, oneshot};
 
 use crate::config::Config;
+use crate::tags::provider::Provider as TagProvider;
 use crate::traces::stats_concentrator::StatsConcentrator;
 use crate::traces::stats_concentrator::StatsEvent;
 use crate::traces::stats_concentrator::TracerMetadata;
@@ -99,10 +100,13 @@ pub struct StatsConcentratorService {
 // to avoid using mutex, which may cause lock contention.
 impl StatsConcentratorService {
     #[must_use]
-    pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
+    pub fn new(
+        config: Arc<Config>,
+        tags_provider: Arc<TagProvider>,
+    ) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
-        let concentrator = StatsConcentrator::new(config);
+        let concentrator = StatsConcentrator::new(config, tags_provider);
         let service: StatsConcentratorService = Self { concentrator, rx };
         (service, handle)
     }

@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::tags::provider::Provider as TagProvider;
 use datadog_trace_protobuf::pb;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::{collections::HashMap, sync::Arc};
@@ -54,6 +55,7 @@ pub struct StatsConcentrator {
     config: Arc<Config>,
     tracer_metadata: TracerMetadata,
     buckets: HashMap<u64, Bucket>,
+    hostname: String,
 }
 
 // The number of latest buckets to not flush when force_flush is false.
@@ -71,11 +73,13 @@ const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
 // Aggregates stats into buckets, which are then pulled by the stats aggregator.
 impl StatsConcentrator {
     #[must_use]
-    pub fn new(config: Arc<Config>) -> Self {
+    pub fn new(config: Arc<Config>, tags_provider: Arc<TagProvider>) -> Self {
+        let hostname = tags_provider.get_canonical_id().unwrap_or_default();
         Self {
             config,
             buckets: HashMap::new(),
             tracer_metadata: TracerMetadata::default(), // to be set when a trace is processed
+            hostname,
         }
     }
 
@@ -122,6 +126,7 @@ impl StatsConcentrator {
                         aggregation_key,
                         *stats,
                         &self.tracer_metadata,
+                        &self.hostname,
                     ));
                 }
                 false
@@ -146,10 +151,10 @@ impl StatsConcentrator {
         aggregation_key: &AggregationKey,
         stats: Stats,
         tracer_metadata: &TracerMetadata,
+        hostname: &str,
     ) -> pb::ClientStatsPayload {
         pb::ClientStatsPayload {
-            // TODO: handle this
-            hostname: String::new(),
+            hostname: hostname.to_string(),
             env: aggregation_key.env.clone(),
             // Version is not in the trace payload. Need to read it from config.
             version: config.version.clone().unwrap_or_default(),
