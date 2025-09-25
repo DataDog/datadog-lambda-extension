@@ -1930,8 +1930,8 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libddwaf"
-version = "1.27.0"
-source = "git+https://github.com/DataDog/libddwaf-rust?rev=1d57bf0ca49782723e556ba327ee7f378978aaa7#1d57bf0ca49782723e556ba327ee7f378978aaa7"
+version = "1.28.1"
+source = "git+https://github.com/DataDog/libddwaf-rust?rev=d1534a158d976bd4f747bf9fcc58e0712d2d17fc#d1534a158d976bd4f747bf9fcc58e0712d2d17fc"
 dependencies = [
  "libddwaf-sys",
  "serde",
@@ -1939,8 +1939,8 @@ dependencies = [
 
 [[package]]
 name = "libddwaf-sys"
-version = "1.27.0"
-source = "git+https://github.com/DataDog/libddwaf-rust?rev=1d57bf0ca49782723e556ba327ee7f378978aaa7#1d57bf0ca49782723e556ba327ee7f378978aaa7"
+version = "1.28.1"
+source = "git+https://github.com/DataDog/libddwaf-rust?rev=d1534a158d976bd4f747bf9fcc58e0712d2d17fc#d1534a158d976bd4f747bf9fcc58e0712d2d17fc"
 dependencies = [
  "bindgen 0.72.0",
  "flate2",

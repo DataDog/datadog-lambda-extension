@@ -1,0 +1,20 @@
+#!/usr/bin/env sh
+
+###
+# This wrapper should be set to `RUSTC_WRAPPER` when building the `libddwaf-sys`
+# crate on musl-based platforms (e.g, Alpine), so that the build-script for it
+# is compiled with `-Ctarget-feature=-crt-static`, so that `bindgen` can
+# dynamically load `libclang` (musl static targets are unable to dynamically
+# load code), while continuing to build the surrounding code with the static
+# C runtime (ensuring it can be fully static).
+###
+
+if [ "${CARGO_CRATE_NAME}" != 'build_script_build' ]; then
+    exec "$@"
+fi
+
+if [ "${CARGO_PKG_NAME}" != 'libddwaf-sys' ]; then
+    exec "$@"
+fi
+
+exec "$@" "-Ctarget-feature=-crt-static"
