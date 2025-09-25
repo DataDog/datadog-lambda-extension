@@ -20,7 +20,7 @@ pub struct AggregationKey {
     pub name: String,
     // e.g. "my-lambda-function-name", "datadog_lambda.handler", "urllib.request"
     pub resource: String,
-    // e.g. "aws.lambda.load", "aws.lambda.import"
+    // e.g. "serverless"
     pub r#type: String,
 }
 
