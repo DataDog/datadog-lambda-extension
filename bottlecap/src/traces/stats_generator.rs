@@ -3,7 +3,6 @@ use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use datadog_trace_utils::tracer_payload::TracerPayloadCollection;
 use tracing::error;
 
-use crate::traces::stats_concentrator::TracerMetadata;
 use crate::traces::stats_concentrator_service::StatsError;
 
 pub struct StatsGenerator {
@@ -22,24 +21,14 @@ pub enum StatsGeneratorError {
 impl StatsGenerator {
     #[must_use]
     pub fn new(stats_concentrator: StatsConcentratorHandle) -> Self {
-        Self {
-            stats_concentrator,
-        }
+        Self { stats_concentrator }
     }
 
     pub fn send(&self, traces: &TracerPayloadCollection) -> Result<(), StatsGeneratorError> {
         if let TracerPayloadCollection::V07(traces) = traces {
             for trace in traces {
                 // Set tracer metadata
-                let tracer_metadata = TracerMetadata {
-                    language: trace.language_name.clone(),
-                    tracer_version: trace.tracer_version.clone(),
-                    runtime_id: trace.runtime_id.clone(),
-                };
-                if let Err(err) = self
-                    .stats_concentrator
-                    .set_tracer_metadata(tracer_metadata)
-                {
+                if let Err(err) = self.stats_concentrator.set_tracer_metadata(trace) {
                     error!("Failed to set tracer metadata: {err}");
                     return Err(StatsGeneratorError::ConcentratorCommandError(err));
                 }

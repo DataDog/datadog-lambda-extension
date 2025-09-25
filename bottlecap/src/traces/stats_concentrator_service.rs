@@ -5,7 +5,11 @@ use crate::traces::stats_concentrator::StatsConcentrator;
 use crate::traces::stats_concentrator::StatsEvent;
 use crate::traces::stats_concentrator::TracerMetadata;
 use datadog_trace_protobuf::pb;
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+use datadog_trace_protobuf::pb::TracerPayload;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
@@ -33,7 +37,9 @@ impl Clone for StatsConcentratorHandle {
             tx: self.tx.clone(),
             // Cloning this may cause trace metadata to be set multiple times,
             // but it's okay because it's the same for all traces and we don't need to be perfect on dedup.
-            is_tracer_metadata_set: AtomicBool::new(self.is_tracer_metadata_set.load(Ordering::Acquire)),
+            is_tracer_metadata_set: AtomicBool::new(
+                self.is_tracer_metadata_set.load(Ordering::Acquire),
+            ),
         }
     }
 }
@@ -47,27 +53,26 @@ impl StatsConcentratorHandle {
         }
     }
 
-    pub fn set_tracer_metadata(
-        &self,
-        tracer_metadata: TracerMetadata,
-    ) -> Result<(), StatsError> {
+    pub fn set_tracer_metadata(&self, trace: &TracerPayload) -> Result<(), StatsError> {
         // Set tracer metadata only once for the first trace because
         // it is the same for all traces.
         if !self.is_tracer_metadata_set.load(Ordering::Acquire) {
             self.is_tracer_metadata_set.store(true, Ordering::Release);
-            self.tx.send(ConcentratorCommand::SetTracerMetadata(
-                tracer_metadata,
-            ))
-            .map_err(StatsError::SendError)?;
+            let tracer_metadata = TracerMetadata {
+                language: trace.language_name.clone(),
+                tracer_version: trace.tracer_version.clone(),
+                runtime_id: trace.runtime_id.clone(),
+            };
+            self.tx
+                .send(ConcentratorCommand::SetTracerMetadata(tracer_metadata))
+                .map_err(StatsError::SendError)?;
         }
         Ok(())
     }
 
-    pub fn add(
-        &self,
-        stats_event: StatsEvent,
-    ) -> Result<(), StatsError> {
-        self.tx.send(ConcentratorCommand::Add(stats_event))
+    pub fn add(&self, stats_event: StatsEvent) -> Result<(), StatsError> {
+        self.tx
+            .send(ConcentratorCommand::Add(stats_event))
             .map_err(StatsError::SendError)?;
         Ok(())
     }
