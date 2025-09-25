@@ -207,7 +207,7 @@ impl StatsConcentrator {
                         pb::Trilean::False.into()
                     },
                 }],
-                // not supported yet
+                // Not supported yet
                 agent_time_shift: 0,
             }],
         }
