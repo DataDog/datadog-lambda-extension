@@ -5,7 +5,7 @@ use crate::traces::stats_concentrator::StatsConcentrator;
 use crate::traces::stats_concentrator::StatsEvent;
 use crate::traces::stats_concentrator::TracerMetadata;
 use datadog_trace_protobuf::pb;
-use std::sync::Arc;
+use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
 use tracing::error;
 
 #[derive(Debug, thiserror::Error)]
@@ -22,26 +22,54 @@ pub enum ConcentratorCommand {
     Flush(bool, oneshot::Sender<Vec<pb::ClientStatsPayload>>),
 }
 
-#[derive(Clone)]
 pub struct StatsConcentratorHandle {
     tx: mpsc::UnboundedSender<ConcentratorCommand>,
+    is_tracer_metadata_set: AtomicBool,
+}
+
+impl Clone for StatsConcentratorHandle {
+    fn clone(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            // Cloning this may cause trace metadata to be set multiple times,
+            // but it's okay because it's the same for all traces and we don't need to be perfect on dedup.
+            is_tracer_metadata_set: AtomicBool::new(self.is_tracer_metadata_set.load(Ordering::Acquire)),
+        }
+    }
 }
 
 impl StatsConcentratorHandle {
+    #[must_use]
+    pub fn new(tx: mpsc::UnboundedSender<ConcentratorCommand>) -> Self {
+        Self {
+            tx,
+            is_tracer_metadata_set: AtomicBool::new(false),
+        }
+    }
+
     pub fn set_tracer_metadata(
         &self,
-        tracer_metadata: &TracerMetadata,
-    ) -> Result<(), mpsc::error::SendError<ConcentratorCommand>> {
-        self.tx.send(ConcentratorCommand::SetTracerMetadata(
-            tracer_metadata.clone(),
-        ))
+        tracer_metadata: TracerMetadata,
+    ) -> Result<(), StatsError> {
+        // Set tracer metadata only once for the first trace because
+        // it is the same for all traces.
+        if !self.is_tracer_metadata_set.load(Ordering::Acquire) {
+            self.is_tracer_metadata_set.store(true, Ordering::Release);
+            self.tx.send(ConcentratorCommand::SetTracerMetadata(
+                tracer_metadata,
+            ))
+            .map_err(StatsError::SendError)?;
+        }
+        Ok(())
     }
 
     pub fn add(
         &self,
         stats_event: StatsEvent,
-    ) -> Result<(), mpsc::error::SendError<ConcentratorCommand>> {
+    ) -> Result<(), StatsError> {
         self.tx.send(ConcentratorCommand::Add(stats_event))
+            .map_err(StatsError::SendError)?;
+        Ok(())
     }
 
     pub async fn flush(
@@ -68,7 +96,7 @@ impl StatsConcentratorService {
     #[must_use]
     pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let handle = StatsConcentratorHandle { tx };
+        let handle = StatsConcentratorHandle::new(tx);
         let concentrator = StatsConcentrator::new(config);
         let service: StatsConcentratorService = Self { concentrator, rx };
         (service, handle)

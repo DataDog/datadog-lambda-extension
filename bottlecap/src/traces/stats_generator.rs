@@ -4,19 +4,16 @@ use datadog_trace_utils::tracer_payload::TracerPayloadCollection;
 use tracing::error;
 
 use crate::traces::stats_concentrator::TracerMetadata;
-use crate::traces::stats_concentrator_service::ConcentratorCommand;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::mpsc::error::SendError;
+use crate::traces::stats_concentrator_service::StatsError;
 
 pub struct StatsGenerator {
     stats_concentrator: StatsConcentratorHandle,
-    is_tracer_metadata_set: AtomicBool,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum StatsGeneratorError {
     #[error("Error sending trace stats to the stats concentrator: {0}")]
-    ConcentratorCommandError(SendError<ConcentratorCommand>),
+    ConcentratorCommandError(StatsError),
     #[error("Unsupported trace payload version. Failed to send trace stats.")]
     TracePayloadVersionError,
 }
@@ -27,29 +24,24 @@ impl StatsGenerator {
     pub fn new(stats_concentrator: StatsConcentratorHandle) -> Self {
         Self {
             stats_concentrator,
-            is_tracer_metadata_set: AtomicBool::new(false),
         }
     }
 
     pub fn send(&self, traces: &TracerPayloadCollection) -> Result<(), StatsGeneratorError> {
         if let TracerPayloadCollection::V07(traces) = traces {
             for trace in traces {
-                // Set tracer metadata only once for the first trace because
-                // it is the same for all traces.
-                if !self.is_tracer_metadata_set.load(Ordering::Acquire) {
-                    self.is_tracer_metadata_set.store(true, Ordering::Release);
-                    let tracer_metadata = TracerMetadata {
-                        language: trace.language_name.clone(),
-                        tracer_version: trace.tracer_version.clone(),
-                        runtime_id: trace.runtime_id.clone(),
-                    };
-                    if let Err(err) = self
-                        .stats_concentrator
-                        .set_tracer_metadata(&tracer_metadata)
-                    {
-                        error!("Failed to set tracer metadata: {err}");
-                        return Err(StatsGeneratorError::ConcentratorCommandError(err));
-                    }
+                // Set tracer metadata
+                let tracer_metadata = TracerMetadata {
+                    language: trace.language_name.clone(),
+                    tracer_version: trace.tracer_version.clone(),
+                    runtime_id: trace.runtime_id.clone(),
+                };
+                if let Err(err) = self
+                    .stats_concentrator
+                    .set_tracer_metadata(tracer_metadata)
+                {
+                    error!("Failed to set tracer metadata: {err}");
+                    return Err(StatsGeneratorError::ConcentratorCommandError(err));
                 }
 
                 // Generate stats for each span in the trace
