@@ -87,7 +87,11 @@ use dogstatsd::{
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, sync::Arc};
 use tokio::time::{Duration, Instant};
-use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
+use tokio::{
+    sync::Mutex as TokioMutex,
+    sync::mpsc::{self, Receiver, Sender},
+    task::JoinHandle,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -358,7 +362,7 @@ async fn extension_loop_active(
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
 ) -> anyhow::Result<()> {
-    let mut event_bus = EventBus::run();
+    let event_bus = EventBus::run();
 
     let account_id = r
         .account_id
@@ -488,6 +492,47 @@ async fn extension_loop_active(
     let mut race_flush_interval = flush_control.get_flush_interval();
     race_flush_interval.tick().await; // discard first tick, which is instantaneous
 
+    let (telemetry_tx, mut telemetry_rx): (Sender<TelemetryEvent>, Receiver<TelemetryEvent>) =
+        mpsc::channel(10000);
+    let (tombstone_tx, mut tombstone_rx): (Sender<TelemetryEvent>, Receiver<TelemetryEvent>) =
+        mpsc::channel(10000);
+
+    let event_bus_processor_tx = telemetry_tx.clone();
+    let tombstone_processor_tx = tombstone_tx.clone();
+    let mut event_bus_rx = event_bus.rx;
+    let invocation_processor_clone = invocation_processor.clone();
+    let appsec_processor_clone = appsec_processor.clone();
+    let tags_provider_clone = tags_provider.clone();
+    let trace_processor_clone = trace_processor.clone();
+    let trace_agent_channel_clone = trace_agent_channel.clone();
+    let stats_concentrator_clone = stats_concentrator.clone();
+
+    tokio::spawn(async move {
+        while let Some(event) = event_bus_rx.recv().await {
+            if let Some(telemetry_event) = handle_event_bus_event(
+                event,
+                invocation_processor_clone.clone(),
+                appsec_processor_clone.clone(),
+                tags_provider_clone.clone(),
+                trace_processor_clone.clone(),
+                trace_agent_channel_clone.clone(),
+                stats_concentrator_clone.clone(),
+            )
+            .await
+            {
+                match &telemetry_event.record {
+                    TelemetryRecord::PlatformRuntimeDone { .. } => {
+                        let _ = event_bus_processor_tx.send(telemetry_event).await;
+                    }
+                    TelemetryRecord::PlatformTombstone => {
+                        let _ = tombstone_processor_tx.send(telemetry_event).await;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    });
+
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
@@ -510,11 +555,9 @@ async fn extension_loop_active(
                 'flush_end: loop {
                     tokio::select! {
                     biased;
-                        Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
-                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
-                                    break 'flush_end;
-                                }
+                        Some(telemetry_event) = telemetry_rx.recv() => {
+                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                break 'flush_end;
                             }
                         }
                         _ = race_flush_interval.tick() => {
@@ -637,9 +680,7 @@ async fn extension_loop_active(
                             // Need to break here to re-call next
                             break 'next_invocation;
                         }
-                        Some(event) = event_bus.rx.recv() => {
-                            handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
-                        }
+
                         _ = race_flush_interval.tick() => {
                             if flush_control.flush_strategy == FlushStrategy::Default {
                                 let mut locked_metrics = metrics_flushers.lock().await;
@@ -675,12 +716,11 @@ async fn extension_loop_active(
             // Wait for tombstone event from telemetry listener to ensure all events are processed
             'shutdown: loop {
                 tokio::select! {
-                    Some(event) = event_bus.rx.recv() => {
-                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
+                    Some(telemetry_event) = tombstone_rx.recv() => {
+                        if let TelemetryRecord::PlatformTombstone = telemetry_event.record {
                             debug!("Received tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
