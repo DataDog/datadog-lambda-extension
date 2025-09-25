@@ -5,9 +5,6 @@ use tracing::error;
 
 use crate::traces::stats_concentrator_service::StatsError;
 
-const TAG_ORIGIN: &str = "_dd.origin";
-const TAG_SYNTHETICS: &str = "synthetics";
-
 pub struct StatsGenerator {
     stats_concentrator: StatsConcentratorHandle,
 }
