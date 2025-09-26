@@ -173,7 +173,7 @@ impl Agent {
                 .into_response();
         }
 
-        let compute_trace_stats = config.compute_trace_stats;
+        let compute_trace_stats_on_extension = config.compute_trace_stats_on_extension;
         let (send_data_builder, processed_traces) = trace_processor.process_traces(
             config,
             tags_provider,
@@ -198,7 +198,7 @@ impl Agent {
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
-        if compute_trace_stats {
+        if compute_trace_stats_on_extension {
             if let Err(err) = stats_generator.send(&processed_traces) {
                 // Just log the error. We don't think trace stats are critical, so we don't want to
                 // return an error if only stats fail to send.
