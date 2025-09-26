@@ -140,6 +140,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             trace_builders = guard.get_batch();
         }
 
+        drop(guard);
         while let Some(result) = batch_tasks.join_next().await {
             if let Ok(Some(mut failed)) = result {
                 failed_batch.append(&mut failed);
