@@ -959,7 +959,7 @@ extension_version: "compatibility"
                 lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
-                compute_trace_stats: true,
+                compute_trace_stats_on_extension: true,
 
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
