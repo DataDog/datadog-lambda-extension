@@ -23,6 +23,7 @@ pub struct AggregationKey {
     pub resource: String,
     // e.g. "serverless"
     pub r#type: String,
+    pub is_trace_root: bool,
 }
 
 // Aggregated stats for a time interval across all the aggregation keys.
@@ -49,6 +50,7 @@ pub struct TracerMetadata {
     pub tracer_version: String,
     // e.g. "f45568ad09d5480b99087d86ebda26e6"
     pub runtime_id: String,
+    pub container_id: String,
 }
 
 pub struct StatsConcentrator {
@@ -161,18 +163,17 @@ impl StatsConcentrator {
             lang: tracer_metadata.language.clone(),
             tracer_version: tracer_metadata.tracer_version.clone(),
             runtime_id: tracer_metadata.runtime_id.clone(),
-            // TODO: handle this
+            // Not supported yet
             sequence: 0,
-            // TODO: handle this
+            // Not supported yet
             agent_aggregation: String::new(),
             service: aggregation_key.service.clone(),
-            // TODO: handle this
-            container_id: String::new(),
-            // TODO: handle this
+            container_id: tracer_metadata.container_id.clone(),
+            // Not supported yet
             tags: vec![],
-            // TODO: handle this
+            // Not supported yet
             git_commit_sha: String::new(),
-            // TODO: handle this
+            // Not supported yet
             image_tag: String::new(),
             stats: vec![pb::ClientStatsBucket {
                 start: timestamp,
@@ -181,29 +182,32 @@ impl StatsConcentrator {
                     service: aggregation_key.service.clone(),
                     name: aggregation_key.name.clone(),
                     resource: aggregation_key.resource.clone(),
-                    // TODO: handle this
+                    // Not supported yet
                     http_status_code: 0,
                     r#type: aggregation_key.r#type.clone(),
-                    // TODO: handle this
+                    // Reserved field, not currently used by tracers
                     db_type: String::new(),
                     hits: stats.hits.try_into().unwrap_or_default(),
                     errors: stats.errors.try_into().unwrap_or_default(),
                     duration: stats.duration.try_into().unwrap_or_default(),
-                    // TODO: handle this
+                    // Not supported yet
                     ok_summary: vec![],
-                    // TODO: handle this
+                    // Not supported yet
                     error_summary: vec![],
-                    // TODO: handle this
+                    // Not supported yet
                     synthetics: false,
                     top_level_hits: stats.top_level_hits.round() as u64,
-                    // TODO: handle this
+                    // Not supported yet
                     span_kind: String::new(),
-                    // TODO: handle this
+                    // Not supported yet
                     peer_tags: vec![],
-                    // TODO: handle this
-                    is_trace_root: 1,
+                    is_trace_root: if aggregation_key.is_trace_root {
+                        pb::Trilean::True.into()
+                    } else {
+                        pb::Trilean::False.into()
+                    },
                 }],
-                // TODO: handle this
+                // Not supported yet
                 agent_time_shift: 0,
             }],
         }

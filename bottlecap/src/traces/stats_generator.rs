@@ -48,6 +48,7 @@ impl StatsGenerator {
                                 name: span.name.clone(),
                                 resource: span.resource.clone(),
                                 r#type: span.r#type.clone(),
+                                is_trace_root: span.parent_id == 0,
                             },
                             stats: Stats {
                                 hits: 1,

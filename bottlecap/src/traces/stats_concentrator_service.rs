@@ -63,6 +63,7 @@ impl StatsConcentratorHandle {
                 language: trace.language_name.clone(),
                 tracer_version: trace.tracer_version.clone(),
                 runtime_id: trace.runtime_id.clone(),
+                container_id: trace.container_id.clone(),
             };
             self.tx
                 .send(ConcentratorCommand::SetTracerMetadata(tracer_metadata))
