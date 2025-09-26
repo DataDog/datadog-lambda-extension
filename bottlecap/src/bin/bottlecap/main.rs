@@ -302,7 +302,7 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
     let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
+        "h2=off,hyper=off,reqwest=off,rustls=off,tokio=trace,runtime=trace,datadog-trace-mini-agent=off,{:?}",
         config.log_level
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()

@@ -183,6 +183,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 return Some(coalesced_traces.clone());
             }
         }
+        let m = tokio::runtime::Handle::current().metrics();
+        println!(
+            "workers: {}, queue: {}, tasks: {}",
+            m.num_workers(),
+            m.global_queue_depth(),
+            m.num_alive_tasks()
+        );
 
         debug!("Flushing traces took {}ms", start.elapsed().as_millis());
         None

@@ -37,7 +37,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     fi; \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.
-    export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
+    export RUSTFLAGS="${RUSTFLAGS:-} --cfg tokio_unstable -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
     cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" --release && \
     mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/release/bottlecap" /tmp/out/bottlecap
 

@@ -28,7 +28,7 @@ reqwest = { version = "0.12.11", features = ["json", "http2"], default-features 
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 thiserror = { version = "1.0", default-features = false }
-tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1.47", default-features = false, features = ["macros", "rt-multi-thread", "time", "tracing"] }
 tokio-util = { version = "0.7", default-features = false }
 tracing = { version = "0.1", default-features = false }
 tracing-core = { version = "0.1", default-features = false }
@@ -64,6 +64,7 @@ datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "b0b0cb9310d8d8f2038c00a46e3267e21dc3e287", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7", default-features = false }
 libddwaf = { version = "1.26.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "1d57bf0ca49782723e556ba327ee7f378978aaa7", default-features = false, features = ["serde", "dynamic"] }
+console-subscriber = "0.4.1"
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
