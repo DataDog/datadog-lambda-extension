@@ -83,10 +83,11 @@ name = "bottlecap"
 opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
-strip = "debuginfo"
+strip = true
 panic = "abort"
 
 [profile.release-alpine-arm64-fips]
+strip = true
 inherits = "release"
 # Unfortunately opt-level "z" does not work for building aws-lc-fips-sys on
 # Alpine for ARM with FIPS enabled.
