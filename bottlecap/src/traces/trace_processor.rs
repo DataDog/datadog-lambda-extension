@@ -461,7 +461,7 @@ impl SendingTraceProcessor {
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
-        if config.compute_trace_stats {
+        if config.compute_trace_stats_on_extension {
             if let Err(err) = self.stats_generator.send(&processed_traces) {
                 // Just log the error. We don't think trace stats are critical, so we don't want to
                 // return an error if only stats fail to send.
