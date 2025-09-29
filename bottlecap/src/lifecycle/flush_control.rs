@@ -130,6 +130,8 @@ mod tests {
             FlushStrategy::EndPeriodically(PeriodicStrategy { interval: 1 }),
             60,
         );
+        // Set last_flush to an older time to trigger flush
+        flush_control.last_flush = flush_control.last_flush - 2;
         assert_eq!(flush_control.evaluate_flush_decision(), FlushDecision::End);
 
         let mut flush_control = FlushControl::new(FlushStrategy::End, 60);
@@ -139,6 +141,8 @@ mod tests {
             FlushStrategy::Periodically(PeriodicStrategy { interval: 1 }),
             60,
         );
+        // Set last_flush to an older time to trigger flush
+        flush_control.last_flush = flush_control.last_flush - 2;
         assert_eq!(
             flush_control.evaluate_flush_decision(),
             FlushDecision::Periodic
@@ -158,6 +162,8 @@ mod tests {
         for _ in 0..LOOKBACK_COUNT - 1 {
             assert_eq!(flush_control.evaluate_flush_decision(), FlushDecision::End);
         }
+        // Set last_flush to an older time to trigger flush after lookback threshold
+        flush_control.last_flush = flush_control.last_flush - 61;
         assert_eq!(
             flush_control.evaluate_flush_decision(),
             FlushDecision::Continuous
@@ -170,6 +176,8 @@ mod tests {
             FlushStrategy::Periodically(PeriodicStrategy { interval: 1 }),
             60,
         );
+        // Set last_flush to an older time to trigger flush
+        flush_control.last_flush = flush_control.last_flush - 2;
         assert_eq!(
             flush_control.evaluate_flush_decision(),
             FlushDecision::Periodic,
