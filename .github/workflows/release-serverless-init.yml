@@ -6,10 +6,10 @@ on:
       buildTags:
         type: choice
         description: Build tags
-        default: "serverless otlp"
+        default: "serverless otlp zlib zstd"
         options:
-          - "serverless otlp"
-          - "serverless"
+          - "serverless otlp zlib zstd"
+          - "serverless zlib zstd"
       tag:
         type: string
         description: Docker image tag name, eg. (beta11, beta12-rc1, etc.)
