@@ -26,7 +26,11 @@ else
 fi
 
 if [ -z "$BUILD_TAGS" ]; then
-    BUILD_TAGS="serverless otlp"
+    if [ -z "$SERVERLESS_INIT" ]; then
+        BUILD_TAGS="serverless otlp"
+    else
+        BUILD_TAGS="serverless otlp zlib zstd"
+    fi
 fi
 
 if [ -z "$AGENT_PATH" ]; then
