@@ -542,7 +542,7 @@ mod tests {
             function_name: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
-            max_concurrency: None,
+            initialization_type: "on-demand".into(),
         });
 
         inferrer.infer_span(&payload, &aws_config);
