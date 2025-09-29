@@ -2,7 +2,7 @@ use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::propagation::DatadogCompositePropagator;
 use crate::{
     appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
-    extension::EXTENSION_HOST, lifecycle::invocation::processor::Processor as InvocationProcessor,
+    extension::EXTENSION_HOST, lifecycle::invocation::processor_service::InvocationProcessorHandle,
     lwa, proxy::tee_body::TeeBodyWithCompletion,
 };
 use axum::{
@@ -31,7 +31,7 @@ const INTERCEPTOR_DEFAULT_PORT: u16 = 9000;
 type InterceptorState = (
     Arc<AwsConfig>,
     Arc<Client<HttpConnector, Body>>,
-    Arc<Mutex<InvocationProcessor>>,
+    InvocationProcessorHandle,
     Option<Arc<Mutex<AppSecProcessor>>>,
     Arc<DatadogCompositePropagator>,
     Arc<Mutex<JoinSet<()>>>,
@@ -39,7 +39,7 @@ type InterceptorState = (
 
 pub fn start(
     aws_config: Arc<AwsConfig>,
-    invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    invocation_processor: InvocationProcessorHandle,
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     propagator: Arc<DatadogCompositePropagator>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
