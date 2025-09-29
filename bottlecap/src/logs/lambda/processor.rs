@@ -7,6 +7,7 @@ use tracing::{debug, error};
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
 use crate::event_bus::Event;
+use crate::extension::telemetry::events::ReportMetrics;
 use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator_service::AggregatorHandle;
@@ -192,35 +193,40 @@ impl LambdaProcessor {
                     error!("Failed to send PlatformReport to the main event bus: {}", e);
                 }
 
-                let mut post_runtime_duration_ms = 0.0;
-                // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
-                if self.invocation_context.runtime_duration_ms > 0.0 {
-                    post_runtime_duration_ms = metrics.duration_ms - self.invocation_context.runtime_duration_ms;
+                match metrics {
+                    // TODO(duncanista): Figure out how to format this log in elevator mode
+                    ReportMetrics::Elevator(_) => Err("Elevator report log is not supported".into()),
+                    ReportMetrics::OnDemand(metrics) => {
+                        let mut post_runtime_duration_ms = 0.0;
+                        // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
+                        if self.invocation_context.runtime_duration_ms > 0.0 {
+                            post_runtime_duration_ms = metrics.duration_ms - self.invocation_context.runtime_duration_ms;
+                        }
+
+                        let mut message = format!(
+                            "REPORT RequestId: {} Duration: {:.2} ms Runtime Duration: {:.2} ms Post Runtime Duration: {:.2} ms Billed Duration: {:.2} ms Memory Size: {} MB Max Memory Used: {} MB",
+                            request_id,
+                            metrics.duration_ms,
+                            self.invocation_context.runtime_duration_ms,
+                            post_runtime_duration_ms,
+                            metrics.billed_duration_ms,
+                            metrics.memory_size_mb,
+                            metrics.max_memory_used_mb,
+                        );
+
+                        if let Some(init_duration_ms) = metrics.init_duration_ms {
+                            message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
+                        }
+
+                        Ok(Message::new(
+                            message,
+                            Some(request_id),
+                            self.function_arn.clone(),
+                            event.time.timestamp_millis(),
+                            None,
+                        ))
+                    }
                 }
-
-                let mut message = format!(
-                    "REPORT RequestId: {} Duration: {:.2} ms Runtime Duration: {:.2} ms Post Runtime Duration: {:.2} ms Billed Duration: {:.2} ms Memory Size: {} MB Max Memory Used: {} MB",
-                    request_id,
-                    metrics.duration_ms,
-                    self.invocation_context.runtime_duration_ms,
-                    post_runtime_duration_ms,
-                    metrics.billed_duration_ms,
-                    metrics.memory_size_mb,
-                    metrics.max_memory_used_mb,
-                );
-
-                let init_duration_ms = metrics.init_duration_ms;
-                if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
-                }
-
-                Ok(Message::new(
-                    message,
-                    Some(request_id),
-                    self.function_arn.clone(),
-                    event.time.timestamp_millis(),
-                    None,
-                ))
             },
             TelemetryRecord::PlatformRestoreStart { .. } => {
                 if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
@@ -382,7 +388,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::extension::telemetry::events::{
-        InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
+        InitPhase, InitType, OnDemandReportMetrics, ReportMetrics, RuntimeDoneMetrics, Status,
     };
     use crate::logs::aggregator_service::AggregatorService;
     use crate::logs::lambda::Lambda;
@@ -561,14 +567,14 @@ mod tests {
                     error_type: None,
                     status: Status::Success,
                     request_id: "test-request-id".to_string(),
-                    metrics: ReportMetrics {
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
                         duration_ms: 100.0,
                         billed_duration_ms: 128,
                         memory_size_mb: 256,
                         max_memory_used_mb: 64,
                         init_duration_ms: Some(50.0),
                         restore_duration_ms: None
-                    }
+                    })
                 }
             },
             Message {

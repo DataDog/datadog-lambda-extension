@@ -604,23 +604,36 @@ impl Processor {
         // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
         // We don't do this for other runtimes to avoid double counting.
         if let Some(runtime) = &self.runtime {
-            if runtime.starts_with("provided.al")
-                && metrics.max_memory_used_mb == metrics.memory_size_mb
-            {
-                debug!(
-                    "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
-                );
-                self.enhanced_metrics.increment_oom_metric(timestamp);
+            match metrics {
+                ReportMetrics::Elevator(_) => {
+                    // Elevator doesn't include any memory related metrics, so skip it
+                }
+                ReportMetrics::OnDemand(metrics) => {
+                    if runtime.starts_with("provided.al")
+                        && metrics.max_memory_used_mb == metrics.memory_size_mb
+                    {
+                        debug!(
+                            "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
+                        );
+                        self.enhanced_metrics.increment_oom_metric(timestamp);
+                    }
+                }
             }
         }
 
         if let Some(context) = self.context_buffer.get(request_id) {
-            if context.runtime_duration_ms != 0.0 {
-                let post_runtime_duration_ms = metrics.duration_ms - context.runtime_duration_ms;
-
-                // Set the post runtime duration metric
-                self.enhanced_metrics
-                    .set_post_runtime_duration_metric(post_runtime_duration_ms, timestamp);
+            match metrics {
+                ReportMetrics::Elevator(_) => {
+                    // Elevator mode does not have the concept of post runtime duration.
+                }
+                ReportMetrics::OnDemand(metrics) => {
+                    if context.runtime_duration_ms != 0.0 {
+                        let post_runtime_duration_ms =
+                            metrics.duration_ms - context.runtime_duration_ms;
+                        self.enhanced_metrics
+                            .set_post_runtime_duration_metric(post_runtime_duration_ms, timestamp);
+                    }
+                }
             }
 
             // Set Network and CPU time metrics
