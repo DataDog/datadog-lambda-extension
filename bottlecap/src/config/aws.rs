@@ -1,4 +1,5 @@
-use std::{env, time::Instant};
+use std::env;
+use tokio::time::Instant;
 
 const AWS_DEFAULT_REGION: &str = "AWS_DEFAULT_REGION";
 const AWS_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";

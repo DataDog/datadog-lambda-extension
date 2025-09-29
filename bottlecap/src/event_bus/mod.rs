@@ -1,6 +1,6 @@
 use tokio::sync::mpsc::{self, Sender};
 
-use crate::{event_bus::constants::MAX_EVENTS, telemetry::events::TelemetryEvent};
+use crate::{event_bus::constants::MAX_EVENTS, extension::telemetry::events::TelemetryEvent};
 
 mod constants;
 

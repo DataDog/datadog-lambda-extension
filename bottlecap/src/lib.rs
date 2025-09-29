@@ -35,7 +35,6 @@ pub mod proc;
 pub mod proxy;
 pub mod secrets;
 pub mod tags;
-pub mod telemetry;
 pub mod traces;
 
 pub const LAMBDA_RUNTIME_SLUG: &str = "lambda";
@@ -45,9 +44,3 @@ pub const FLUSH_RETRY_COUNT: usize = 3;
 
 // todo: make sure we can override those with environment variables
 pub const DOGSTATSD_PORT: u16 = 8125;
-
-pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
-// todo(astuyve) should be 8124 on /lambda/logs but
-// telemetry is implemented on a raw socket now and
-// does not multiplex routes on the same port.
-pub const TELEMETRY_PORT: u16 = 8999;

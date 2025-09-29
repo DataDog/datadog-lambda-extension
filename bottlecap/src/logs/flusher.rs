@@ -98,7 +98,11 @@ impl Flusher {
     }
 
     async fn create_request(&self, data: Vec<u8>, api_key: &str) -> reqwest::RequestBuilder {
-        let url = format!("{}/api/v2/logs", self.endpoint);
+        let url = if self.config.observability_pipelines_worker_logs_enabled {
+            self.endpoint.clone()
+        } else {
+            format!("{}/api/v2/logs", self.endpoint)
+        };
         let headers = self.get_headers(api_key).await;
         self.client
             .post(&url)
@@ -133,7 +137,7 @@ impl Flusher {
                         );
                         return Ok(());
                     }
-                    if status == 202 {
+                    if status.is_success() {
                         return Ok(());
                     }
                 }
@@ -165,16 +169,20 @@ impl Flusher {
                     "DD-API-KEY",
                     api_key.parse().expect("failed to parse header"),
                 );
-                headers.insert(
-                    "DD-PROTOCOL",
-                    "agent-json".parse().expect("failed to parse header"),
-                );
+                if !self.config.observability_pipelines_worker_logs_enabled {
+                    headers.insert(
+                        "DD-PROTOCOL",
+                        "agent-json".parse().expect("failed to parse header"),
+                    );
+                }
                 headers.insert(
                     "Content-Type",
                     "application/json".parse().expect("failed to parse header"),
                 );
 
-                if self.config.logs_config_use_compression {
+                if self.config.logs_config_use_compression
+                    && !self.config.observability_pipelines_worker_logs_enabled
+                {
                     headers.insert(
                         "Content-Encoding",
                         "zstd".parse().expect("failed to parse header"),
@@ -201,10 +209,19 @@ impl LogsFlusher {
     ) -> Self {
         let mut flushers = Vec::new();
 
+        let endpoint = if config.observability_pipelines_worker_logs_enabled {
+            if config.observability_pipelines_worker_logs_url.is_empty() {
+                error!("Observability Pipelines Worker Logs are enabled but the URL is empty");
+            }
+            config.observability_pipelines_worker_logs_url.clone()
+        } else {
+            config.logs_config_logs_dd_url.clone()
+        };
+
         // Create primary flusher
         flushers.push(Flusher::new(
             Arc::clone(&api_key_factory),
-            config.logs_config_logs_dd_url.clone(),
+            endpoint,
             aggregator.clone(),
             config.clone(),
         ));
@@ -272,7 +289,9 @@ impl LogsFlusher {
     }
 
     fn compress(&self, data: Vec<u8>) -> Vec<u8> {
-        if !self.config.logs_config_use_compression {
+        if !self.config.logs_config_use_compression
+            || self.config.observability_pipelines_worker_logs_enabled
+        {
             return data;
         }
 

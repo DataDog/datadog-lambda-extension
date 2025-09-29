@@ -1,15 +1,18 @@
+use crate::extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
 use crate::metrics::enhanced::{
     constants::{self, BASE_LAMBDA_INVOCATION_PRICE},
     statfs::statfs_info,
 };
 use crate::proc::{self, CPUData, NetworkData};
-use crate::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
 use dogstatsd::metric::SortedTags;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator_service::AggregatorHandle, metric};
 use std::collections::HashMap;
 use std::env::consts::ARCH;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::Duration;
 use tokio::{
     sync::watch::{Receiver, Sender},
@@ -17,6 +20,12 @@ use tokio::{
 };
 use tracing::debug;
 use tracing::error;
+// tmp/proc enhanced metrics tasks open and/or read files in the /proc directory using blocking I/O.
+// These tasks can block the async context the task is called under and thus delay other important work.
+// In rare cases, if the tasks start taking longer than the typical invocations take, these tasks can pile up and cause timeouts.
+// So we ensure only one task to measure these is ever running at the same time
+static TMP_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
+static PROCESS_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 
 pub struct Lambda {
     pub aggr_handle: AggregatorHandle,
@@ -60,27 +69,16 @@ impl Lambda {
             .insert(String::from("runtime"), runtime.to_string());
     }
 
-    fn tags_to_sorted_tags(tags: &HashMap<String, String>) -> Option<SortedTags> {
-        let vec_tags: Vec<String> = tags.iter().map(|(k, v)| format!("{k}:{v}")).collect();
+    fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
+        let vec_tags: Vec<String> = self
+            .dynamic_value_tags
+            .iter()
+            .map(|(k, v)| format!("{k}:{v}"))
+            .collect();
 
         let string_tags = vec_tags.join(",");
 
         SortedTags::parse(&string_tags).ok()
-    }
-
-    fn get_dynamic_value_tags(&self) -> Option<SortedTags> {
-        Self::tags_to_sorted_tags(&self.dynamic_value_tags)
-    }
-
-    fn get_combined_tags(&self, additional_tags: &HashMap<String, String>) -> Option<SortedTags> {
-        if additional_tags.is_empty() {
-            return self.get_dynamic_value_tags();
-        }
-
-        let mut combined_tags = self.dynamic_value_tags.clone();
-        combined_tags.extend(additional_tags.clone());
-
-        Self::tags_to_sorted_tags(&combined_tags)
     }
 
     pub fn increment_invocation_metric(&self, timestamp: i64) {
@@ -103,19 +101,6 @@ impl Lambda {
     // This is our best effort to cover different cases without double counting. We can adjust this if we find more cases.
     pub fn increment_oom_metric(&self, timestamp: i64) {
         self.increment_metric(constants::OUT_OF_MEMORY_METRIC, timestamp);
-    }
-
-    /// Set up a metric tracking configuration load issue with details
-    pub fn set_config_load_issue_metric(&self, timestamp: i64, reason_msg: &str) {
-        let dynamic_tags = self.get_combined_tags(&HashMap::from([(
-            "reason".to_string(),
-            reason_msg.to_string(),
-        )]));
-        self.increment_metric_with_tags(
-            constants::DATADOG_SERVERLESS_EXTENSION_FAILOVER_CONFIG_ISSUE_METRIC,
-            timestamp,
-            dynamic_tags,
-        );
     }
 
     pub fn set_init_duration_metric(
@@ -146,23 +131,13 @@ impl Lambda {
     }
 
     fn increment_metric(&self, metric_name: &str, timestamp: i64) {
-        self.increment_metric_with_tags(metric_name, timestamp, self.get_dynamic_value_tags());
-    }
-
-    /// Helper function to emit metric with supplied tags
-    fn increment_metric_with_tags(
-        &self,
-        metric_name: &str,
-        timestamp: i64,
-        tags: Option<SortedTags>,
-    ) {
         if !self.config.enhanced_metrics {
             return;
         }
         let metric = Metric::new(
             metric_name.into(),
             MetricValue::distribution(1f64),
-            tags,
+            self.get_dynamic_value_tags(),
             Some(timestamp),
         );
         if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
@@ -538,6 +513,14 @@ impl Lambda {
             return;
         }
 
+        if TMP_TASK_RUNNING
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            debug!("Tmp enhanced metrics task already running, skipping");
+            return;
+        }
+
         let aggr = self.aggr_handle.clone();
         let tags = self.get_dynamic_value_tags();
 
@@ -547,6 +530,7 @@ impl Lambda {
                 Ok(stats) => stats,
                 Err(err) => {
                     debug!("Could not emit tmp enhanced metrics. {:?}", err);
+                    TMP_TASK_RUNNING.store(false, Ordering::Release);
                     return;
                 }
             };
@@ -560,6 +544,7 @@ impl Lambda {
                     // When the stop signal is received, generate final metrics
                     _ = send_metrics.changed() => {
                         Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &aggr, tags);
+                        TMP_TASK_RUNNING.store(false, Ordering::Release);
                         return;
                     }
                     // Otherwise keep monitoring tmp usage periodically
@@ -568,6 +553,7 @@ impl Lambda {
                             Ok(stats) => stats,
                             Err(err) => {
                                 debug!("Could not emit tmp enhanced metrics. {:?}", err);
+                                TMP_TASK_RUNNING.store(false, Ordering::Release);
                                 return;
                             }
                         };
@@ -648,6 +634,14 @@ impl Lambda {
             return;
         }
 
+        if PROCESS_TASK_RUNNING
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            debug!("Process enhanced metrics task already running, skipping");
+            return;
+        }
+
         let aggr = self.aggr_handle.clone();
         let tags = self.get_dynamic_value_tags();
 
@@ -670,6 +664,7 @@ impl Lambda {
                     // When the stop signal is received, generate final metrics
                     _ = send_metrics.changed() => {
                         Self::generate_process_metrics(fd_max, fd_use, threads_max, threads_use, &aggr, tags.clone());
+                        PROCESS_TASK_RUNNING.store(false, Ordering::Release);
                         return;
                     }
                     // Otherwise keep monitoring file descriptor and thread usage periodically
@@ -801,19 +796,9 @@ mod tests {
     }
 
     async fn assert_sketch(handle: &AggregatorHandle, metric_id: &str, value: f64, timestamp: i64) {
-        assert_sketch_with_tag(handle, metric_id, value, timestamp, None).await;
-    }
-
-    async fn assert_sketch_with_tag(
-        handle: &AggregatorHandle,
-        metric_id: &str,
-        value: f64,
-        timestamp: i64,
-        tags: Option<SortedTags>,
-    ) {
         let ts = (timestamp / 10) * 10;
         if let Some(e) = handle
-            .get_entry_by_id(metric_id.into(), tags, ts)
+            .get_entry_by_id(metric_id.into(), None, ts)
             .await
             .unwrap()
         {
@@ -1414,31 +1399,5 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
-    }
-
-    #[tokio::test]
-    async fn test_set_config_load_issue_metric() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        let test_reason = "test_config_issue";
-
-        lambda.set_config_load_issue_metric(now, test_reason);
-
-        // Create the expected tags for the metric lookup
-        let expected_tags = SortedTags::parse(&format!("reason:{test_reason}")).ok();
-        assert_sketch_with_tag(
-            &metrics_aggr,
-            constants::DATADOG_SERVERLESS_EXTENSION_FAILOVER_CONFIG_ISSUE_METRIC,
-            1f64,
-            now,
-            expected_tags,
-        )
-        .await;
     }
 }

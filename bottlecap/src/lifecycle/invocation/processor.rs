@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use chrono::{DateTime, Utc};
@@ -9,10 +9,12 @@ use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use serde_json::Value;
 use tokio::sync::watch;
+use tokio::time::Instant;
 use tracing::{debug, warn};
 
 use crate::{
     config::{self, aws::AwsConfig},
+    extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
     lifecycle::invocation::{
         base64_to_string,
         context::{Context, ContextBuffer, ReparentingInfo},
@@ -25,7 +27,6 @@ use crate::{
         constants::{ETC_PATH, PROC_PATH},
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
-    telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
     traces::{
         context::SpanContext,
         propagation::{
@@ -89,7 +90,7 @@ impl Processor {
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
         aws_config: Arc<AwsConfig>,
-        enhanced_metrics: EnhancedMetrics,
+        metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
     ) -> Self {
         let resource = tags_provider
@@ -106,7 +107,7 @@ impl Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(Arc::clone(&config)),
             propagator,
-            enhanced_metrics,
+            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
             aws_config,
             tracer_detected: false,
             runtime: None,
@@ -988,15 +989,8 @@ mod tests {
 
         tokio::spawn(service.run());
 
-        let enhanced_metrics = EnhancedMetrics::new(handle, Arc::clone(&config));
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        Processor::new(
-            tags_provider,
-            config,
-            aws_config,
-            enhanced_metrics,
-            propagator,
-        )
+        Processor::new(tags_provider, config, aws_config, handle, propagator)
     }
 
     #[test]

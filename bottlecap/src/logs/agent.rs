@@ -5,9 +5,9 @@ use tokio::sync::{
 };
 
 use crate::event_bus::Event;
+use crate::extension::telemetry::events::TelemetryEvent;
 use crate::logs::{aggregator::Aggregator, processor::LogsProcessor};
 use crate::tags;
-use crate::telemetry::events::TelemetryEvent;
 use crate::{LAMBDA_RUNTIME_SLUG, config};
 
 #[allow(clippy::module_name_repetitions)]

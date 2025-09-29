@@ -15,12 +15,12 @@ use opentelemetry_proto::tonic::trace::v1::{
     status::StatusCode,
 };
 use opentelemetry_semantic_conventions::attribute::{
-    DB_QUERY_TEXT, DB_STATEMENT, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT,
-    DEPLOYMENT_ENVIRONMENT_NAME, FAAS_INVOKED_NAME, FAAS_INVOKED_PROVIDER, FAAS_TRIGGER,
-    GRAPHQL_OPERATION_NAME, GRAPHQL_OPERATION_TYPE, HTTP_ROUTE, HTTP_STATUS_CODE,
-    MESSAGING_DESTINATION_NAME, MESSAGING_OPERATION, MESSAGING_SYSTEM, OTEL_LIBRARY_NAME,
-    OTEL_LIBRARY_VERSION, OTEL_STATUS_CODE, OTEL_STATUS_DESCRIPTION, RPC_METHOD, RPC_SERVICE,
-    RPC_SYSTEM,
+    DB_COLLECTION_NAME, DB_NAMESPACE, DB_OPERATION_NAME, DB_QUERY_SUMMARY, DB_QUERY_TEXT,
+    DB_STORED_PROCEDURE_NAME, DB_SYSTEM_NAME, DEPLOYMENT_ENVIRONMENT_NAME, FAAS_INVOKED_NAME,
+    FAAS_INVOKED_PROVIDER, FAAS_TRIGGER, GRAPHQL_OPERATION_NAME, GRAPHQL_OPERATION_TYPE,
+    HTTP_RESPONSE_STATUS_CODE, HTTP_ROUTE, MESSAGING_DESTINATION_NAME, MESSAGING_OPERATION_TYPE,
+    MESSAGING_SYSTEM, OTEL_SCOPE_NAME, OTEL_SCOPE_VERSION, OTEL_STATUS_CODE,
+    OTEL_STATUS_DESCRIPTION, RPC_METHOD, RPC_SERVICE, RPC_SYSTEM, SERVER_ADDRESS, SERVER_PORT,
 };
 use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION}; // CONTAINER_ID, SERVICE_VERSION, TELEMETRY_SDK_LANGUAGE, TELEMETRY_SDK_VERSION,
 use opentelemetry_semantic_conventions::trace::{
@@ -246,6 +246,7 @@ fn get_otel_operation_name_v1(
     operation_name
 }
 
+#[allow(clippy::too_many_lines)]
 fn get_otel_operation_name_v2(otel_span: &OtelSpan) -> String {
     let operation_name =
         get_otel_attribute_value_as_string(&otel_span.attributes, "operation.name", false);
@@ -257,32 +258,57 @@ fn get_otel_operation_name_v2(otel_span: &OtelSpan) -> String {
     let is_server = otel_span.kind() == SpanKind::Server;
 
     // HTTP
-    //
-    // As opposed to Go's implementation, we don't check for the semantic convention
-    // of `HTTP_METHOD` which mapped to `http.method` as that is deprecated.
     let method =
         get_otel_attribute_value_as_string(&otel_span.attributes, "http.request.method", false);
     if !method.is_empty() {
         if is_server {
             return "http.server.request".to_string();
         }
-
         if is_client {
             return "http.client.request".to_string();
         }
     }
 
     // Database
+    let db_summary =
+        get_otel_attribute_value_as_string(&otel_span.attributes, DB_QUERY_SUMMARY, true);
+    if !db_summary.is_empty() {
+        return db_summary;
+    }
+
+    let get = |k| {
+        let v = get_otel_attribute_value_as_string(&otel_span.attributes, k, true);
+        (!v.is_empty()).then_some(v)
+    };
+    let target = get(DB_COLLECTION_NAME)
+        .or_else(|| get(DB_STORED_PROCEDURE_NAME))
+        .or_else(|| get(DB_NAMESPACE))
+        .or_else(|| {
+            let addr = get(SERVER_ADDRESS)?;
+            let port = get(SERVER_PORT)?;
+            Some(format!("{addr}:{port}"))
+        })
+        .unwrap_or_default();
+
+    let db_operation =
+        get_otel_attribute_value_as_string(&otel_span.attributes, DB_OPERATION_NAME, true);
+    if !target.is_empty() {
+        if !db_operation.is_empty() {
+            return format!("{db_operation} {target}");
+        }
+        return target;
+    }
+
     let db_system = get_otel_attribute_value_as_string(&otel_span.attributes, DB_SYSTEM_NAME, true);
-    if !db_system.is_empty() && is_client {
-        return format!("{db_system}.query");
+    if !db_system.is_empty() {
+        return db_system;
     }
 
     // Messaging
     let messaging_system =
         get_otel_attribute_value_as_string(&otel_span.attributes, MESSAGING_SYSTEM, true);
     let messaging_operation =
-        get_otel_attribute_value_as_string(&otel_span.attributes, MESSAGING_OPERATION, true);
+        get_otel_attribute_value_as_string(&otel_span.attributes, MESSAGING_OPERATION_TYPE, true);
     if !messaging_system.is_empty() && !messaging_operation.is_empty() {
         match otel_span.kind() {
             SpanKind::Client | SpanKind::Server | SpanKind::Consumer | SpanKind::Producer => {
@@ -303,7 +329,6 @@ fn get_otel_operation_name_v2(otel_span: &OtelSpan) -> String {
         if !service.is_empty() {
             return format!("aws.{service}.request");
         }
-
         return "aws.client.request".to_string();
     }
 
@@ -403,7 +428,7 @@ pub fn get_otel_resource(otel_span: &OtelSpan, otel_res: &OtelResource) -> Strin
     let messaging_operation = get_otel_attribute_value_as_string_from_resource_or_span(
         otel_res,
         otel_span,
-        MESSAGING_OPERATION,
+        MESSAGING_OPERATION_TYPE,
         false,
     );
     if !messaging_operation.is_empty() {
@@ -467,16 +492,6 @@ pub fn get_otel_resource(otel_span: &OtelSpan, otel_res: &OtelResource) -> Strin
         false,
     );
     if !database_system.is_empty() {
-        let database_statement = get_otel_attribute_value_as_string_from_resource_or_span(
-            otel_res,
-            otel_span,
-            DB_STATEMENT,
-            false,
-        );
-        if !database_statement.is_empty() {
-            return database_statement;
-        }
-
         let database_query = get_otel_attribute_value_as_string_from_resource_or_span(
             otel_res,
             otel_span,
@@ -541,7 +556,7 @@ fn get_otel_status_code(otel_span: &OtelSpan) -> u32 {
     }
 
     status_code =
-        get_otel_attribute_value_as_string(&otel_span.attributes, HTTP_STATUS_CODE, false);
+        get_otel_attribute_value_as_string(&otel_span.attributes, HTTP_RESPONSE_STATUS_CODE, false);
     if !status_code.is_empty() {
         if let Ok(status_code) = status_code.parse::<u32>() {
             return status_code;
@@ -926,23 +941,12 @@ pub fn otel_span_to_dd_span(
                 .insert("http.status_code".to_string(), f64::from(http_status_code));
         }
 
-        // Map OTEL deployment.environment to Datadog env field with fallback
         if !dd_span.meta.contains_key("env") {
-            // Try new standard first: deployment.environment.name
-            let mut env = get_otel_attribute_value_as_string(
+            let env = get_otel_attribute_value_as_string(
                 &otel_res.attributes,
                 DEPLOYMENT_ENVIRONMENT_NAME,
                 true,
             );
-
-            // Fallback to deprecated deployment.environment if new standard not found
-            if env.is_empty() {
-                env = get_otel_attribute_value_as_string(
-                    &otel_res.attributes,
-                    DEPLOYMENT_ENVIRONMENT,
-                    true,
-                );
-            }
 
             if !env.is_empty() {
                 dd_span.meta.insert("env".to_string(), env);
@@ -1072,13 +1076,13 @@ pub fn otel_span_to_dd_span(
     if !lib.name.is_empty() {
         dd_span
             .meta
-            .insert(OTEL_LIBRARY_NAME.to_string(), lib.name.clone());
+            .insert(OTEL_SCOPE_NAME.to_string(), lib.name.clone());
     }
 
     if !lib.version.is_empty() {
         dd_span
             .meta
-            .insert(OTEL_LIBRARY_VERSION.to_string(), lib.version.clone());
+            .insert(OTEL_SCOPE_VERSION.to_string(), lib.version.clone());
     }
 
     if let Some(status) = &otel_span.status {

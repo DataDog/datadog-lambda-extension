@@ -17,19 +17,24 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 use bottlecap::{
-    DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG, TELEMETRY_PORT,
+    DOGSTATSD_PORT, LAMBDA_RUNTIME_SLUG,
     appsec::processor::{
         Error::FeatureDisabled as AppSecFeatureDisabled, Processor as AppSecProcessor,
     },
     config::{
         self, Config,
-        aws::{AwsConfig, AwsCredentials, build_lambda_function_arn},
+        aws::{AwsConfig, build_lambda_function_arn},
         flush_strategy::FlushStrategy,
     },
     event_bus::{Event, EventBus},
     extension::{
         self, EXTENSION_HOST, EXTENSION_HOST_IP, ExtensionError, NextEventResponse,
         RegisterResponse,
+        telemetry::{
+            self, TELEMETRY_PORT,
+            events::{TelemetryEvent, TelemetryRecord},
+            listener::TelemetryListener,
+        },
     },
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
@@ -39,7 +44,6 @@ use bottlecap::{
     },
     logger,
     logs::{agent::LogsAgent, flusher::LogsFlusher},
-    metrics::enhanced::lambda::Lambda as enhanced_metrics,
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -47,17 +51,14 @@ use bottlecap::{
         lambda::{self, tags::EXTENSION_VERSION},
         provider::Provider as TagProvider,
     },
-    telemetry::{
-        client::TelemetryApiClient,
-        events::{TelemetryEvent, TelemetryRecord},
-        listener::TelemetryListener,
-    },
     traces::{
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
         stats_aggregator::StatsAggregator,
+        stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
         stats_flusher::{self, StatsFlusher},
+        stats_generator::StatsGenerator,
         stats_processor, trace_agent,
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
@@ -84,13 +85,11 @@ use dogstatsd::{
 };
 use reqwest::Client;
 use std::{
-    collections::hash_map,
-    env,
-    path::Path,
+    collections::hash_map, env, os::unix::process::CommandExt, path::Path, process::Command,
     sync::Arc,
-    time::{Duration, Instant},
 };
-use tokio::{sync::Mutex as TokioMutex, sync::RwLock, sync::mpsc::Sender, task::JoinHandle};
+use tokio::time::{Duration, Instant};
+use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error};
 use tracing_subscriber::EnvFilter;
@@ -241,7 +240,7 @@ impl PendingFlushHandles {
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
-    let (aws_config, aws_credentials, config) = load_configs(start_time);
+    let (aws_config, config) = load_configs(start_time);
 
     enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
@@ -259,7 +258,7 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
 
     let aws_config = Arc::new(aws_config);
-    let api_key_factory = create_api_key_factory(&config, &aws_config, aws_credentials);
+    let api_key_factory = create_api_key_factory(&config, &aws_config);
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -290,14 +289,20 @@ fn init_ustr() {
     });
 }
 
-fn load_configs(start_time: Instant) -> (AwsConfig, AwsCredentials, Arc<Config>) {
+fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     // First load the AWS configuration
     let aws_config = AwsConfig::from_env(start_time);
-    let aws_credentials = AwsCredentials::from_env();
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
-    (aws_config, aws_credentials, config)
+    let config = match config::get_config(Path::new(&lambda_directory)) {
+        Ok(config) => Arc::new(config),
+        Err(_e) => {
+            let err = Command::new("/opt/datadog-agent-go").exec();
+            panic!("Error starting the extension: {err:?}");
+        }
+    };
+
+    (aws_config, config)
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
@@ -323,21 +328,15 @@ fn enable_logging_subsystem(config: &Arc<Config>) {
     debug!("Logging subsystem enabled");
 }
 
-fn create_api_key_factory(
-    config: &Arc<Config>,
-    aws_config: &Arc<AwsConfig>,
-    aws_credentials: AwsCredentials,
-) -> Arc<ApiKeyFactory> {
+fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
-    let aws_credentials = Arc::new(RwLock::new(aws_credentials));
 
     Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
         let config = Arc::clone(&config);
         let aws_config = Arc::clone(&aws_config);
-        let aws_credentials = Arc::clone(&aws_credentials);
 
-        Box::pin(async move { resolve_secrets(config, aws_config, aws_credentials).await })
+        Box::pin(async move { resolve_secrets(config, aws_config).await })
     })))
 }
 
@@ -399,21 +398,11 @@ async fn extension_loop_active(
     );
     start_dogstatsd_aggregator(metrics_aggr_service);
 
-    let metrics_intake_url = create_metrics_intake_url_prefix(config);
     let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
         Arc::clone(&api_key_factory),
         &metrics_aggr_handle,
-        &metrics_intake_url,
         config,
     )));
-
-    // Create lambda enhanced metrics instance once
-    let lambda_enhanced_metrics =
-        enhanced_metrics::new(metrics_aggr_handle.clone(), Arc::clone(config));
-
-    // Send config issue metrics
-    let config_issues = config::inspect_config(config);
-    send_config_issue_metric(&config_issues, &lambda_enhanced_metrics);
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
@@ -421,7 +410,7 @@ async fn extension_loop_active(
         Arc::clone(&tags_provider),
         Arc::clone(config),
         Arc::clone(&aws_config),
-        lambda_enhanced_metrics,
+        metrics_aggr_handle.clone(),
         Arc::clone(&propagator),
     )));
     // AppSec processor (if enabled)
@@ -444,6 +433,7 @@ async fn extension_loop_active(
         stats_flusher,
         proxy_flusher,
         trace_agent_shutdown_token,
+        stats_concentrator,
     ) = start_trace_agent(
         config,
         &api_key_factory,
@@ -474,15 +464,21 @@ async fn extension_loop_active(
 
     let dogstatsd_cancel_token = start_dogstatsd(metrics_aggr_handle.clone()).await;
 
-    let telemetry_listener_cancel_token =
-        setup_telemetry_client(&r.extension_id, &aws_config.runtime_api, logs_agent_channel)
-            .await?;
+    let telemetry_listener_cancel_token = setup_telemetry_client(
+        client,
+        &r.extension_id,
+        &aws_config.runtime_api,
+        logs_agent_channel,
+        config.serverless_logs_enabled,
+    )
+    .await?;
 
     let otlp_cancel_token = start_otlp_agent(
         config,
         tags_provider.clone(),
         trace_processor.clone(),
         trace_agent_channel.clone(),
+        stats_concentrator.clone(),
     );
 
     let mut flush_control =
@@ -504,140 +500,23 @@ async fn extension_loop_active(
         let maybe_shutdown_event;
 
         let current_flush_decision = flush_control.evaluate_flush_decision();
-        if current_flush_decision == FlushDecision::End {
-            // break loop after runtime done
-            // flush everything
-            // call next
-            // optionally flush after tick for long running invos
-            'flush_end: loop {
-                tokio::select! {
-                biased;
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await {
-                            if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
-                                break 'flush_end;
+        match current_flush_decision {
+            FlushDecision::End => {
+                // break loop after runtime done
+                // flush everything
+                // call next
+                // optionally flush after tick for long running invos
+                'flush_end: loop {
+                    tokio::select! {
+                    biased;
+                        Some(event) = event_bus.rx.recv() => {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
+                                if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
+                                    break 'flush_end;
+                                }
                             }
                         }
-                    }
-                    _ = race_flush_interval.tick() => {
-                        let mut locked_metrics = metrics_flushers.lock().await;
-                        blocking_flush_all(
-                            &logs_flusher,
-                            &mut locked_metrics,
-                            &*trace_flusher,
-                            &*stats_flusher,
-                            &proxy_flusher,
-                            &mut race_flush_interval,
-                            &metrics_aggr_handle.clone(),
-                        )
-                        .await;
-                    }
-                }
-            }
-            // flush
-            let mut locked_metrics = metrics_flushers.lock().await;
-            blocking_flush_all(
-                &logs_flusher,
-                &mut locked_metrics,
-                &*trace_flusher,
-                &*stats_flusher,
-                &proxy_flusher,
-                &mut race_flush_interval,
-                &metrics_aggr_handle.clone(),
-            )
-            .await;
-            let next_response =
-                extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
-            maybe_shutdown_event =
-                handle_next_invocation(next_response, invocation_processor.clone()).await;
-        } else {
-            //Periodic flush scenario, flush at top of invocation
-            if current_flush_decision == FlushDecision::Continuous
-                && !pending_flush_handles.has_pending_handles()
-            {
-                let lf = logs_flusher.clone();
-                pending_flush_handles
-                    .log_flush_handles
-                    .push(tokio::spawn(async move { lf.flush(None).await }));
-                let tf = trace_flusher.clone();
-                pending_flush_handles
-                    .trace_flush_handles
-                    .push(tokio::spawn(async move {
-                        tf.flush(None).await.unwrap_or_default()
-                    }));
-                let (metrics_flushers_copy, series, sketches) = {
-                    let locked_metrics = metrics_flushers.lock().await;
-                    let flush_response = metrics_aggr_handle
-                        .clone()
-                        .flush()
-                        .await
-                        .expect("can't flush metrics handle");
-                    (
-                        locked_metrics.clone(),
-                        flush_response.series,
-                        flush_response.distributions,
-                    )
-                };
-                for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
-                    let series_clone = series.clone();
-                    let sketches_clone = sketches.clone();
-                    let handle = tokio::spawn(async move {
-                        let (retry_series, retry_sketches) = flusher
-                            .flush_metrics(series_clone.clone(), sketches_clone.clone())
-                            .await
-                            .unwrap_or_default();
-                        MetricsRetryBatch {
-                            flusher_id: idx,
-                            series: retry_series,
-                            sketches: retry_sketches,
-                        }
-                    });
-                    pending_flush_handles.metric_flush_handles.push(handle);
-                }
-
-                let pf = proxy_flusher.clone();
-                pending_flush_handles
-                    .proxy_flush_handles
-                    .push(tokio::spawn(async move {
-                        pf.flush(None).await.unwrap_or_default()
-                    }));
-
-                race_flush_interval.reset();
-            } else if current_flush_decision == FlushDecision::Periodic {
-                let mut locked_metrics = metrics_flushers.lock().await;
-                blocking_flush_all(
-                    &logs_flusher,
-                    &mut locked_metrics,
-                    &*trace_flusher,
-                    &*stats_flusher,
-                    &proxy_flusher,
-                    &mut race_flush_interval,
-                    &metrics_aggr_handle,
-                )
-                .await;
-            }
-            // NO FLUSH SCENARIO
-            // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
-            // If we get platform.runtimeDone or platform.runtimeReport
-            // That's fine, we still wait to break until we get the response from next
-            // and then we break to determine if we'll flush or not
-            let next_lambda_response =
-                extension::next_event(client, &aws_config.runtime_api, &r.extension_id);
-            tokio::pin!(next_lambda_response);
-            'next_invocation: loop {
-                tokio::select! {
-                biased;
-                    next_response = &mut next_lambda_response => {
-
-                        maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
-                        // Need to break here to re-call next
-                        break 'next_invocation;
-                    }
-                    Some(event) = event_bus.rx.recv() => {
-                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
-                    }
-                    _ = race_flush_interval.tick() => {
-                        if flush_control.flush_strategy == FlushStrategy::Default {
+                        _ = race_flush_interval.tick() => {
                             let mut locked_metrics = metrics_flushers.lock().await;
                             blocking_flush_all(
                                 &logs_flusher,
@@ -646,9 +525,135 @@ async fn extension_loop_active(
                                 &*stats_flusher,
                                 &proxy_flusher,
                                 &mut race_flush_interval,
-                                &metrics_aggr_handle,
+                                &metrics_aggr_handle.clone(),
+                                false,
                             )
                             .await;
+                        }
+                    }
+                }
+                // flush
+                let mut locked_metrics = metrics_flushers.lock().await;
+                blocking_flush_all(
+                    &logs_flusher,
+                    &mut locked_metrics,
+                    &*trace_flusher,
+                    &*stats_flusher,
+                    &proxy_flusher,
+                    &mut race_flush_interval,
+                    &metrics_aggr_handle.clone(),
+                    false,
+                )
+                .await;
+                let next_response =
+                    extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
+                maybe_shutdown_event =
+                    handle_next_invocation(next_response, invocation_processor.clone()).await;
+            }
+            FlushDecision::Continuous | FlushDecision::Periodic | FlushDecision::Dont => {
+                match current_flush_decision {
+                    //Periodic flush scenario, flush at top of invocation
+                    FlushDecision::Continuous => {
+                        if !pending_flush_handles.has_pending_handles() {
+                            let lf = logs_flusher.clone();
+                            pending_flush_handles
+                                .log_flush_handles
+                                .push(tokio::spawn(async move { lf.flush(None).await }));
+                            let tf = trace_flusher.clone();
+                            pending_flush_handles.trace_flush_handles.push(tokio::spawn(
+                                async move { tf.flush(None).await.unwrap_or_default() },
+                            ));
+                            let (metrics_flushers_copy, series, sketches) = {
+                                let locked_metrics = metrics_flushers.lock().await;
+                                let flush_response = metrics_aggr_handle
+                                    .clone()
+                                    .flush()
+                                    .await
+                                    .expect("can't flush metrics handle");
+                                (
+                                    locked_metrics.clone(),
+                                    flush_response.series,
+                                    flush_response.distributions,
+                                )
+                            };
+                            for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate()
+                            {
+                                let series_clone = series.clone();
+                                let sketches_clone = sketches.clone();
+                                let handle = tokio::spawn(async move {
+                                    let (retry_series, retry_sketches) = flusher
+                                        .flush_metrics(series_clone.clone(), sketches_clone.clone())
+                                        .await
+                                        .unwrap_or_default();
+                                    MetricsRetryBatch {
+                                        flusher_id: idx,
+                                        series: retry_series,
+                                        sketches: retry_sketches,
+                                    }
+                                });
+                                pending_flush_handles.metric_flush_handles.push(handle);
+                            }
+
+                            let pf = proxy_flusher.clone();
+                            pending_flush_handles.proxy_flush_handles.push(tokio::spawn(
+                                async move { pf.flush(None).await.unwrap_or_default() },
+                            ));
+
+                            race_flush_interval.reset();
+                        }
+                    }
+                    FlushDecision::Periodic => {
+                        let mut locked_metrics = metrics_flushers.lock().await;
+                        blocking_flush_all(
+                            &logs_flusher,
+                            &mut locked_metrics,
+                            &*trace_flusher,
+                            &*stats_flusher,
+                            &proxy_flusher,
+                            &mut race_flush_interval,
+                            &metrics_aggr_handle,
+                            false, // force_flush_trace_stats
+                        )
+                        .await;
+                    }
+                    _ => {
+                        // No specific flush logic for Dont or End (End already handled above)
+                    }
+                }
+                // NO FLUSH SCENARIO
+                // JUST LOOP OVER PIPELINE AND WAIT FOR NEXT EVENT
+                // If we get platform.runtimeDone or platform.runtimeReport
+                // That's fine, we still wait to break until we get the response from next
+                // and then we break to determine if we'll flush or not
+                let next_lambda_response =
+                    extension::next_event(client, &aws_config.runtime_api, &r.extension_id);
+                tokio::pin!(next_lambda_response);
+                'next_invocation: loop {
+                    tokio::select! {
+                    biased;
+                        next_response = &mut next_lambda_response => {
+                            maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                            // Need to break here to re-call next
+                            break 'next_invocation;
+                        }
+                        Some(event) = event_bus.rx.recv() => {
+                            handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
+                        }
+                        _ = race_flush_interval.tick() => {
+                            if flush_control.flush_strategy == FlushStrategy::Default {
+                                let mut locked_metrics = metrics_flushers.lock().await;
+                                blocking_flush_all(
+                                    &logs_flusher,
+                                    &mut locked_metrics,
+                                    &*trace_flusher,
+                                    &*stats_flusher,
+                                    &proxy_flusher,
+                                    &mut race_flush_interval,
+                                    &metrics_aggr_handle,
+                                    false, // force_flush_trace_stats
+                                )
+                                .await;
+                            }
                         }
                     }
                 }
@@ -674,7 +679,7 @@ async fn extension_loop_active(
                             debug!("Received tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone()).await;
+                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
@@ -705,6 +710,7 @@ async fn extension_loop_active(
                 &proxy_flusher,
                 &mut race_flush_interval,
                 &metrics_aggr_handle,
+                true, // force_flush_trace_stats
             )
             .await;
             return Ok(());
@@ -712,6 +718,7 @@ async fn extension_loop_active(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn blocking_flush_all(
     logs_flusher: &LogsFlusher,
     metrics_flushers: &mut [MetricsFlusher],
@@ -720,6 +727,7 @@ async fn blocking_flush_all(
     proxy_flusher: &ProxyFlusher,
     race_flush_interval: &mut tokio::time::Interval,
     metrics_aggr_handle: &MetricsAggregatorHandle,
+    force_flush_trace_stats: bool,
 ) {
     let flush_response = metrics_aggr_handle
         .flush()
@@ -739,7 +747,7 @@ async fn blocking_flush_all(
         logs_flusher.flush(None),
         futures::future::join_all(metrics_futures),
         trace_flusher.flush(None),
-        stats_flusher.flush(),
+        stats_flusher.flush(force_flush_trace_stats),
         proxy_flusher.flush(None),
     );
     race_flush_interval.reset();
@@ -752,6 +760,7 @@ async fn handle_event_bus_event(
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
+    stats_concentrator: StatsConcentratorHandle,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::OutOfMemory(event_timestamp) => {
@@ -803,6 +812,9 @@ async fn handle_event_bus_event(
                             appsec: appsec_processor.clone(),
                             processor: trace_processor.clone(),
                             trace_tx: trace_agent_channel.clone(),
+                            stats_generator: Arc::new(StatsGenerator::new(
+                                stats_concentrator.clone(),
+                            )),
                         }),
                         event.time.timestamp(),
                     )
@@ -905,33 +917,33 @@ fn start_logs_agent(
     (logs_agent_channel, logs_flusher)
 }
 
-fn create_metrics_intake_url_prefix(config: &Config) -> MetricsIntakeUrlPrefix {
-    if !config.dd_url.is_empty() {
-        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
-        MetricsIntakeUrlPrefix::new(None, prefix_override).expect("can't parse DD_DD_URL prefix")
-    } else if !config.url.is_empty() {
-        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
-        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
-        MetricsIntakeUrlPrefix::new(None, prefix_override).expect("can't parse DD_URL prefix")
-    } else {
-        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
-        MetricsIntakeUrlPrefix::new(Some(metrics_site), None).expect("can't parse site prefix")
-    }
-}
-
 fn start_metrics_flushers(
     api_key_factory: Arc<ApiKeyFactory>,
     metrics_aggr_handle: &MetricsAggregatorHandle,
-    metrics_intake_url: &MetricsIntakeUrlPrefix,
     config: &Arc<Config>,
 ) -> Vec<MetricsFlusher> {
     let mut flushers = Vec::new();
 
+    let metrics_intake_url = if !config.dd_url.is_empty() {
+        let dd_dd_url = DdDdUrl::new(config.dd_url.clone()).expect("can't parse DD_DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(None, Some(dd_dd_url));
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else if !config.url.is_empty() {
+        let dd_url = DdUrl::new(config.url.clone()).expect("can't parse DD_URL");
+
+        let prefix_override = MetricsIntakeUrlPrefixOverride::maybe_new(Some(dd_url), None);
+        MetricsIntakeUrlPrefix::new(None, prefix_override)
+    } else {
+        // use site
+        let metrics_site = MetricsSite::new(config.site.clone()).expect("can't parse site");
+        MetricsIntakeUrlPrefix::new(Some(metrics_site), None)
+    };
+
     let flusher_config = MetricsFlusherConfig {
         api_key_factory,
         aggregator_handle: metrics_aggr_handle.clone(),
-        metrics_intake_url_prefix: metrics_intake_url.clone(),
+        metrics_intake_url_prefix: metrics_intake_url.expect("can't parse site or override"),
         https_proxy: config.proxy_https.clone(),
         timeout: Duration::from_secs(config.flush_timeout),
         retry_strategy: DsdRetryStrategy::Immediate(3),
@@ -987,9 +999,15 @@ fn start_trace_agent(
     Arc<stats_flusher::ServerlessStatsFlusher>,
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
+    StatsConcentratorHandle,
 ) {
     // Stats
-    let stats_aggregator = Arc::new(TokioMutex::new(StatsAggregator::default()));
+    let (stats_concentrator_service, stats_concentrator_handle) =
+        StatsConcentratorService::new(Arc::clone(config), tags_provider.clone());
+    tokio::spawn(stats_concentrator_service.run());
+    let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
+        StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
+    ));
     let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
         api_key_factory.clone(),
         stats_aggregator.clone(),
@@ -1037,6 +1055,7 @@ fn start_trace_agent(
         invocation_processor,
         appsec_processor,
         Arc::clone(tags_provider),
+        stats_concentrator_handle.clone(),
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
@@ -1055,29 +1074,8 @@ fn start_trace_agent(
         stats_flusher,
         proxy_flusher,
         shutdown_token,
+        stats_concentrator_handle,
     )
-}
-
-/// Sends metrics indicating issue with configuration.
-///
-/// # Arguments
-/// * `issue_reasons` - Vector of messages describing the issue with the configurations
-/// * `lambda_enhanced_metrics` - The lambda enhanced metrics instance
-fn send_config_issue_metric(issue_reasons: &[String], lambda_enhanced_metrics: &enhanced_metrics) {
-    if issue_reasons.is_empty() {
-        return;
-    }
-    let now = std::time::UNIX_EPOCH
-        .elapsed()
-        .expect("can't poll clock")
-        .as_secs()
-        .try_into()
-        .unwrap_or_default();
-
-    // Setup a separate metric for each config issue reason
-    for issue_reason in issue_reasons {
-        lambda_enhanced_metrics.set_config_load_issue_metric(now, issue_reason);
-    }
 }
 
 fn start_dogstatsd_aggregator(aggr_service: MetricsAggregatorService) {
@@ -1107,29 +1105,30 @@ async fn start_dogstatsd(metrics_aggr_handle: MetricsAggregatorHandle) -> Cancel
 }
 
 async fn setup_telemetry_client(
+    client: &Client,
     extension_id: &str,
     runtime_api: &str,
     logs_agent_channel: Sender<TelemetryEvent>,
+    logs_enabled: bool,
 ) -> anyhow::Result<CancellationToken> {
     let telemetry_listener =
         TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
 
     let cancel_token = telemetry_listener.cancel_token();
-    tokio::spawn(async move {
-        if let Err(e) = telemetry_listener.start() {
-            error!("Error starting telemetry listener: {e:?}");
-        }
-    });
+    if let Err(e) = telemetry_listener.start() {
+        error!("Error starting telemetry listener: {e:?}");
+    }
 
-    let telemetry_client = TelemetryApiClient::new(
-        extension_id.to_string(),
+    telemetry::subscribe(
+        client,
+        runtime_api,
+        extension_id,
         TELEMETRY_PORT,
-        runtime_api.to_string(),
-    );
-    telemetry_client
-        .subscribe()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;
+        logs_enabled,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;
+
     Ok(cancel_token)
 }
 
@@ -1138,18 +1137,23 @@ fn start_otlp_agent(
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
     trace_tx: Sender<SendDataBuilderInfo>,
+    stats_concentrator: StatsConcentratorHandle,
 ) -> Option<CancellationToken> {
     if !should_enable_otlp_agent(config) {
         return None;
     }
-
-    let agent = OtlpAgent::new(config.clone(), tags_provider, trace_processor, trace_tx);
+    let stats_generator = Arc::new(StatsGenerator::new(stats_concentrator));
+    let agent = OtlpAgent::new(
+        config.clone(),
+        tags_provider,
+        trace_processor,
+        trace_tx,
+        stats_generator,
+    );
     let cancel_token = agent.cancel_token();
-    tokio::spawn(async move {
-        if let Err(e) = agent.start() {
-            error!("Error starting OTLP agent: {e:?}");
-        }
-    });
+    if let Err(e) = agent.start() {
+        error!("Error starting OTLP agent: {e:?}");
+    }
 
     Some(cancel_token)
 }

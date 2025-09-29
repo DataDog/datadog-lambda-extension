@@ -40,14 +40,12 @@ const SERVICE_KEY: &str = "service";
 
 // ComputeStatsKey is the tag key indicating whether trace stats should be computed
 const COMPUTE_STATS_KEY: &str = "_dd.compute_stats";
-// ComputeStatsValue is the tag value indicating trace stats should be computed
-const COMPUTE_STATS_VALUE: &str = "1";
 // FunctionTagsKey is the tag key for a function's tags to be set on the top level tracepayload
 const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-pub const EXTENSION_VERSION: &str = "86-next";
+pub const EXTENSION_VERSION: &str = "87-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -129,10 +127,12 @@ fn tags_from_env(
         tags_map.extend(config.tags.clone());
     }
 
-    tags_map.insert(
-        COMPUTE_STATS_KEY.to_string(),
-        COMPUTE_STATS_VALUE.to_string(),
-    );
+    // The value of _dd.compute_stats is the opposite of config.compute_trace_stats.
+    // "config.compute_trace_stats == true" means computing stats on the extension side,
+    // so we set _dd.compute_stats to 0 so stats won't be computed on the backend side.
+    let compute_stats = i32::from(!config.compute_trace_stats);
+    tags_map.insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
+
     tags_map
 }
 
@@ -293,10 +293,7 @@ mod tests {
         let metadata = HashMap::new();
         let tags = Lambda::new_from_config(Arc::new(Config::default()), &metadata);
         assert_eq!(tags.tags_map.len(), 3);
-        assert_eq!(
-            tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(),
-            COMPUTE_STATS_VALUE
-        );
+        assert_eq!(tags.tags_map.get(COMPUTE_STATS_KEY).unwrap(), "1");
         let arch = arch_to_platform();
         assert_eq!(
             tags.tags_map.get(ARCHITECTURE_KEY).unwrap(),

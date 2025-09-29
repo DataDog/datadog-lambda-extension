@@ -434,11 +434,8 @@ where
 #[cfg(test)]
 mod tests {
     use http_body_util::BodyExt;
-    use std::{
-        collections::HashMap,
-        time::{Duration, Instant},
-    };
-    use tokio::sync::Mutex as TokioMutex;
+    use std::{collections::HashMap, time::Duration};
+    use tokio::{sync::Mutex as TokioMutex, time::Instant};
 
     use dogstatsd::{aggregator_service::AggregatorService, metric::EMPTY_TAGS};
     use http_body_util::Full;
@@ -492,8 +489,7 @@ mod tests {
 
         tokio::spawn(service.run());
 
-        let enhanced_metrics =
-            crate::metrics::enhanced::lambda::Lambda::new(handle, Arc::clone(&config));
+        let metrics_aggregator = handle;
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".to_string(),
             function_name: "arn:some-function".to_string(),
@@ -507,7 +503,7 @@ mod tests {
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             Arc::clone(&aws_config),
-            enhanced_metrics,
+            metrics_aggregator,
             Arc::clone(&propagator),
         )));
         let appsec_processor = match AppSecProcessor::new(&config) {

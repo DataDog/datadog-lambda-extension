@@ -32,7 +32,9 @@ use crate::{
     traces::{
         INVOCATION_SPAN_RESOURCE,
         proxy_aggregator::{self, ProxyRequest},
-        stats_aggregator, stats_processor,
+        stats_aggregator,
+        stats_generator::StatsGenerator,
+        stats_processor,
         trace_aggregator::{self, SendDataBuilderInfo},
         trace_processor,
     },
@@ -40,6 +42,8 @@ use crate::{
 use datadog_trace_protobuf::pb;
 use datadog_trace_utils::trace_utils::{self};
 use ddcommon::hyper_migration;
+
+use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 
 const TRACE_AGENT_PORT: usize = 8126;
 
@@ -102,6 +106,7 @@ pub struct TraceAgent {
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
+    stats_concentrator: StatsConcentratorHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -123,6 +128,7 @@ impl TraceAgent {
         invocation_processor: Arc<Mutex<InvocationProcessor>>,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
+        stats_concentrator: StatsConcentratorHandle,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -149,9 +155,11 @@ impl TraceAgent {
             tags_provider,
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
+            stats_concentrator,
         }
     }
 
+    #[allow(clippy::cast_possible_truncation)]
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let now = Instant::now();
 
@@ -191,12 +199,14 @@ impl TraceAgent {
     }
 
     fn make_router(&self, stats_tx: Sender<pb::ClientStatsPayload>) -> Router {
+        let stats_generator = Arc::new(StatsGenerator::new(self.stats_concentrator.clone()));
         let trace_state = TraceState {
             config: Arc::clone(&self.config),
             trace_sender: Arc::new(SendingTraceProcessor {
                 appsec: self.appsec_processor.clone(),
                 processor: Arc::clone(&self.trace_processor),
                 trace_tx: self.tx.clone(),
+                stats_generator,
             }),
             invocation_processor: Arc::clone(&self.invocation_processor),
             tags_provider: Arc::clone(&self.tags_provider),
@@ -509,7 +519,7 @@ impl TraceAgent {
             }
         }
 
-        match trace_sender
+        if let Err(err) = trace_sender
             .send_processed_traces(
                 config,
                 tags_provider,
@@ -520,12 +530,13 @@ impl TraceAgent {
             )
             .await
         {
-            Ok(()) => success_response("Successfully buffered traces to be aggregated."),
-            Err(err) => error_response(
+            return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error sending traces to the trace aggregator: {err}"),
-            ),
+                format!("Error sending traces to the trace aggregator: {err:?}"),
+            );
         }
+
+        success_response("Successfully buffered traces to be aggregated.")
     }
 
     #[allow(clippy::too_many_arguments)]
