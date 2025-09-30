@@ -27,11 +27,11 @@ impl AggregatorHandle {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(AggregatorCommand::Flush(response_tx))
-            .map_err(|e| format!("Failed to send flush command: {}", e))?;
+            .map_err(|e| format!("Failed to send flush command: {e}"))?;
 
         response_rx
             .await
-            .map_err(|e| format!("Failed to receive flush response: {}", e))
+            .map_err(|e| format!("Failed to receive flush response: {e}"))
     }
 
     pub fn shutdown(&self) -> Result<(), mpsc::error::SendError<AggregatorCommand>> {
@@ -45,6 +45,7 @@ pub struct AggregatorService {
 }
 
 impl AggregatorService {
+    #[must_use]
     pub fn new(
         max_batch_entries_size: usize,
         max_content_size_bytes: usize,
@@ -63,6 +64,7 @@ impl AggregatorService {
         (service, handle)
     }
 
+    #[must_use]
     pub fn new_default() -> (Self, AggregatorHandle) {
         use crate::logs::constants;
         Self::new(
@@ -144,5 +146,5 @@ mod tests {
         // Shutdown the service
         handle.shutdown().unwrap();
         let _ = service_handle.await;
-    }   
+    }
 }
