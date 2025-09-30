@@ -356,7 +356,10 @@ impl LambdaProcessor {
 
         if !self.ready_logs.is_empty() {
             // Send logs to aggregator via handle
-            if let Err(e) = self.aggregator_handle.insert_batch(std::mem::take(&mut self.ready_logs)) {
+            if let Err(e) = self
+                .aggregator_handle
+                .insert_batch(std::mem::take(&mut self.ready_logs))
+            {
                 debug!("Failed to send logs to aggregator: {}", e);
             }
         }
@@ -592,7 +595,12 @@ mod tests {
         let (tx, _) = tokio::sync::mpsc::channel(2);
         let (_, aggregator_handle) = AggregatorService::new_default();
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), aggregator_handle);
+        let mut processor = LambdaProcessor::new(
+            tags_provider,
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -626,7 +634,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let (_, aggregator_handle) = AggregatorService::new_default();
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), aggregator_handle);
+        let mut processor = LambdaProcessor::new(
+            tags_provider,
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -673,7 +686,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let (_, aggregator_handle) = AggregatorService::new_default();
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), aggregator_handle);
+        let mut processor = LambdaProcessor::new(
+            tags_provider,
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -707,7 +725,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let (_, aggregator_handle) = AggregatorService::new_default();
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), aggregator_handle);
+        let mut processor = LambdaProcessor::new(
+            tags_provider,
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle,
+        );
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -758,10 +781,10 @@ mod tests {
         });
 
         let mut processor = LambdaProcessor::new(
-            Arc::clone(&tags_provider), 
-            Arc::clone(&config), 
-            tx.clone(), 
-            aggregator_handle.clone()
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle.clone(),
         );
 
         let event = TelemetryEvent {
@@ -777,7 +800,7 @@ mod tests {
         // Flush the aggregator to get the batches
         let batches = aggregator_handle.flush().await.unwrap();
         assert_eq!(batches.len(), 1);
-        
+
         let log = IntakeLog {
             message: Message {
                 message: "START RequestId: test-request-id Version: test".to_string(),
@@ -825,10 +848,10 @@ mod tests {
         });
 
         let mut processor = LambdaProcessor::new(
-            Arc::clone(&tags_provider), 
-            Arc::clone(&config), 
-            tx.clone(), 
-            aggregator_handle.clone()
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle.clone(),
         );
 
         let event = TelemetryEvent {
@@ -873,10 +896,10 @@ mod tests {
         });
 
         let mut processor = LambdaProcessor::new(
-            tags_provider, 
-            Arc::clone(&config), 
-            tx.clone(), 
-            aggregator_handle.clone()
+            tags_provider,
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle.clone(),
         );
 
         let event = TelemetryEvent {
@@ -919,10 +942,10 @@ mod tests {
         });
 
         let mut processor = LambdaProcessor::new(
-            Arc::clone(&tags_provider), 
-            Arc::clone(&config), 
-            tx.clone(), 
-            aggregator_handle.clone()
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            aggregator_handle.clone(),
         );
 
         let start_event = TelemetryEvent {
@@ -950,7 +973,7 @@ mod tests {
         // Flush the aggregator to get the batches
         let batches = aggregator_handle.flush().await.unwrap();
         assert_eq!(batches.len(), 1);
-        
+
         let start_log = IntakeLog {
             message: Message {
                 message: "START RequestId: test-request-id Version: test".to_string(),
@@ -1009,12 +1032,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let (_, aggregator_handle) = AggregatorService::new_default();
-        
+
         let mut processor = LambdaProcessor::new(
-            tags_provider.clone(), 
-            Arc::clone(&config), 
+            tags_provider.clone(),
+            Arc::clone(&config),
             tx.clone(),
-            aggregator_handle
+            aggregator_handle,
         );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1072,12 +1095,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let (_, aggregator_handle) = AggregatorService::new_default();
-        
+
         let mut processor = LambdaProcessor::new(
-            tags_provider.clone(), 
-            Arc::clone(&config), 
+            tags_provider.clone(),
+            Arc::clone(&config),
             tx.clone(),
-            aggregator_handle
+            aggregator_handle,
         );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),

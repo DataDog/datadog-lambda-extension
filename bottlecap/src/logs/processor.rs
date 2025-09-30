@@ -23,7 +23,8 @@ impl LogsProcessor {
     ) -> Self {
         match runtime.as_str() {
             LAMBDA_RUNTIME_SLUG => {
-                let lambda_processor = LambdaProcessor::new(tags_provider, config, event_bus, aggregator_handle);
+                let lambda_processor =
+                    LambdaProcessor::new(tags_provider, config, event_bus, aggregator_handle);
                 LogsProcessor::Lambda(lambda_processor)
             }
             _ => panic!("Unsupported runtime: {runtime}"),

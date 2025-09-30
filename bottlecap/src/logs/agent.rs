@@ -32,11 +32,7 @@ impl LogsAgent {
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);
 
-        Self {
-            tx,
-            rx,
-            processor,
-        }
+        Self { tx, rx, processor }
     }
 
     pub async fn spin(&mut self) {

@@ -43,7 +43,13 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{agent::LogsAgent, aggregator_service::{AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService}, flusher::LogsFlusher},
+    logs::{
+        agent::LogsAgent,
+        aggregator_service::{
+            AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
+        },
+        flusher::LogsFlusher,
+    },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -380,10 +386,7 @@ async fn extension_loop_active(
     let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::new_default();
     debug!(
         "Logs aggregator created in {:} microseconds",
-        logs_aggr_init_start_time
-            .elapsed()
-            .as_micros()
-            .to_string()
+        logs_aggr_init_start_time.elapsed().as_micros().to_string()
     );
     start_logs_aggregator(logs_aggr_service);
 
@@ -917,13 +920,14 @@ fn start_logs_agent(
     event_bus: Sender<Event>,
     logs_aggr_handle: LogsAggregatorHandle,
 ) -> (Sender<TelemetryEvent>, LogsFlusher) {
-    let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus, logs_aggr_handle.clone());
-    let logs_agent_channel = logs_agent.get_sender_copy();
-    let logs_flusher = LogsFlusher::new(
-        api_key_factory,
-        logs_aggr_handle,
-        config.clone(),
+    let mut logs_agent = LogsAgent::new(
+        Arc::clone(tags_provider),
+        Arc::clone(config),
+        event_bus,
+        logs_aggr_handle.clone(),
     );
+    let logs_agent_channel = logs_agent.get_sender_copy();
+    let logs_flusher = LogsFlusher::new(api_key_factory, logs_aggr_handle, config.clone());
     tokio::spawn(async move {
         logs_agent.spin().await;
     });

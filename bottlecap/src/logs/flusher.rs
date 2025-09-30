@@ -10,10 +10,7 @@ use std::error::Error;
 use std::time::Instant;
 use std::{io::Write, sync::Arc};
 use thiserror::Error as ThisError;
-use tokio::{
-    sync::OnceCell,
-    task::JoinSet,
-};
+use tokio::{sync::OnceCell, task::JoinSet};
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -225,12 +222,19 @@ impl LogsFlusher {
         ));
 
         // Create flushers for additional endpoints
-        debug!("=== Creating {} additional log flushers for dual shipping ===", config.logs_config_additional_endpoints.len());
+        debug!(
+            "=== Creating {} additional log flushers for dual shipping ===",
+            config.logs_config_additional_endpoints.len()
+        );
         for endpoint in &config.logs_config_additional_endpoints {
             let endpoint_url = format!("https://{}:{}", endpoint.host, endpoint.port);
-            debug!("=== Creating additional log flusher for endpoint: {}", endpoint_url);
+            debug!(
+                "=== Creating additional log flusher for endpoint: {}",
+                endpoint_url
+            );
             // Create a separate API key factory for this endpoint using its specific API key
-            let additional_api_key_factory = Arc::new(ApiKeyFactory::new(endpoint.api_key.clone().as_str()));
+            let additional_api_key_factory =
+                Arc::new(ApiKeyFactory::new(endpoint.api_key.clone().as_str()));
             flushers.push(Flusher::new(
                 additional_api_key_factory,
                 endpoint_url,
@@ -238,8 +242,8 @@ impl LogsFlusher {
             ));
         }
 
-        LogsFlusher { 
-            config, 
+        LogsFlusher {
+            config,
             flushers,
             aggregator_handle,
         }
@@ -268,7 +272,10 @@ impl LogsFlusher {
         } else {
             let logs_batches = Arc::new({
                 match self.aggregator_handle.flush().await {
-                    Ok(batches) => batches.into_iter().map(|batch| self.compress(batch)).collect(),
+                    Ok(batches) => batches
+                        .into_iter()
+                        .map(|batch| self.compress(batch))
+                        .collect(),
                     Err(e) => {
                         debug!("Failed to flush from aggregator: {}", e);
                         Vec::new()
@@ -281,8 +288,12 @@ impl LogsFlusher {
                 let batches = Arc::clone(&logs_batches);
                 let flusher = flusher.clone();
                 async move {
-                    debug!("=== Flusher for endpoint {} processing {} batches ===", flusher.endpoint, batches.len());
-                    flusher.flush(Some(batches)).await 
+                    debug!(
+                        "=== Flusher for endpoint {} processing {} batches ===",
+                        flusher.endpoint,
+                        batches.len()
+                    );
+                    flusher.flush(Some(batches)).await
                 }
             });
 

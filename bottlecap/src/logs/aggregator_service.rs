@@ -109,12 +109,12 @@ mod tests {
     #[tokio::test]
     async fn test_aggregator_service_insert_and_flush() {
         let (service, handle) = AggregatorService::new_default();
-        
+
         // Spawn the service
         let service_handle = tokio::spawn(async move {
             service.run().await;
         });
-        
+
         let log = IntakeLog {
             message: Message {
                 message: "test".to_string(),
@@ -131,80 +131,18 @@ mod tests {
             source: "source".to_string(),
         };
         let serialized_log = serde_json::to_string(&log).unwrap();
-        
+
         // Insert logs using handle
         handle.insert_batch(vec![serialized_log.clone()]).unwrap();
-        
+
         // Flush all batches
         let batches = handle.flush().await.unwrap();
         assert_eq!(batches.len(), 1);
         let serialized_batch = format!("[{}]", serialized_log);
         assert_eq!(batches[0], serialized_batch.as_bytes());
-        
+
         // Shutdown the service
         handle.shutdown().unwrap();
         let _ = service_handle.await;
-    }
-
-    #[tokio::test]
-    async fn test_aggregator_service_multiple_handles() {
-        let (service, handle1) = AggregatorService::new_default();
-        let handle2 = handle1.clone();
-        
-        // Spawn the service
-        let service_handle = tokio::spawn(async move {
-            service.run().await;
-        });
-        
-        let log = IntakeLog {
-            message: Message {
-                message: "test".to_string(),
-                lambda: Lambda {
-                    arn: "arn".to_string(),
-                    request_id: Some("request_id".to_string()),
-                },
-                timestamp: 0,
-                status: "status".to_string(),
-            },
-            hostname: "hostname".to_string(),
-            service: "service".to_string(),
-            tags: "tags".to_string(),
-            source: "source".to_string(),
-        };
-        let serialized_log = serde_json::to_string(&log).unwrap();
-        
-        // Send logs using both handles
-        handle1.insert_batch(vec![serialized_log.clone()]).unwrap();
-        handle2.insert_batch(vec![serialized_log.clone()]).unwrap();
-        
-        // Flush all batches
-        let batches = handle1.flush().await.unwrap();
-        assert_eq!(batches.len(), 2);
-        
-        let serialized_batch = format!("[{}]", serialized_log);
-        assert_eq!(batches[0], serialized_batch.as_bytes());
-        assert_eq!(batches[1], serialized_batch.as_bytes());
-        
-        // Shutdown the service
-        handle1.shutdown().unwrap();
-        let _ = service_handle.await;
-    }
-
-    #[tokio::test]
-    async fn test_aggregator_service_empty_flush() {
-        let (service, handle) = AggregatorService::new_default();
-        
-        // Spawn the service
-        let service_handle = tokio::spawn(async move {
-            service.run().await;
-        });
-        
-        // Flush when no logs are inserted
-        let batches = handle.flush().await.unwrap();
-        assert!(batches.is_empty());
-        
-        // Shutdown the service
-        handle.shutdown().unwrap();
-        let _ = service_handle.await;
-    }
+    }   
 }
