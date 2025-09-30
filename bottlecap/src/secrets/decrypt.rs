@@ -87,7 +87,7 @@ pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) ->
                 .await
             };
 
-            debug!("Decrypt took {}ms", before_decrypt.elapsed().as_millis());
+            debug!("Decrypt took {} ms", before_decrypt.elapsed().as_millis());
 
             match decrypted_key {
                 Ok(key) => Some(key),
