@@ -57,12 +57,12 @@ async fn test_logs() {
     let bus = EventBus::run();
     let (logs_aggr_service, logs_aggr_handle) =
         bottlecap::logs::aggregator_service::AggregatorService::new_default();
-    
+
     // Spawn the aggregator service
     tokio::spawn(async move {
         logs_aggr_service.run().await;
     });
-    
+
     let mut logs_agent = LogsAgent::new(
         tags_provider,
         Arc::clone(&arc_conf),
