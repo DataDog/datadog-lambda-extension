@@ -55,12 +55,13 @@ async fn test_logs() {
     ));
 
     let bus = EventBus::run();
+    let (_, logs_aggr_handle) = bottlecap::logs::aggregator_service::AggregatorService::new_default();
     let mut logs_agent =
-        LogsAgent::new(tags_provider, Arc::clone(&arc_conf), bus.get_sender_copy());
+        LogsAgent::new(tags_provider, Arc::clone(&arc_conf), bus.get_sender_copy(), logs_aggr_handle.clone());
     let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
     let logs_flusher = LogsFlusher::new(
         api_key_factory,
-        Arc::clone(&logs_agent.aggregator),
+        logs_aggr_handle,
         arc_conf.clone(),
     );
 

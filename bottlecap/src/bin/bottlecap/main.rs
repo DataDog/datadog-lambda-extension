@@ -43,7 +43,7 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{agent::LogsAgent, flusher::LogsFlusher},
+    logs::{agent::LogsAgent, aggregator_service::{AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService}, flusher::LogsFlusher},
     metrics::enhanced::lambda::Lambda as enhanced_metrics,
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
@@ -367,11 +367,23 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
+    let logs_aggr_init_start_time = Instant::now();
+    let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::new_default();
+    debug!(
+        "Logs aggregator created in {:} microseconds",
+        logs_aggr_init_start_time
+            .elapsed()
+            .as_micros()
+            .to_string()
+    );
+    start_logs_aggregator(logs_aggr_service);
+
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
         Arc::clone(&api_key_factory),
         &tags_provider,
         event_bus.get_sender_copy(),
+        logs_aggr_handle,
     );
 
     let metrics_aggr_init_start_time = Instant::now();
@@ -904,12 +916,13 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
+    logs_aggr_handle: LogsAggregatorHandle,
 ) -> (Sender<TelemetryEvent>, LogsFlusher) {
-    let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
+    let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus, logs_aggr_handle.clone());
     let logs_agent_channel = logs_agent.get_sender_copy();
     let logs_flusher = LogsFlusher::new(
         api_key_factory,
-        Arc::clone(&logs_agent.aggregator),
+        logs_aggr_handle,
         config.clone(),
     );
     tokio::spawn(async move {
@@ -1102,6 +1115,12 @@ fn send_config_issue_metric(issue_reasons: &[String], lambda_enhanced_metrics: &
 }
 
 fn start_dogstatsd_aggregator(aggr_service: MetricsAggregatorService) {
+    tokio::spawn(async move {
+        aggr_service.run().await;
+    });
+}
+
+fn start_logs_aggregator(aggr_service: LogsAggregatorService) {
     tokio::spawn(async move {
         aggr_service.run().await;
     });
