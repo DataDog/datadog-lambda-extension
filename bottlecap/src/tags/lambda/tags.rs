@@ -45,7 +45,7 @@ const FUNCTION_TAGS_KEY: &str = "_dd.tags.function";
 // TODO(astuyve) decide what to do with the version
 const EXTENSION_VERSION_KEY: &str = "dd_extension_version";
 // TODO(duncanista) figure out a better way to not hardcode this
-pub const EXTENSION_VERSION: &str = "86-next";
+pub const EXTENSION_VERSION: &str = "87-next";
 
 const REGION_KEY: &str = "region";
 const ACCOUNT_ID_KEY: &str = "account_id";
@@ -127,10 +127,10 @@ fn tags_from_env(
         tags_map.extend(config.tags.clone());
     }
 
-    // The value of _dd.compute_stats is the opposite of config.compute_trace_stats.
-    // "config.compute_trace_stats == true" means computing stats on the extension side,
+    // The value of _dd.compute_stats is the opposite of config.compute_trace_stats_on_extension.
+    // "config.compute_trace_stats_on_extension == true" means computing stats on the extension side,
     // so we set _dd.compute_stats to 0 so stats won't be computed on the backend side.
-    let compute_stats = i32::from(!config.compute_trace_stats);
+    let compute_stats = i32::from(!config.compute_trace_stats_on_extension);
     tags_map.insert(COMPUTE_STATS_KEY.to_string(), compute_stats.to_string());
 
     tags_map

@@ -55,7 +55,7 @@ ustr = { version = "1.0.0", default-features = false }
 # datadog_fips::reqwest_adapter::create_reqwest_client_builder. An example can
 # be found in the clippy.toml file adjacent to this Cargo.toml.
 datadog-protos = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "c89b58e5784b985819baf11f13f7d35876741222"}
-ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/" }
+ddsketch-agent = { version = "0.1.0", default-features = false, git = "https://github.com/DataDog/saluki/", rev = "c89b58e5784b985819baf11f13f7d35876741222"}
 ddcommon = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" }
 datadog-trace-protobuf = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50"  }
 datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50" , features = ["mini_agent"] }
@@ -63,7 +63,7 @@ datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "9405db9cb4ef733f3954c3ee77ce71a502e98e50"  }
 dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "b0b0cb9310d8d8f2038c00a46e3267e21dc3e287", default-features = false }
 datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7", default-features = false }
-libddwaf = { version = "1.26.0", git = "https://github.com/DataDog/libddwaf-rust", rev = "1d57bf0ca49782723e556ba327ee7f378978aaa7", default-features = false, features = ["serde", "dynamic"] }
+libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
 figment = { version = "0.10", default-features = false, features = ["yaml", "env", "test"] }
@@ -83,10 +83,11 @@ name = "bottlecap"
 opt-level = "z"  # Optimize for size.
 lto = true
 codegen-units = 1
-strip = "debuginfo"
+strip = true
 panic = "abort"
 
 [profile.release-alpine-arm64-fips]
+strip = true
 inherits = "release"
 # Unfortunately opt-level "z" does not work for building aws-lc-fips-sys on
 # Alpine for ARM with FIPS enabled.

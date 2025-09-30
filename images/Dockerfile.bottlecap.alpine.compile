@@ -4,8 +4,8 @@ ARG PLATFORM
 ARG FIPS
 
 # Install dependencies
-RUN apk add --no-cache bash build-base clang-libclang cmake curl go \
-    linux-headers perl unzip
+RUN apk add --no-cache bash build-base clang clang-libclang compiler-rt cmake \
+                       curl go linux-headers perl unzip
 
 SHELL ["/bin/bash", "-c"]
 
@@ -24,12 +24,6 @@ ENV PATH="${PATH}:/root/.cargo/bin"
 
 # Build the binary
 ENV RUSTFLAGS="-Cpanic=abort"
-# Added -Ctarget-feature=-crt-static for alpine: the default MUSL target is
-# configured to produce fully static binaries, hence incapable of dynamically
-# loading libraries. The libddwaf crate uses `bindgen` which by default
-# dynamically loads `libclang`, and the `static` feature is tricky to get
-# working on alpine due to how it packages the static version of libLLVM.
-ENV RUSTFLAGS="${RUSTFLAGS} -Ctarget-feature=-crt-static"
 
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/root/.cargo/git \
@@ -44,12 +38,15 @@ RUN --mount=type=cache,target=/root/.cargo/git \
     else \
         export FEATURES=default; \
     fi; \
-    # Explicitly NOT passing `--target` as this makes the `RUSTFLAGS` (from any
-    # source) not apply to `build.rs` compilation, which in turns means
-    # `libddwaf`'s builder fails to build because on MUSL platforms it can only
-    # work with `-Ctarget-feature=-crt-runtime` being specified. There is
-    # currently no way to set `RUSTFLAGS` for `build.rs` compilation if
-    # `--target` is passed (see: https://github.com/rust-lang/cargo/issues/4423).
+    if [ "${PLATFORM}" = "x86_64" ]; then \
+        # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
+        # this is not presented to the linker by default on this platform, so we force it in.
+        export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
+    fi; \
+    # We use a wrapper to allow `libddwaf-sys`' build.rs to be compiled with
+    # -Ctarget-feature=-crt-static so that it is capable of dynamically loading
+    # libclang; while still building bottlecap with a static CRT.
+    RUSTC_WRAPPER=/tmp/dd/.cargo/musl.rustc-wrapper \
     cargo +stable build --verbose --locked --no-default-features \
         --features="${FEATURES}" \
         --profile="${PROFILE:-release}" && \
