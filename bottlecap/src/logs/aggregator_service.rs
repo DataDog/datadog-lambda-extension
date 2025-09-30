@@ -108,7 +108,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_aggregator_service_insert_and_flush() {
-        let (mut service, handle) = AggregatorService::new_default();
+        let (service, handle) = AggregatorService::new_default();
         
         // Spawn the service
         let service_handle = tokio::spawn(async move {
@@ -148,7 +148,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_aggregator_service_multiple_handles() {
-        let (mut service, handle1) = AggregatorService::new_default();
+        let (service, handle1) = AggregatorService::new_default();
         let handle2 = handle1.clone();
         
         // Spawn the service
@@ -192,7 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_aggregator_service_empty_flush() {
-        let (mut service, handle) = AggregatorService::new_default();
+        let (service, handle) = AggregatorService::new_default();
         
         // Spawn the service
         let service_handle = tokio::spawn(async move {

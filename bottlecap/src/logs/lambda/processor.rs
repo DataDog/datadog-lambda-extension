@@ -734,325 +734,387 @@ mod tests {
         );
     }
 
-    // // process
-    // #[tokio::test]
-    // async fn test_process() {
-    //     let config = Arc::new(config::Config {
-    //         service: Some("test-service".to_string()),
-    //         tags: HashMap::from([("test".to_string(), "tags".to_string())]),
-    //         ..config::Config::default()
-    //     });
+    // process
+    #[tokio::test]
+    async fn test_process() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
 
-    //     let tags_provider = Arc::new(provider::Provider::new(
-    //         Arc::clone(&config),
-    //         LAMBDA_RUNTIME_SLUG.to_string(),
-    //         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-    //     ));
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
 
-    //     let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
 
-    //     let mut processor =
-    //         {
-    //             let (_, aggregator_handle) = AggregatorService::new_default();
-    //             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone(), aggregator_handle)
-    //         };
+        // Spawn the aggregator service
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
 
-    //     let event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::PlatformStart {
-    //             request_id: "test-request-id".to_string(),
-    //             version: Some("test".to_string()),
-    //         },
-    //     };
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider), 
+            Arc::clone(&config), 
+            tx.clone(), 
+            aggregator_handle.clone()
+        );
 
-    //     processor.process(event.clone()).await;
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
 
-    //     let mut aggregator_lock = aggregator.lock().await;
-    //     let batch = aggregator_lock.get_batch();
-    //     let log = IntakeLog {
-    //         message: Message {
-    //             message: "START RequestId: test-request-id Version: test".to_string(),
-    //             lambda: Lambda {
-    //                 arn: "test-arn".to_string(),
-    //                 request_id: Some("test-request-id".to_string()),
-    //             },
-    //             timestamp: 1_673_061_827_000,
-    //             status: "info".to_string(),
-    //         },
-    //         hostname: "test-arn".to_string(),
-    //         source: LAMBDA_RUNTIME_SLUG.to_string(),
-    //         service: "test-service".to_string(),
-    //         tags: tags_provider.get_tags_string(),
-    //     };
-    //     let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
-    //     assert_eq!(batch, serialized_log.as_bytes());
-    // }
+        processor.process(event.clone()).await;
 
-    // #[tokio::test]
-    // async fn test_process_logs_disabled() {
-    //     let config = Arc::new(config::Config {
-    //         service: Some("test-service".to_string()),
-    //         tags: HashMap::from([("test".to_string(), "tags".to_string())]),
-    //         serverless_logs_enabled: false,
-    //         ..config::Config::default()
-    //     });
+        // Flush the aggregator to get the batches
+        let batches = aggregator_handle.flush().await.unwrap();
+        assert_eq!(batches.len(), 1);
+        
+        let log = IntakeLog {
+            message: Message {
+                message: "START RequestId: test-request-id Version: test".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string(),
+        };
+        let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
+        assert_eq!(batches[0], serialized_log.as_bytes());
 
-    //     let tags_provider = Arc::new(provider::Provider::new(
-    //         Arc::clone(&config),
-    //         LAMBDA_RUNTIME_SLUG.to_string(),
-    //         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-    //     ));
+        // Shutdown the service
+        aggregator_handle.shutdown().unwrap();
+        let _ = service_handle.await;
+    }
 
-    //     let (tx, _rx) = tokio::sync::mpsc::channel(2);
+    #[tokio::test]
+    async fn test_process_logs_disabled() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            serverless_logs_enabled: false,
+            ..config::Config::default()
+        });
 
-    //     let mut processor =
-    //         {
-    //             let (_, aggregator_handle) = AggregatorService::new_default();
-    //             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone(), aggregator_handle)
-    //         };
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
 
-    //     let event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::PlatformStart {
-    //             request_id: "test-request-id".to_string(),
-    //             version: Some("test".to_string()),
-    //         },
-    //     };
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
 
-    //     processor.process(event.clone()).await;
+        // Spawn the aggregator service
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
 
-    //     let mut aggregator_lock = aggregator.lock().await;
-    //     let batch = aggregator_lock.get_batch();
-    //     assert_eq!(batch.len(), 0);
-    // }
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider), 
+            Arc::clone(&config), 
+            tx.clone(), 
+            aggregator_handle.clone()
+        );
 
-    // #[tokio::test]
-    // async fn test_process_log_with_no_request_id() {
-    //     let config = Arc::new(config::Config {
-    //         service: Some("test-service".to_string()),
-    //         tags: HashMap::from([("test".to_string(), "tags".to_string())]),
-    //         ..config::Config::default()
-    //     });
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
 
-    //     let tags_provider = Arc::new(provider::Provider::new(
-    //         Arc::clone(&config),
-    //         LAMBDA_RUNTIME_SLUG.to_string(),
-    //         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-    //     ));
+        processor.process(event.clone()).await;
 
-    //     let (tx, _rx) = tokio::sync::mpsc::channel(2);
-    //     let (_, aggregator_handle) = AggregatorService::new_default();
+        // Flush the aggregator to get the batches
+        let batches = aggregator_handle.flush().await.unwrap();
+        assert!(batches.is_empty());
 
-    //     let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), aggregator_handle);
+        // Shutdown the service
+        aggregator_handle.shutdown().unwrap();
+        let _ = service_handle.await;
+    }
 
-    //     let event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::Function(Value::String("test-function".to_string())),
-    //     };
+    #[tokio::test]
+    async fn test_process_log_with_no_request_id() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
 
-    //     processor.process(event.clone()).await;
-    //     assert_eq!(processor.orphan_logs.len(), 1);
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
 
-    //     let mut aggregator_lock = aggregator.lock().await;
-    //     let batch = aggregator_lock.get_batch();
-    //     assert!(batch.is_empty());
-    // }
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
 
-    // #[tokio::test]
-    // async fn test_process_logs_after_seeing_request_id() {
-    //     let config = Arc::new(config::Config {
-    //         service: Some("test-service".to_string()),
-    //         tags: HashMap::from([("test".to_string(), "tags".to_string())]),
-    //         ..config::Config::default()
-    //     });
+        // Spawn the aggregator service
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
 
-    //     let tags_provider = Arc::new(provider::Provider::new(
-    //         Arc::clone(&config),
-    //         LAMBDA_RUNTIME_SLUG.to_string(),
-    //         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-    //     ));
+        let mut processor = LambdaProcessor::new(
+            tags_provider, 
+            Arc::clone(&config), 
+            tx.clone(), 
+            aggregator_handle.clone()
+        );
 
-    //     let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
+        };
 
-    //     let mut processor =
-    //         {
-    //             let (_, aggregator_handle) = AggregatorService::new_default();
-    //             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone(), aggregator_handle)
-    //         };
+        processor.process(event.clone()).await;
+        assert_eq!(processor.orphan_logs.len(), 1);
 
-    //     let start_event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::PlatformStart {
-    //             request_id: "test-request-id".to_string(),
-    //             version: Some("test".to_string()),
-    //         },
-    //     };
+        // Flush the aggregator to get the batches
+        let batches = aggregator_handle.flush().await.unwrap();
+        assert!(batches.is_empty());
 
-    //     processor.process(start_event.clone()).await;
-    //     assert_eq!(
-    //         processor.invocation_context.request_id,
-    //         "test-request-id".to_string()
-    //     );
+        // Shutdown the service
+        aggregator_handle.shutdown().unwrap();
+        let _ = service_handle.await;
+    }
 
-    //     // This could be any event that doesn't have a `request_id`
-    //     let event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::Function(Value::String("test-function".to_string())),
-    //     };
+    #[tokio::test]
+    async fn test_process_logs_after_seeing_request_id() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
 
-    //     processor.process(event.clone()).await;
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
 
-    //     // Verify aggregator logs
-    //     let mut aggregator_lock = aggregator.lock().await;
-    //     let batch = aggregator_lock.get_batch();
-    //     let start_log = IntakeLog {
-    //         message: Message {
-    //             message: "START RequestId: test-request-id Version: test".to_string(),
-    //             lambda: Lambda {
-    //                 arn: "test-arn".to_string(),
-    //                 request_id: Some("test-request-id".to_string()),
-    //             },
-    //             timestamp: 1_673_061_827_000,
-    //             status: "info".to_string(),
-    //         },
-    //         hostname: "test-arn".to_string(),
-    //         source: LAMBDA_RUNTIME_SLUG.to_string(),
-    //         service: "test-service".to_string(),
-    //         tags: tags_provider.get_tags_string(),
-    //     };
-    //     let function_log = IntakeLog {
-    //         message: Message {
-    //             message: "test-function".to_string(),
-    //             lambda: Lambda {
-    //                 arn: "test-arn".to_string(),
-    //                 request_id: Some("test-request-id".to_string()),
-    //             },
-    //             timestamp: 1_673_061_827_000,
-    //             status: "info".to_string(),
-    //         },
-    //         hostname: "test-arn".to_string(),
-    //         source: LAMBDA_RUNTIME_SLUG.to_string(),
-    //         service: "test-service".to_string(),
-    //         tags: tags_provider.get_tags_string(),
-    //     };
-    //     let serialized_log = format!(
-    //         "[{},{}]",
-    //         serde_json::to_string(&start_log).unwrap(),
-    //         serde_json::to_string(&function_log).unwrap()
-    //     );
-    //     assert_eq!(batch, serialized_log.as_bytes());
-    // }
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
 
-    // #[tokio::test]
-    // async fn test_process_logs_structured_ddtags() {
-    //     let config = Arc::new(config::Config {
-    //         service: Some("test-service".to_string()),
-    //         tags: HashMap::from([("test".to_string(), "tags".to_string())]),
-    //         ..config::Config::default()
-    //     });
+        // Spawn the aggregator service
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
 
-    //     let tags_provider = Arc::new(provider::Provider::new(
-    //         Arc::clone(&config),
-    //         LAMBDA_RUNTIME_SLUG.to_string(),
-    //         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-    //     ));
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider), 
+            Arc::clone(&config), 
+            tx.clone(), 
+            aggregator_handle.clone()
+        );
 
-    //     let (tx, _rx) = tokio::sync::mpsc::channel(2);
-    //     let mut processor =
-    //         LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
-    //     let start_event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::PlatformStart {
-    //             request_id: "test-request-id".to_string(),
-    //             version: Some("test".to_string()),
-    //         },
-    //     };
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
 
-    //     let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
-    //     processor.get_intake_log(start_lambda_message).unwrap();
-    //     let event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details": "my-structured-message","ddtags":"added_tag1:added_value1,added_tag2:added_value2"}}"#.to_string())),
-    //     };
+        processor.process(start_event.clone()).await;
+        assert_eq!(
+            processor.invocation_context.request_id,
+            "test-request-id".to_string()
+        );
 
-    //     let lambda_message = processor.get_message(event.clone()).await.unwrap();
-    //     let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        // This could be any event that doesn't have a `request_id`
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
+        };
 
-    //     assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
-    //     assert_eq!(intake_log.hostname, "test-arn".to_string());
-    //     assert_eq!(intake_log.service, "test-service".to_string());
-    //     assert!(intake_log.tags.contains("added_tag1:added_value1"));
-    //     let function_log = IntakeLog {
-    //         message: Message {
-    //             message: r#"{"custom_details":"my-structured-message"}"#.to_string(),
-    //             lambda: Lambda {
-    //                 arn: "test-arn".to_string(),
-    //                 request_id: Some("test-request-id".to_string()),
-    //             },
-    //             timestamp: 1_673_061_827_000,
-    //             status: "info".to_string(),
-    //         },
-    //         hostname: "test-arn".to_string(),
-    //         source: LAMBDA_RUNTIME_SLUG.to_string(),
-    //         service: "test-service".to_string(),
-    //         tags: tags_provider.get_tags_string()
-    //             + ",added_tag1:added_value1,added_tag2:added_value2",
-    //     };
-    //     assert_eq!(intake_log, function_log);
-    // }
-    // #[tokio::test]
-    // async fn test_process_logs_structured_no_ddtags() {
-    //     let config = Arc::new(config::Config {
-    //         service: Some("test-service".to_string()),
-    //         tags: HashMap::from([("test".to_string(), "tags".to_string())]),
-    //         ..config::Config::default()
-    //     });
+        processor.process(event.clone()).await;
 
-    //     let tags_provider = Arc::new(provider::Provider::new(
-    //         Arc::clone(&config),
-    //         LAMBDA_RUNTIME_SLUG.to_string(),
-    //         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
-    //     ));
+        // Flush the aggregator to get the batches
+        let batches = aggregator_handle.flush().await.unwrap();
+        assert_eq!(batches.len(), 1);
+        
+        let start_log = IntakeLog {
+            message: Message {
+                message: "START RequestId: test-request-id Version: test".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string(),
+        };
+        let function_log = IntakeLog {
+            message: Message {
+                message: "test-function".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string(),
+        };
+        let serialized_log = format!(
+            "[{},{}]",
+            serde_json::to_string(&start_log).unwrap(),
+            serde_json::to_string(&function_log).unwrap()
+        );
+        assert_eq!(batches[0], serialized_log.as_bytes());
 
-    //     let (tx, _rx) = tokio::sync::mpsc::channel(2);
-    //     let mut processor =
-    //         LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
-    //     let start_event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::PlatformStart {
-    //             request_id: "test-request-id".to_string(),
-    //             version: Some("test".to_string()),
-    //         },
-    //     };
+        // Shutdown the service
+        aggregator_handle.shutdown().unwrap();
+        let _ = service_handle.await;
+    }
 
-    //     let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
-    //     processor.get_intake_log(start_lambda_message).unwrap();
-    //     let event = TelemetryEvent {
-    //         time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
-    //         record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string())),
-    //     };
+    #[tokio::test]
+    async fn test_process_logs_structured_ddtags() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
 
-    //     let lambda_message = processor.get_message(event.clone()).await.unwrap();
-    //     let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
 
-    //     assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
-    //     assert_eq!(intake_log.hostname, "test-arn".to_string());
-    //     assert_eq!(intake_log.service, "test-service".to_string());
-    //     let function_log = IntakeLog {
-    //         message: Message {
-    //             message: r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string(),
-    //             lambda: Lambda {
-    //                 arn: "test-arn".to_string(),
-    //                 request_id: Some("test-request-id".to_string()),
-    //             },
-    //             timestamp: 1_673_061_827_000,
-    //             status: "info".to_string(),
-    //         },
-    //         hostname: "test-arn".to_string(),
-    //         source: LAMBDA_RUNTIME_SLUG.to_string(),
-    //         service: "test-service".to_string(),
-    //         tags: tags_provider.get_tags_string(),
-    //     };
-    //     assert_eq!(intake_log, function_log);
-    // }
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (_, aggregator_handle) = AggregatorService::new_default();
+        
+        let mut processor = LambdaProcessor::new(
+            tags_provider.clone(), 
+            Arc::clone(&config), 
+            tx.clone(),
+            aggregator_handle
+        );
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+
+        let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
+        processor.get_intake_log(start_lambda_message).unwrap();
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details": "my-structured-message","ddtags":"added_tag1:added_value1,added_tag2:added_value2"}}"#.to_string())),
+        };
+
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        assert!(intake_log.tags.contains("added_tag1:added_value1"));
+        let function_log = IntakeLog {
+            message: Message {
+                message: r#"{"custom_details":"my-structured-message"}"#.to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string()
+                + ",added_tag1:added_value1,added_tag2:added_value2",
+        };
+        assert_eq!(intake_log, function_log);
+    }
+    #[tokio::test]
+    async fn test_process_logs_structured_no_ddtags() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (_, aggregator_handle) = AggregatorService::new_default();
+        
+        let mut processor = LambdaProcessor::new(
+            tags_provider.clone(), 
+            Arc::clone(&config), 
+            tx.clone(),
+            aggregator_handle
+        );
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+
+        let start_lambda_message = processor.get_message(start_event.clone()).await.unwrap();
+        processor.get_intake_log(start_lambda_message).unwrap();
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String(r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string())),
+        };
+
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        let function_log = IntakeLog {
+            message: Message {
+                message: r#"{"message":{"custom_details":"my-structured-message"},"my_other_details":"included"}"#.to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_061_827_000,
+                status: "info".to_string(),
+            },
+            hostname: "test-arn".to_string(),
+            source: LAMBDA_RUNTIME_SLUG.to_string(),
+            service: "test-service".to_string(),
+            tags: tags_provider.get_tags_string(),
+        };
+        assert_eq!(intake_log, function_log);
+    }
 }
