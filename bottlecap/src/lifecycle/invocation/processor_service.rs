@@ -10,12 +10,14 @@ use tracing::{debug, error};
 use crate::{
     config::{self, aws::AwsConfig},
     extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
-    lifecycle::invocation::{context::{Context, ReparentingInfo}, processor::Processor},
+    lifecycle::invocation::{
+        context::{Context, ReparentingInfo},
+        processor::Processor,
+    },
     metrics::enhanced::lambda::Lambda as EnhancedMetrics,
     tags::provider,
     traces::{
-        context::SpanContext,
-        propagation::DatadogCompositePropagator,
+        context::SpanContext, propagation::DatadogCompositePropagator,
         trace_processor::SendingTraceProcessor,
     },
 };
@@ -74,18 +76,21 @@ pub enum ProcessorCommand {
         parent_id: u64,
     },
     GetReparentingInfo {
-        response: oneshot::Sender<Result<std::collections::VecDeque<ReparentingInfo>, ProcessorError>>,
+        response:
+            oneshot::Sender<Result<std::collections::VecDeque<ReparentingInfo>, ProcessorError>>,
     },
     UpdateReparenting {
         reparenting_info: std::collections::VecDeque<ReparentingInfo>,
-        response: oneshot::Sender<Result<Vec<crate::lifecycle::invocation::context::Context>, ProcessorError>>,
+        response: oneshot::Sender<
+            Result<Vec<crate::lifecycle::invocation::context::Context>, ProcessorError>,
+        >,
     },
     SetColdStartSpanTraceId {
         trace_id: u64,
         response: oneshot::Sender<Result<Option<u64>, ProcessorError>>,
     },
     AddTracerSpan {
-        span: Span,
+        span: Box<Span>,
     },
     OnOutOfMemoryError {
         timestamp: i64,
@@ -105,12 +110,18 @@ pub struct InvocationProcessorHandle {
 }
 
 impl InvocationProcessorHandle {
-    pub fn on_invoke_event(&self, request_id: String) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+    pub fn on_invoke_event(
+        &self,
+        request_id: String,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::InvokeEvent { request_id })
     }
 
-    pub fn on_platform_init_start(&self, time: DateTime<Utc>) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+    pub fn on_platform_init_start(
+        &self,
+        time: DateTime<Utc>,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::PlatformInitStart { time })
     }
@@ -121,12 +132,11 @@ impl InvocationProcessorHandle {
         duration_ms: f64,
         timestamp: i64,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
-        self.sender
-            .send(ProcessorCommand::PlatformInitReport {
-                init_type,
-                duration_ms,
-                timestamp,
-            })
+        self.sender.send(ProcessorCommand::PlatformInitReport {
+            init_type,
+            duration_ms,
+            timestamp,
+        })
     }
 
     pub fn on_platform_start(
@@ -135,12 +145,10 @@ impl InvocationProcessorHandle {
         time: DateTime<Utc>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
-            .send(ProcessorCommand::PlatformStart {
-                request_id,
-                time,
-            })
+            .send(ProcessorCommand::PlatformStart { request_id, time })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn on_platform_runtime_done(
         &self,
         request_id: String,
@@ -151,16 +159,15 @@ impl InvocationProcessorHandle {
         trace_sender: Arc<SendingTraceProcessor>,
         timestamp: i64,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
-        self.sender
-            .send(ProcessorCommand::PlatformRuntimeDone {
-                request_id,
-                metrics,
-                status,
-                error_type,
-                tags_provider,
-                trace_sender,
-                timestamp,
-            })
+        self.sender.send(ProcessorCommand::PlatformRuntimeDone {
+            request_id,
+            metrics,
+            status,
+            error_type,
+            tags_provider,
+            trace_sender,
+            timestamp,
+        })
     }
 
     pub fn on_platform_report(
@@ -169,12 +176,11 @@ impl InvocationProcessorHandle {
         metrics: ReportMetrics,
         timestamp: i64,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
-        self.sender
-            .send(ProcessorCommand::PlatformReport {
-                request_id,
-                metrics,
-                timestamp,
-            })
+        self.sender.send(ProcessorCommand::PlatformReport {
+            request_id,
+            metrics,
+            timestamp,
+        })
     }
 
     pub fn on_universal_instrumentation_start(
@@ -207,19 +213,22 @@ impl InvocationProcessorHandle {
         span_id: u64,
         parent_id: u64,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
-        self.sender
-            .send(ProcessorCommand::AddReparenting {
-                request_id,
-                span_id,
-                parent_id,
-            })
+        self.sender.send(ProcessorCommand::AddReparenting {
+            request_id,
+            span_id,
+            parent_id,
+        })
     }
 
-    pub async fn get_reparenting_info(&self) -> Result<std::collections::VecDeque<ReparentingInfo>, ProcessorError> {
+    pub async fn get_reparenting_info(
+        &self,
+    ) -> Result<std::collections::VecDeque<ReparentingInfo>, ProcessorError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         self.sender
-            .send(ProcessorCommand::GetReparentingInfo { response: response_tx })
+            .send(ProcessorCommand::GetReparentingInfo {
+                response: response_tx,
+            })
             .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
 
         response_rx
@@ -245,6 +254,7 @@ impl InvocationProcessorHandle {
             .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?
     }
 
+    #[must_use]
     pub fn extract_span_context(
         headers: &HashMap<String, String>,
         payload_value: &Value,
@@ -253,7 +263,10 @@ impl InvocationProcessorHandle {
         Processor::extract_span_context(headers, payload_value, propagator)
     }
 
-    pub async fn set_cold_start_span_trace_id(&self, trace_id: u64) -> Result<Option<u64>, ProcessorError> {
+    pub async fn set_cold_start_span_trace_id(
+        &self,
+        trace_id: u64,
+    ) -> Result<Option<u64>, ProcessorError> {
         let (response_tx, response_rx) = oneshot::channel();
 
         self.sender
@@ -268,23 +281,25 @@ impl InvocationProcessorHandle {
             .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?
     }
 
-    pub fn add_tracer_span(&self, span: Span) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
-        self.sender
-            .send(ProcessorCommand::AddTracerSpan {
-                span,
-            })
+    pub fn add_tracer_span(
+        &self,
+        span: Span,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender.send(ProcessorCommand::AddTracerSpan {
+            span: Box::new(span),
+        })
     }
 
-    pub fn on_out_of_memory_error(&self, timestamp: i64) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+    pub fn on_out_of_memory_error(
+        &self,
+        timestamp: i64,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
-            .send(ProcessorCommand::OnOutOfMemoryError {
-                timestamp,
-            })
+            .send(ProcessorCommand::OnOutOfMemoryError { timestamp })
     }
 
     pub fn on_shutdown_event(&self) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
-        self.sender
-            .send(ProcessorCommand::OnShutdownEvent)
+        self.sender.send(ProcessorCommand::OnShutdownEvent)
     }
 
     pub fn send_ctx_spans(
@@ -293,15 +308,14 @@ impl InvocationProcessorHandle {
         trace_sender: &Arc<SendingTraceProcessor>,
         context: Context,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
-        self.sender
-            .send(ProcessorCommand::SendCtxSpans {
-                tags_provider: Arc::clone(tags_provider),
-                trace_sender: Arc::clone(trace_sender),
-                context,
-            })
+        self.sender.send(ProcessorCommand::SendCtxSpans {
+            tags_provider: Arc::clone(tags_provider),
+            trace_sender: Arc::clone(trace_sender),
+            context,
+        })
     }
 
-    pub async fn shutdown(&self) -> Result<(), ProcessorError> {
+    pub fn shutdown(&self) -> Result<(), ProcessorError> {
         self.sender
             .send(ProcessorCommand::Shutdown)
             .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
@@ -315,6 +329,7 @@ pub struct InvocationProcessorService {
 }
 
 impl InvocationProcessorService {
+    #[must_use]
     pub fn new(
         tags_provider: Arc<provider::Provider>,
         config: Arc<config::Config>,
@@ -333,11 +348,15 @@ impl InvocationProcessorService {
         );
 
         let handle = InvocationProcessorHandle { sender };
-        let service = Self { processor, receiver };
+        let service = Self {
+            processor,
+            receiver,
+        };
 
         (handle, service)
     }
 
+    #[allow(clippy::too_many_lines)]
     pub async fn run(mut self) {
         debug!("InvocationProcessorService starting");
 
@@ -354,12 +373,10 @@ impl InvocationProcessorService {
                     duration_ms,
                     timestamp,
                 } => {
-                    self.processor.on_platform_init_report(init_type, duration_ms, timestamp);
+                    self.processor
+                        .on_platform_init_report(init_type, duration_ms, timestamp);
                 }
-                ProcessorCommand::PlatformStart {
-                    request_id,
-                    time,
-                } => {
+                ProcessorCommand::PlatformStart { request_id, time } => {
                     self.processor.on_platform_start(request_id, time);
                 }
                 ProcessorCommand::PlatformRuntimeDone {
@@ -388,26 +405,30 @@ impl InvocationProcessorService {
                     metrics,
                     timestamp,
                 } => {
-                    self.processor.on_platform_report(&request_id, metrics, timestamp);
+                    self.processor
+                        .on_platform_report(&request_id, metrics, timestamp);
                 }
                 ProcessorCommand::UniversalInstrumentationStart {
                     headers,
                     payload_value,
                 } => {
-                    self.processor.on_universal_instrumentation_start(headers, payload_value);
+                    self.processor
+                        .on_universal_instrumentation_start(headers, payload_value);
                 }
                 ProcessorCommand::UniversalInstrumentationEnd {
                     headers,
                     payload_value,
                 } => {
-                    self.processor.on_universal_instrumentation_end(headers, payload_value);
+                    self.processor
+                        .on_universal_instrumentation_end(headers, payload_value);
                 }
                 ProcessorCommand::AddReparenting {
                     request_id,
                     span_id,
                     parent_id,
                 } => {
-                    self.processor.add_reparenting(request_id, span_id, parent_id);
+                    self.processor
+                        .add_reparenting(request_id, span_id, parent_id);
                 }
                 ProcessorCommand::GetReparentingInfo { response } => {
                     let result = Ok(self.processor.get_reparenting_info());
@@ -438,7 +459,9 @@ impl InvocationProcessorService {
                     trace_sender,
                     context,
                 } => {
-                    self.processor.send_ctx_spans(&tags_provider, &trace_sender, context).await;
+                    self.processor
+                        .send_ctx_spans(&tags_provider, &trace_sender, context)
+                        .await;
                 }
                 ProcessorCommand::Shutdown => {
                     debug!("InvocationProcessorService shutting down");
@@ -449,5 +472,4 @@ impl InvocationProcessorService {
 
         debug!("InvocationProcessorService stopped");
     }
-
 }

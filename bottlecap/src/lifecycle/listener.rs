@@ -51,6 +51,7 @@ type ListenerState = (
 );
 
 impl Listener {
+    #[must_use]
     pub fn new(
         invocation_processor: InvocationProcessorHandle,
         propagator: Arc<DatadogCompositePropagator>,
@@ -132,7 +133,7 @@ impl Listener {
         let extracted_span_context = InvocationProcessorHandle::extract_span_context(
             &headers,
             &payload_value,
-            propagator.clone()
+            propagator.clone(),
         );
 
         if let Some(sp) = &extracted_span_context {
@@ -141,8 +142,7 @@ impl Listener {
 
         let mut join_set = tasks.lock().await;
         join_set.spawn(async move {
-            Self::universal_instrumentation_start(headers, payload_value, invocation_processor)
-                .await;
+            Self::universal_instrumentation_start(headers, payload_value, invocation_processor);
         });
 
         (StatusCode::OK, response_headers, json!({}).to_string()).into_response()
@@ -162,7 +162,7 @@ impl Listener {
                 }
             };
 
-            Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await;
+            Self::universal_instrumentation_end(&parts.headers, body, invocation_processor);
         });
 
         (StatusCode::OK, json!({}).to_string()).into_response()
@@ -174,15 +174,14 @@ impl Listener {
         (StatusCode::OK, json!({}).to_string()).into_response()
     }
 
-    pub async fn universal_instrumentation_start(
+    pub fn universal_instrumentation_start(
         headers: HashMap<String, String>,
         payload_value: Value,
         invocation_processor: InvocationProcessorHandle,
     ) {
         debug!("Received start invocation request");
 
-        let _ = invocation_processor
-            .on_universal_instrumentation_start(headers, payload_value);
+        let _ = invocation_processor.on_universal_instrumentation_start(headers, payload_value);
     }
 
     // If a `SpanContext` exists, then tell the tracer to use it.
@@ -222,7 +221,7 @@ impl Listener {
         }
     }
 
-    pub async fn universal_instrumentation_end(
+    pub fn universal_instrumentation_end(
         headers: &HeaderMap,
         body: Bytes,
         invocation_processor: InvocationProcessorHandle,
@@ -232,7 +231,6 @@ impl Listener {
         let headers = headers_to_map(headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
 
-        let _ = invocation_processor
-            .on_universal_instrumentation_end(headers, payload_value);
+        let _ = invocation_processor.on_universal_instrumentation_end(headers, payload_value);
     }
 }

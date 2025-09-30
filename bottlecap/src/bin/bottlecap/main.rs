@@ -500,7 +500,7 @@ async fn extension_loop_active(
         extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
-    handle_next_invocation(next_lambda_response, invocation_processor_handle.clone()).await;
+    handle_next_invocation(next_lambda_response, invocation_processor_handle.clone());
     loop {
         let maybe_shutdown_event;
 
@@ -515,7 +515,7 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()) {
                                 if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                     break 'flush_end;
                                 }
@@ -553,7 +553,7 @@ async fn extension_loop_active(
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
                 maybe_shutdown_event =
-                    handle_next_invocation(next_response, invocation_processor_handle.clone()).await;
+                    handle_next_invocation(next_response, invocation_processor_handle.clone());
             }
             FlushDecision::Continuous | FlushDecision::Periodic | FlushDecision::Dont => {
                 match current_flush_decision {
@@ -637,12 +637,12 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         next_response = &mut next_lambda_response => {
-                            maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor_handle.clone()).await;
+                            maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor_handle.clone());
                             // Need to break here to re-call next
                             break 'next_invocation;
                         }
                         Some(event) = event_bus.rx.recv() => {
-                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
+                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone());
                         }
                         _ = race_flush_interval.tick() => {
                             if flush_control.flush_strategy == FlushStrategy::Default {
@@ -684,7 +684,7 @@ async fn extension_loop_active(
                             debug!("Received tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
+                    handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone());
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
@@ -758,7 +758,8 @@ async fn blocking_flush_all(
     race_flush_interval.reset();
 }
 
-async fn handle_event_bus_event(
+#[allow(clippy::needless_pass_by_value)]
+fn handle_event_bus_event(
     event: Event,
     invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
@@ -769,27 +770,27 @@ async fn handle_event_bus_event(
 ) -> Option<TelemetryEvent> {
     match event {
         Event::OutOfMemory(event_timestamp) => {
-            invocation_processor_handle.on_out_of_memory_error(event_timestamp);
+            let _ = invocation_processor_handle.on_out_of_memory_error(event_timestamp);
         }
         Event::Telemetry(event) => {
             debug!("Telemetry event received: {:?}", event);
             match event.record {
                 TelemetryRecord::PlatformInitStart { .. } => {
-                    invocation_processor_handle.on_platform_init_start(event.time);
+                    let _ = invocation_processor_handle.on_platform_init_start(event.time);
                 }
                 TelemetryRecord::PlatformInitReport {
                     metrics,
                     initialization_type,
                     ..
                 } => {
-                    invocation_processor_handle.on_platform_init_report(
+                    let _ = invocation_processor_handle.on_platform_init_report(
                         initialization_type,
                         metrics.duration_ms,
                         event.time.timestamp(),
                     );
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
-                    invocation_processor_handle.on_platform_start(request_id, event.time);
+                    let _ = invocation_processor_handle.on_platform_start(request_id, event.time);
                 }
                 TelemetryRecord::PlatformRuntimeDone {
                     ref request_id,
@@ -798,7 +799,7 @@ async fn handle_event_bus_event(
                     ref error_type,
                     ..
                 } => {
-                    invocation_processor_handle.on_platform_runtime_done(
+                    let _ = invocation_processor_handle.on_platform_runtime_done(
                         request_id.clone(),
                         metrics,
                         status,
@@ -821,10 +822,10 @@ async fn handle_event_bus_event(
                     metrics,
                     ..
                 } => {
-                    invocation_processor_handle.on_platform_report(
+                    let _ = invocation_processor_handle.on_platform_report(
                         request_id.clone(),
                         metrics,
-                        event.time.timestamp()
+                        event.time.timestamp(),
                     );
                     return Some(event);
                 }
@@ -837,7 +838,8 @@ async fn handle_event_bus_event(
     None
 }
 
-async fn handle_next_invocation(
+#[allow(clippy::needless_pass_by_value)]
+fn handle_next_invocation(
     next_response: Result<NextEventResponse, ExtensionError>,
     invocation_processor_handle: InvocationProcessorHandle,
 ) -> NextEventResponse {
@@ -853,13 +855,13 @@ async fn handle_next_invocation(
                 deadline_ms,
                 invoked_function_arn.clone()
             );
-            invocation_processor_handle.on_invoke_event(request_id.into());
+            let _ = invocation_processor_handle.on_invoke_event(request_id.into());
         }
         Ok(NextEventResponse::Shutdown {
             ref shutdown_reason,
             deadline_ms,
         }) => {
-            invocation_processor_handle.on_shutdown_event();
+            let _ = invocation_processor_handle.on_shutdown_event();
             println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
         }
         Err(ref err) => {

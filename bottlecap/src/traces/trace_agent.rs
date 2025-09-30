@@ -499,7 +499,10 @@ impl TraceAgent {
                 // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
                 // span to the cold start span, and eventually send the cold start span.
                 if span.name == LAMBDA_LOAD_SPAN {
-                    match invocation_processor.set_cold_start_span_trace_id(span.trace_id).await {
+                    match invocation_processor
+                        .set_cold_start_span_trace_id(span.trace_id)
+                        .await
+                    {
                         Ok(Some(cold_start_span_id)) => {
                             span.parent_id = cold_start_span_id;
                         }
@@ -513,18 +516,24 @@ impl TraceAgent {
                 }
 
                 if span.resource == INVOCATION_SPAN_RESOURCE {
-                    invocation_processor.add_tracer_span(span.clone());
+                    let _ = invocation_processor.add_tracer_span(span.clone());
                 }
                 handle_reparenting(&mut reparenting_info, span);
             }
         }
 
-        match invocation_processor.update_reparenting(reparenting_info).await {
+        match invocation_processor
+            .update_reparenting(reparenting_info)
+            .await
+        {
             Ok(contexts_to_send) => {
                 for ctx_to_send in contexts_to_send {
                     debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
-                    invocation_processor
-                        .send_ctx_spans(&tags_provider, &trace_sender, ctx_to_send);
+                    let _ = invocation_processor.send_ctx_spans(
+                        &tags_provider,
+                        &trace_sender,
+                        ctx_to_send,
+                    );
                 }
             }
             Err(e) => {

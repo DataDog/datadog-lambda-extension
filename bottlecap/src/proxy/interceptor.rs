@@ -203,8 +203,7 @@ async fn invocation_next_proxy(
                     &intercepted_parts_clone,
                     &body,
                     Arc::clone(&propagator),
-                )
-                .await;
+                );
             }
         }
     });
@@ -251,7 +250,7 @@ async fn invocation_response_proxy(
             }
 
             if aws_config_clone.aws_lwa_proxy_lambda_runtime_api.is_some() {
-                lwa::process_invocation_response(&invocation_processor, &body).await;
+                lwa::process_invocation_response(&invocation_processor, &body);
             }
         }
     });
@@ -500,13 +499,14 @@ mod tests {
             exec_wrapper: None,
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
-            Arc::clone(&tags_provider),
-            Arc::clone(&config),
-            Arc::clone(&aws_config),
-            enhanced_metrics,
-            Arc::clone(&propagator),
-        )));
+        let (invocation_processor_handle, _invocation_processor_service) =
+            crate::lifecycle::invocation::processor_service::InvocationProcessorService::new(
+                Arc::clone(&tags_provider),
+                Arc::clone(&config),
+                Arc::clone(&aws_config),
+                enhanced_metrics,
+                Arc::clone(&propagator),
+            );
         let appsec_processor = match AppSecProcessor::new(&config) {
             Ok(p) => Some(Arc::new(TokioMutex::new(p))),
             Err(AppSecFeatureDisabled) => None,
@@ -520,7 +520,7 @@ mod tests {
 
         let proxy_handle = start(
             aws_config,
-            invocation_processor,
+            invocation_processor_handle,
             appsec_processor,
             propagator,
         )
