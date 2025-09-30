@@ -253,7 +253,7 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
 
-    let r = extension::register(&client, &aws_config.runtime_api)
+    let r = extension::register(&client, &aws_config.runtime_api, extension::EXTENSION_NAME)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
 

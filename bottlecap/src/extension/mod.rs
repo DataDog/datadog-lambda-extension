@@ -83,6 +83,7 @@ pub fn base_url(route: &str, runtime_api: &str) -> String {
 pub async fn register(
     client: &Client,
     runtime_api: &str,
+    extension_name: &str,
 ) -> Result<RegisterResponse, ExtensionError> {
     let events_to_subscribe_to = serde_json::json!({
         "events": ["INVOKE", "SHUTDOWN"]
@@ -93,7 +94,7 @@ pub async fn register(
 
     let response = client
         .post(&url)
-        .header(EXTENSION_NAME_HEADER, EXTENSION_NAME)
+        .header(EXTENSION_NAME_HEADER, extension_name)
         .header(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
         .json(&events_to_subscribe_to)
         .send()
