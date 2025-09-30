@@ -31,6 +31,7 @@ pub struct Flusher {
 }
 
 impl Flusher {
+    #[must_use]
     pub fn new(
         api_key_factory: Arc<ApiKeyFactory>,
         endpoint: String,

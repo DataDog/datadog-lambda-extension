@@ -140,7 +140,7 @@ mod tests {
         // Flush all batches
         let batches = handle.flush().await.unwrap();
         assert_eq!(batches.len(), 1);
-        let serialized_batch = format!("[{}]", serialized_log);
+        let serialized_batch = format!("[{serialized_log}]");
         assert_eq!(batches[0], serialized_batch.as_bytes());
 
         // Shutdown the service
