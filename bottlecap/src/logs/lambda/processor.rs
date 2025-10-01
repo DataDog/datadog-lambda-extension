@@ -801,7 +801,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        
+
         let (aggregator_service, aggregator_handle) = AggregatorService::default();
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
@@ -842,7 +842,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        
+
         let (aggregator_service, aggregator_handle) = AggregatorService::default();
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
@@ -880,7 +880,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        
+
         let (aggregator_service, aggregator_handle) = AggregatorService::default();
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;

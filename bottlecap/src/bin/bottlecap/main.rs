@@ -44,8 +44,7 @@ use bottlecap::{
     },
     logger,
     logs::{
-        agent::LogsAgent,
-        aggregator_service::AggregatorService as LogsAggregatorService,
+        agent::LogsAgent, aggregator_service::AggregatorService as LogsAggregatorService,
         flusher::LogsFlusher,
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
