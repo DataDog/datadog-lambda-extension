@@ -55,7 +55,9 @@ impl StatsAggregator {
         // Pull stats data from concentrator
         match self.concentrator.flush(force_flush).await {
             Ok(stats) => {
-                self.queue.push_back(stats);
+                if let Some(stats) = stats {
+                    self.queue.push_back(stats);
+                }
             }
             Err(e) => {
                 error!("Error getting stats from the stats concentrator: {e:?}");
