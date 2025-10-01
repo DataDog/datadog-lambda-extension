@@ -96,7 +96,7 @@ fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
                 .all(|filter| span_matches_tag_exact_filter(span, filter));
             if !matches_require {
                 debug!(
-                    "Filtering out span '{}' - doesn't match all required tags {}",
+                    "TRACE_PROCESSOR | Filtering out span '{}' - doesn't match all required tags {}",
                     span.name,
                     require_tags.join(", ")
                 );
@@ -113,7 +113,7 @@ fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
                 .all(|filter| span_matches_tag_regex_filter(span, filter));
             if !matches_require_regex {
                 debug!(
-                    "Filtering out span '{}' - doesn't match all required regex tags {}",
+                    "TRACE_PROCESSOR | Filtering out span '{}' - doesn't match all required regex tags {}",
                     span.name,
                     require_regex_tags.join(", ")
                 );
@@ -130,7 +130,7 @@ fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
                 .any(|filter| span_matches_tag_exact_filter(span, filter));
             if matches_reject {
                 debug!(
-                    "Filtering out span '{}' - matches reject tags {}",
+                    "TRACE_PROCESSOR | Filtering out span '{}' - matches reject tags {}",
                     span.name,
                     reject_tags.join(", ")
                 );
@@ -147,7 +147,7 @@ fn filter_span_by_tags(span: &Span, config: &config::Config) -> bool {
                 .any(|filter| span_matches_tag_regex_filter(span, filter));
             if matches_reject_regex {
                 debug!(
-                    "Filtering out span '{}' - matches reject regex tags {}",
+                    "TRACE_PROCESSOR | Filtering out span '{}' - matches reject regex tags {}",
                     span.name,
                     reject_regex_tags.join(", ")
                 );
@@ -216,7 +216,7 @@ fn span_matches_tag_exact(span: &Span, key: &str, value: &str) -> bool {
 fn span_matches_tag_regex(span: &Span, key: &str, value: &str) -> bool {
     let Ok(regex) = Regex::new(value) else {
         debug!(
-            "Invalid regex pattern '{}' for key '{}', treating as non-match",
+            "TRACE_PROCESSOR | Invalid regex pattern '{}' for key '{}', treating as non-match",
             value, key
         );
         return false;
@@ -342,7 +342,7 @@ impl TraceProcessor for ServerlessTraceProcessor {
             true, // send agentless since we are the agent
         )
         .unwrap_or_else(|e| {
-            error!("Error processing traces: {:?}", e);
+            error!("TRACE_PROCESSOR | Error processing traces: {:?}", e);
             TracerPayloadCollection::V07(vec![])
         });
         if let TracerPayloadCollection::V07(ref mut collection) = payload {
@@ -418,7 +418,7 @@ impl SendingTraceProcessor {
                 if  finalized {
                     Some(trace)
                 } else if let Some(ctx) = ctx{
-                    debug!("TRACE_PROCESSOR | holding trace for App & API Protection additional data");
+                    debug!("TRACE_PROCESSOR | Holding trace for App & API Protection additional data");
                     ctx.hold_trace(trace, SendingTraceProcessor{ appsec:  None, processor: self.processor.clone(), trace_tx: self.trace_tx.clone(), stats_generator: self.stats_generator.clone() }, HoldArguments{
                         config:Arc::clone(&config),
                         tags_provider:Arc::clone(&tags_provider),

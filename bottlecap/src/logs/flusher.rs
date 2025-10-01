@@ -49,7 +49,7 @@ impl Flusher {
 
     pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
-            error!("Skipping flushing logs: Failed to resolve API key");
+            error!("LOGS | Skipping flushing: Failed to resolve API key");
             return vec![];
         };
 
@@ -68,7 +68,7 @@ impl Flusher {
         let mut failed_requests = Vec::new();
         for result in set.join_all().await {
             if let Err(e) = result {
-                debug!("Failed to join task: {}", e);
+                debug!("LOGS | Failed to join task: {}", e);
                 continue;
             }
 
@@ -83,9 +83,9 @@ impl Flusher {
                             .try_clone()
                             .expect("should be able to clone request"),
                     );
-                    debug!("Failed to send logs after retries, will retry later");
+                    debug!("LOGS | Failed to send request after retries, will retry later");
                 } else {
-                    debug!("Failed to send logs: {}", e);
+                    debug!("LOGS | Failed to send request: {}", e);
                 }
             }
         }
@@ -128,7 +128,7 @@ impl Flusher {
                     if status == StatusCode::FORBIDDEN {
                         // Access denied. Stop retrying.
                         error!(
-                            "Failed to send logs to Datadog: Access denied. Please verify that your API key is valid."
+                            "LOGS | Request was denied by Datadog: Access denied. Please verify that your API key is valid."
                         );
                         return Ok(());
                     }
@@ -141,14 +141,14 @@ impl Flusher {
                         // After 3 failed attempts, return the original request for later retry
                         // Create a custom error that can be downcast to get the RequestBuilder
                         error!(
-                            "Failed to send logs to datadog after {} ms and {} attempts: {:?}",
+                            "LOGS | Failed to send request after {} ms and {} attempts: {:?}",
                             elapsed.as_millis(),
                             attempts,
                             e
                         );
                         return Err(Box::new(FailedRequestError {
                             request: req,
-                            message: format!("Failed after {attempts} attempts: {e}"),
+                            message: format!("LOGS | Failed after {attempts} attempts: {e}"),
                         }));
                     }
                 }
@@ -207,7 +207,7 @@ impl LogsFlusher {
 
         let endpoint = if config.observability_pipelines_worker_logs_enabled {
             if config.observability_pipelines_worker_logs_url.is_empty() {
-                error!("Observability Pipelines Worker Logs are enabled but the URL is empty");
+                error!("LOGS | Observability Pipelines Worker URL is empty");
             }
             config.observability_pipelines_worker_logs_url.clone()
         } else {
@@ -299,7 +299,7 @@ impl LogsFlusher {
         match self.encode(&data) {
             Ok(compressed_data) => compressed_data,
             Err(e) => {
-                debug!("Failed to compress data: {}", e);
+                debug!("LOGS | Failed to compress data: {}", e);
                 data
             }
         }
