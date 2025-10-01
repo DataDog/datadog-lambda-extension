@@ -9,7 +9,7 @@ WORKDIR /extensions
 RUN --mount=type=bind,source=.binaries/bottlecap-${FILE_SUFFIX},target=/extensions/datadog-agent \
     --mount=type=bind,source=./scripts/datadog_wrapper,target=/datadog_wrapper,rw \
     chmod +x /datadog_wrapper && \
-    zip -r datadog_extension.zip /extensions /datadog_wrapper /datadog-agent-go
+    zip -r datadog_extension.zip /extensions /datadog_wrapper
 
 # Keep the smallest possible docker image
 FROM scratch
