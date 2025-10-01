@@ -144,14 +144,14 @@ impl PendingFlushHandles {
                 Ok(retry) => {
                     let tf = trace_flusher.clone();
                     if !retry.is_empty() {
-                        debug!("redriving {:?} trace payloads", retry.len());
+                        debug!("PENDING_FLUSH_HANDLES | redriving {:?} trace payloads", retry.len());
                         joinset.spawn(async move {
                             tf.flush(Some(retry)).await;
                         });
                     }
                 }
                 Err(e) => {
-                    error!("redrive trace error {e:?}");
+                    error!("PENDING_FLUSH_HANDLES | redrive trace error {e:?}");
                 }
             }
         }
@@ -160,7 +160,7 @@ impl PendingFlushHandles {
             match handle.await {
                 Ok(retry) => {
                     if !retry.is_empty() {
-                        debug!("redriving {:?} log payloads", retry.len());
+                        debug!("PENDING_FLUSH_HANDLES | redriving {:?} log payloads", retry.len());
                     }
                     for item in retry {
                         let lf = logs_flusher.clone();
@@ -171,13 +171,13 @@ impl PendingFlushHandles {
                                 });
                             }
                             None => {
-                                error!("can't clone redrive log payloads");
+                                error!("PENDING_FLUSH_HANDLES | Can't clone redrive log payloads");
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    error!("redrive log error {e:?}");
+                    error!("PENDING_FLUSH_HANDLES | redrive log error {e:?}");
                 }
             }
         }
@@ -188,7 +188,7 @@ impl PendingFlushHandles {
                 Ok(retry_batch) => {
                     if !retry_batch.series.is_empty() || !retry_batch.sketches.is_empty() {
                         debug!(
-                            "redriving {:?} series and {:?} sketch payloads",
+                            "PENDING_FLUSH_HANDLES | redriving {:?} series and {:?} sketch payloads",
                             retry_batch.series.len(),
                             retry_batch.sketches.len()
                         );
@@ -203,7 +203,7 @@ impl PendingFlushHandles {
                     }
                 }
                 Err(e) => {
-                    error!("redrive metrics error {e:?}");
+                    error!("PENDING_FLUSH_HANDLES | redrive metrics error {e:?}");
                 }
             }
         }
@@ -212,7 +212,7 @@ impl PendingFlushHandles {
             match handle.await {
                 Ok(batch) => {
                     if !batch.is_empty() {
-                        debug!("Redriving {:?} APM proxy payloads", batch.len());
+                        debug!("PENDING_FLUSH_HANDLES | Redriving {:?} APM proxy payloads", batch.len());
                     }
 
                     let pf = proxy_flusher.clone();
@@ -221,7 +221,7 @@ impl PendingFlushHandles {
                     });
                 }
                 Err(e) => {
-                    error!("Redrive error in APM proxy: {e:?}");
+                    error!("PENDING_FLUSH_HANDLES | Redrive error in APM proxy: {e:?}");
                 }
             }
         }
@@ -229,7 +229,7 @@ impl PendingFlushHandles {
         // Wait for all flush join operations to complete
         while let Some(result) = joinset.join_next().await {
             if let Err(e) = result {
-                error!("redrive request error {e:?}");
+                error!("PENDING_FLUSH_HANDLES | redrive request error {e:?}");
                 flush_error = true;
             }
         }
@@ -245,7 +245,7 @@ async fn main() -> anyhow::Result<()> {
     let aws_config = AwsConfig::from_env(start_time);
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
-    debug!("Starting Datadog Extension {version_without_next}");
+    debug!("Starting Datadog Extension v{version_without_next}");
     prepare_client_provider()?;
     let client = create_reqwest_client_builder()
         .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
