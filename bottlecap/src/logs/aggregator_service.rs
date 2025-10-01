@@ -1,13 +1,12 @@
-use log::error;
 use tokio::sync::{mpsc, oneshot};
-use tracing::debug;
+use tracing::{debug, error};
 
 use crate::logs::{aggregator::Aggregator, constants};
 
 #[derive(Debug)]
 pub enum AggregatorCommand {
     InsertBatch(Vec<String>),
-    Flush(oneshot::Sender<Vec<Vec<u8>>>),
+    GetBatches(oneshot::Sender<Vec<Vec<u8>>>),
     Shutdown,
 }
 
@@ -24,10 +23,10 @@ impl AggregatorHandle {
         self.tx.send(AggregatorCommand::InsertBatch(logs))
     }
 
-    pub async fn flush(&self) -> Result<Vec<Vec<u8>>, String> {
+    pub async fn get_batches(&self) -> Result<Vec<Vec<u8>>, String> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
-            .send(AggregatorCommand::Flush(response_tx))
+            .send(AggregatorCommand::GetBatches(response_tx))
             .map_err(|e| format!("Failed to send flush command: {e}"))?;
 
         response_rx
@@ -83,7 +82,7 @@ impl AggregatorService {
                 AggregatorCommand::InsertBatch(logs) => {
                     self.aggregator.add_batch(logs);
                 }
-                AggregatorCommand::Flush(response_tx) => {
+                AggregatorCommand::GetBatches(response_tx) => {
                     let mut batches = Vec::new();
                     let mut current_batch = self.aggregator.get_batch();
                     while !current_batch.is_empty() {
@@ -139,7 +138,7 @@ mod tests {
         handle.insert_batch(vec![serialized_log.clone()]).unwrap();
 
         // Flush all batches
-        let batches = handle.flush().await.unwrap();
+        let batches = handle.get_batches().await.unwrap();
         assert_eq!(batches.len(), 1);
         let serialized_batch = format!("[{serialized_log}]");
         assert_eq!(batches[0], serialized_batch.as_bytes());

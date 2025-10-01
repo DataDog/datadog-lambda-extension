@@ -12,6 +12,7 @@ pub struct LogsAgent {
     tx: Sender<TelemetryEvent>,
     rx: mpsc::Receiver<TelemetryEvent>,
     processor: LogsProcessor,
+    aggregator_handle: AggregatorHandle,
 }
 
 impl LogsAgent {
@@ -27,23 +28,29 @@ impl LogsAgent {
             tags_provider,
             event_bus,
             LAMBDA_RUNTIME_SLUG.to_string(),
-            aggregator_handle.clone(),
         );
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);
 
-        Self { tx, rx, processor }
+        Self {
+            tx,
+            rx,
+            processor,
+            aggregator_handle,
+        }
     }
 
     pub async fn spin(&mut self) {
         while let Some(event) = self.rx.recv().await {
-            self.processor.process(event).await;
+            self.processor.process(event, &self.aggregator_handle).await;
         }
     }
 
     pub async fn sync_consume(&mut self) {
         if let Some(events) = self.rx.recv().await {
-            self.processor.process(events).await;
+            self.processor
+                .process(events, &self.aggregator_handle)
+                .await;
         }
     }
 

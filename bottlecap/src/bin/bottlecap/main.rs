@@ -45,9 +45,7 @@ use bottlecap::{
     logger,
     logs::{
         agent::LogsAgent,
-        aggregator_service::{
-            AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
-        },
+        aggregator_service::AggregatorService as LogsAggregatorService,
         flusher::LogsFlusher,
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
@@ -382,15 +380,11 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::default();
-    start_logs_aggregator(logs_aggr_service);
-
     let (logs_agent_channel, logs_flusher) = start_logs_agent(
         config,
         Arc::clone(&api_key_factory),
         &tags_provider,
         event_bus.get_sender_copy(),
-        logs_aggr_handle,
     );
 
     let metrics_aggr_init_start_time = Instant::now();
@@ -913,8 +907,10 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
-    logs_aggr_handle: LogsAggregatorHandle,
 ) -> (Sender<TelemetryEvent>, LogsFlusher) {
+    let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::default();
+    start_logs_aggregator(logs_aggr_service);
+
     let mut logs_agent = LogsAgent::new(
         Arc::clone(tags_provider),
         Arc::clone(config),

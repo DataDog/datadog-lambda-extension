@@ -7,10 +7,9 @@ use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config::{self, processing_rule};
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
-use crate::tags;
-
 use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::lambda::processor::LambdaProcessor;
+use crate::tags;
 
 impl LogsProcessor {
     #[must_use]
@@ -19,22 +18,20 @@ impl LogsProcessor {
         tags_provider: Arc<tags::provider::Provider>,
         event_bus: Sender<Event>,
         runtime: String,
-        aggregator_handle: AggregatorHandle,
     ) -> Self {
         match runtime.as_str() {
             LAMBDA_RUNTIME_SLUG => {
-                let lambda_processor =
-                    LambdaProcessor::new(tags_provider, config, event_bus, aggregator_handle);
+                let lambda_processor = LambdaProcessor::new(tags_provider, config, event_bus);
                 LogsProcessor::Lambda(lambda_processor)
             }
             _ => panic!("Unsupported runtime: {runtime}"),
         }
     }
 
-    pub async fn process(&mut self, event: TelemetryEvent) {
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => {
-                lambda_processor.process(event).await;
+                lambda_processor.process(event, aggregator_handle).await;
             }
         }
     }

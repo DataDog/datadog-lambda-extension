@@ -262,7 +262,7 @@ impl LogsFlusher {
             }
         } else {
             let logs_batches = Arc::new({
-                match self.aggregator_handle.flush().await {
+                match self.aggregator_handle.get_batches().await {
                     Ok(batches) => batches
                         .into_iter()
                         .map(|batch| self.compress(batch))
