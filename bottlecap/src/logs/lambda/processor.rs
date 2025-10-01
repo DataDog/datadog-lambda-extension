@@ -741,7 +741,6 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
         let (aggregator_service, aggregator_handle) = AggregatorService::default();
 
-        // Spawn the aggregator service
         let service_handle = tokio::spawn(async move {
             aggregator_service.run().await;
         });
