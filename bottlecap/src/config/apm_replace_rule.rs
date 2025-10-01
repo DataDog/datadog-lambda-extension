@@ -25,10 +25,13 @@ impl<'de> Visitor<'de> for StringOrReplaceRulesVisitor {
     where
         E: serde::de::Error,
     {
-        // Validate it's at least valid JSON
-        let _: serde_json::Value =
-            serde_json::from_str(value).map_err(|_| E::custom("Expected valid JSON string"))?;
-        Ok(value.to_string())
+        match serde_json::from_str::<serde_json::Value>(value) {
+            Ok(_) => Ok(value.to_string()),
+            Err(e) => {
+                tracing::error!("Invalid JSON string for APM replace rules: {}", e);
+                Ok(String::new())
+            }
+        }
     }
 
     // Convert YAML sequences to JSON strings
@@ -40,10 +43,13 @@ impl<'de> Visitor<'de> for StringOrReplaceRulesVisitor {
         while let Some(rule) = seq.next_element::<ReplaceRuleYaml>()? {
             rules.push(rule);
         }
-        // Serialize to JSON string for compatibility with parse_rules_from_string
-        serde_json::to_string(&rules).map_err(|e| {
-            serde::de::Error::custom(format!("Failed to serialize rules to JSON: {e}"))
-        })
+        match serde_json::to_string(&rules) {
+            Ok(json) => Ok(json),
+            Err(e) => {
+                tracing::error!("Failed to convert YAML rules to JSON: {}", e);
+                Ok(String::new())
+            }
+        }
     }
 }
 
