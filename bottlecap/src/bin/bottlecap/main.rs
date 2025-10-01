@@ -302,7 +302,8 @@ fn enable_logging_subsystem() {
         std::env::var("DD_LOG_LEVEL")
             .unwrap_or("info".to_string())
             .as_str(),
-    );
+    )
+    .unwrap_or(LogLevel::Info);
 
     let env_filter = format!(
         "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",

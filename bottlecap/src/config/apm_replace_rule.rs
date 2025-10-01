@@ -55,8 +55,11 @@ where
 {
     let json_string = deserializer.deserialize_any(StringOrReplaceRulesVisitor)?;
 
-    let rules = parse_rules_from_string(&json_string)
-        .map_err(|e| serde::de::Error::custom(format!("Parse error: {e}")))?;
-
-    Ok(Some(rules))
+    match parse_rules_from_string(&json_string) {
+        Ok(rules) => Ok(Some(rules)),
+        Err(e) => {
+            tracing::error!("Failed to parse APM replace rule, ignoring: {}", e);
+            Ok(None)
+        }
+    }
 }

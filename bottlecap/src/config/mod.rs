@@ -349,8 +349,6 @@ pub struct Config {
     pub appsec_waf_timeout: Duration,
     pub api_security_enabled: bool,
     pub api_security_sample_delay: Duration,
-
-    pub extension_version: Option<String>,
 }
 
 impl Default for Config {
@@ -452,8 +450,6 @@ impl Default for Config {
             appsec_waf_timeout: Duration::from_millis(5),
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
-
-            extension_version: None,
         }
     }
 }
@@ -476,6 +472,22 @@ fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
 }
 
+pub fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Value::deserialize(deserializer)? {
+        Value::String(s) => Ok(Some(s)),
+        other => {
+            error!(
+                "Failed to parse value, expected a string, got: {}, ignoring",
+                other
+            );
+            Ok(None)
+        }
+    }
+}
+
 pub fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
 where
     D: Deserializer<'de>,
@@ -490,7 +502,10 @@ where
             }
         }
         Value::Number(n) => Ok(Some(n.to_string())),
-        _ => Err(serde::de::Error::custom("expected a string or an integer")),
+        _ => {
+            error!("Failed to parse value, expected a string or an integer, ignoring");
+            Ok(None)
+        }
     }
 }
 
@@ -505,13 +520,13 @@ where
 
     match opt {
         None => Ok(None),
-        Some(value) => {
-            // Use your existing method by deserializing the value
-            let bool_result = deserialize_bool_from_anything(value).map_err(|e| {
-                serde::de::Error::custom(format!("Failed to deserialize bool: {e}"))
-            })?;
-            Ok(Some(bool_result))
-        }
+        Some(value) => match deserialize_bool_from_anything(value) {
+            Ok(bool_result) => Ok(Some(bool_result)),
+            Err(e) => {
+                error!("Failed to parse bool value: {}, ignoring", e);
+                Ok(None)
+            }
+        },
     }
 }
 
@@ -540,14 +555,63 @@ where
                 let parts = tag.split(':').collect::<Vec<&str>>();
                 if parts.len() == 2 {
                     map.insert(parts[0].to_string(), parts[1].to_string());
+                } else {
+                    error!(
+                        "Failed to parse tag '{}', expected format 'key:value', ignoring",
+                        tag.trim()
+                    );
                 }
             }
 
             Ok(map)
         }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got number {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got number {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got number {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got boolean {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
     }
 
-    deserializer.deserialize_str(KeyValueVisitor)
+    deserializer.deserialize_any(KeyValueVisitor)
 }
 
 pub fn deserialize_array_from_comma_separated_string<'de, D>(
@@ -575,6 +639,11 @@ where
         let parts = s.split(':').collect::<Vec<&str>>();
         if parts.len() == 2 {
             map.insert(parts[0].to_string(), parts[1].to_string());
+        } else {
+            error!(
+                "Failed to parse tag '{}', expected format 'key:value', ignoring",
+                s.trim()
+            );
         }
     }
     Ok(map)
@@ -627,6 +696,20 @@ where
     }
 }
 
+pub fn deserialize_option_lossless<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    match Option::<T>::deserialize(deserializer) {
+        Ok(value) => Ok(value),
+        Err(e) => {
+            error!("Failed to deserialize optional value: {}, ignoring", e);
+            Ok(None)
+        }
+    }
+}
+
 pub fn deserialize_optional_duration_from_microseconds<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Duration>, D::Error> {
@@ -647,13 +730,15 @@ pub fn deserialize_optional_duration_from_seconds<'de, D: Deserializer<'de>>(
         }
         fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
             if v < 0 {
-                return Err(E::custom("negative durations are not allowed"));
+                error!("Failed to parse duration: negative durations are not allowed, ignoring");
+                return Ok(None);
             }
             self.visit_u64(u64::try_from(v).expect("positive i64 to u64 conversion never fails"))
         }
         fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
             if v < 0f64 {
-                return Err(E::custom("negative durations are not allowed"));
+                error!("Failed to parse duration: negative durations are not allowed, ignoring");
+                return Ok(None);
             }
             Ok(Some(Duration::from_secs_f64(v)))
         }
@@ -982,7 +1067,6 @@ pub mod tests {
             jail.create_file(
                 "datadog.yaml",
                 r"
-                extension_version: next
                 logs_config:
                   processing_rules:
                     - type: exclude_at_match
@@ -1120,7 +1204,6 @@ pub mod tests {
                 "DD_TRACE_PROPAGATION_STYLE",
                 "datadog,tracecontext,b3,b3multi",
             );
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new(""));
 
             let expected_styles = vec![
@@ -1153,6 +1236,17 @@ pub mod tests {
                 config.trace_propagation_style_extract,
                 vec![TracePropagationStyle::Datadog]
             );
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_bad_tags() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", 123123123);
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags, HashMap::new());
             Ok(())
         });
     }
@@ -1239,16 +1333,20 @@ pub mod tests {
             serde_json::from_str::<Value>("{}").expect("failed to parse JSON"),
             Value { duration: None }
         );
-        serde_json::from_str::<Value>(r#"{"duration":-1}"#)
-            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":-1}"#).expect("failed to parse JSON"),
+            Value { duration: None }
+        );
         assert_eq!(
             serde_json::from_str::<Value>(r#"{"duration":1}"#).expect("failed to parse JSON"),
             Value {
                 duration: Some(Duration::from_secs(1))
             }
         );
-        serde_json::from_str::<Value>(r#"{"duration":-1.5}"#)
-            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":-1.5}"#).expect("failed to parse JSON"),
+            Value { duration: None }
+        );
         assert_eq!(
             serde_json::from_str::<Value>(r#"{"duration":1.5}"#).expect("failed to parse JSON"),
             Value {
