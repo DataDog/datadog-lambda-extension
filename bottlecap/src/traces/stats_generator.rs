@@ -27,10 +27,10 @@ impl StatsGenerator {
         if let TracerPayloadCollection::V07(traces) = traces {
             for trace in traces {
                 // Set tracer metadata
-                // if let Err(err) = self.stats_concentrator.set_tracer_metadata(trace) {
-                //     error!("Failed to set tracer metadata: {err}");
-                //     return Err(StatsGeneratorError::ConcentratorCommandError(err));
-                // }
+                if let Err(err) = self.stats_concentrator.set_tracer_metadata(trace) {
+                    error!("Failed to set tracer metadata: {err}");
+                    return Err(StatsGeneratorError::ConcentratorCommandError(err));
+                }
 
                 // Generate stats for each span in the trace
                 for chunk in &trace.chunks {

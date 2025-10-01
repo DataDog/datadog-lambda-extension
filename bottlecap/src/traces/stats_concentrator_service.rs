@@ -5,6 +5,7 @@ use datadog_trace_protobuf::pb;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, Duration};
 use tracing::error;
+use datadog_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
 
 const S_TO_NS: u64 = 1_000_000_000;
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
@@ -17,10 +18,21 @@ pub enum StatsError {
     RecvError(oneshot::error::RecvError),
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct TracerMetadata {
+    // e.g. "python"
+    pub language: String,
+    // e.g. "3.11.0"
+    pub tracer_version: String,
+    // e.g. "f45568ad09d5480b99087d86ebda26e6"
+    pub runtime_id: String,
+    pub container_id: String,
+}
+
 pub enum ConcentratorCommand {
-    // SetTracerMetadata(TracerMetadata),
+    SetTracerMetadata(TracerMetadata),
     Add(Box<pb::Span>),
-    Flush(bool, oneshot::Sender<Vec<pb::ClientStatsBucket>>),
+    Flush(bool, oneshot::Sender<ClientStatsPayload>),
 }
 
 pub struct StatsConcentratorHandle {
@@ -50,6 +62,24 @@ impl StatsConcentratorHandle {
         }
     }
 
+    pub fn set_tracer_metadata(&self, trace: &TracerPayload) -> Result<(), StatsError> {
+        // Set tracer metadata only once for the first trace because
+        // it is the same for all traces.
+        if !self.is_tracer_metadata_set.load(Ordering::Acquire) {
+            self.is_tracer_metadata_set.store(true, Ordering::Release);
+            let tracer_metadata = TracerMetadata {
+                language: trace.language_name.clone(),
+                tracer_version: trace.tracer_version.clone(),
+                runtime_id: trace.runtime_id.clone(),
+                container_id: trace.container_id.clone(),
+            };
+            self.tx
+                .send(ConcentratorCommand::SetTracerMetadata(tracer_metadata))
+                .map_err(StatsError::SendError)?;
+        }
+        Ok(())
+    }
+
     pub fn add(&self, span: &pb::Span) -> Result<(), StatsError> {
         self.tx
             .send(ConcentratorCommand::Add(Box::new(span.clone())))
@@ -60,40 +90,72 @@ impl StatsConcentratorHandle {
     pub async fn flush(
         &self,
         force_flush: bool,
-    ) -> Result<Vec<pb::ClientStatsBucket>, StatsError> {
+    ) -> Result<ClientStatsPayload, StatsError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(ConcentratorCommand::Flush(force_flush, response_tx))
             .map_err(StatsError::SendError)?;
-        let stats = response_rx.await.map_err(StatsError::RecvError)?;
-        Ok(stats)
+        response_rx.await.map_err(StatsError::RecvError)
     }
 }
 
 pub struct StatsConcentratorService {
     concentrator: SpanConcentrator,
     rx: mpsc::UnboundedReceiver<ConcentratorCommand>,
+    tracer_metadata: TracerMetadata,
 }
 
 // A service that handles add() and flush() requests in the same queue,
 // to avoid using mutex, which may cause lock contention.
 impl StatsConcentratorService {
     #[must_use]
-    pub fn new() -> (Self, StatsConcentratorHandle) {
+    pub fn new(
+        // config: Arc<Config>,
+        // tags_provider: Arc<TagProvider>,
+    ) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
         // TODO: set span_kinds_stats_computed and peer_tag_keys
         let concentrator = SpanConcentrator::new(Duration::from_nanos(BUCKET_DURATION_NS), SystemTime::now(), vec![], vec![]);
-        let service: StatsConcentratorService = Self { concentrator, rx };
+        let service: StatsConcentratorService = Self { concentrator, rx, tracer_metadata: TracerMetadata::default() };
         (service, handle)
     }
 
     pub async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
             match command {
+                ConcentratorCommand::SetTracerMetadata(tracer_metadata) => {
+                    self.tracer_metadata = tracer_metadata;
+                }
                 ConcentratorCommand::Add(span) => self.concentrator.add_span(&*span),
                 ConcentratorCommand::Flush(force_flush, response_tx) => {
-                    let stats = self.concentrator.flush(SystemTime::now(), force_flush);
+                    let stats_buckets = self.concentrator.flush(SystemTime::now(), force_flush);
+                    let stats = ClientStatsPayload {
+                        hostname: "hostname".to_string(),
+                        env: "env".to_string(),
+                        // TODO: support this
+                        // Version is not in the trace payload. Need to read it from config.
+                        version: "version".to_string(),
+                        lang: self.tracer_metadata.language.clone(),
+                        tracer_version: self.tracer_metadata.tracer_version.clone(),
+                        runtime_id: self.tracer_metadata.runtime_id.clone(),
+                        // Not supported yet
+                        sequence: 0,
+                        // Not supported yet
+                        agent_aggregation: String::new(),
+                        // TODO: support this
+                        service: "service".to_string(),
+                        container_id: self.tracer_metadata.container_id.clone(),
+                        // Not supported yet
+                        tags: vec![],
+                        // Not supported yet
+                        git_commit_sha: String::new(),
+                        // Not supported yet
+                        image_tag: String::new(),
+                        stats: stats_buckets,
+                        process_tags: String::new(),
+                        process_tags_hash: 0,
+                    };
                     if let Err(e) = response_tx.send(stats) {
                         error!("Failed to return trace stats: {e:?}");
                     }
