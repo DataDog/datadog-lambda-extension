@@ -1,0 +1,27 @@
+[package]
+name = "recorder"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+reqwest = { version = "0.12.23", default-features = false, features = ["http2", "json"] }
+tokio = { version = "1.47.1", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
+tracing = { version = "0.1", default-features = false }
+tracing-core = { version = "0.1", default-features = false }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry", "fmt", "env-filter", "tracing-log"] }
+bottlecap = { path = "../../bottlecap" }
+axum = { version = "0.8", default-features = false, features = ["default"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+flate2 = { version = "1.0" }
+zstd = { version = "0.13" }
+
+[[bin]]
+name = "recorder"
+
+[profile.release]
+opt-level = "z"  # Optimize for size.
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
