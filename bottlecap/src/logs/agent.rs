@@ -1,21 +1,18 @@
 use std::sync::Arc;
-use tokio::sync::{
-    Mutex,
-    mpsc::{self, Sender},
-};
+use tokio::sync::mpsc::{self, Sender};
 
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
-use crate::logs::{aggregator::Aggregator, processor::LogsProcessor};
+use crate::logs::{aggregator_service::AggregatorHandle, processor::LogsProcessor};
 use crate::tags;
 use crate::{LAMBDA_RUNTIME_SLUG, config};
 
 #[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {
-    pub aggregator: Arc<Mutex<Aggregator>>,
     tx: Sender<TelemetryEvent>,
     rx: mpsc::Receiver<TelemetryEvent>,
     processor: LogsProcessor,
+    aggregator_handle: AggregatorHandle,
 }
 
 impl LogsAgent {
@@ -24,8 +21,8 @@ impl LogsAgent {
         tags_provider: Arc<tags::provider::Provider>,
         datadog_config: Arc<config::Config>,
         event_bus: Sender<Event>,
-    ) -> LogsAgent {
-        let aggregator: Arc<Mutex<Aggregator>> = Arc::new(Mutex::new(Aggregator::default()));
+        aggregator_handle: AggregatorHandle,
+    ) -> Self {
         let processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
             tags_provider,
@@ -35,23 +32,25 @@ impl LogsAgent {
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);
 
-        LogsAgent {
-            aggregator,
+        Self {
             tx,
             rx,
             processor,
+            aggregator_handle,
         }
     }
 
     pub async fn spin(&mut self) {
         while let Some(event) = self.rx.recv().await {
-            self.processor.process(event, &self.aggregator).await;
+            self.processor.process(event, &self.aggregator_handle).await;
         }
     }
 
     pub async fn sync_consume(&mut self) {
         if let Some(events) = self.rx.recv().await {
-            self.processor.process(events, &self.aggregator).await;
+            self.processor
+                .process(events, &self.aggregator_handle)
+                .await;
         }
     }
 

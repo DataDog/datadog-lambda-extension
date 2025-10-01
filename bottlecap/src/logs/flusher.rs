@@ -1,7 +1,7 @@
 use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::http::get_client;
-use crate::logs::aggregator::Aggregator;
+use crate::logs::aggregator_service::AggregatorHandle;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
 use hyper::StatusCode;
@@ -10,10 +10,7 @@ use std::error::Error;
 use std::time::Instant;
 use std::{io::Write, sync::Arc};
 use thiserror::Error as ThisError;
-use tokio::{
-    sync::{Mutex, OnceCell},
-    task::JoinSet,
-};
+use tokio::{sync::OnceCell, task::JoinSet};
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -28,24 +25,22 @@ pub struct FailedRequestError {
 pub struct Flusher {
     client: reqwest::Client,
     endpoint: String,
-    aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
     headers: OnceCell<HeaderMap>,
 }
 
 impl Flusher {
+    #[must_use]
     pub fn new(
         api_key_factory: Arc<ApiKeyFactory>,
         endpoint: String,
-        aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(&config);
         Flusher {
             client,
             endpoint,
-            aggregator,
             config,
             api_key_factory,
             headers: OnceCell::new(),
@@ -199,12 +194,13 @@ impl Flusher {
 pub struct LogsFlusher {
     config: Arc<config::Config>,
     pub flushers: Vec<Flusher>,
+    aggregator_handle: AggregatorHandle,
 }
 
 impl LogsFlusher {
     pub fn new(
         api_key_factory: Arc<ApiKeyFactory>,
-        aggregator: Arc<Mutex<Aggregator>>,
+        aggregator_handle: AggregatorHandle,
         config: Arc<config::Config>,
     ) -> Self {
         let mut flushers = Vec::new();
@@ -222,22 +218,26 @@ impl LogsFlusher {
         flushers.push(Flusher::new(
             Arc::clone(&api_key_factory),
             endpoint,
-            aggregator.clone(),
             config.clone(),
         ));
 
         // Create flushers for additional endpoints
         for endpoint in &config.logs_config_additional_endpoints {
             let endpoint_url = format!("https://{}:{}", endpoint.host, endpoint.port);
+            let additional_api_key_factory =
+                Arc::new(ApiKeyFactory::new(endpoint.api_key.clone().as_str()));
             flushers.push(Flusher::new(
-                Arc::clone(&api_key_factory),
+                additional_api_key_factory,
                 endpoint_url,
-                aggregator.clone(),
                 config.clone(),
             ));
         }
 
-        LogsFlusher { config, flushers }
+        LogsFlusher {
+            config,
+            flushers,
+            aggregator_handle,
+        }
     }
 
     pub async fn flush(
@@ -261,16 +261,17 @@ impl LogsFlusher {
                 }
             }
         } else {
-            // Get batches from primary flusher's aggregator
             let logs_batches = Arc::new({
-                let mut guard = self.flushers[0].aggregator.lock().await;
-                let mut batches = Vec::new();
-                let mut current_batch = guard.get_batch();
-                while !current_batch.is_empty() {
-                    batches.push(self.compress(current_batch));
-                    current_batch = guard.get_batch();
+                match self.aggregator_handle.get_batches().await {
+                    Ok(batches) => batches
+                        .into_iter()
+                        .map(|batch| self.compress(batch))
+                        .collect(),
+                    Err(e) => {
+                        debug!("Failed to flush from aggregator: {}", e);
+                        Vec::new()
+                    }
                 }
-                batches
             });
 
             // Send batches to each flusher
