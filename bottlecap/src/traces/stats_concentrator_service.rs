@@ -1,14 +1,14 @@
 use tokio::sync::{mpsc, oneshot};
 
-use datadog_trace_stats::span_concentrator::SpanConcentrator;
-use datadog_trace_protobuf::pb;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, Duration};
-use tracing::error;
-use datadog_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
 use crate::config::Config;
 use crate::tags::provider::Provider as TagProvider;
+use datadog_trace_protobuf::pb;
+use datadog_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
+use datadog_trace_stats::span_concentrator::SpanConcentrator;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, SystemTime};
+use tracing::error;
 
 const S_TO_NS: u64 = 1_000_000_000;
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
@@ -90,10 +90,7 @@ impl StatsConcentratorHandle {
         Ok(())
     }
 
-    pub async fn flush(
-        &self,
-        force_flush: bool,
-    ) -> Result<ClientStatsPayload, StatsError> {
+    pub async fn flush(&self, force_flush: bool) -> Result<ClientStatsPayload, StatsError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(ConcentratorCommand::Flush(force_flush, response_tx))
@@ -121,9 +118,20 @@ impl StatsConcentratorService {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
         // TODO: set span_kinds_stats_computed and peer_tag_keys
-        let concentrator = SpanConcentrator::new(Duration::from_nanos(BUCKET_DURATION_NS), SystemTime::now(), vec![], vec![]);
+        let concentrator = SpanConcentrator::new(
+            Duration::from_nanos(BUCKET_DURATION_NS),
+            SystemTime::now(),
+            vec![],
+            vec![],
+        );
         let hostname = tags_provider.get_canonical_id().unwrap_or_default();
-        let service: StatsConcentratorService = Self { concentrator, rx, tracer_metadata: TracerMetadata::default(), hostname, config };
+        let service: StatsConcentratorService = Self {
+            concentrator,
+            rx,
+            tracer_metadata: TracerMetadata::default(),
+            hostname,
+            config,
+        };
         (service, handle)
     }
 
