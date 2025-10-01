@@ -252,12 +252,14 @@ async fn main() -> anyhow::Result<()> {
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
-    let response =
-        tokio::task::spawn(async move { extension::register(&cloned_client, &runtime_api).await });
+    let response = tokio::task::spawn(async move {
+        extension::register(&cloned_client, &runtime_api, extension::EXTENSION_NAME).await
+    });
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
+
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config);
 

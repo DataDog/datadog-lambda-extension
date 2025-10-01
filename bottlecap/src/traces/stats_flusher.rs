@@ -105,7 +105,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
             stats_utils::send_stats_payload(serialized_stats_payload, endpoint, api_key).await;
         let elapsed = start.elapsed();
         debug!(
-            "Stats request to {} took {}ms",
+            "Stats request to {} took {} ms",
             stats_url,
             elapsed.as_millis()
         );
