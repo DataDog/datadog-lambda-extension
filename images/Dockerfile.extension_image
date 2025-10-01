@@ -4,11 +4,9 @@ ARG SUFFIX
 
 # Mount the layers directory and copy the required files
 RUN --mount=type=bind,source=.layers/datadog_extension-${TARGETARCH}${SUFFIX}/extensions/datadog-agent,target=/tmp/extensions/datadog-agent \
-    --mount=type=bind,source=.layers/datadog_extension-${TARGETARCH}${SUFFIX}/datadog-agent-go,target=/tmp/datadog-agent-go \
     --mount=type=bind,source=scripts/datadog_wrapper,target=/tmp/datadog_wrapper \
     mkdir -p /opt/extensions /opt && \
     cp /tmp/extensions/datadog-agent /opt/extensions/datadog-agent && \
-    cp /tmp/datadog-agent-go /opt/datadog-agent-go && \
     cp /tmp/datadog_wrapper /opt/datadog_wrapper && \
     chmod 0755 /opt/datadog_wrapper
 
