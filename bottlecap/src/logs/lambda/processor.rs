@@ -402,7 +402,7 @@ mod tests {
                         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())])));
 
                     let (tx, _) = tokio::sync::mpsc::channel(2);
-                    let (_, aggregator_handle) = AggregatorService::new_default();
+                    let (_, aggregator_handle) = AggregatorService::default();
 
                     let mut processor = LambdaProcessor::new(
                         tags_provider,
@@ -593,7 +593,7 @@ mod tests {
         ));
 
         let (tx, _) = tokio::sync::mpsc::channel(2);
-        let (_, aggregator_handle) = AggregatorService::new_default();
+        let (_, aggregator_handle) = AggregatorService::default();
 
         let mut processor = LambdaProcessor::new(
             tags_provider,
@@ -633,7 +633,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (_, aggregator_handle) = AggregatorService::new_default();
+        let (_, aggregator_handle) = AggregatorService::default();
         let mut processor = LambdaProcessor::new(
             tags_provider,
             Arc::clone(&config),
@@ -685,7 +685,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (_, aggregator_handle) = AggregatorService::new_default();
+        let (_, aggregator_handle) = AggregatorService::default();
         let mut processor = LambdaProcessor::new(
             tags_provider,
             Arc::clone(&config),
@@ -724,7 +724,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (_, aggregator_handle) = AggregatorService::new_default();
+        let (_, aggregator_handle) = AggregatorService::default();
         let mut processor = LambdaProcessor::new(
             tags_provider,
             Arc::clone(&config),
@@ -773,7 +773,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
 
         // Spawn the aggregator service
         let service_handle = tokio::spawn(async move {
@@ -840,7 +840,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
 
         // Spawn the aggregator service
         let service_handle = tokio::spawn(async move {
@@ -888,7 +888,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
 
         // Spawn the aggregator service
         let service_handle = tokio::spawn(async move {
@@ -934,7 +934,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (aggregator_service, aggregator_handle) = AggregatorService::new_default();
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
 
         // Spawn the aggregator service
         let service_handle = tokio::spawn(async move {
@@ -1031,7 +1031,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (_, aggregator_handle) = AggregatorService::new_default();
+        let (_, aggregator_handle) = AggregatorService::default();
 
         let mut processor = LambdaProcessor::new(
             tags_provider.clone(),
@@ -1094,7 +1094,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let (_, aggregator_handle) = AggregatorService::new_default();
+        let (_, aggregator_handle) = AggregatorService::default();
 
         let mut processor = LambdaProcessor::new(
             tags_provider.clone(),

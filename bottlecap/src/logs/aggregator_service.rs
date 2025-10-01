@@ -1,7 +1,8 @@
+use log::error;
 use tokio::sync::{mpsc, oneshot};
 use tracing::debug;
 
-use crate::logs::aggregator::Aggregator;
+use crate::logs::{aggregator::Aggregator, constants};
 
 #[derive(Debug)]
 pub enum AggregatorCommand {
@@ -46,6 +47,16 @@ pub struct AggregatorService {
 
 impl AggregatorService {
     #[must_use]
+    #[allow(clippy::should_implement_trait)]
+    pub fn default() -> (Self, AggregatorHandle) {
+        Self::new(
+            constants::MAX_BATCH_ENTRIES_SIZE,
+            constants::MAX_CONTENT_SIZE_BYTES,
+            constants::MAX_LOG_SIZE_BYTES,
+        )
+    }
+
+    #[must_use]
     pub fn new(
         max_batch_entries_size: usize,
         max_content_size_bytes: usize,
@@ -64,16 +75,6 @@ impl AggregatorService {
         (service, handle)
     }
 
-    #[must_use]
-    pub fn new_default() -> (Self, AggregatorHandle) {
-        use crate::logs::constants;
-        Self::new(
-            constants::MAX_BATCH_ENTRIES_SIZE,
-            constants::MAX_CONTENT_SIZE_BYTES,
-            constants::MAX_LOG_SIZE_BYTES,
-        )
-    }
-
     pub async fn run(mut self) {
         debug!("Logs aggregator service started");
 
@@ -84,14 +85,14 @@ impl AggregatorService {
                 }
                 AggregatorCommand::Flush(response_tx) => {
                     let mut batches = Vec::new();
-                    loop {
-                        let batch = self.aggregator.get_batch();
-                        if batch.is_empty() {
-                            break;
-                        }
-                        batches.push(batch);
+                    let mut current_batch = self.aggregator.get_batch();
+                    while !current_batch.is_empty() {
+                        batches.push(current_batch);
+                        current_batch = self.aggregator.get_batch();
                     }
-                    let _ = response_tx.send(batches);
+                    if response_tx.send(batches).is_err() {
+                        error!("Failed to send logs flush response - receiver dropped");
+                    }
                 }
                 AggregatorCommand::Shutdown => {
                     debug!("Logs aggregator service shutting down");
@@ -110,7 +111,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_aggregator_service_insert_and_flush() {
-        let (service, handle) = AggregatorService::new_default();
+        let (service, handle) = AggregatorService::default();
 
         // Spawn the service
         let service_handle = tokio::spawn(async move {

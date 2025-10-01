@@ -382,12 +382,7 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    let logs_aggr_init_start_time = Instant::now();
-    let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::new_default();
-    debug!(
-        "Logs aggregator created in {:} microseconds",
-        logs_aggr_init_start_time.elapsed().as_micros().to_string()
-    );
+    let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::default();
     start_logs_aggregator(logs_aggr_service);
 
     let (logs_agent_channel, logs_flusher) = start_logs_agent(

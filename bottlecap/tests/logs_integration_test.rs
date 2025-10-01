@@ -56,7 +56,7 @@ async fn test_logs() {
 
     let bus = EventBus::run();
     let (logs_aggr_service, logs_aggr_handle) =
-        bottlecap::logs::aggregator_service::AggregatorService::new_default();
+        bottlecap::logs::aggregator_service::AggregatorService::default();
 
     // Spawn the aggregator service
     tokio::spawn(async move {
