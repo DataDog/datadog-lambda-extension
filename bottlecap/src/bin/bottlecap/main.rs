@@ -460,16 +460,28 @@ async fn extension_loop_active(
         }
     });
 
-    let dogstatsd_cancel_token = start_dogstatsd(metrics_aggr_handle.clone()).await;
+    let dogstatsd_task = {
+        let metrics_aggr_handle = metrics_aggr_handle.clone();
+        tokio::spawn(async move { start_dogstatsd(metrics_aggr_handle).await })
+    };
 
-    let telemetry_listener_cancel_token = setup_telemetry_client(
-        client,
-        &r.extension_id,
-        &aws_config.runtime_api,
-        logs_agent_channel,
-        config.serverless_logs_enabled,
-    )
-    .await?;
+    let telemetry_task = {
+        let client = client.clone();
+        let extension_id = r.extension_id.clone();
+        let runtime_api = aws_config.runtime_api.clone();
+        let logs_agent_channel = logs_agent_channel.clone();
+        let logs_enabled = config.serverless_logs_enabled;
+        tokio::spawn(async move {
+            setup_telemetry_client(
+                &client,
+                &extension_id,
+                &runtime_api,
+                logs_agent_channel,
+                logs_enabled,
+            )
+            .await
+        })
+    };
 
     let otlp_cancel_token = start_otlp_agent(
         config,
@@ -694,7 +706,13 @@ async fn extension_loop_active(
                 otlp_cancel_token.cancel();
             }
             trace_agent_shutdown_token.cancel();
+            let dogstatsd_cancel_token = dogstatsd_task
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to join dogstatsd task: {e:?}"))?;
             dogstatsd_cancel_token.cancel();
+            let telemetry_listener_cancel_token = telemetry_task
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to join telemetry task: {e:?}"))??;
             telemetry_listener_cancel_token.cancel();
             lifecycle_listener_shutdown_token.cancel();
 
