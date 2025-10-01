@@ -84,10 +84,7 @@ use dogstatsd::{
     metric::{EMPTY_TAGS, SortedTags},
 };
 use reqwest::Client;
-use std::{
-    collections::hash_map, env, os::unix::process::CommandExt, path::Path, process::Command,
-    sync::Arc,
-};
+use std::{collections::hash_map, env, path::Path, sync::Arc};
 use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -294,15 +291,9 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     let aws_config = AwsConfig::from_env(start_time);
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => Arc::new(config),
-        Err(_e) => {
-            let err = Command::new("/opt/datadog-agent-go").exec();
-            panic!("Error starting the extension: {err:?}");
-        }
-    };
+    let config = config::get_config(Path::new(&lambda_directory));
 
-    (aws_config, config)
+    (aws_config, Arc::new(config))
 }
 
 fn enable_logging_subsystem(config: &Arc<Config>) {
