@@ -351,7 +351,6 @@ impl LambdaProcessor {
         }
 
         if !self.ready_logs.is_empty() {
-            // Send logs to aggregator via handle
             if let Err(e) = aggregator_handle.insert_batch(std::mem::take(&mut self.ready_logs)) {
                 debug!("Failed to send logs to aggregator: {}", e);
             }
@@ -781,8 +780,12 @@ mod tests {
         let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
         assert_eq!(batches[0], serialized_log.as_bytes());
 
-        aggregator_handle.shutdown().unwrap();
-        let _ = service_handle.await;
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]
@@ -823,8 +826,12 @@ mod tests {
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert!(batches.is_empty());
 
-        aggregator_handle.shutdown().unwrap();
-        let _ = service_handle.await;
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]
@@ -861,8 +868,12 @@ mod tests {
         let batches = aggregator_handle.get_batches().await.unwrap();
         assert!(batches.is_empty());
 
-        aggregator_handle.shutdown().unwrap();
-        let _ = service_handle.await;
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]
@@ -953,9 +964,12 @@ mod tests {
         );
         assert_eq!(batches[0], serialized_log.as_bytes());
 
-        // Shutdown the service
-        aggregator_handle.shutdown().unwrap();
-        let _ = service_handle.await;
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]

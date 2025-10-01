@@ -112,7 +112,6 @@ mod tests {
     async fn test_aggregator_service_insert_and_flush() {
         let (service, handle) = AggregatorService::default();
 
-        // Spawn the service
         let service_handle = tokio::spawn(async move {
             service.run().await;
         });
@@ -134,17 +133,18 @@ mod tests {
         };
         let serialized_log = serde_json::to_string(&log).unwrap();
 
-        // Insert logs using handle
         handle.insert_batch(vec![serialized_log.clone()]).unwrap();
 
-        // Flush all batches
         let batches = handle.get_batches().await.unwrap();
         assert_eq!(batches.len(), 1);
         let serialized_batch = format!("[{serialized_log}]");
         assert_eq!(batches[0], serialized_batch.as_bytes());
 
-        // Shutdown the service
-        handle.shutdown().unwrap();
-        let _ = service_handle.await;
+        handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 }
