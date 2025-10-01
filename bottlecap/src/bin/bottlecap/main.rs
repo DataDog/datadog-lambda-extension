@@ -129,6 +129,7 @@ impl PendingFlushHandles {
         trace_pending || log_pending || metric_pending || proxy_pending
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn await_flush_handles(
         &mut self,
         logs_flusher: &LogsFlusher,
@@ -144,7 +145,10 @@ impl PendingFlushHandles {
                 Ok(retry) => {
                     let tf = trace_flusher.clone();
                     if !retry.is_empty() {
-                        debug!("PENDING_FLUSH_HANDLES | redriving {:?} trace payloads", retry.len());
+                        debug!(
+                            "PENDING_FLUSH_HANDLES | redriving {:?} trace payloads",
+                            retry.len()
+                        );
                         joinset.spawn(async move {
                             tf.flush(Some(retry)).await;
                         });
@@ -160,7 +164,10 @@ impl PendingFlushHandles {
             match handle.await {
                 Ok(retry) => {
                     if !retry.is_empty() {
-                        debug!("PENDING_FLUSH_HANDLES | redriving {:?} log payloads", retry.len());
+                        debug!(
+                            "PENDING_FLUSH_HANDLES | redriving {:?} log payloads",
+                            retry.len()
+                        );
                     }
                     for item in retry {
                         let lf = logs_flusher.clone();
@@ -212,7 +219,10 @@ impl PendingFlushHandles {
             match handle.await {
                 Ok(batch) => {
                     if !batch.is_empty() {
-                        debug!("PENDING_FLUSH_HANDLES | Redriving {:?} APM proxy payloads", batch.len());
+                        debug!(
+                            "PENDING_FLUSH_HANDLES | Redriving {:?} APM proxy payloads",
+                            batch.len()
+                        );
                     }
 
                     let pf = proxy_flusher.clone();

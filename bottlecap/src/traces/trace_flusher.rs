@@ -101,7 +101,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
         if let Some(traces) = failed_traces {
             // If we have traces from a previous failed attempt, try to send those first
             if !traces.is_empty() {
-                debug!("TRACES | Retrying to send {} previously failed batches", traces.len());
+                debug!(
+                    "TRACES | Retrying to send {} previously failed batches",
+                    traces.len()
+                );
                 let retry_result = Self::send(traces, None, &self.config.proxy_https).await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
