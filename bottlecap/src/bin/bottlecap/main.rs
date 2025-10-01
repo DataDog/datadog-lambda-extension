@@ -237,10 +237,8 @@ impl PendingFlushHandles {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
-    init_ustr();
     enable_logging_subsystem();
-    let (aws_config, config) = load_configs(start_time);
-
+    let aws_config = AwsConfig::from_env(start_time);
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
@@ -254,6 +252,11 @@ async fn main() -> anyhow::Result<()> {
     let r = extension::register(&client, &aws_config.runtime_api)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    // First load the AWS configuration
+    let lambda_directory: String =
+        env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
+    init_ustr();
 
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config);
@@ -285,16 +288,6 @@ fn init_ustr() {
     tokio::spawn(async {
         Ustr::from("");
     });
-}
-
-fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
-    // First load the AWS configuration
-    let aws_config = AwsConfig::from_env(start_time);
-    let lambda_directory: String =
-        env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = config::get_config(Path::new(&lambda_directory));
-
-    (aws_config, Arc::new(config))
 }
 
 fn enable_logging_subsystem() {
