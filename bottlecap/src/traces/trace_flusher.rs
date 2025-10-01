@@ -185,7 +185,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             }
         }
 
-        debug!("Flushing traces took {}ms", start.elapsed().as_millis());
+        debug!("Flushing traces took {} ms", start.elapsed().as_millis());
         None
     }
 }
