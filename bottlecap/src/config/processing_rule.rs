@@ -28,21 +28,28 @@ where
     let value: JsonValue = Deserialize::deserialize(deserializer)?;
 
     match value {
-        JsonValue::String(s) => {
-            let values: Vec<ProcessingRule> = serde_json::from_str(&s).map_err(|e| {
-                serde::de::Error::custom(format!("Failed to deserialize processing rules: {e}"))
-            })?;
-            Ok(Some(values))
-        }
+        JsonValue::String(s) => match serde_json::from_str(&s) {
+            Ok(values) => Ok(Some(values)),
+            Err(e) => {
+                tracing::error!("Failed to parse processing rules: {}, ignoring", e);
+                Ok(None)
+            }
+        },
         JsonValue::Array(a) => {
             let mut values = Vec::new();
             for v in a {
-                let rule: ProcessingRule = serde_json::from_value(v).map_err(|e| {
-                    serde::de::Error::custom(format!("Failed to deserialize processing rule: {e}"))
-                })?;
-                values.push(rule);
+                match serde_json::from_value(v.clone()) {
+                    Ok(rule) => values.push(rule),
+                    Err(e) => {
+                        tracing::error!("Failed to parse processing rule: {}, ignoring", e);
+                    }
+                }
             }
-            Ok(Some(values))
+            if values.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(values))
+            }
         }
         _ => Ok(None),
     }
