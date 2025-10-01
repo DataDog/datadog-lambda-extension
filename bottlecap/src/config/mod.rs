@@ -1244,7 +1244,7 @@ pub mod tests {
     fn test_bad_tags() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env("DD_TAGS", 123123123);
+            jail.set_env("DD_TAGS", 123);
             let config = get_config(Path::new(""));
             assert_eq!(config.tags, HashMap::new());
             Ok(())
