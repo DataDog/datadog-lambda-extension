@@ -24,9 +24,6 @@ WORKDIR /extensions
 # Copy Rust Agent binary
 COPY .binaries/bottlecap-$FILE_SUFFIX /extensions/datadog-agent
 
-# UPX compress
-RUN upx -1 /extensions/datadog-agent
-
 # Copy wrapper script
 COPY ./scripts/$DATADOG_WRAPPER /$DATADOG_WRAPPER
 RUN chmod +x /$DATADOG_WRAPPER
