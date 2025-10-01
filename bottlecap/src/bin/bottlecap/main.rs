@@ -43,7 +43,10 @@ use bottlecap::{
         listener::Listener as LifecycleListener,
     },
     logger,
-    logs::{agent::LogsAgent, flusher::LogsFlusher},
+    logs::{
+        agent::LogsAgent, aggregator_service::AggregatorService as LogsAggregatorService,
+        flusher::LogsFlusher,
+    },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -904,13 +907,17 @@ fn start_logs_agent(
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
 ) -> (Sender<TelemetryEvent>, LogsFlusher) {
-    let mut logs_agent = LogsAgent::new(Arc::clone(tags_provider), Arc::clone(config), event_bus);
-    let logs_agent_channel = logs_agent.get_sender_copy();
-    let logs_flusher = LogsFlusher::new(
-        api_key_factory,
-        Arc::clone(&logs_agent.aggregator),
-        config.clone(),
+    let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::default();
+    start_logs_aggregator(logs_aggr_service);
+
+    let mut logs_agent = LogsAgent::new(
+        Arc::clone(tags_provider),
+        Arc::clone(config),
+        event_bus,
+        logs_aggr_handle.clone(),
     );
+    let logs_agent_channel = logs_agent.get_sender_copy();
+    let logs_flusher = LogsFlusher::new(api_key_factory, logs_aggr_handle, config.clone());
     tokio::spawn(async move {
         logs_agent.spin().await;
     });
@@ -1079,6 +1086,12 @@ fn start_trace_agent(
 }
 
 fn start_dogstatsd_aggregator(aggr_service: MetricsAggregatorService) {
+    tokio::spawn(async move {
+        aggr_service.run().await;
+    });
+}
+
+fn start_logs_aggregator(aggr_service: LogsAggregatorService) {
     tokio::spawn(async move {
         aggr_service.run().await;
     });
