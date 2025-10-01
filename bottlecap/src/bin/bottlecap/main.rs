@@ -237,9 +237,9 @@ impl PendingFlushHandles {
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
+    enable_logging_subsystem();
     let (aws_config, config) = load_configs(start_time);
 
-    enable_logging_subsystem(&config);
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
@@ -296,10 +296,24 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
     (aws_config, Arc::new(config))
 }
 
-fn enable_logging_subsystem(config: &Arc<Config>) {
+fn enable_logging_subsystem() {
+    let dd_log_level = env::var("DD_LOG_LEVEL")
+        .ok()
+        .and_then(|level| {
+            let level_lower = level.to_lowercase();
+            match level_lower.as_str() {
+                "error" | "warn" | "info" | "debug" | "trace" => Some(level_lower),
+                _ => {
+                    eprintln!("Invalid DD_LOG_LEVEL: '{}'. Valid levels are: error, warn, info, debug, trace. Defaulting to 'info'", level);
+                    None
+                }
+            }
+        })
+        .unwrap_or_else(|| "info".to_string());
+
     let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
-        config.log_level
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{}",
+        dd_log_level
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
