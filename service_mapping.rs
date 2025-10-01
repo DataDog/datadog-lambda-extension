@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Deserializer};
-use tracing::debug;
 
 #[allow(clippy::module_name_repetitions)]
 pub fn deserialize_service_mapping<'de, D>(
@@ -14,22 +13,20 @@ where
 
     let map = s
         .split(',')
-        .map(|pair| {
+        .filter_map(|pair| {
             let mut split = pair.split(':');
 
             let service = split.next();
             let to_map = split.next();
 
             if let (Some(service), Some(to_map)) = (service, to_map) {
-                Ok((service.trim().to_string(), to_map.trim().to_string()))
+                Some((service.trim().to_string(), to_map.trim().to_string()))
             } else {
-                debug!("Ignoring invalid service mapping pair: {pair}");
-                Err(serde::de::Error::custom(format!(
-                    "Failed to deserialize service mapping for pair: {pair}"
-                )))
+                tracing::error!("Failed to parse service mapping '{}', expected format 'service:mapped_service', ignoring", pair.trim());
+                None
             }
         })
         .collect();
 
-    map
+    Ok(map)
 }
