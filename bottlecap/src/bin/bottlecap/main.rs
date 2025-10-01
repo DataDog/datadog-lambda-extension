@@ -25,6 +25,7 @@ use bottlecap::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
         flush_strategy::FlushStrategy,
+        log_level::LogLevel,
     },
     event_bus::{Event, EventBus},
     extension::{
@@ -84,7 +85,7 @@ use dogstatsd::{
     metric::{EMPTY_TAGS, SortedTags},
 };
 use reqwest::Client;
-use std::{collections::hash_map, env, path::Path, sync::Arc};
+use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -297,23 +298,14 @@ fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
 }
 
 fn enable_logging_subsystem() {
-    let dd_log_level = env::var("DD_LOG_LEVEL")
-        .ok()
-        .and_then(|level| {
-            let level_lower = level.to_lowercase();
-            match level_lower.as_str() {
-                "error" | "warn" | "info" | "debug" | "trace" => Some(level_lower),
-                _ => {
-                    eprintln!("Invalid DD_LOG_LEVEL: '{}'. Valid levels are: error, warn, info, debug, trace. Defaulting to 'info'", level);
-                    None
-                }
-            }
-        })
-        .unwrap_or_else(|| "info".to_string());
+    let log_level = LogLevel::from_str(
+        std::env::var("DD_LOG_LEVEL")
+            .unwrap_or("info".to_string())
+            .as_str(),
+    );
 
     let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{}",
-        dd_log_level
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
