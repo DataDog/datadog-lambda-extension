@@ -459,11 +459,10 @@ impl Default for Config {
 #[must_use]
 pub fn get_config(config_directory: &Path) -> Config {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
-    let mut config_builder = ConfigBuilder::default()
+    ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))
-        .add_source(Box::new(EnvConfigSource));
-
-    config_builder.build()
+        .add_source(Box::new(EnvConfigSource))
+        .build()
 }
 
 #[inline]
