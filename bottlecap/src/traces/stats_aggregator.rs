@@ -54,8 +54,38 @@ impl StatsAggregator {
     pub async fn get_batch(&mut self, force_flush: bool) -> Vec<ClientStatsPayload> {
         // Pull stats data from concentrator
         match self.concentrator.flush(force_flush).await {
-            Ok(stats) => {
-                self.queue.extend(stats);
+            Ok(stats_buckets) => {
+                let stats = ClientStatsPayload {
+                    // TODO: support this
+                    hostname: "hostname".to_string(),
+                    env: "env".to_string(),
+                    // TODO: support this
+                    // Version is not in the trace payload. Need to read it from config.
+                    version: "version".to_string(),
+                    // TODO: support this
+                    lang: "lang".to_string(),
+                    // TODO: support this
+                    tracer_version: "tracer_version".to_string(),
+                    runtime_id: "runtime_id".to_string(),
+                    // Not supported yet
+                    sequence: 0,
+                    // Not supported yet
+                    agent_aggregation: String::new(),
+                    // TODO: support this
+                    service: "service".to_string(),
+                    // TODO: support this
+                    container_id: "container_id".to_string(),
+                    // Not supported yet
+                    tags: vec![],
+                    // Not supported yet
+                    git_commit_sha: String::new(),
+                    // Not supported yet
+                    image_tag: String::new(),
+                    stats: stats_buckets,
+                    process_tags: String::new(),
+                    process_tags_hash: 0,
+                };
+                self.queue.push_back(stats);
             }
             Err(e) => {
                 error!("Error getting stats from the stats concentrator: {e:?}");
