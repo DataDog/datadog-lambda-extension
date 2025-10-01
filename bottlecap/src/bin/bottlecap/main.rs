@@ -237,6 +237,7 @@ impl PendingFlushHandles {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
+    init_ustr();
     enable_logging_subsystem();
     let aws_config = AwsConfig::from_env(start_time);
     log_fips_status(&aws_config.region);
@@ -249,17 +250,21 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
 
-    let r = extension::register(&client, &aws_config.runtime_api)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    let cloned_client = client.clone();
+    let runtime_api = aws_config.runtime_api.clone();
+    let response =
+        tokio::task::spawn(async move { extension::register(&cloned_client, &runtime_api).await });
     // First load the AWS configuration
     let lambda_directory: String =
         env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
     let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
-    init_ustr();
-
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config);
+
+    let r = response
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
+        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
 
     match extension_loop_active(
         Arc::clone(&aws_config),
