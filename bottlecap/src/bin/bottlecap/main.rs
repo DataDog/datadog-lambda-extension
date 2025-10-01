@@ -1003,7 +1003,7 @@ fn start_trace_agent(
 ) {
     // Stats
     let (stats_concentrator_service, stats_concentrator_handle) =
-        StatsConcentratorService::new();
+        StatsConcentratorService::new(Arc::clone(config), Arc::clone(tags_provider));
     tokio::spawn(stats_concentrator_service.run());
     let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
         StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),

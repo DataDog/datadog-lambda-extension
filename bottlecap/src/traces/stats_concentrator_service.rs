@@ -6,6 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, Duration};
 use tracing::error;
 use datadog_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
+use crate::config::Config;
+use crate::tags::provider::Provider as TagProvider;
+use std::sync::Arc;
 
 const S_TO_NS: u64 = 1_000_000_000;
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
@@ -103,6 +106,8 @@ pub struct StatsConcentratorService {
     concentrator: SpanConcentrator,
     rx: mpsc::UnboundedReceiver<ConcentratorCommand>,
     tracer_metadata: TracerMetadata,
+    hostname: String,
+    config: Arc<Config>,
 }
 
 // A service that handles add() and flush() requests in the same queue,
@@ -110,14 +115,15 @@ pub struct StatsConcentratorService {
 impl StatsConcentratorService {
     #[must_use]
     pub fn new(
-        // config: Arc<Config>,
-        // tags_provider: Arc<TagProvider>,
+        config: Arc<Config>,
+        tags_provider: Arc<TagProvider>,
     ) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
         // TODO: set span_kinds_stats_computed and peer_tag_keys
         let concentrator = SpanConcentrator::new(Duration::from_nanos(BUCKET_DURATION_NS), SystemTime::now(), vec![], vec![]);
-        let service: StatsConcentratorService = Self { concentrator, rx, tracer_metadata: TracerMetadata::default() };
+        let hostname = tags_provider.get_canonical_id().unwrap_or_default();
+        let service: StatsConcentratorService = Self { concentrator, rx, tracer_metadata: TracerMetadata::default(), hostname, config };
         (service, handle)
     }
 
@@ -131,11 +137,10 @@ impl StatsConcentratorService {
                 ConcentratorCommand::Flush(force_flush, response_tx) => {
                     let stats_buckets = self.concentrator.flush(SystemTime::now(), force_flush);
                     let stats = ClientStatsPayload {
-                        hostname: "hostname".to_string(),
-                        env: "env".to_string(),
-                        // TODO: support this
+                        hostname: self.hostname.clone(),
+                        env: self.config.env.clone().unwrap_or("unknown-env".to_string()),
                         // Version is not in the trace payload. Need to read it from config.
-                        version: "version".to_string(),
+                        version: self.config.version.clone().unwrap_or_default(),
                         lang: self.tracer_metadata.language.clone(),
                         tracer_version: self.tracer_metadata.tracer_version.clone(),
                         runtime_id: self.tracer_metadata.runtime_id.clone(),
@@ -143,8 +148,7 @@ impl StatsConcentratorService {
                         sequence: 0,
                         // Not supported yet
                         agent_aggregation: String::new(),
-                        // TODO: support this
-                        service: "service".to_string(),
+                        service: self.config.service.clone().unwrap_or_default(),
                         container_id: self.tracer_metadata.container_id.clone(),
                         // Not supported yet
                         tags: vec![],
