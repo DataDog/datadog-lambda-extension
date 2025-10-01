@@ -25,6 +25,7 @@ use bottlecap::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
         flush_strategy::FlushStrategy,
+        log_level::LogLevel,
     },
     event_bus::{Event, EventBus},
     extension::{
@@ -87,10 +88,7 @@ use dogstatsd::{
     metric::{EMPTY_TAGS, SortedTags},
 };
 use reqwest::Client;
-use std::{
-    collections::hash_map, env, os::unix::process::CommandExt, path::Path, process::Command,
-    sync::Arc,
-};
+use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
@@ -243,9 +241,8 @@ impl PendingFlushHandles {
 async fn main() -> anyhow::Result<()> {
     let start_time = Instant::now();
     init_ustr();
-    let (aws_config, config) = load_configs(start_time);
-
-    enable_logging_subsystem(&config);
+    enable_logging_subsystem();
+    let aws_config = AwsConfig::from_env(start_time);
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension {version_without_next}");
@@ -256,12 +253,23 @@ async fn main() -> anyhow::Result<()> {
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create client: {e:?}"))?;
 
-    let r = extension::register(&client, &aws_config.runtime_api, extension::EXTENSION_NAME)
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
+    let cloned_client = client.clone();
+    let runtime_api = aws_config.runtime_api.clone();
+    let response = tokio::task::spawn(async move {
+        extension::register(&cloned_client, &runtime_api, extension::EXTENSION_NAME).await
+    });
+    // First load the AWS configuration
+    let lambda_directory: String =
+        env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
+    let config = Arc::new(config::get_config(Path::new(&lambda_directory)));
 
     let aws_config = Arc::new(aws_config);
     let api_key_factory = create_api_key_factory(&config, &aws_config);
+
+    let r = response
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to join task: {e:?}"))?
+        .map_err(|e| anyhow::anyhow!("Failed to register extension: {e:?}"))?;
 
     match extension_loop_active(
         Arc::clone(&aws_config),
@@ -292,26 +300,16 @@ fn init_ustr() {
     });
 }
 
-fn load_configs(start_time: Instant) -> (AwsConfig, Arc<Config>) {
-    // First load the AWS configuration
-    let aws_config = AwsConfig::from_env(start_time);
-    let lambda_directory: String =
-        env::var("LAMBDA_TASK_ROOT").unwrap_or_else(|_| "/var/task".to_string());
-    let config = match config::get_config(Path::new(&lambda_directory)) {
-        Ok(config) => Arc::new(config),
-        Err(_e) => {
-            let err = Command::new("/opt/datadog-agent-go").exec();
-            panic!("Error starting the extension: {err:?}");
-        }
-    };
+fn enable_logging_subsystem() {
+    let log_level = LogLevel::from_str(
+        std::env::var("DD_LOG_LEVEL")
+            .unwrap_or("info".to_string())
+            .as_str(),
+    )
+    .unwrap_or(LogLevel::Info);
 
-    (aws_config, config)
-}
-
-fn enable_logging_subsystem(config: &Arc<Config>) {
     let env_filter = format!(
-        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{:?}",
-        config.log_level
+        "h2=off,hyper=off,reqwest=off,rustls=off,datadog-trace-mini-agent=off,{log_level:?}",
     );
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .with_env_filter(
