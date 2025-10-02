@@ -394,26 +394,8 @@ async fn extension_loop_active(
         event_bus.get_sender_copy(),
     );
 
-    let metrics_aggr_init_start_time = Instant::now();
-    let (metrics_aggr_service, metrics_aggr_handle) = MetricsAggregatorService::new(
-        SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
-        CONTEXTS,
-    )
-    .expect("can't create metrics service");
-    debug!(
-        "Metrics aggregator created in {:} microseconds",
-        metrics_aggr_init_start_time
-            .elapsed()
-            .as_micros()
-            .to_string()
-    );
-    start_dogstatsd_aggregator(metrics_aggr_service);
-
-    let metrics_flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
-        Arc::clone(&api_key_factory),
-        &metrics_aggr_handle,
-        config,
-    )));
+    let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
+        start_dogstatsd(tags_provider.clone(), Arc::clone(&api_key_factory), config).await;
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
@@ -421,7 +403,7 @@ async fn extension_loop_active(
         Arc::clone(&tags_provider),
         Arc::clone(config),
         Arc::clone(&aws_config),
-        metrics_aggr_handle.clone(),
+        metrics_aggregator_handle.clone(),
         Arc::clone(&propagator),
     )));
     // AppSec processor (if enabled)
@@ -436,7 +418,6 @@ async fn extension_loop_active(
         }
     };
 
-    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
     let (
         trace_agent_channel,
         trace_flusher,
@@ -451,7 +432,6 @@ async fn extension_loop_active(
         &tags_provider,
         Arc::clone(&invocation_processor),
         appsec_processor.clone(),
-        Arc::clone(&trace_aggregator),
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
@@ -467,13 +447,10 @@ async fn extension_loop_active(
     let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
     // TODO(astuyve): deprioritize this task after the first request
     tokio::spawn(async move {
-        let res = lifecycle_listener.start().await;
-        if let Err(e) = res {
-            error!("Error starting hello agent: {e:?}");
+        if let Err(e) = lifecycle_listener.start().await {
+            error!("Error starting lifecycle listener: {e:?}");
         }
     });
-
-    let dogstatsd_cancel_token = start_dogstatsd(metrics_aggr_handle.clone()).await;
 
     let telemetry_listener_cancel_token = setup_telemetry_client(
         client,
@@ -536,7 +513,7 @@ async fn extension_loop_active(
                                 &*stats_flusher,
                                 &proxy_flusher,
                                 &mut race_flush_interval,
-                                &metrics_aggr_handle.clone(),
+                                &metrics_aggregator_handle.clone(),
                                 false,
                             )
                             .await;
@@ -552,7 +529,7 @@ async fn extension_loop_active(
                     &*stats_flusher,
                     &proxy_flusher,
                     &mut race_flush_interval,
-                    &metrics_aggr_handle.clone(),
+                    &metrics_aggregator_handle.clone(),
                     false,
                 )
                 .await;
@@ -576,7 +553,7 @@ async fn extension_loop_active(
                             ));
                             let (metrics_flushers_copy, series, sketches) = {
                                 let locked_metrics = metrics_flushers.lock().await;
-                                let flush_response = metrics_aggr_handle
+                                let flush_response = metrics_aggregator_handle
                                     .clone()
                                     .flush()
                                     .await
@@ -622,7 +599,7 @@ async fn extension_loop_active(
                             &*stats_flusher,
                             &proxy_flusher,
                             &mut race_flush_interval,
-                            &metrics_aggr_handle,
+                            &metrics_aggregator_handle,
                             false, // force_flush_trace_stats
                         )
                         .await;
@@ -660,7 +637,7 @@ async fn extension_loop_active(
                                     &*stats_flusher,
                                     &proxy_flusher,
                                     &mut race_flush_interval,
-                                    &metrics_aggr_handle,
+                                    &metrics_aggregator_handle,
                                     false, // force_flush_trace_stats
                                 )
                                 .await;
@@ -720,7 +697,7 @@ async fn extension_loop_active(
                 &*stats_flusher,
                 &proxy_flusher,
                 &mut race_flush_interval,
-                &metrics_aggr_handle,
+                &metrics_aggregator_handle,
                 true, // force_flush_trace_stats
             )
             .await;
@@ -915,21 +892,174 @@ fn start_logs_agent(
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
 ) -> (Sender<TelemetryEvent>, LogsFlusher) {
-    let (logs_aggr_service, logs_aggr_handle) = LogsAggregatorService::default();
-    start_logs_aggregator(logs_aggr_service);
+    let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
+    // Start service in background
+    tokio::spawn(async move {
+        aggregator_service.run().await;
+    });
 
-    let mut logs_agent = LogsAgent::new(
+    let mut agent = LogsAgent::new(
         Arc::clone(tags_provider),
         Arc::clone(config),
         event_bus,
-        logs_aggr_handle.clone(),
+        aggregator_handle.clone(),
     );
-    let logs_agent_channel = logs_agent.get_sender_copy();
-    let logs_flusher = LogsFlusher::new(api_key_factory, logs_aggr_handle, config.clone());
+    let tx = agent.get_sender_copy();
+
+    // Start logs agent in background
     tokio::spawn(async move {
-        logs_agent.spin().await;
+        agent.spin().await;
     });
-    (logs_agent_channel, logs_flusher)
+
+    let flusher = LogsFlusher::new(api_key_factory, aggregator_handle, config.clone());
+    (tx, flusher)
+}
+
+#[allow(clippy::type_complexity)]
+fn start_trace_agent(
+    config: &Arc<Config>,
+    api_key_factory: &Arc<ApiKeyFactory>,
+    tags_provider: &Arc<TagProvider>,
+    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+) -> (
+    Sender<SendDataBuilderInfo>,
+    Arc<trace_flusher::ServerlessTraceFlusher>,
+    Arc<trace_processor::ServerlessTraceProcessor>,
+    Arc<stats_flusher::ServerlessStatsFlusher>,
+    Arc<ProxyFlusher>,
+    tokio_util::sync::CancellationToken,
+    StatsConcentratorHandle,
+) {
+    // Stats
+    let (stats_concentrator_service, stats_concentrator_handle) =
+        StatsConcentratorService::new(Arc::clone(config), tags_provider.clone());
+    tokio::spawn(stats_concentrator_service.run());
+    let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
+        StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
+    ));
+    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
+        api_key_factory.clone(),
+        stats_aggregator.clone(),
+        Arc::clone(config),
+    ));
+
+    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
+
+    // Traces
+    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
+    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
+        trace_aggregator.clone(),
+        config.clone(),
+        api_key_factory.clone(),
+    ));
+
+    let obfuscation_config = obfuscation_config::ObfuscationConfig {
+        tag_replace_rules: config.apm_replace_tags.clone(),
+        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
+        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
+        obfuscate_memcached: false,
+        obfuscation_redis_enabled: false,
+        obfuscation_redis_remove_all_args: false,
+    };
+
+    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
+        obfuscation_config: Arc::new(obfuscation_config),
+    });
+
+    // Proxy
+    let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
+    let proxy_flusher = Arc::new(ProxyFlusher::new(
+        api_key_factory.clone(),
+        Arc::clone(&proxy_aggregator),
+        Arc::clone(tags_provider),
+        Arc::clone(config),
+    ));
+
+    let trace_agent = trace_agent::TraceAgent::new(
+        Arc::clone(config),
+        trace_aggregator,
+        trace_processor.clone(),
+        stats_aggregator,
+        stats_processor,
+        proxy_aggregator,
+        invocation_processor,
+        appsec_processor,
+        Arc::clone(tags_provider),
+        stats_concentrator_handle.clone(),
+    );
+    let trace_agent_channel = trace_agent.get_sender_copy();
+    let shutdown_token = trace_agent.shutdown_token();
+
+    tokio::spawn(async move {
+        if let Err(e) = trace_agent.start().await {
+            error!("Error starting trace agent: {e:?}");
+        }
+    });
+
+    (
+        trace_agent_channel,
+        trace_flusher,
+        trace_processor,
+        stats_flusher,
+        proxy_flusher,
+        shutdown_token,
+        stats_concentrator_handle,
+    )
+}
+
+async fn start_dogstatsd(
+    tags_provider: Arc<TagProvider>,
+    api_key_factory: Arc<ApiKeyFactory>,
+    config: &Arc<Config>,
+) -> (
+    Arc<TokioMutex<Vec<MetricsFlusher>>>,
+    MetricsAggregatorHandle,
+    CancellationToken,
+) {
+    // Start aggregator service and handle
+    let start_time = Instant::now();
+    let (aggregator_service, aggregator_handle) = MetricsAggregatorService::new(
+        SortedTags::parse(&tags_provider.get_tags_string()).unwrap_or(EMPTY_TAGS),
+        CONTEXTS,
+    )
+    .expect("can't create metrics service");
+    debug!(
+        "Metrics aggregator created in {:} microseconds",
+        start_time.elapsed().as_micros().to_string()
+    );
+
+    // Start service in background
+    tokio::spawn(async move {
+        aggregator_service.run().await;
+    });
+
+    // Get flushers with aggregator handle
+    let flushers = Arc::new(TokioMutex::new(start_metrics_flushers(
+        Arc::clone(&api_key_factory),
+        &aggregator_handle,
+        config,
+    )));
+
+    // Create Dogstatsd server
+    let dogstatsd_config = DogStatsDConfig {
+        host: EXTENSION_HOST.to_string(),
+        port: DOGSTATSD_PORT,
+    };
+    let cancel_token = tokio_util::sync::CancellationToken::new();
+    let dogstatsd_agent = DogStatsD::new(
+        &dogstatsd_config,
+        aggregator_handle.clone(),
+        cancel_token.clone(),
+    )
+    .await;
+
+    // Start server in background
+    tokio::spawn(async move {
+        dogstatsd_agent.spin().await;
+    });
+
+    (flushers, aggregator_handle, cancel_token)
 }
 
 fn start_metrics_flushers(
@@ -999,132 +1129,6 @@ fn start_metrics_flushers(
     flushers
 }
 
-#[allow(clippy::type_complexity)]
-fn start_trace_agent(
-    config: &Arc<Config>,
-    api_key_factory: &Arc<ApiKeyFactory>,
-    tags_provider: &Arc<TagProvider>,
-    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
-    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
-    trace_aggregator: Arc<TokioMutex<trace_aggregator::TraceAggregator>>,
-) -> (
-    Sender<SendDataBuilderInfo>,
-    Arc<trace_flusher::ServerlessTraceFlusher>,
-    Arc<trace_processor::ServerlessTraceProcessor>,
-    Arc<stats_flusher::ServerlessStatsFlusher>,
-    Arc<ProxyFlusher>,
-    tokio_util::sync::CancellationToken,
-    StatsConcentratorHandle,
-) {
-    // Stats
-    let (stats_concentrator_service, stats_concentrator_handle) =
-        StatsConcentratorService::new(Arc::clone(config), tags_provider.clone());
-    tokio::spawn(stats_concentrator_service.run());
-    let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
-        StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
-    ));
-    let stats_flusher = Arc::new(stats_flusher::ServerlessStatsFlusher::new(
-        api_key_factory.clone(),
-        stats_aggregator.clone(),
-        Arc::clone(config),
-    ));
-
-    let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
-
-    // Traces
-    let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
-        trace_aggregator.clone(),
-        config.clone(),
-        api_key_factory.clone(),
-    ));
-
-    let obfuscation_config = obfuscation_config::ObfuscationConfig {
-        tag_replace_rules: config.apm_replace_tags.clone(),
-        http_remove_path_digits: config.apm_config_obfuscation_http_remove_paths_with_digits,
-        http_remove_query_string: config.apm_config_obfuscation_http_remove_query_string,
-        obfuscate_memcached: false,
-        obfuscation_redis_enabled: false,
-        obfuscation_redis_remove_all_args: false,
-    };
-
-    let trace_processor = Arc::new(trace_processor::ServerlessTraceProcessor {
-        obfuscation_config: Arc::new(obfuscation_config),
-    });
-
-    // Proxy
-    let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
-    let proxy_flusher = Arc::new(ProxyFlusher::new(
-        api_key_factory.clone(),
-        Arc::clone(&proxy_aggregator),
-        Arc::clone(tags_provider),
-        Arc::clone(config),
-    ));
-
-    let trace_agent = trace_agent::TraceAgent::new(
-        Arc::clone(config),
-        trace_aggregator,
-        trace_processor.clone(),
-        stats_aggregator,
-        stats_processor,
-        proxy_aggregator,
-        invocation_processor,
-        appsec_processor,
-        Arc::clone(tags_provider),
-        stats_concentrator_handle.clone(),
-    );
-    let trace_agent_channel = trace_agent.get_sender_copy();
-    let shutdown_token = trace_agent.shutdown_token();
-
-    tokio::spawn(async move {
-        let res = trace_agent.start().await;
-        if let Err(e) = res {
-            error!("Error starting trace agent: {e:?}");
-        }
-    });
-
-    (
-        trace_agent_channel,
-        trace_flusher,
-        trace_processor,
-        stats_flusher,
-        proxy_flusher,
-        shutdown_token,
-        stats_concentrator_handle,
-    )
-}
-
-fn start_dogstatsd_aggregator(aggr_service: MetricsAggregatorService) {
-    tokio::spawn(async move {
-        aggr_service.run().await;
-    });
-}
-
-fn start_logs_aggregator(aggr_service: LogsAggregatorService) {
-    tokio::spawn(async move {
-        aggr_service.run().await;
-    });
-}
-
-async fn start_dogstatsd(metrics_aggr_handle: MetricsAggregatorHandle) -> CancellationToken {
-    let dogstatsd_config = DogStatsDConfig {
-        host: EXTENSION_HOST.to_string(),
-        port: DOGSTATSD_PORT,
-    };
-    let dogstatsd_cancel_token = tokio_util::sync::CancellationToken::new();
-    let dogstatsd_client = DogStatsD::new(
-        &dogstatsd_config,
-        metrics_aggr_handle,
-        dogstatsd_cancel_token.clone(),
-    )
-    .await;
-
-    tokio::spawn(async move {
-        dogstatsd_client.spin().await;
-    });
-
-    dogstatsd_cancel_token
-}
-
 async fn setup_telemetry_client(
     client: &Client,
     extension_id: &str,
@@ -1132,11 +1136,10 @@ async fn setup_telemetry_client(
     logs_agent_channel: Sender<TelemetryEvent>,
     logs_enabled: bool,
 ) -> anyhow::Result<CancellationToken> {
-    let telemetry_listener =
-        TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
+    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
 
-    let cancel_token = telemetry_listener.cancel_token();
-    if let Err(e) = telemetry_listener.start() {
+    let cancel_token = listener.cancel_token();
+    if let Err(e) = listener.start() {
         error!("Error starting telemetry listener: {e:?}");
     }
 
@@ -1172,9 +1175,12 @@ fn start_otlp_agent(
         stats_generator,
     );
     let cancel_token = agent.cancel_token();
-    if let Err(e) = agent.start() {
-        error!("Error starting OTLP agent: {e:?}");
-    }
+
+    tokio::spawn(async move {
+        if let Err(e) = agent.start().await {
+            error!("Error starting OTLP agent: {e:?}");
+        }
+    });
 
     Some(cancel_token)
 }
