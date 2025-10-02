@@ -457,6 +457,7 @@ async fn extension_loop_active(
         &r.extension_id,
         &aws_config.runtime_api,
         logs_agent_channel,
+        event_bus.get_sender_copy(),
         config.serverless_logs_enabled,
     )
     .await?;
@@ -649,6 +650,11 @@ async fn extension_loop_active(
         }
 
         if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
+            // Cancel Telemetry API listener
+            // Important to do this first, so we can receive the Tombstone event which signals
+            // that there are no more Telemetry events to process
+            telemetry_listener_cancel_token.cancel();
+
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
@@ -663,11 +669,11 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
+                        if let Event::Tombstone = event {
                             debug!("Received tombstone event, proceeding with shutdown");
                             break 'shutdown;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
+                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
@@ -685,7 +691,6 @@ async fn extension_loop_active(
             }
             trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
-            telemetry_listener_cancel_token.cancel();
             lifecycle_listener_shutdown_token.cancel();
 
             // gotta lock here
@@ -825,6 +830,8 @@ async fn handle_event_bus_event(
                 }
             }
         }
+        // Nothing to do with Tombstone event
+        _ => {}
     }
     None
 }
@@ -1133,10 +1140,11 @@ async fn setup_telemetry_client(
     client: &Client,
     extension_id: &str,
     runtime_api: &str,
-    logs_agent_channel: Sender<TelemetryEvent>,
+    logs_tx: Sender<TelemetryEvent>,
+    event_bus_tx: Sender<Event>,
     logs_enabled: bool,
 ) -> anyhow::Result<CancellationToken> {
-    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
+    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
     let cancel_token = listener.cancel_token();
     if let Err(e) = listener.start() {
