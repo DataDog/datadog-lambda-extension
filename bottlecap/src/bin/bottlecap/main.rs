@@ -666,18 +666,25 @@ async fn extension_loop_active(
                 )
                 .await;
             // Wait for tombstone event from telemetry listener to ensure all events are processed
+            let mut tombstone_received = false;
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
                         if let Event::Tombstone = event {
-                            debug!("Received tombstone event, proceeding with shutdown");
-                            break 'shutdown;
+                            debug!("Received tombstone event, continuing to drain remaining events");
+                            tombstone_received = true;
+                            // Continue processing to drain any remaining events after tombstone
+                        } else {
+                            handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                         }
-                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
-                        debug!("Timeout waiting for tombstone event, proceeding with shutdown");
+                        if tombstone_received {
+                            debug!("Timeout after tombstone event, all remaining events processed");
+                        } else {
+                            debug!("Timeout waiting for tombstone event, proceeding with shutdown");
+                        }
                         break 'shutdown;
                     }
                 }
@@ -831,7 +838,7 @@ async fn handle_event_bus_event(
             }
         }
         // Nothing to do with Tombstone event
-        _ => {}
+        Event::Tombstone => {}
     }
     None
 }
