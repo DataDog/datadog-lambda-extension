@@ -8,6 +8,7 @@ mod constants;
 pub enum Event {
     Telemetry(TelemetryEvent),
     OutOfMemory(i64),
+    Tombstone,
 }
 
 #[allow(clippy::module_name_repetitions)]
