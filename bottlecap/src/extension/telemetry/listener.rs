@@ -1,5 +1,6 @@
 use crate::{
-    extension::telemetry::events::{TelemetryEvent, TelemetryRecord},
+    event_bus,
+    extension::telemetry::events::TelemetryEvent,
     http::{extract_request_body, handler_not_found},
 };
 
@@ -10,7 +11,6 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use chrono::Utc;
 use std::net::SocketAddr;
 use tokio::{net::TcpListener, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
@@ -22,18 +22,25 @@ pub struct TelemetryListener {
     host: [u8; 4],
     port: u16,
     cancel_token: CancellationToken,
-    event_bus: Sender<TelemetryEvent>,
+    logs_tx: Sender<TelemetryEvent>,
+    event_bus_tx: Sender<event_bus::Event>,
 }
 
 impl TelemetryListener {
     #[must_use]
-    pub fn new(host: [u8; 4], port: u16, event_bus: Sender<TelemetryEvent>) -> Self {
+    pub fn new(
+        host: [u8; 4],
+        port: u16,
+        logs_tx: Sender<TelemetryEvent>,
+        event_bus_tx: Sender<event_bus::Event>,
+    ) -> Self {
         let cancel_token = CancellationToken::new();
         Self {
             host,
             port,
             cancel_token,
-            event_bus,
+            logs_tx,
+            event_bus_tx,
         }
     }
 
@@ -47,17 +54,14 @@ impl TelemetryListener {
         let router = self.make_router();
 
         let cancel_token_clone = self.cancel_token();
-        let event_bus_clone = self.event_bus.clone();
+        let event_bus_tx = self.event_bus_tx.clone();
         tokio::spawn(async move {
             let listener = TcpListener::bind(&socket)
                 .await
                 .expect("Failed to bind socket");
             debug!("Telemetry API | Starting listener on {}", socket);
             axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(
-                    cancel_token_clone,
-                    event_bus_clone,
-                ))
+                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone, event_bus_tx))
                 .await
                 .expect("Failed to start telemetry listener");
         });
@@ -66,32 +70,30 @@ impl TelemetryListener {
     }
 
     fn make_router(&self) -> Router {
-        let event_bus = self.event_bus.clone();
+        let logs_tx: Sender<TelemetryEvent> = self.logs_tx.clone();
 
         Router::new()
             .route("/", post(Self::handle))
             .fallback(handler_not_found)
-            .with_state(event_bus)
+            .with_state(logs_tx)
     }
 
-    async fn graceful_shutdown(cancel_token: CancellationToken, event_bus: Sender<TelemetryEvent>) {
+    async fn graceful_shutdown(
+        cancel_token: CancellationToken,
+        event_bus_tx: Sender<event_bus::Event>,
+    ) {
         cancel_token.cancelled().await;
         debug!("Telemetry API | Shutdown signal received, sending tombstone event");
 
         // Send tombstone event to signal shutdown
-        let tombstone_event = TelemetryEvent {
-            time: Utc::now(),
-            record: TelemetryRecord::PlatformTombstone,
-        };
-
-        if let Err(e) = event_bus.send(tombstone_event).await {
-            debug!("Failed to send tombstone event: {:?}", e);
+        if let Err(e) = event_bus_tx.send(event_bus::Event::Tombstone).await {
+            debug!("Telemetry API |Failed to send tombstone event: {:?}", e);
         }
 
         debug!("Telemetry API | Shutting down");
     }
 
-    async fn handle(State(event_bus): State<Sender<TelemetryEvent>>, request: Request) -> Response {
+    async fn handle(State(logs_tx): State<Sender<TelemetryEvent>>, request: Request) -> Response {
         let (_, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -119,7 +121,7 @@ impl TelemetryListener {
         };
 
         for event in telemetry_events.drain(..) {
-            event_bus.send(event).await.expect("infallible");
+            logs_tx.send(event).await.expect("infallible");
         }
 
         (StatusCode::OK, "OK").into_response()
