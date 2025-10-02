@@ -58,6 +58,6 @@ pub async fn subscribe(
         .send()
         .await?;
 
-    debug!("Subscribed to Telemetry API: {:?}", response);
+    debug!("EXTENSION | Subscribed to Telemetry API: {:?}", response);
     Ok(response)
 }

@@ -93,9 +93,9 @@ impl LambdaProcessor {
 
                 if let Some(message) = message {
                     if is_oom_error(&message) {
-                        debug!("Lambda Processor | Got a runtime-specific OOM error. Incrementing OOM metric.");
+                        debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
-                            error!("Failed to send OOM event to the main event bus: {e}");
+                            error!("LOGS | Failed to send OOM event to the main event bus: {e}");
                         }
                     }
 
