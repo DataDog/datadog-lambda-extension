@@ -378,7 +378,7 @@ async fn extension_loop_active(
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
 ) -> anyhow::Result<()> {
-    let mut event_bus = EventBus::run();
+    let (mut event_bus, event_bus_tx) = EventBus::run();
 
     let account_id = r
         .account_id
@@ -387,11 +387,11 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    let (logs_agent_channel, logs_flusher) = start_logs_agent(
+    let (logs_agent_channel, logs_flusher, logs_agent_cancel_token) = start_logs_agent(
         config,
         Arc::clone(&api_key_factory),
         &tags_provider,
-        event_bus.get_sender_copy(),
+        event_bus_tx.clone(),
     );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
@@ -457,6 +457,7 @@ async fn extension_loop_active(
         &r.extension_id,
         &aws_config.runtime_api,
         logs_agent_channel,
+        event_bus_tx.clone(),
         config.serverless_logs_enabled,
     )
     .await?;
@@ -649,6 +650,17 @@ async fn extension_loop_active(
         }
 
         if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
+            // Cancel Telemetry API listener
+            // Important to do this first, so we can receive the Tombstone event which signals
+            // that there are no more Telemetry events to process
+            telemetry_listener_cancel_token.cancel();
+
+            // Cancel Logs Agent which might have Telemetry API events to process
+            logs_agent_cancel_token.cancel();
+
+            // Drop the event bus sender to allow the channel to close properly
+            drop(event_bus_tx);
+
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
@@ -663,15 +675,28 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
-                            debug!("Received tombstone event, proceeding with shutdown");
-                            break 'shutdown;
+                        if let Event::Tombstone = event {
+                            debug!("Received tombstone event, draining remaining events");
+                            // Drain without waiting
+                            loop {
+                                match event_bus.rx.try_recv() {
+                                    Ok(event) => {
+                                        handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
+                                    },
+                                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break 'shutdown,
+                                    // Empty signals there are still outstanding senders
+                                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                                        debug!("No more events to process but still have senders, continuing to drain...");
+                                    },
+                                }
+                            }
+                        } else {
+                            handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
-                        debug!("Timeout waiting for tombstone event, proceeding with shutdown");
+                        debug!("Timeout waiting for teardown, proceeding with shutdown");
                         break 'shutdown;
                     }
                 }
@@ -685,7 +710,6 @@ async fn extension_loop_active(
             }
             trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
-            telemetry_listener_cancel_token.cancel();
             lifecycle_listener_shutdown_token.cancel();
 
             // gotta lock here
@@ -825,6 +849,8 @@ async fn handle_event_bus_event(
                 }
             }
         }
+        // Nothing to do with Tombstone event
+        Event::Tombstone => {}
     }
     None
 }
@@ -891,28 +917,30 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
-) -> (Sender<TelemetryEvent>, LogsFlusher) {
+) -> (Sender<TelemetryEvent>, LogsFlusher, CancellationToken) {
     let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
     // Start service in background
     tokio::spawn(async move {
         aggregator_service.run().await;
     });
 
-    let mut agent = LogsAgent::new(
+    let (mut agent, tx) = LogsAgent::new(
         Arc::clone(tags_provider),
         Arc::clone(config),
         event_bus,
         aggregator_handle.clone(),
     );
-    let tx = agent.get_sender_copy();
-
+    let cancel_token = agent.cancel_token();
     // Start logs agent in background
     tokio::spawn(async move {
         agent.spin().await;
+
+        debug!("LOGS_AGENT | Shutting down...");
+        drop(agent);
     });
 
     let flusher = LogsFlusher::new(api_key_factory, aggregator_handle, config.clone());
-    (tx, flusher)
+    (tx, flusher, cancel_token)
 }
 
 #[allow(clippy::type_complexity)]
@@ -1133,14 +1161,21 @@ async fn setup_telemetry_client(
     client: &Client,
     extension_id: &str,
     runtime_api: &str,
-    logs_agent_channel: Sender<TelemetryEvent>,
+    logs_tx: Sender<TelemetryEvent>,
+    event_bus_tx: Sender<Event>,
     logs_enabled: bool,
 ) -> anyhow::Result<CancellationToken> {
-    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
+    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
     let cancel_token = listener.cancel_token();
-    if let Err(e) = listener.start() {
-        error!("Error starting telemetry listener: {e:?}");
+    match listener.start() {
+        Ok(()) => {
+            // Drop the listener, so event_bus_tx is closed
+            drop(listener);
+        }
+        Err(e) => {
+            error!("Error starting telemetry listener: {e:?}");
+        }
     }
 
     telemetry::subscribe(

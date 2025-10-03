@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::mpsc::{self, Sender};
+use tokio_util::sync::CancellationToken;
+use tracing::debug;
 
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
@@ -9,10 +11,10 @@ use crate::{LAMBDA_RUNTIME_SLUG, config};
 
 #[allow(clippy::module_name_repetitions)]
 pub struct LogsAgent {
-    tx: Sender<TelemetryEvent>,
     rx: mpsc::Receiver<TelemetryEvent>,
     processor: LogsProcessor,
     aggregator_handle: AggregatorHandle,
+    cancel_token: CancellationToken,
 }
 
 impl LogsAgent {
@@ -22,7 +24,7 @@ impl LogsAgent {
         datadog_config: Arc<config::Config>,
         event_bus: Sender<Event>,
         aggregator_handle: AggregatorHandle,
-    ) -> Self {
+    ) -> (Self, Sender<TelemetryEvent>) {
         let processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
             tags_provider,
@@ -31,31 +33,65 @@ impl LogsAgent {
         );
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);
+        let cancel_token = CancellationToken::new();
 
-        Self {
-            tx,
+        let agent = Self {
             rx,
             processor,
             aggregator_handle,
-        }
+            cancel_token,
+        };
+
+        (agent, tx)
     }
 
     pub async fn spin(&mut self) {
-        while let Some(event) = self.rx.recv().await {
-            self.processor.process(event, &self.aggregator_handle).await;
+        loop {
+            tokio::select! {
+                Some(event) = self.rx.recv() => {
+                    self.processor.process(event, &self.aggregator_handle).await;
+                }
+                () = self.cancel_token.cancelled() => {
+                    debug!("LOGS_AGENT | Received shutdown signal, draining remaining events");
+
+                    // Drain remaining events
+                    'drain_logs_loop: loop {
+                        match self.rx.try_recv() {
+                            Ok(event) => {
+                                self.processor.process(event, &self.aggregator_handle).await;
+                            }
+                            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                                debug!("LOGS_AGENT | Channel disconnected, finished draining");
+                                break 'drain_logs_loop;
+                            },
+                            // Empty signals there are still outstanding senders
+                            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                                debug!("LOGS_AGENT | No more events to process but still have senders, continuing to drain...");
+                            },
+                        }
+                    }
+
+                    break;
+                }
+            }
         }
     }
 
     pub async fn sync_consume(&mut self) {
-        if let Some(events) = self.rx.recv().await {
-            self.processor
-                .process(events, &self.aggregator_handle)
-                .await;
+        tokio::select! {
+            Some(events) = self.rx.recv() => {
+                self.processor
+                    .process(events, &self.aggregator_handle)
+                    .await;
+            }
+            () = self.cancel_token.cancelled() => {
+                // Cancellation requested, exit early
+            }
         }
     }
 
     #[must_use]
-    pub fn get_sender_copy(&self) -> Sender<TelemetryEvent> {
-        self.tx.clone()
+    pub fn cancel_token(&self) -> CancellationToken {
+        self.cancel_token.clone()
     }
 }

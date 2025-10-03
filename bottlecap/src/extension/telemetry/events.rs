@@ -150,10 +150,6 @@ pub enum TelemetryRecord {
         /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
     },
-
-    /// Tombstone event to signal shutdown
-    #[serde(rename = "platform.tombstone")]
-    PlatformTombstone,
 }
 
 /// Type of Initialization

@@ -184,9 +184,9 @@ impl TraceAgent {
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
         let listener = tokio::net::TcpListener::bind(&socket).await?;
 
-        debug!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
+        debug!("TRACE AGENT | Listening on port {TRACE_AGENT_PORT}");
         debug!(
-            "Time taken start the Trace Agent: {} ms",
+            "TRACE AGENT | Time taken to start: {} ms",
             now.elapsed().as_millis()
         );
 
@@ -268,7 +268,7 @@ impl TraceAgent {
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
         shutdown_token.cancelled().await;
-        debug!("Trace Agent | Shutdown signal received, shutting down");
+        debug!("TRACE_AGENT | Shutdown signal received, shutting down");
     }
 
     async fn v04_traces(State(state): State<TraceState>, request: Request) -> Response {
@@ -548,7 +548,7 @@ impl TraceAgent {
         backend_path: &str,
         context: &str,
     ) -> Response {
-        debug!("Trace Agent | Proxied request for {context}");
+        debug!("TRACE_AGENT | Proxied request for {context}");
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
