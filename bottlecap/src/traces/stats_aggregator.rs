@@ -175,8 +175,8 @@ mod tests {
             &HashMap::new(),
         ));
         let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
-        let mut aggregator = StatsAggregator::new(720, concentrator);
-        // Payload below is 115 bytes
+        let mut aggregator = StatsAggregator::new(704, concentrator);
+        // Payload below is 352 bytes
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
             env: "dev".to_string(),
