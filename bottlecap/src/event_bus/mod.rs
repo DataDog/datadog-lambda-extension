@@ -13,19 +13,14 @@ pub enum Event {
 
 #[allow(clippy::module_name_repetitions)]
 pub struct EventBus {
-    tx: Sender<Event>,
     pub rx: mpsc::Receiver<Event>,
 }
 
 impl EventBus {
     #[must_use]
-    pub fn run() -> EventBus {
+    pub fn run() -> (EventBus, Sender<Event>) {
         let (tx, rx) = mpsc::channel(MAX_EVENTS);
-        EventBus { tx, rx }
-    }
-
-    #[must_use]
-    pub fn get_sender_copy(&self) -> Sender<Event> {
-        self.tx.clone()
+        let event_bus = EventBus { rx };
+        (event_bus, tx)
     }
 }

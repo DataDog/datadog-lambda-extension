@@ -59,7 +59,7 @@ impl TelemetryListener {
             let listener = TcpListener::bind(&socket)
                 .await
                 .expect("Failed to bind socket");
-            debug!("Telemetry API | Starting listener on {}", socket);
+            debug!("TELEMETRY API | Starting listener on {}", socket);
             axum::serve(listener, router)
                 .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone, event_bus_tx))
                 .await
@@ -83,14 +83,14 @@ impl TelemetryListener {
         event_bus_tx: Sender<event_bus::Event>,
     ) {
         cancel_token.cancelled().await;
-        debug!("Telemetry API | Shutdown signal received, sending tombstone event");
+        debug!("TELEMETRY API | Shutdown signal received, sending tombstone event");
 
         // Send tombstone event to signal shutdown
         if let Err(e) = event_bus_tx.send(event_bus::Event::Tombstone).await {
-            debug!("Telemetry API |Failed to send tombstone event: {:?}", e);
+            debug!("TELEMETRY API |Failed to send tombstone event: {:?}", e);
         }
 
-        debug!("Telemetry API | Shutting down");
+        debug!("TELEMETRY API | Shutting down");
     }
 
     async fn handle(State(logs_tx): State<Sender<TelemetryEvent>>, request: Request) -> Response {
