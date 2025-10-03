@@ -87,7 +87,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
             error!(
-                "Purging the aggregated data and skipping flushing traces: Failed to resolve API key"
+                "TRACES | Failed to resolve API key, dropping aggregated data and skipping flushing."
             );
             {
                 let mut guard = self.aggregator.lock().await;
@@ -101,7 +101,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
         if let Some(traces) = failed_traces {
             // If we have traces from a previous failed attempt, try to send those first
             if !traces.is_empty() {
-                debug!("Retrying to send {} previously failed traces", traces.len());
+                debug!(
+                    "TRACES | Retrying to send {} previously failed batches",
+                    traces.len()
+                );
                 let retry_result = Self::send(traces, None, &self.config.proxy_https).await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
@@ -165,7 +168,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let start = tokio::time::Instant::now();
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
         tokio::task::yield_now().await;
-        debug!("Flushing {} traces", coalesced_traces.len());
+        debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
         for trace in &coalesced_traces {
             let trace_with_endpoint = match endpoint {
@@ -179,13 +182,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 .last_result;
 
             if let Err(e) = send_result {
-                error!("Error sending trace: {e:?}");
+                error!("TRACES | Request failed: {e:?}");
                 // Return the original traces for retry
                 return Some(coalesced_traces.clone());
             }
         }
 
-        debug!("Flushing traces took {}ms", start.elapsed().as_millis());
+        debug!("TRACES | Flushing took {} ms", start.elapsed().as_millis());
         None
     }
 }

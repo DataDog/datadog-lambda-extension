@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc::Sender};
+use tokio::sync::mpsc::Sender;
 
 use tracing::{debug, error};
 
@@ -9,7 +9,7 @@ use crate::config;
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
-use crate::logs::aggregator::Aggregator;
+use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::processor::{Processor, Rule};
 use crate::tags::provider;
 
@@ -93,9 +93,9 @@ impl LambdaProcessor {
 
                 if let Some(message) = message {
                     if is_oom_error(&message) {
-                        debug!("Lambda Processor | Got a runtime-specific OOM error. Incrementing OOM metric.");
+                        debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
                         if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
-                            error!("Failed to send OOM event to the main event bus: {e}");
+                            error!("LOGS | Failed to send OOM event to the main event bus: {e}");
                         }
                     }
 
@@ -324,7 +324,7 @@ impl LambdaProcessor {
         }
     }
 
-    pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
         if let Ok(mut log) = self.make_log(event).await {
             let should_send_log = self.logs_enabled
                 && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
@@ -350,11 +350,11 @@ impl LambdaProcessor {
             }
         }
 
-        if self.ready_logs.is_empty() {
-            return;
+        if !self.ready_logs.is_empty() {
+            if let Err(e) = aggregator_handle.insert_batch(std::mem::take(&mut self.ready_logs)) {
+                debug!("Failed to send logs to aggregator: {}", e);
+            }
         }
-        let mut aggregator = aggregator.lock().await;
-        aggregator.add_batch(std::mem::take(&mut self.ready_logs));
     }
 }
 
@@ -366,10 +366,12 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use serde_json::{Number, Value};
     use std::collections::hash_map::HashMap;
+    use std::sync::Arc;
 
     use crate::extension::telemetry::events::{
         InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
     };
+    use crate::logs::aggregator_service::AggregatorService;
     use crate::logs::lambda::Lambda;
 
     macro_rules! get_message_tests {
@@ -724,7 +726,6 @@ mod tests {
     // process
     #[tokio::test]
     async fn test_process() {
-        let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
@@ -738,6 +739,11 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
 
         let mut processor =
             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
@@ -750,10 +756,11 @@ mod tests {
             },
         };
 
-        processor.process(event.clone(), &aggregator).await;
+        processor.process(event.clone(), &aggregator_handle).await;
 
-        let mut aggregator_lock = aggregator.lock().await;
-        let batch = aggregator_lock.get_batch();
+        let batches = aggregator_handle.get_batches().await.unwrap();
+        assert_eq!(batches.len(), 1);
+
         let log = IntakeLog {
             message: Message {
                 message: "START RequestId: test-request-id Version: test".to_string(),
@@ -770,12 +777,18 @@ mod tests {
             tags: tags_provider.get_tags_string(),
         };
         let serialized_log = format!("[{}]", serde_json::to_string(&log).unwrap());
-        assert_eq!(batch, serialized_log.as_bytes());
+        assert_eq!(batches[0], serialized_log.as_bytes());
+
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]
     async fn test_process_logs_disabled() {
-        let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
@@ -791,6 +804,11 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
+
         let mut processor =
             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
 
@@ -802,16 +820,21 @@ mod tests {
             },
         };
 
-        processor.process(event.clone(), &aggregator).await;
+        processor.process(event.clone(), &aggregator_handle).await;
 
-        let mut aggregator_lock = aggregator.lock().await;
-        let batch = aggregator_lock.get_batch();
-        assert_eq!(batch.len(), 0);
+        let batches = aggregator_handle.get_batches().await.unwrap();
+        assert!(batches.is_empty());
+
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]
     async fn test_process_log_with_no_request_id() {
-        let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
@@ -825,6 +848,11 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
 
         let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
 
@@ -833,17 +861,22 @@ mod tests {
             record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
-        processor.process(event.clone(), &aggregator).await;
+        processor.process(event.clone(), &aggregator_handle).await;
         assert_eq!(processor.orphan_logs.len(), 1);
 
-        let mut aggregator_lock = aggregator.lock().await;
-        let batch = aggregator_lock.get_batch();
-        assert!(batch.is_empty());
+        let batches = aggregator_handle.get_batches().await.unwrap();
+        assert!(batches.is_empty());
+
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]
     async fn test_process_logs_after_seeing_request_id() {
-        let aggregator = Arc::new(Mutex::new(Aggregator::default()));
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
@@ -857,6 +890,11 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
 
         let mut processor =
             LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
@@ -869,7 +907,9 @@ mod tests {
             },
         };
 
-        processor.process(start_event.clone(), &aggregator).await;
+        processor
+            .process(start_event.clone(), &aggregator_handle)
+            .await;
         assert_eq!(
             processor.invocation_context.request_id,
             "test-request-id".to_string()
@@ -881,11 +921,11 @@ mod tests {
             record: TelemetryRecord::Function(Value::String("test-function".to_string())),
         };
 
-        processor.process(event.clone(), &aggregator).await;
+        processor.process(event.clone(), &aggregator_handle).await;
 
-        // Verify aggregator logs
-        let mut aggregator_lock = aggregator.lock().await;
-        let batch = aggregator_lock.get_batch();
+        let batches = aggregator_handle.get_batches().await.unwrap();
+        assert_eq!(batches.len(), 1);
+
         let start_log = IntakeLog {
             message: Message {
                 message: "START RequestId: test-request-id Version: test".to_string(),
@@ -921,7 +961,14 @@ mod tests {
             serde_json::to_string(&start_log).unwrap(),
             serde_json::to_string(&function_log).unwrap()
         );
-        assert_eq!(batch, serialized_log.as_bytes());
+        assert_eq!(batches[0], serialized_log.as_bytes());
+
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 
     #[tokio::test]
@@ -939,6 +986,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
         let mut processor =
             LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
         let start_event = TelemetryEvent {
@@ -996,6 +1044,7 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
         let mut processor =
             LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
         let start_event = TelemetryEvent {

@@ -140,13 +140,19 @@ pub async fn next_event(
     let text = match response.text().await {
         Ok(t) => t,
         Err(e) => {
-            error!("Next response: Failed to read response body: {}", e);
+            error!(
+                "EXTENSION | Next response: Failed to read response body: {}",
+                e
+            );
             return Err(ExtensionError::ResponseBodyReadError);
         }
     };
 
     if !status.is_success() {
-        error!("Next response HTTP Error {} - Response: {}", status, text);
+        error!(
+            "EXTENSION | Next response HTTP Error {} - Response: {}",
+            status, text
+        );
         return Err(ExtensionError::HttpStatusError {
             status: status.as_u16(),
         });

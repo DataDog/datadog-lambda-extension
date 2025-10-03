@@ -93,21 +93,20 @@ impl Agent {
         default_port
     }
 
-    pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let socket = SocketAddr::from(([127, 0, 0, 1], self.port));
         let router = self.make_router();
 
         let cancel_token_clone = self.cancel_token.clone();
-        tokio::spawn(async move {
-            let listener = TcpListener::bind(&socket)
-                .await
-                .expect("Failed to bind socket");
-            debug!("OTLP | Starting collector on {}", socket);
-            axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
-                .await
-                .expect("Failed to start OTLP agent");
-        });
+
+        let listener = TcpListener::bind(&socket)
+            .await
+            .expect("Failed to bind socket");
+        debug!("OTLP | Starting collector on {}", socket);
+        axum::serve(listener, router)
+            .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
+            .await
+            .expect("Failed to start OTLP agent");
 
         Ok(())
     }
