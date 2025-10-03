@@ -545,6 +545,7 @@ mod tests {
             r#type: String::new(),
             meta_struct: HashMap::new(),
             span_links: vec![],
+            span_events: vec![],
         };
         if is_top_level {
             span.metrics.insert("_top_level".to_string(), 1.0);
@@ -806,6 +807,7 @@ mod tests {
             r#type: String::new(),
             span_links: vec![],
             meta_struct: std::collections::HashMap::new(),
+            span_events: vec![],
         };
 
         let child_span = pb::Span {
@@ -823,6 +825,7 @@ mod tests {
             r#type: String::new(),
             span_links: vec![],
             meta_struct: std::collections::HashMap::new(),
+            span_events: vec![],
         };
 
         let mut chunk = pb::TraceChunk {
@@ -888,6 +891,7 @@ mod tests {
             r#type: String::new(),
             span_links: vec![],
             meta_struct: std::collections::HashMap::new(),
+            span_events: vec![],
         };
 
         let child_span = pb::Span {
@@ -905,6 +909,7 @@ mod tests {
             r#type: String::new(),
             span_links: vec![],
             meta_struct: std::collections::HashMap::new(),
+            span_events: vec![],
         };
 
         let mut chunk = pb::TraceChunk {
@@ -970,6 +975,7 @@ mod tests {
             r#type: String::new(),
             span_links: vec![],
             meta_struct: std::collections::HashMap::new(),
+            span_events: vec![],
         };
 
         let child_span = pb::Span {
@@ -987,6 +993,7 @@ mod tests {
             r#type: String::new(),
             span_links: vec![],
             meta_struct: std::collections::HashMap::new(),
+            span_events: vec![],
         };
 
         let mut chunk = pb::TraceChunk {
