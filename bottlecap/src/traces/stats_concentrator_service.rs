@@ -128,6 +128,7 @@ impl StatsConcentratorService {
         let service: StatsConcentratorService = Self {
             concentrator,
             rx,
+            // To be set when the first trace is received
             tracer_metadata: TracerMetadata::default(),
             hostname,
             config,
@@ -143,40 +144,51 @@ impl StatsConcentratorService {
                 }
                 ConcentratorCommand::Add(span) => self.concentrator.add_span(&*span),
                 ConcentratorCommand::Flush(force_flush, response_tx) => {
-                    let stats_buckets = self.concentrator.flush(SystemTime::now(), force_flush);
-                    let stats = if stats_buckets.is_empty() {
-                        None
-                    } else {
-                        Some(ClientStatsPayload {
-                            hostname: self.hostname.clone(),
-                            env: self.config.env.clone().unwrap_or("unknown-env".to_string()),
-                            // Version is not in the trace payload. Need to read it from config.
-                            version: self.config.version.clone().unwrap_or_default(),
-                            lang: self.tracer_metadata.language.clone(),
-                            tracer_version: self.tracer_metadata.tracer_version.clone(),
-                            runtime_id: self.tracer_metadata.runtime_id.clone(),
-                            // Not supported yet
-                            sequence: 0,
-                            // Not supported yet
-                            agent_aggregation: String::new(),
-                            service: self.config.service.clone().unwrap_or_default(),
-                            container_id: self.tracer_metadata.container_id.clone(),
-                            // Not supported yet
-                            tags: vec![],
-                            // Not supported yet
-                            git_commit_sha: String::new(),
-                            // Not supported yet
-                            image_tag: String::new(),
-                            stats: stats_buckets,
-                            process_tags: String::new(),
-                            process_tags_hash: 0,
-                        })
-                    };
-                    if let Err(e) = response_tx.send(stats) {
-                        error!("Failed to return trace stats: {e:?}");
-                    }
+                    self.handle_flush(force_flush, response_tx);
                 }
             }
+        }
+    }
+
+    fn handle_flush(
+        &mut self,
+        force_flush: bool,
+        response_tx: oneshot::Sender<Option<ClientStatsPayload>>,
+    ) {
+        let stats_buckets = self.concentrator.flush(SystemTime::now(), force_flush);
+        let stats = if stats_buckets.is_empty() {
+            None
+        } else {
+            Some(ClientStatsPayload {
+                hostname: self.hostname.clone(),
+                env: self.config.env.clone().unwrap_or("unknown-env".to_string()),
+                // Version is not in the trace payload. Need to read it from config.
+                version: self.config.version.clone().unwrap_or_default(),
+                lang: self.tracer_metadata.language.clone(),
+                tracer_version: self.tracer_metadata.tracer_version.clone(),
+                runtime_id: self.tracer_metadata.runtime_id.clone(),
+                // Not supported yet
+                sequence: 0,
+                // Not supported yet
+                agent_aggregation: String::new(),
+                service: self.config.service.clone().unwrap_or_default(),
+                container_id: self.tracer_metadata.container_id.clone(),
+                // Not supported yet
+                tags: vec![],
+                // Not supported yet
+                git_commit_sha: String::new(),
+                // Not supported yet
+                image_tag: String::new(),
+                stats: stats_buckets,
+                // Not supported yet
+                process_tags: String::new(),
+                // Not supported yet
+                process_tags_hash: 0,
+            })
+        };
+        let response = response_tx.send(stats);
+        if let Err(e) = response {
+            error!("Failed to return trace stats: {e:?}");
         }
     }
 }
