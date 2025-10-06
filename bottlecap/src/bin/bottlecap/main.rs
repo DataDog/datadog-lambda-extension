@@ -48,6 +48,7 @@ use bottlecap::{
         agent::LogsAgent, aggregator_service::AggregatorService as LogsAggregatorService,
         flusher::LogsFlusher,
     },
+    metrics::enhanced::usage_metrics::{EnhancedMetricsService},
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
@@ -397,6 +398,13 @@ async fn extension_loop_active(
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
         start_dogstatsd(tags_provider.clone(), Arc::clone(&api_key_factory), config).await;
 
+    // start service for proc enhanced metrics
+    let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
+    let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
+    tokio::spawn(async move {
+        enhanced_metrics_service.run().await;
+    });
+
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
     let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
@@ -405,6 +413,7 @@ async fn extension_loop_active(
         Arc::clone(&aws_config),
         metrics_aggregator_handle.clone(),
         Arc::clone(&propagator),
+        Arc::clone(&enhanced_metrics_handle),
     )));
     // AppSec processor (if enabled)
     let appsec_processor = match AppSecProcessor::new(config) {

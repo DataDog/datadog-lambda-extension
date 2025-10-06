@@ -8,7 +8,6 @@ use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use serde_json::Value;
-use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
@@ -21,20 +20,17 @@ use crate::{
         create_empty_span, generate_span_id, get_metadata_from_value,
         span_inferrer::{self, SpanInferrer},
     },
-    metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
+    metrics::enhanced::{lambda::{EnhancedMetricData, Lambda as EnhancedMetrics}, usage_metrics::EnhancedMetricsHandle},
     proc::{
-        self, CPUData, NetworkData,
-        constants::{ETC_PATH, PROC_PATH},
+        self, constants::{ETC_PATH, PROC_PATH}, CPUData, NetworkData
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
         context::SpanContext,
         propagation::{
-            DatadogCompositePropagator, Propagator,
             text_map_propagator::{
-                DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY,
-                DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
-            },
+                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY
+            }, DatadogCompositePropagator, Propagator
         },
         trace_processor::SendingTraceProcessor,
     },
@@ -92,6 +88,7 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
+        enhanced_metrics_handle: Arc<EnhancedMetricsHandle>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -107,7 +104,7 @@ impl Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(Arc::clone(&config)),
             propagator,
-            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
+            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config), Arc::clone(&enhanced_metrics_handle)),
             aws_config,
             tracer_detected: false,
             runtime: None,
@@ -141,21 +138,13 @@ impl Processor {
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
 
-            // Start a channel for monitoring tmp enhanced data
-            let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
-            self.enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
 
-            // Start a channel for monitoring file descriptor and thread count
-            let (process_chan_tx, process_chan_rx) = watch::channel(());
-            self.enhanced_metrics
-                .set_process_enhanced_metrics(process_chan_rx);
+            self.enhanced_metrics.start_usage_metrics_monitoring();
 
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
-                tmp_chan_tx,
-                process_chan_tx,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -388,10 +377,9 @@ impl Processor {
                 offsets.cpu_offset.clone(),
                 offsets.uptime_offset,
             );
-            // Send the signal to stop monitoring tmp
-            _ = offsets.tmp_chan_tx.send(());
-            // Send the signal to stop monitoring file descriptors and threads
-            _ = offsets.process_chan_tx.send(());
+            
+            self.enhanced_metrics.send_final_usage_metrics();
+            self.enhanced_metrics.pause_usage_metrics_monitoring();
         }
 
         // todo(duncanista): Add missing metric tags for ASM
@@ -956,6 +944,7 @@ impl Processor {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::metrics::enhanced::usage_metrics::EnhancedMetricsService;
     use crate::LAMBDA_RUNTIME_SLUG;
     use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator_service::AggregatorService;
@@ -963,6 +952,12 @@ mod tests {
     use serde_json::json;
 
     fn setup() -> Processor {
+        let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
+        let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
+        tokio::spawn(async move {
+            enhanced_metrics_service.run().await;
+        });
+
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
@@ -990,7 +985,7 @@ mod tests {
         tokio::spawn(service.run());
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        Processor::new(tags_provider, config, aws_config, handle, propagator)
+        Processor::new(tags_provider, config, aws_config, handle, propagator, enhanced_metrics_handle)
     }
 
     #[test]

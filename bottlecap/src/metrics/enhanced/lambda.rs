@@ -1,9 +1,11 @@
 use crate::extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
+use crate::metrics::enhanced::usage_metrics::EnhancedMetricsHandle;
 use crate::metrics::enhanced::{
     constants::{self, BASE_LAMBDA_INVOCATION_PRICE},
     statfs::statfs_info,
 };
 use crate::proc::{self, CPUData, NetworkData};
+use crate::metrics::enhanced::statfs;
 use dogstatsd::metric::SortedTags;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator_service::AggregatorHandle, metric};
@@ -15,7 +17,7 @@ use std::sync::{
 };
 use std::time::Duration;
 use tokio::{
-    sync::watch::{Receiver, Sender},
+    sync::watch::Receiver,
     time::interval,
 };
 use tracing::debug;
@@ -33,17 +35,56 @@ pub struct Lambda {
     // Dynamic value tags are the ones we cannot obtain statically from the sandbox
     dynamic_value_tags: HashMap<String, String>,
     invoked_received: bool,
+    pub enhanced_metrics_handle: Arc<EnhancedMetricsHandle>,
 }
 
 impl Lambda {
     #[must_use]
-    pub fn new(aggregator: AggregatorHandle, config: Arc<crate::config::Config>) -> Lambda {
+    pub fn new(aggregator: AggregatorHandle, config: Arc<crate::config::Config>, enhanced_metrics_handle: Arc<EnhancedMetricsHandle>) -> Lambda {
         Lambda {
             aggr_handle: aggregator,
             config,
             dynamic_value_tags: HashMap::new(),
             invoked_received: false,
+            enhanced_metrics_handle,
         }
+    }
+
+    pub fn start_long_running_monitoring_task(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        
+        let enhanced_metrics_handle = Arc::clone(&self.enhanced_metrics_handle);
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(constants::MONITORING_INTERVAL));
+            let mut monitoring_state_rx = enhanced_metrics_handle.get_monitoring_state_receiver();
+            let mut is_active = *monitoring_state_rx.borrow(); // Get initial state (true = active, false = paused)
+            
+            loop {
+                tokio::select! {
+                    biased;
+
+                    _ = monitoring_state_rx.changed() => {
+                        is_active = *monitoring_state_rx.borrow();
+                        debug!("Monitoring state changed: active = {}", is_active);
+                    }
+                    
+                    _ = interval.tick(), if is_active => {
+                        let pids = proc::get_pid_list();
+                        let tmp_used = statfs::get_tmp_used().ok();
+                        let fd_use = Some(proc::get_fd_use_data(&pids));
+                        let threads_use = proc::get_threads_use_data(&pids).ok();
+                        
+                        if let Err(e) = enhanced_metrics_handle.update_metrics(tmp_used, fd_use, threads_use) {
+                            debug!("Failed to update usage metrics: {}", e);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
     }
 
     /// Set the init tags in `dynamic_value_tags`
@@ -750,6 +791,107 @@ impl Lambda {
             error!("failed to insert estimated cost metric: {}", e);
         }
     }
+
+    /// Starts monitoring usage metrics (tmp, fd, threads) for the current invocation.
+    /// This resets metrics and resumes monitoring for the new invocation.
+    pub fn start_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        
+        // Reset the metrics for the new invocation
+        if let Err(e) = self.enhanced_metrics_handle.reset_metrics() {
+            debug!("Failed to reset enhanced metrics on new invocation: {}", e);
+        }
+        
+        // Resume monitoring for this invocation
+        self.resume_usage_metrics_monitoring();
+    }
+
+    /// Pauses usage metrics monitoring between invocations.
+    /// This stops the collection of tmp, fd, and threads metrics.
+    pub fn pause_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        
+        self.enhanced_metrics_handle.pause_monitoring();
+    }
+
+    /// Resumes usage metrics monitoring for a new invocation.
+    /// This restarts the collection of tmp, fd, and threads metrics.
+    pub fn resume_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        
+        self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Retrieves final usage metrics and sends them to the enhanced metrics system.
+    /// This is called at the end of an invocation to capture the peak usage values.
+    pub fn send_final_usage_metrics(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        
+        let enhanced_metrics_handle = Arc::clone(&self.enhanced_metrics_handle);
+        let aggr_handle = self.aggr_handle.clone();
+        let tags = self.get_dynamic_value_tags();
+        
+        tokio::spawn(async move {
+            match enhanced_metrics_handle.get_metrics().await {
+                Ok(metrics) => {
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .expect("Time went backwards")
+                        .as_secs() as i64;
+                    
+                    // Send tmp usage metric
+                    if metrics.tmp_used() > 0.0 {
+                        let metric = Metric::new(
+                            constants::TMP_USED_METRIC.into(),
+                            MetricValue::distribution(metrics.tmp_used()),
+                            tags.clone(),
+                            Some(timestamp),
+                        );
+                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                            error!("Failed to insert tmp_used metric: {}", e);
+                        }
+                    }
+                    
+                    // Send fd usage metric
+                    if metrics.fd_use() > 0.0 {
+                        let metric = Metric::new(
+                            constants::FD_USE_METRIC.into(),
+                            MetricValue::distribution(metrics.fd_use()),
+                            tags.clone(),
+                            Some(timestamp),
+                        );
+                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                            error!("Failed to insert fd_use metric: {}", e);
+                        }
+                    }
+                    
+                    // Send threads usage metric
+                    if metrics.threads_use() > 0.0 {
+                        let metric = Metric::new(
+                            constants::THREADS_USE_METRIC.into(),
+                            MetricValue::distribution(metrics.threads_use()),
+                            tags.clone(),
+                            Some(timestamp),
+                        );
+                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                            error!("Failed to insert threads_use metric: {}", e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    error!("Failed to get final usage metrics: {}", e);
+                }
+            }
+        });
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -757,8 +899,6 @@ pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
-    pub tmp_chan_tx: Sender<()>,
-    pub process_chan_tx: Sender<()>,
 }
 
 impl PartialEq for EnhancedMetricData {
@@ -776,11 +916,12 @@ mod tests {
 
     use super::*;
     use crate::config;
+    use crate::metrics::enhanced::usage_metrics::EnhancedMetricsService;
     use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
 
-    fn setup() -> (AggregatorHandle, Arc<config::Config>) {
+    fn setup() -> (AggregatorHandle, Arc<config::Config>, Arc<EnhancedMetricsHandle>) {
         let config = Arc::new(config::Config {
             service: Some("test-service".to_string()),
             tags: HashMap::from([("test".to_string(), "tags".to_string())]),
@@ -792,7 +933,13 @@ mod tests {
 
         tokio::spawn(service.run());
 
-        (handle, config)
+        let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
+        let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
+        tokio::spawn(async move {
+            enhanced_metrics_service.run().await;
+        });
+
+        (handle, config, enhanced_metrics_handle)
     }
 
     async fn assert_sketch(handle: &AggregatorHandle, metric_id: &str, value: f64, timestamp: i64) {
@@ -815,8 +962,8 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::float_cmp)]
     async fn test_increment_invocation_metric() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -836,8 +983,8 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::float_cmp)]
     async fn test_increment_errors_metric() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -857,12 +1004,12 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::too_many_lines)]
     async fn test_disabled() {
-        let (metrics_aggr, no_config) = setup();
+        let (metrics_aggr, no_config, enhanced_metrics_handle) = setup();
         let my_config = Arc::new(config::Config {
             enhanced_metrics: false,
             ..no_config.as_ref().clone()
         });
-        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1110,8 +1257,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_runtime_done_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let runtime_done_metrics = RuntimeDoneMetrics {
             duration_ms: 100.0,
             produced_bytes: Some(42_u64),
@@ -1136,8 +1283,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_report_log_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let report_metrics = ReportMetrics {
             duration_ms: 100.0,
             billed_duration_ms: 100,
@@ -1163,8 +1310,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_network_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1194,8 +1341,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_cpu_time_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1231,8 +1378,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_cpu_utilization_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1304,8 +1451,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_tmp_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1330,8 +1477,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_process_enhanced_metrics_valid_use() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1360,8 +1507,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_process_enhanced_metrics_invalid_use() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")

@@ -4,6 +4,8 @@ use nix::sys::statfs::statfs;
 use std::io;
 use std::path::Path;
 
+use crate::metrics::enhanced::constants;
+
 #[cfg(not(target_os = "windows"))]
 #[allow(clippy::cast_lossless)]
 /// Returns the block size, total number of blocks, and number of blocks available for the specified directory path.
@@ -23,4 +25,10 @@ fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
         io::ErrorKind::Other,
         "Cannot get tmp data on Windows",
     ))
+}
+
+pub fn get_tmp_used() -> Result<f64, io::Error> {
+    let (bsize, blocks, bavail) = statfs_info(constants::TMP_PATH)?;
+    let tmp_used = bsize * (blocks - bavail);
+    Ok(tmp_used)
 }
