@@ -54,7 +54,6 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        
         let enhanced_metrics_handle = Arc::clone(&self.enhanced_metrics_handle);
         
         tokio::spawn(async move {
@@ -68,7 +67,6 @@ impl Lambda {
 
                     _ = monitoring_state_rx.changed() => {
                         is_active = *monitoring_state_rx.borrow();
-                        debug!("Monitoring state changed: active = {}", is_active);
                     }
                     
                     _ = interval.tick(), if is_active => {
@@ -78,7 +76,6 @@ impl Lambda {
                         let threads_use = proc::get_threads_use_data(&pids).ok();
                         
                         if let Err(e) = enhanced_metrics_handle.update_metrics(tmp_used, fd_use, threads_use) {
-                            debug!("Failed to update usage metrics: {}", e);
                             break;
                         }
                     }
@@ -834,7 +831,7 @@ impl Lambda {
         if !self.config.enhanced_metrics {
             return;
         }
-        
+
         let enhanced_metrics_handle = Arc::clone(&self.enhanced_metrics_handle);
         let aggr_handle = self.aggr_handle.clone();
         let tags = self.get_dynamic_value_tags();

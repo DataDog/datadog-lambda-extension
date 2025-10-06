@@ -100,11 +100,17 @@ impl Processor {
             config.trace_aws_service_representation_enabled,
         );
 
+        let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config), Arc::clone(&enhanced_metrics_handle));
+        
+        // Start the long-running background task that monitors usage metrics (fd_use, threads_use, tmp_used)
+        // This task runs for the lifetime of the extension and is paused/resumed per invocation
+        enhanced_metrics.start_long_running_monitoring_task();
+
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(Arc::clone(&config)),
             propagator,
-            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config), Arc::clone(&enhanced_metrics_handle)),
+            enhanced_metrics,
             aws_config,
             tracer_detected: false,
             runtime: None,
