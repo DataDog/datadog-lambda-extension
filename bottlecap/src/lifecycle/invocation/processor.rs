@@ -20,7 +20,7 @@ use crate::{
         create_empty_span, generate_span_id, get_metadata_from_value,
         span_inferrer::{self, SpanInferrer},
     },
-    metrics::enhanced::{lambda::{EnhancedMetricData, Lambda as EnhancedMetrics}, usage_metrics::EnhancedMetricsHandle},
+    metrics::enhanced::{lambda::{EnhancedMetricData, Lambda as EnhancedMetrics}, usage_metrics::EnhancedMetricsService},
     proc::{
         self, constants::{ETC_PATH, PROC_PATH}, CPUData, NetworkData
     },
@@ -88,7 +88,6 @@ impl Processor {
         aws_config: Arc<AwsConfig>,
         metrics_aggregator: dogstatsd::aggregator_service::AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
-        enhanced_metrics_handle: Arc<EnhancedMetricsHandle>,
     ) -> Self {
         let resource = tags_provider
             .get_canonical_resource_name()
@@ -99,6 +98,13 @@ impl Processor {
             "aws.lambda",
             config.trace_aws_service_representation_enabled,
         );
+
+        // Create and start the enhanced metrics service
+        let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
+        let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
+        tokio::spawn(async move {
+            enhanced_metrics_service.run().await;
+        });
 
         let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config), Arc::clone(&enhanced_metrics_handle));
         
@@ -950,7 +956,6 @@ impl Processor {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::metrics::enhanced::usage_metrics::EnhancedMetricsService;
     use crate::LAMBDA_RUNTIME_SLUG;
     use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator_service::AggregatorService;
@@ -958,12 +963,6 @@ mod tests {
     use serde_json::json;
 
     fn setup() -> Processor {
-        let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
-        let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
-        tokio::spawn(async move {
-            enhanced_metrics_service.run().await;
-        });
-
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
@@ -991,7 +990,7 @@ mod tests {
         tokio::spawn(service.run());
 
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        Processor::new(tags_provider, config, aws_config, handle, propagator, enhanced_metrics_handle)
+        Processor::new(tags_provider, config, aws_config, handle, propagator)
     }
 
     #[test]

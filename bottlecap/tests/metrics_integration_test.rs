@@ -1,5 +1,6 @@
 use bottlecap::config::Config;
 use bottlecap::metrics::enhanced::lambda::Lambda as enhanced_metrics;
+use bottlecap::metrics::enhanced::usage_metrics::EnhancedMetricsService;
 use dogstatsd::aggregator_service::AggregatorService;
 use dogstatsd::api_key::ApiKeyFactory;
 use dogstatsd::datadog::{DdDdUrl, MetricsIntakeUrlPrefix, MetricsIntakeUrlPrefixOverride};
@@ -57,8 +58,15 @@ async fn test_enhanced_metrics() {
         compression_level: 6,
     };
     let mut metrics_flusher = MetricsFlusher::new(flusher_config);
+    
+    let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
+    let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
+    tokio::spawn(async move {
+        enhanced_metrics_service.run().await;
+    });
+    
     let lambda_enhanced_metrics =
-        enhanced_metrics::new(metrics_aggr_handle.clone(), Arc::clone(&arc_config));
+        enhanced_metrics::new(metrics_aggr_handle.clone(), Arc::clone(&arc_config), enhanced_metrics_handle);
 
     let now = std::time::UNIX_EPOCH
         .elapsed()

@@ -500,19 +500,12 @@ mod tests {
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
         
-        let (enhanced_metrics_service, enhanced_metrics_handle) = crate::metrics::enhanced::usage_metrics::EnhancedMetricsService::new();
-        let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
-        tokio::spawn(async move {
-            enhanced_metrics_service.run().await;
-        });
-        
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),
             Arc::clone(&aws_config),
             metrics_aggregator,
             Arc::clone(&propagator),
-            Arc::clone(&enhanced_metrics_handle),
         )));
         let appsec_processor = match AppSecProcessor::new(&config) {
             Ok(p) => Some(Arc::new(TokioMutex::new(p))),
