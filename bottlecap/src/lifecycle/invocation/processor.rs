@@ -99,7 +99,6 @@ impl Processor {
             config.trace_aws_service_representation_enabled,
         );
 
-        // Create and start the enhanced metrics service
         let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
         let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
         tokio::spawn(async move {
@@ -107,10 +106,7 @@ impl Processor {
         });
 
         let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config), Arc::clone(&enhanced_metrics_handle));
-        
-        // Start the long-running background task that monitors usage metrics (fd_use, threads_use, tmp_used)
-        // This task runs for the lifetime of the extension and is paused/resumed per invocation
-        enhanced_metrics.start_long_running_monitoring_task();
+        enhanced_metrics.start_enhanced_metrics_task(); // starts thelong-running task that monitors usage metrics (fd_use, threads_use, tmp_used)
 
         Processor {
             context_buffer: ContextBuffer::default(),
@@ -150,7 +146,10 @@ impl Processor {
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
 
-
+            // Send max metrics (fd_max, threads_max) at start of invocation
+            self.enhanced_metrics.send_max_metrics();
+            
+            // Start monitoring usage metrics (fd_use, threads_use, tmp_used)
             self.enhanced_metrics.start_usage_metrics_monitoring();
 
             let enhanced_metric_offsets = Some(EnhancedMetricData {

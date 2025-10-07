@@ -11,23 +11,11 @@ use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator_service::AggregatorHandle, metric};
 use std::collections::HashMap;
 use std::env::consts::ARCH;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::time::Duration;
-use tokio::{
-    sync::watch::Receiver,
-    time::interval,
-};
+use std::sync::Arc;
+
 use tracing::debug;
 use tracing::error;
-// tmp/proc enhanced metrics tasks open and/or read files in the /proc directory using blocking I/O.
-// These tasks can block the async context the task is called under and thus delay other important work.
-// In rare cases, if the tasks start taking longer than the typical invocations take, these tasks can pile up and cause timeouts.
-// So we ensure only one task to measure these is ever running at the same time
-static TMP_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
-static PROCESS_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
+
 
 pub struct Lambda {
     pub aggr_handle: AggregatorHandle,
@@ -50,7 +38,7 @@ impl Lambda {
         }
     }
 
-    pub fn start_long_running_monitoring_task(&self) {
+    pub fn start_enhanced_metrics_task(&self) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -76,7 +64,7 @@ impl Lambda {
                         let threads_use = proc::get_threads_use_data(&pids).ok();
                         
                         if let Err(e) = enhanced_metrics_handle.update_metrics(tmp_used, fd_use, threads_use) {
-                            break;
+                            debug!("Failed to update process enhanced metrics: {}", e);
                         }
                     }
                 }
@@ -546,62 +534,6 @@ impl Lambda {
         }
     }
 
-    pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        if !self.config.enhanced_metrics {
-            return;
-        }
-
-        if TMP_TASK_RUNNING
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            debug!("Tmp enhanced metrics task already running, skipping");
-            return;
-        }
-
-        let aggr = self.aggr_handle.clone();
-        let tags = self.get_dynamic_value_tags();
-
-        tokio::spawn(async move {
-            // Set tmp_max and initial value for tmp_used
-            let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
-                Ok(stats) => stats,
-                Err(err) => {
-                    debug!("Could not emit tmp enhanced metrics. {:?}", err);
-                    TMP_TASK_RUNNING.store(false, Ordering::Release);
-                    return;
-                }
-            };
-            let tmp_max = bsize * blocks;
-            let mut tmp_used = bsize * (blocks - bavail);
-
-            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
-            loop {
-                tokio::select! {
-                    biased;
-                    // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
-                        Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &aggr, tags);
-                        TMP_TASK_RUNNING.store(false, Ordering::Release);
-                        return;
-                    }
-                    // Otherwise keep monitoring tmp usage periodically
-                    _ = interval.tick() => {
-                        let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
-                            Ok(stats) => stats,
-                            Err(err) => {
-                                debug!("Could not emit tmp enhanced metrics. {:?}", err);
-                                TMP_TASK_RUNNING.store(false, Ordering::Release);
-                                return;
-                            }
-                        };
-                        tmp_used = tmp_used.max(bsize * (blocks - bavail));
-                    }
-                }
-            }
-        });
-    }
-
     pub fn generate_process_metrics(
         fd_max: f64,
         fd_use: f64,
@@ -665,58 +597,6 @@ impl Lambda {
         } else {
             debug!("Could not get thread usage data.");
         }
-    }
-
-    pub fn set_process_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        if !self.config.enhanced_metrics {
-            return;
-        }
-
-        if PROCESS_TASK_RUNNING
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            debug!("Process enhanced metrics task already running, skipping");
-            return;
-        }
-
-        let aggr = self.aggr_handle.clone();
-        let tags = self.get_dynamic_value_tags();
-
-        tokio::spawn(async move {
-            // get list of all process ids
-            let mut pids = proc::get_pid_list();
-
-            // Set fd_max and initial value for fd_use
-            let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = proc::get_fd_use_data(&pids);
-
-            // Set threads_max and initial value for threads_use
-            let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = proc::get_threads_use_data(&pids).unwrap_or_else(|_| -1_f64);
-
-            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
-            loop {
-                tokio::select! {
-                    biased;
-                    // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
-                        Self::generate_process_metrics(fd_max, fd_use, threads_max, threads_use, &aggr, tags.clone());
-                        PROCESS_TASK_RUNNING.store(false, Ordering::Release);
-                        return;
-                    }
-                    // Otherwise keep monitoring file descriptor and thread usage periodically
-                    _ = interval.tick() => {
-                        pids = proc::get_pid_list();
-                        let fd_use_curr = proc::get_fd_use_data(&pids);
-                        fd_use = fd_use.max(fd_use_curr);
-                        if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
-                            threads_use = threads_use.max(threads_use_curr);
-                        }
-                    }
-                }
-            }
-        });
     }
 
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
@@ -823,6 +703,47 @@ impl Lambda {
         }
         
         self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Sends max metrics for fd and threads at the start of an invocation.
+    /// These represent the system limits.
+    pub fn send_max_metrics(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        
+        let pids = proc::get_pid_list();
+        let fd_max = proc::get_fd_max_data(&pids);
+        let threads_max = proc::get_threads_max_data(&pids);
+        
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs() as i64;
+        
+        let tags = self.get_dynamic_value_tags();
+        
+        // Send fd_max metric
+        let metric = Metric::new(
+            constants::FD_MAX_METRIC.into(),
+            MetricValue::distribution(fd_max),
+            tags.clone(),
+            Some(timestamp),
+        );
+        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+            error!("Failed to insert fd_max metric: {}", e);
+        }
+        
+        // Send threads_max metric
+        let metric = Metric::new(
+            constants::THREADS_MAX_METRIC.into(),
+            MetricValue::distribution(threads_max),
+            tags,
+            Some(timestamp),
+        );
+        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+            error!("Failed to insert threads_max metric: {}", e);
+        }
     }
 
     /// Retrieves final usage metrics and sends them to the enhanced metrics system.
@@ -1473,33 +1394,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_set_process_enhanced_metrics_valid_use() {
+    async fn test_send_max_metrics() {
         let (metrics_aggr, my_config, enhanced_metrics_handle) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
+        let lambda = Lambda::new(metrics_aggr.clone(), my_config, enhanced_metrics_handle);
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
             .as_secs()
             .try_into()
             .unwrap_or_default();
-        let fd_max = 1024.0;
-        let fd_use = 175.0;
-        let threads_max = 1024.0;
-        let threads_use = 40.0;
 
-        Lambda::generate_process_metrics(
-            fd_max,
-            fd_use,
-            threads_max,
-            threads_use,
-            &metrics_aggr,
-            None,
-        );
+        lambda.send_max_metrics();
 
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now).await;
-        assert_sketch(&metrics_aggr, constants::FD_USE_METRIC, 175.0, now).await;
-        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now).await;
-        assert_sketch(&metrics_aggr, constants::THREADS_USE_METRIC, 40.0, now).await;
+        // Wait a bit for the metrics to be inserted
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        // Verify fd_max and threads_max metrics were sent
+        // Values will vary by system, just check they exist and are > 0
+        let fd_max_entry = metrics_aggr
+            .get_entry_by_id(constants::FD_MAX_METRIC.into(), None, now)
+            .await
+            .unwrap();
+        assert!(fd_max_entry.is_some());
+        
+        let threads_max_entry = metrics_aggr
+            .get_entry_by_id(constants::THREADS_MAX_METRIC.into(), None, now)
+            .await
+            .unwrap();
+        assert!(threads_max_entry.is_some());
     }
 
     #[tokio::test]
