@@ -1,6 +1,7 @@
 use std::{fmt::Display, str::FromStr};
 
 use serde::{Deserialize, Deserializer};
+use tracing::error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TracePropagationStyle {
@@ -21,7 +22,10 @@ impl FromStr for TracePropagationStyle {
             "b3" => Ok(TracePropagationStyle::B3),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "none" => Ok(TracePropagationStyle::None),
-            _ => Err(format!("Unknown trace propagation style: {s}")),
+            _ => {
+                error!("Trace propagation style is invalid: {:?}, using Datadog", s);
+                Ok(TracePropagationStyle::Datadog)
+            }
         }
     }
 }
