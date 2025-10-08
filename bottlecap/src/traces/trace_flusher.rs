@@ -113,17 +113,22 @@ impl TraceFlusher for ServerlessTraceFlusher {
             }
         }
 
-        // Process new traces from the aggregator
-        let mut guard = self.aggregator.lock().await;
-        let mut trace_builders = guard.get_batch();
+        let mut all_batches = Vec::new();
+        {
+            let mut guard = self.aggregator.lock().await;
+            let mut trace_builders = guard.get_batch();
 
-        // Collect all batches and their tasks
+            while !trace_builders.is_empty() {
+                all_batches.push(trace_builders);
+                trace_builders = guard.get_batch();
+            }
+        }
+
         let mut batch_tasks = JoinSet::new();
 
-        while !trace_builders.is_empty() {
+        for trace_builders in all_batches {
             let traces: Vec<_> = trace_builders
                 .into_iter()
-                // Lazily set the API key
                 .map(|builder| builder.with_api_key(api_key))
                 .map(SendDataBuilder::build)
                 .collect();
@@ -139,11 +144,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     Self::send(traces_clone, Some(&endpoint), &proxy_https).await
                 });
             }
-
-            trace_builders = guard.get_batch();
         }
-
-        drop(guard);
         while let Some(result) = batch_tasks.join_next().await {
             if let Ok(Some(mut failed)) = result {
                 failed_batch.append(&mut failed);
