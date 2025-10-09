@@ -97,7 +97,7 @@ opt-level = 3
 tikv-jemallocator = "0.5"
 
 [features]
-default = ["reqwest/rustls-tls-native-roots", "rustls-native-certs", "dogstatsd/default", "datadog-fips/default" ]
+default = ["reqwest/rustls-tls-native-roots", "dogstatsd/default", "datadog-fips/default" ]
 fips = [
     "ddcommon/fips",
     "datadog-trace-utils/fips",
