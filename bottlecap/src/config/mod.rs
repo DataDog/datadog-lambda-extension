@@ -343,6 +343,7 @@ pub struct Config {
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
     pub compute_trace_stats_on_extension: bool,
+    pub api_key_reload_interval: Option<Duration>,
 
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
@@ -444,6 +445,7 @@ impl Default for Config {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             compute_trace_stats_on_extension: false,
+            api_key_reload_interval: None,
 
             serverless_appsec_enabled: false,
             appsec_rules: None,
@@ -743,6 +745,17 @@ pub fn deserialize_optional_duration_from_seconds<'de, D: Deserializer<'de>>(
         }
     }
     deserializer.deserialize_any(DurationVisitor)
+}
+
+// Like deserialize_optional_duration_from_seconds(), but return None if the duration is 0 seconds
+pub fn deserialize_optional_duration_from_seconds_ignore_zero<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error> {
+    let duration: Option<Duration> = deserialize_optional_duration_from_seconds(deserializer)?;
+    if duration.is_some_and(|d| d.as_secs() == 0) {
+        return Ok(None);
+    }
+    Ok(duration)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
@@ -1351,6 +1364,28 @@ pub mod tests {
             Value {
                 duration: Some(Duration::from_millis(1500))
             }
+        );
+    }
+
+    #[test]
+    fn test_parse_duration_from_seconds_ignore_zero() {
+        #[derive(Deserialize, Debug, PartialEq, Eq)]
+        struct Value {
+            #[serde(default)]
+            #[serde(deserialize_with = "deserialize_optional_duration_from_seconds_ignore_zero")]
+            duration: Option<Duration>,
+        }
+
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_secs(1))
+            }
+        );
+
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":0}"#).expect("failed to parse JSON"),
+            Value { duration: None }
         );
     }
 }

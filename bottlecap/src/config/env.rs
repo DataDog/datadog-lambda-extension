@@ -395,6 +395,13 @@ pub struct EnvConfig {
     /// Default is `false`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub compute_trace_stats_on_extension: Option<bool>,
+    /// @env `DD_API_KEY_RELOAD_INTERVAL`
+    ///
+    /// The interval at which the Datadog API key is reloaded, in seconds.
+    /// If None, the API key will not be reloaded.
+    /// Default is `None`.
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
+    pub api_key_reload_interval: Option<Duration>,
     /// @env `DD_SERVERLESS_APPSEC_ENABLED`
     ///
     /// Enable Application and API Protection (AAP), previously known as AppSec/ASM, for AWS Lambda.

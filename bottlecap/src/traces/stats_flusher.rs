@@ -102,7 +102,8 @@ impl StatsFlusher for ServerlessStatsFlusher {
         let start = std::time::Instant::now();
 
         let resp =
-            stats_utils::send_stats_payload(serialized_stats_payload, endpoint, api_key).await;
+            stats_utils::send_stats_payload(serialized_stats_payload, endpoint, api_key.as_str())
+                .await;
         let elapsed = start.elapsed();
         debug!(
             "Stats request to {} took {} ms",
