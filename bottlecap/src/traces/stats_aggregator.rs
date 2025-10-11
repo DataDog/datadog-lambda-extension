@@ -55,7 +55,9 @@ impl StatsAggregator {
         // Pull stats data from concentrator
         match self.concentrator.flush(force_flush).await {
             Ok(stats) => {
-                self.queue.extend(stats);
+                if let Some(stats) = stats {
+                    self.queue.push_back(stats);
+                }
             }
             Err(e) => {
                 error!("Error getting stats from the stats concentrator: {e:?}");
@@ -121,6 +123,8 @@ mod tests {
             tags: vec![],
             git_commit_sha: "git_commit_sha".to_string(),
             image_tag: "image_tag".to_string(),
+            process_tags: "process_tags".to_string(),
+            process_tags_hash: 0,
         };
 
         aggregator.add(payload.clone());
@@ -153,6 +157,8 @@ mod tests {
             tags: vec![],
             git_commit_sha: "git_commit_sha".to_string(),
             image_tag: "image_tag".to_string(),
+            process_tags: "process_tags".to_string(),
+            process_tags_hash: 0,
         };
         aggregator.add(payload.clone());
         assert_eq!(aggregator.queue.len(), 1);
@@ -169,8 +175,8 @@ mod tests {
             &HashMap::new(),
         ));
         let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
-        let mut aggregator = StatsAggregator::new(640, concentrator);
-        // Payload below is 115 bytes
+        let mut aggregator = StatsAggregator::new(704, concentrator);
+        // Payload below is 352 bytes
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
             env: "dev".to_string(),
@@ -186,6 +192,8 @@ mod tests {
             tags: vec![],
             git_commit_sha: "git_commit_sha".to_string(),
             image_tag: "image_tag".to_string(),
+            process_tags: "process_tags".to_string(),
+            process_tags_hash: 0,
         };
 
         // Add 3 payloads
