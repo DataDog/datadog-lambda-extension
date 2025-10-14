@@ -747,7 +747,7 @@ pub fn deserialize_optional_duration_from_seconds<'de, D: Deserializer<'de>>(
     deserializer.deserialize_any(DurationVisitor)
 }
 
-// Like deserialize_optional_duration_from_seconds(), but return None if the duration is 0 seconds
+// Like deserialize_optional_duration_from_seconds(), but return None if the value is 0
 pub fn deserialize_optional_duration_from_seconds_ignore_zero<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Duration>, D::Error> {
