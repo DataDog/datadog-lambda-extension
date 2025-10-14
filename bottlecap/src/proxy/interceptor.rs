@@ -499,7 +499,6 @@ mod tests {
             exec_wrapper: None,
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        
         let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
             Arc::clone(&tags_provider),
             Arc::clone(&config),

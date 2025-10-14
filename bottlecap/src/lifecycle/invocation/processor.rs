@@ -22,15 +22,18 @@ use crate::{
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
-        self, constants::{ETC_PATH, PROC_PATH}, CPUData, NetworkData
+        self, CPUData, NetworkData,
+        constants::{ETC_PATH, PROC_PATH},
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
         context::SpanContext,
         propagation::{
+            DatadogCompositePropagator, Propagator,
             text_map_propagator::{
-                DatadogHeaderPropagator, DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY, DATADOG_TRACE_ID_KEY
-            }, DatadogCompositePropagator, Propagator
+                DATADOG_PARENT_ID_KEY, DATADOG_SAMPLING_PRIORITY_KEY, DATADOG_SPAN_ID_KEY,
+                DATADOG_TRACE_ID_KEY, DatadogHeaderPropagator,
+            },
         },
         trace_processor::SendingTraceProcessor,
     },
