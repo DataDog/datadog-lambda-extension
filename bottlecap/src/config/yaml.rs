@@ -8,7 +8,9 @@ use crate::{
         deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
         deserialize_option_lossless, deserialize_optional_bool_from_anything,
         deserialize_optional_duration_from_microseconds,
-        deserialize_optional_duration_from_seconds, deserialize_optional_string,
+        deserialize_optional_duration_from_seconds,
+        deserialize_optional_duration_from_seconds_ignore_zero,
+        deserialize_optional_string,
         deserialize_processing_rules, deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
@@ -111,7 +113,7 @@ pub struct YamlConfig {
     pub capture_lambda_payload_max_depth: Option<u32>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub compute_trace_stats_on_extension: Option<bool>,
-    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds_ignore_zero")]
     pub api_key_reload_interval: Option<Duration>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
@@ -847,7 +849,7 @@ lambda_proc_enhanced_metrics: false
 capture_lambda_payload: true
 capture_lambda_payload_max_depth: 5
 compute_trace_stats_on_extension: true
-api_key_reload_interval: None
+api_key_reload_interval: 0
 serverless_appsec_enabled: true
 appsec_rules: "/path/to/rules.json"
 appsec_waf_timeout: 1000000 # Microseconds
