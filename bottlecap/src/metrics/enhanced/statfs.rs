@@ -27,6 +27,12 @@ fn statfs_info(path: &str) -> Result<(f64, f64, f64), io::Error> {
     ))
 }
 
+pub fn get_tmp_max() -> Result<f64, io::Error> {
+    let (bsize, blocks, _) = statfs_info(constants::TMP_PATH)?;
+    let tmp_max = bsize * blocks;
+    Ok(tmp_max)
+}
+
 pub fn get_tmp_used() -> Result<f64, io::Error> {
     let (bsize, blocks, bavail) = statfs_info(constants::TMP_PATH)?;
     let tmp_used = bsize * (blocks - bavail);

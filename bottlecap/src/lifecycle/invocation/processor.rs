@@ -146,11 +146,7 @@ impl Processor {
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
 
-            // Send max metrics (fd_max, threads_max) at start of invocation
-            self.enhanced_metrics.send_max_metrics();
-            
-            // Start monitoring usage metrics (fd_use, threads_use, tmp_used)
-            self.enhanced_metrics.start_usage_metrics_monitoring();
+            self.enhanced_metrics.resume_usage_metrics_monitoring();
 
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
@@ -388,10 +384,9 @@ impl Processor {
                 offsets.cpu_offset.clone(),
                 offsets.uptime_offset,
             );
-            
-            self.enhanced_metrics.send_final_usage_metrics();
-            self.enhanced_metrics.pause_usage_metrics_monitoring();
         }
+        self.enhanced_metrics.set_max_enhanced_metrics();
+        self.enhanced_metrics.set_usage_enhanced_metrics(); // sets use metric values and pauses monitoring task
 
         // todo(duncanista): Add missing metric tags for ASM
         // Add dynamic and trigger tags

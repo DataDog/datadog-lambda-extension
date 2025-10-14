@@ -48,7 +48,6 @@ use bottlecap::{
         agent::LogsAgent, aggregator_service::AggregatorService as LogsAggregatorService,
         flusher::LogsFlusher,
     },
-    metrics::enhanced::usage_metrics::{EnhancedMetricsService},
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
