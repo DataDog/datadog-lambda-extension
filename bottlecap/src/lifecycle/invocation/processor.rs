@@ -20,7 +20,7 @@ use crate::{
         create_empty_span, generate_span_id, get_metadata_from_value,
         span_inferrer::{self, SpanInferrer},
     },
-    metrics::enhanced::{lambda::{EnhancedMetricData, Lambda as EnhancedMetrics}, usage_metrics::EnhancedMetricsService},
+    metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
         self, constants::{ETC_PATH, PROC_PATH}, CPUData, NetworkData
     },
@@ -99,14 +99,8 @@ impl Processor {
             config.trace_aws_service_representation_enabled,
         );
 
-        let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
-        let enhanced_metrics_handle = Arc::new(enhanced_metrics_handle);
-        tokio::spawn(async move {
-            enhanced_metrics_service.run().await;
-        });
-
-        let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config), Arc::clone(&enhanced_metrics_handle));
-        enhanced_metrics.start_enhanced_metrics_task(); // starts thelong-running task that monitors usage metrics (fd_use, threads_use, tmp_used)
+        let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config));
+        enhanced_metrics.start_enhanced_metrics_task(); // starts the long-running task that monitors usage metrics (fd_use, threads_use, tmp_used)
 
         Processor {
             context_buffer: ContextBuffer::default(),
@@ -141,12 +135,13 @@ impl Processor {
             .unwrap_or_default();
 
         if self.config.lambda_proc_enhanced_metrics {
+            // Resume tmp, fd, and threads enhanced metrics monitoring
+            self.enhanced_metrics.resume_usage_metrics_monitoring();
+
             // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
-
-            self.enhanced_metrics.resume_usage_metrics_monitoring();
 
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
@@ -309,6 +304,10 @@ impl Processor {
             }
         }
 
+        // Set tmp, fd, and threads enhanced metrics
+        self.enhanced_metrics.set_max_enhanced_metrics();
+        self.enhanced_metrics.set_usage_enhanced_metrics(); // sets use metric values and pauses monitoring task
+
         self.context_buffer
             .add_runtime_duration(request_id, metrics.duration_ms);
 
@@ -385,8 +384,6 @@ impl Processor {
                 offsets.uptime_offset,
             );
         }
-        self.enhanced_metrics.set_max_enhanced_metrics();
-        self.enhanced_metrics.set_usage_enhanced_metrics(); // sets use metric values and pauses monitoring task
 
         // todo(duncanista): Add missing metric tags for ASM
         // Add dynamic and trigger tags
