@@ -20,7 +20,7 @@ use tracing::{debug, error, warn};
 
 use crate::{
     http::{extract_request_body, headers_to_map},
-    lifecycle::invocation::processor::Processor as InvocationProcessor,
+    lifecycle::invocation::processor_service::InvocationProcessorHandle,
     traces::{
         context::SpanContext,
         propagation::{
@@ -40,25 +40,26 @@ const AGENT_PORT: usize = 8124;
 
 pub struct Listener {
     propagator: Arc<DatadogCompositePropagator>,
-    pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    pub invocation_processor_handle: InvocationProcessorHandle,
     pub shutdown_token: CancellationToken,
 }
 
 type ListenerState = (
-    Arc<Mutex<InvocationProcessor>>,
+    InvocationProcessorHandle,
     Arc<DatadogCompositePropagator>,
     Arc<Mutex<JoinSet<()>>>,
 );
 
 impl Listener {
+    #[must_use]
     pub fn new(
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        invocation_processor_handle: InvocationProcessorHandle,
         propagator: Arc<DatadogCompositePropagator>,
     ) -> Self {
         let shutdown_token = CancellationToken::new();
         Self {
             propagator,
-            invocation_processor,
+            invocation_processor_handle,
             shutdown_token,
         }
     }
@@ -75,7 +76,7 @@ impl Listener {
 
         let tasks = Arc::new(Mutex::new(JoinSet::new()));
         let state: ListenerState = (
-            self.invocation_processor.clone(),
+            self.invocation_processor_handle.clone(),
             self.propagator.clone(),
             tasks.clone(),
         );
@@ -110,7 +111,7 @@ impl Listener {
 
     // TODO(duncanista): spawn task to handle start invocation request
     async fn handle_start_invocation(
-        State((invocation_processor, propagator, tasks)): State<ListenerState>,
+        State((invocation_processor_handle, propagator, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
         let (parts, body) = match extract_request_body(request).await {
@@ -129,23 +130,30 @@ impl Listener {
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
 
         let mut response_headers = HeaderMap::new();
-        let extracted_span_context =
-            InvocationProcessor::extract_span_context(&headers, &payload_value, propagator);
+        let extracted_span_context = InvocationProcessorHandle::extract_span_context(
+            &headers,
+            &payload_value,
+            propagator.clone(),
+        );
+
         if let Some(sp) = &extracted_span_context {
             Self::inject_span_context_to_headers(&mut response_headers, sp);
         }
 
         let mut join_set = tasks.lock().await;
         join_set.spawn(async move {
-            Self::universal_instrumentation_start(headers, payload_value, invocation_processor)
-                .await;
+            Self::universal_instrumentation_start(
+                headers,
+                payload_value,
+                invocation_processor_handle,
+            );
         });
 
         (StatusCode::OK, response_headers, json!({}).to_string()).into_response()
     }
 
     async fn handle_end_invocation(
-        State((invocation_processor, _, tasks)): State<ListenerState>,
+        State((invocation_processor_handle, _, tasks)): State<ListenerState>,
         request: Request,
     ) -> Response {
         let mut join_set = tasks.lock().await;
@@ -158,7 +166,7 @@ impl Listener {
                 }
             };
 
-            Self::universal_instrumentation_end(&parts.headers, body, invocation_processor).await;
+            Self::universal_instrumentation_end(&parts.headers, body, invocation_processor_handle);
         });
 
         (StatusCode::OK, json!({}).to_string()).into_response()
@@ -170,15 +178,21 @@ impl Listener {
         (StatusCode::OK, json!({}).to_string()).into_response()
     }
 
-    pub async fn universal_instrumentation_start(
+    pub fn universal_instrumentation_start(
         headers: HashMap<String, String>,
         payload_value: Value,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        invocation_processor_handle: InvocationProcessorHandle,
     ) {
         debug!("Received start invocation request");
 
-        let mut processor = invocation_processor.lock().await;
-        processor.on_universal_instrumentation_start(headers, payload_value);
+        if let Err(e) =
+            invocation_processor_handle.on_universal_instrumentation_start(headers, payload_value)
+        {
+            error!(
+                "Failed to send universal instrumentation start to processor: {}",
+                e
+            );
+        }
     }
 
     // If a `SpanContext` exists, then tell the tracer to use it.
@@ -218,16 +232,23 @@ impl Listener {
         }
     }
 
-    pub async fn universal_instrumentation_end(
+    pub fn universal_instrumentation_end(
         headers: &HeaderMap,
         body: Bytes,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        invocation_processor_handle: InvocationProcessorHandle,
     ) {
         debug!("Received end invocation request");
-        let mut processor = invocation_processor.lock().await;
 
         let headers = headers_to_map(headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
-        processor.on_universal_instrumentation_end(headers, payload_value);
+
+        if let Err(e) =
+            invocation_processor_handle.on_universal_instrumentation_end(headers, payload_value)
+        {
+            error!(
+                "Failed to send universal instrumentation end to processor: {}",
+                e
+            );
+        }
     }
 }
