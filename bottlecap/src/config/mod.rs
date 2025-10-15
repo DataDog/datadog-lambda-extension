@@ -343,7 +343,7 @@ pub struct Config {
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
     pub compute_trace_stats_on_extension: bool,
-    pub api_key_reload_interval: Option<Duration>,
+    pub api_key_secret_reload_interval: Option<Duration>,
 
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
@@ -445,7 +445,7 @@ impl Default for Config {
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
             compute_trace_stats_on_extension: false,
-            api_key_reload_interval: None,
+            api_key_secret_reload_interval: None,
 
             serverless_appsec_enabled: false,
             appsec_rules: None,

@@ -342,7 +342,7 @@ fn enable_logging_subsystem() {
 fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
-    let api_key_reload_interval = config.api_key_reload_interval;
+    let api_key_secret_reload_interval = config.api_key_secret_reload_interval;
 
     Arc::new(ApiKeyFactory::new_from_resolver(
         Arc::new(move || {
@@ -351,7 +351,7 @@ fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> 
 
             Box::pin(async move { resolve_secrets(config, aws_config).await })
         }),
-        api_key_reload_interval,
+        api_key_secret_reload_interval,
     ))
 }
 
