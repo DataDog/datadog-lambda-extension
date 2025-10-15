@@ -7,6 +7,7 @@ pub mod events;
 pub mod listener;
 
 pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
+pub const ELEVATOR_TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2025-01-29/telemetry";
 // todo(astuyve) should be 8124 on /lambda/logs but
 // telemetry is implemented on a raw socket now and
 // does not multiplex routes on the same port.
@@ -37,8 +38,16 @@ pub async fn subscribe(
     extension_id: &str,
     destination_port: u16,
     logs_enabled: bool,
+    elevator_mode: bool,
 ) -> Result<Response, ExtensionSubscriptionError> {
-    let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE, runtime_api);
+    let route = if elevator_mode {
+        ELEVATOR_TELEMETRY_SUBSCRIPTION_ROUTE
+    } else {
+        TELEMETRY_SUBSCRIPTION_ROUTE
+    };
+    debug!("Subscribe using route: {route}, elevator_mode: {elevator_mode}");
+
+    let url = base_url(route, runtime_api);
     let response = client
         .put(&url)
         .header(EXTENSION_ID_HEADER, extension_id)

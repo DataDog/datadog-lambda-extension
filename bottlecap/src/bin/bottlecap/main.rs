@@ -285,7 +285,13 @@ async fn main() -> anyhow::Result<()> {
     let runtime_api = aws_config.runtime_api.clone();
     let elevator_mode = aws_config.is_elevator_mode();
     let response = tokio::task::spawn(async move {
-        extension::register(&cloned_client, &runtime_api, extension::EXTENSION_NAME, elevator_mode).await
+        extension::register(
+            &cloned_client,
+            &runtime_api,
+            extension::EXTENSION_NAME,
+            elevator_mode,
+        )
+        .await
     });
     // First load the AWS configuration
     let lambda_directory: String =
@@ -489,6 +495,7 @@ async fn extension_loop_active(
         logs_agent_channel,
         event_bus_tx.clone(),
         config.serverless_logs_enabled,
+        aws_config.is_elevator_mode(),
     )
     .await?;
 
@@ -1262,6 +1269,7 @@ async fn setup_telemetry_client(
     logs_tx: Sender<TelemetryEvent>,
     event_bus_tx: Sender<Event>,
     logs_enabled: bool,
+    elevator_mode: bool,
 ) -> anyhow::Result<CancellationToken> {
     let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
@@ -1282,6 +1290,7 @@ async fn setup_telemetry_client(
         extension_id,
         TELEMETRY_PORT,
         logs_enabled,
+        elevator_mode,
     )
     .await
     .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;
