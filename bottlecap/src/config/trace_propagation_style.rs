@@ -23,8 +23,8 @@ impl FromStr for TracePropagationStyle {
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "none" => Ok(TracePropagationStyle::None),
             _ => {
-                error!("Trace propagation style is invalid: {:?}, using Datadog", s);
-                Ok(TracePropagationStyle::Datadog)
+                error!("Trace propagation style is invalid: {:?}, using None", s);
+                Ok(TracePropagationStyle::None)
             }
         }
     }
