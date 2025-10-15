@@ -129,7 +129,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         for trace_builders in all_batches {
             let traces: Vec<_> = trace_builders
                 .into_iter()
-                .map(|builder| builder.with_api_key(api_key))
+                .map(|builder| builder.with_api_key(api_key.as_str()))
                 .map(SendDataBuilder::build)
                 .collect();
 
