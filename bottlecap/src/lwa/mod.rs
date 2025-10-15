@@ -62,7 +62,7 @@ pub fn get_lwa_proxy_socket_address(
     Ok(socket_addr)
 }
 
-pub fn process_invocation_next(
+pub async fn process_invocation_next(
     invocation_processor_handle: &InvocationProcessorHandle,
     parts: &http::response::Parts,
     body_bytes: &Bytes,
@@ -104,7 +104,7 @@ pub fn process_invocation_next(
         headers,
         payload_value,
         invocation_processor_handle.clone(),
-    );
+    ).await;
 
     let mut parent_id = 0;
     if let Some(sp) = extracted_span_context {
@@ -120,7 +120,7 @@ pub fn process_invocation_next(
     }
 }
 
-pub fn process_invocation_response(
+pub async fn process_invocation_response(
     invocation_processor_handle: &InvocationProcessorHandle,
     waited_intercepted_body: &Bytes,
 ) {
@@ -152,7 +152,7 @@ pub fn process_invocation_response(
         &headers,
         body_bytes.into(),
         invocation_processor_handle.clone(),
-    );
+    ).await;
 }
 
 fn inner_header(inner_payload: &Value) -> HashMap<String, String> {

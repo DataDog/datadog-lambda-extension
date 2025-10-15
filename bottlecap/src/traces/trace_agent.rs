@@ -513,7 +513,7 @@ impl TraceAgent {
                 }
 
                 if span.resource == INVOCATION_SPAN_RESOURCE {
-                    if let Err(e) = invocation_processor_handle.add_tracer_span(span.clone()) {
+                    if let Err(e) = invocation_processor_handle.add_tracer_span(span.clone()).await {
                         error!("Failed to add tracer span to processor: {}", e);
                     }
                 }
@@ -532,7 +532,7 @@ impl TraceAgent {
                         &tags_provider,
                         &trace_sender,
                         ctx_to_send,
-                    ) {
+                    ).await {
                         error!("Failed to send context spans to processor: {}", e);
                     }
                 }

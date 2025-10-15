@@ -1,4 +1,5 @@
-use std::{collections::HashMap, sync::Arc};
+use
+std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
@@ -56,7 +57,7 @@ pub enum ProcessorCommand {
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
         timestamp: i64,
-        completion: Option<oneshot::Sender<()>>,
+        response: oneshot::Sender<()>,
     },
     PlatformReport {
         request_id: String,
@@ -107,27 +108,29 @@ pub enum ProcessorCommand {
 
 #[derive(Clone)]
 pub struct InvocationProcessorHandle {
-    sender: mpsc::UnboundedSender<ProcessorCommand>,
+    sender: mpsc::Sender<ProcessorCommand>,
 }
 
 impl InvocationProcessorHandle {
-    pub fn on_invoke_event(
+    pub async fn on_invoke_event(
         &self,
         request_id: String,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::InvokeEvent { request_id })
+            .await
     }
 
-    pub fn on_platform_init_start(
+    pub async fn on_platform_init_start(
         &self,
         time: DateTime<Utc>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::PlatformInitStart { time })
+            .await
     }
 
-    pub fn on_platform_init_report(
+    pub async fn on_platform_init_report(
         &self,
         init_type: InitType,
         duration_ms: f64,
@@ -138,15 +141,17 @@ impl InvocationProcessorHandle {
             duration_ms,
             timestamp,
         })
+        .await
     }
 
-    pub fn on_platform_start(
+    pub async fn on_platform_start(
         &self,
         request_id: String,
         time: DateTime<Utc>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::PlatformStart { request_id, time })
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -158,11 +163,8 @@ impl InvocationProcessorHandle {
         error_type: Option<String>,
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
-        timestamp: i64,
-        wait_for_completion: bool,
+        timestamp: i64
     ) -> Result<(), ProcessorError> {
-        // Only when Flush decision is 'End' do we want to wait to finish processing PlatformRuntimeDone
-        if wait_for_completion {
             let (tx, rx) = oneshot::channel();
             self.sender
                 .send(ProcessorCommand::PlatformRuntimeDone {
@@ -173,29 +175,16 @@ impl InvocationProcessorHandle {
                     tags_provider,
                     trace_sender,
                     timestamp,
-                    completion: Some(tx),
+                    response: tx,
                 })
+                .await
                 .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
             rx.await
                 .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?;
             Ok(())
-        } else {
-            self.sender
-                .send(ProcessorCommand::PlatformRuntimeDone {
-                    request_id,
-                    metrics,
-                    status,
-                    error_type,
-                    tags_provider,
-                    trace_sender,
-                    timestamp,
-                    completion: None,
-                })
-                .map_err(|e| ProcessorError::ChannelSend(e.to_string()))
-        }
     }
 
-    pub fn on_platform_report(
+    pub async fn on_platform_report(
         &self,
         request_id: String,
         metrics: ReportMetrics,
@@ -206,9 +195,10 @@ impl InvocationProcessorHandle {
             metrics,
             timestamp,
         })
+        .await
     }
 
-    pub fn on_universal_instrumentation_start(
+    pub async fn on_universal_instrumentation_start(
         &self,
         headers: HashMap<String, String>,
         payload_value: Value,
@@ -218,9 +208,10 @@ impl InvocationProcessorHandle {
                 headers,
                 payload_value,
             })
+            .await
     }
 
-    pub fn on_universal_instrumentation_end(
+    pub async fn on_universal_instrumentation_end(
         &self,
         headers: HashMap<String, String>,
         payload_value: Value,
@@ -230,9 +221,10 @@ impl InvocationProcessorHandle {
                 headers,
                 payload_value,
             })
+            .await
     }
 
-    pub fn add_reparenting(
+    pub async fn add_reparenting(
         &self,
         request_id: String,
         span_id: u64,
@@ -243,6 +235,7 @@ impl InvocationProcessorHandle {
             span_id,
             parent_id,
         })
+        .await
     }
 
     pub async fn get_reparenting_info(
@@ -254,6 +247,7 @@ impl InvocationProcessorHandle {
             .send(ProcessorCommand::GetReparentingInfo {
                 response: response_tx,
             })
+            .await
             .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
 
         response_rx
@@ -272,6 +266,7 @@ impl InvocationProcessorHandle {
                 reparenting_info,
                 response: response_tx,
             })
+            .await
             .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
 
         response_rx
@@ -299,6 +294,7 @@ impl InvocationProcessorHandle {
                 trace_id,
                 response: response_tx,
             })
+            .await
             .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
 
         response_rx
@@ -306,28 +302,31 @@ impl InvocationProcessorHandle {
             .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?
     }
 
-    pub fn add_tracer_span(
+    pub async fn add_tracer_span(
         &self,
         span: Span,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender.send(ProcessorCommand::AddTracerSpan {
             span: Box::new(span),
         })
+        .await
     }
 
-    pub fn on_out_of_memory_error(
+    pub async fn on_out_of_memory_error(
         &self,
         timestamp: i64,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::OnOutOfMemoryError { timestamp })
+            .await
     }
 
-    pub fn on_shutdown_event(&self) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+    pub async fn on_shutdown_event(&self) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender.send(ProcessorCommand::OnShutdownEvent)
+            .await
     }
 
-    pub fn send_ctx_spans(
+    pub async fn send_ctx_spans(
         &self,
         tags_provider: &Arc<provider::Provider>,
         trace_sender: &Arc<SendingTraceProcessor>,
@@ -338,11 +337,13 @@ impl InvocationProcessorHandle {
             trace_sender: Arc::clone(trace_sender),
             context,
         })
+        .await
     }
 
-    pub fn shutdown(&self) -> Result<(), ProcessorError> {
+    pub async fn shutdown(&self) -> Result<(), ProcessorError> {
         self.sender
             .send(ProcessorCommand::Shutdown)
+            .await
             .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
 
         Ok(())
@@ -350,7 +351,7 @@ impl InvocationProcessorHandle {
 }
 pub struct InvocationProcessorService {
     processor: Processor,
-    receiver: mpsc::UnboundedReceiver<ProcessorCommand>,
+    receiver: mpsc::Receiver<ProcessorCommand>,
 }
 
 impl InvocationProcessorService {
@@ -362,7 +363,7 @@ impl InvocationProcessorService {
         metrics_aggregator_handle: AggregatorHandle,
         propagator: Arc<DatadogCompositePropagator>,
     ) -> (InvocationProcessorHandle, Self) {
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = mpsc::channel(1000);
 
         let processor = Processor::new(
             tags_provider,
@@ -412,7 +413,7 @@ impl InvocationProcessorService {
                     tags_provider,
                     trace_sender,
                     timestamp,
-                    completion,
+                    response,
                 } => {
                     self.processor
                         .on_platform_runtime_done(
@@ -425,9 +426,7 @@ impl InvocationProcessorService {
                             timestamp,
                         )
                         .await;
-                    if let Some(tx) = completion {
-                        let _ = tx.send(());
-                    }
+                   let _ = response.send(());
                 }
                 ProcessorCommand::PlatformReport {
                     request_id,

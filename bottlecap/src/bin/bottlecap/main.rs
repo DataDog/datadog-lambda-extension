@@ -489,7 +489,7 @@ async fn extension_loop_active(
         extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
-    handle_next_invocation(next_lambda_response, &invocation_processor_handle);
+    handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
     loop {
         let maybe_shutdown_event;
 
@@ -504,7 +504,7 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone(), true).await {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
                                 if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                     break 'flush_end;
                                 }
@@ -542,7 +542,7 @@ async fn extension_loop_active(
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
                 maybe_shutdown_event =
-                    handle_next_invocation(next_response, &invocation_processor_handle);
+                    handle_next_invocation(next_response, &invocation_processor_handle).await;
             }
             FlushDecision::Continuous | FlushDecision::Periodic | FlushDecision::Dont => {
                 match current_flush_decision {
@@ -626,12 +626,12 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         next_response = &mut next_lambda_response => {
-                            maybe_shutdown_event = handle_next_invocation(next_response, &invocation_processor_handle);
+                            maybe_shutdown_event = handle_next_invocation(next_response, &invocation_processor_handle).await;
                             // Need to break here to re-call next
                             break 'next_invocation;
                         }
                         Some(event) = event_bus.rx.recv() => {
-                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone(), false).await;
+                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                         }
                         _ = race_flush_interval.tick() => {
                             if flush_control.flush_strategy == FlushStrategy::Default {
@@ -686,7 +686,7 @@ async fn extension_loop_active(
                             loop {
                                 match event_bus.rx.try_recv() {
                                     Ok(event) => {
-                                        handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone(), false).await;
+                                        handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                                     },
                                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break 'shutdown,
                                     // Empty signals there are still outstanding senders
@@ -696,7 +696,7 @@ async fn extension_loop_active(
                                 }
                             }
                         } else {
-                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone(), false).await;
+                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                         }
                     }
                     // Add timeout to prevent hanging indefinitely
@@ -779,11 +779,10 @@ async fn handle_event_bus_event(
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
     trace_agent_channel: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
-    wait_for_platform_runtime_done_completion: bool,
 ) -> Option<TelemetryEvent> {
     match event {
         Event::OutOfMemory(event_timestamp) => {
-            if let Err(e) = invocation_processor_handle.on_out_of_memory_error(event_timestamp) {
+            if let Err(e) = invocation_processor_handle.on_out_of_memory_error(event_timestamp).await {
                 error!("Failed to send out of memory error to processor: {}", e);
             }
         }
@@ -791,7 +790,7 @@ async fn handle_event_bus_event(
             debug!("Telemetry event received: {:?}", event);
             match event.record {
                 TelemetryRecord::PlatformInitStart { .. } => {
-                    if let Err(e) = invocation_processor_handle.on_platform_init_start(event.time) {
+                    if let Err(e) = invocation_processor_handle.on_platform_init_start(event.time).await {
                         error!("Failed to send platform init start to processor: {}", e);
                     }
                 }
@@ -804,13 +803,13 @@ async fn handle_event_bus_event(
                         initialization_type,
                         metrics.duration_ms,
                         event.time.timestamp(),
-                    ) {
+                    ).await {
                         error!("Failed to send platform init report to processor: {}", e);
                     }
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
                     if let Err(e) =
-                        invocation_processor_handle.on_platform_start(request_id, event.time)
+                        invocation_processor_handle.on_platform_start(request_id, event.time).await
                     {
                         error!("Failed to send platform start to processor: {}", e);
                     }
@@ -838,7 +837,6 @@ async fn handle_event_bus_event(
                                 )),
                             }),
                             event.time.timestamp(),
-                            wait_for_platform_runtime_done_completion,
                         )
                         .await
                     {
@@ -855,7 +853,7 @@ async fn handle_event_bus_event(
                         request_id.clone(),
                         metrics,
                         event.time.timestamp(),
-                    ) {
+                    ).await {
                         error!("Failed to send platform report to processor: {}", e);
                     }
                     return Some(event);
@@ -871,7 +869,7 @@ async fn handle_event_bus_event(
     None
 }
 
-fn handle_next_invocation(
+async fn handle_next_invocation(
     next_response: Result<NextEventResponse, ExtensionError>,
     invocation_processor_handle: &InvocationProcessorHandle,
 ) -> NextEventResponse {
@@ -887,7 +885,7 @@ fn handle_next_invocation(
                 deadline_ms,
                 invoked_function_arn.clone()
             );
-            if let Err(e) = invocation_processor_handle.on_invoke_event(request_id.into()) {
+            if let Err(e) = invocation_processor_handle.on_invoke_event(request_id.into()).await {
                 error!("Failed to send invoke event to processor: {}", e);
             }
         }
@@ -895,7 +893,7 @@ fn handle_next_invocation(
             ref shutdown_reason,
             deadline_ms,
         }) => {
-            if let Err(e) = invocation_processor_handle.on_shutdown_event() {
+            if let Err(e) = invocation_processor_handle.on_shutdown_event().await {
                 error!("Failed to send shutdown event to processor: {}", e);
             }
             println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");

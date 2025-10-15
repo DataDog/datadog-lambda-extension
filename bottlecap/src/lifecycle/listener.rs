@@ -146,7 +146,7 @@ impl Listener {
                 headers,
                 payload_value,
                 invocation_processor_handle,
-            );
+            ).await;
         });
 
         (StatusCode::OK, response_headers, json!({}).to_string()).into_response()
@@ -166,7 +166,7 @@ impl Listener {
                 }
             };
 
-            Self::universal_instrumentation_end(&parts.headers, body, invocation_processor_handle);
+            Self::universal_instrumentation_end(&parts.headers, body, invocation_processor_handle).await;
         });
 
         (StatusCode::OK, json!({}).to_string()).into_response()
@@ -178,7 +178,7 @@ impl Listener {
         (StatusCode::OK, json!({}).to_string()).into_response()
     }
 
-    pub fn universal_instrumentation_start(
+    pub async fn universal_instrumentation_start(
         headers: HashMap<String, String>,
         payload_value: Value,
         invocation_processor_handle: InvocationProcessorHandle,
@@ -186,7 +186,7 @@ impl Listener {
         debug!("Received start invocation request");
 
         if let Err(e) =
-            invocation_processor_handle.on_universal_instrumentation_start(headers, payload_value)
+            invocation_processor_handle.on_universal_instrumentation_start(headers, payload_value).await
         {
             error!(
                 "Failed to send universal instrumentation start to processor: {}",
@@ -232,7 +232,7 @@ impl Listener {
         }
     }
 
-    pub fn universal_instrumentation_end(
+    pub async fn universal_instrumentation_end(
         headers: &HeaderMap,
         body: Bytes,
         invocation_processor_handle: InvocationProcessorHandle,
@@ -243,7 +243,7 @@ impl Listener {
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
 
         if let Err(e) =
-            invocation_processor_handle.on_universal_instrumentation_end(headers, payload_value)
+            invocation_processor_handle.on_universal_instrumentation_end(headers, payload_value).await
         {
             error!(
                 "Failed to send universal instrumentation end to processor: {}",

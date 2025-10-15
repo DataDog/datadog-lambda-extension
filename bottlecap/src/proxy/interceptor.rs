@@ -203,7 +203,7 @@ async fn invocation_next_proxy(
                     &intercepted_parts_clone,
                     &body,
                     Arc::clone(&propagator),
-                );
+                ).await;
             }
         }
     });
@@ -250,7 +250,7 @@ async fn invocation_response_proxy(
             }
 
             if aws_config_clone.aws_lwa_proxy_lambda_runtime_api.is_some() {
-                lwa::process_invocation_response(&invocation_processor, &body);
+                lwa::process_invocation_response(&invocation_processor, &body).await;
             }
         }
     });
