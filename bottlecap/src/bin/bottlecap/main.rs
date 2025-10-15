@@ -782,7 +782,10 @@ async fn handle_event_bus_event(
 ) -> Option<TelemetryEvent> {
     match event {
         Event::OutOfMemory(event_timestamp) => {
-            if let Err(e) = invocation_processor_handle.on_out_of_memory_error(event_timestamp).await {
+            if let Err(e) = invocation_processor_handle
+                .on_out_of_memory_error(event_timestamp)
+                .await
+            {
                 error!("Failed to send out of memory error to processor: {}", e);
             }
         }
@@ -790,7 +793,10 @@ async fn handle_event_bus_event(
             debug!("Telemetry event received: {:?}", event);
             match event.record {
                 TelemetryRecord::PlatformInitStart { .. } => {
-                    if let Err(e) = invocation_processor_handle.on_platform_init_start(event.time).await {
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_init_start(event.time)
+                        .await
+                    {
                         error!("Failed to send platform init start to processor: {}", e);
                     }
                 }
@@ -799,17 +805,21 @@ async fn handle_event_bus_event(
                     initialization_type,
                     ..
                 } => {
-                    if let Err(e) = invocation_processor_handle.on_platform_init_report(
-                        initialization_type,
-                        metrics.duration_ms,
-                        event.time.timestamp(),
-                    ).await {
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_init_report(
+                            initialization_type,
+                            metrics.duration_ms,
+                            event.time.timestamp(),
+                        )
+                        .await
+                    {
                         error!("Failed to send platform init report to processor: {}", e);
                     }
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
-                    if let Err(e) =
-                        invocation_processor_handle.on_platform_start(request_id, event.time).await
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_start(request_id, event.time)
+                        .await
                     {
                         error!("Failed to send platform start to processor: {}", e);
                     }
@@ -849,11 +859,10 @@ async fn handle_event_bus_event(
                     metrics,
                     ..
                 } => {
-                    if let Err(e) = invocation_processor_handle.on_platform_report(
-                        request_id.clone(),
-                        metrics,
-                        event.time.timestamp(),
-                    ).await {
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_report(request_id.clone(), metrics, event.time.timestamp())
+                        .await
+                    {
                         error!("Failed to send platform report to processor: {}", e);
                     }
                     return Some(event);
@@ -885,7 +894,10 @@ async fn handle_next_invocation(
                 deadline_ms,
                 invoked_function_arn.clone()
             );
-            if let Err(e) = invocation_processor_handle.on_invoke_event(request_id.into()).await {
+            if let Err(e) = invocation_processor_handle
+                .on_invoke_event(request_id.into())
+                .await
+            {
                 error!("Failed to send invoke event to processor: {}", e);
             }
         }

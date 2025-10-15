@@ -203,7 +203,8 @@ async fn invocation_next_proxy(
                     &intercepted_parts_clone,
                     &body,
                     Arc::clone(&propagator),
-                ).await;
+                )
+                .await;
             }
         }
     });

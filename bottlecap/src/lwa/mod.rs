@@ -104,7 +104,8 @@ pub async fn process_invocation_next(
         headers,
         payload_value,
         invocation_processor_handle.clone(),
-    ).await;
+    )
+    .await;
 
     let mut parent_id = 0;
     if let Some(sp) = extracted_span_context {
@@ -112,11 +113,9 @@ pub async fn process_invocation_next(
     }
 
     if let Some(request_id) = request_id {
-        let _ = invocation_processor_handle.add_reparenting(
-            request_id.to_string(),
-            generate_span_id(),
-            parent_id,
-        );
+        let _ = invocation_processor_handle
+            .add_reparenting(request_id.to_string(), generate_span_id(), parent_id)
+            .await;
     }
 }
 
@@ -152,7 +151,8 @@ pub async fn process_invocation_response(
         &headers,
         body_bytes.into(),
         invocation_processor_handle.clone(),
-    ).await;
+    )
+    .await;
 }
 
 fn inner_header(inner_payload: &Value) -> HashMap<String, String> {
