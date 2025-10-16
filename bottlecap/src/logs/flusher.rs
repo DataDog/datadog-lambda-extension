@@ -60,7 +60,7 @@ impl Flusher {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch.clone(), api_key).await;
+                let req = self.create_request(batch.clone(), api_key.as_str()).await;
                 set.spawn(async move { Self::send(req).await });
             }
         }

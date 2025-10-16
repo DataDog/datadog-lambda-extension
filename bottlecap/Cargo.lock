@@ -39,12 +39,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allocator-api2"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
-
-[[package]]
 name = "anyhow"
 version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -519,12 +513,11 @@ dependencies = [
  "bytes",
  "chrono",
  "cookie",
- "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7)",
+ "datadog-fips",
  "datadog-protos",
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
  "datadog-trace-protobuf",
- "datadog-trace-stats",
  "datadog-trace-utils",
  "ddcommon",
  "ddsketch-agent",
@@ -767,28 +760,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "datadog-ddsketch"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
-dependencies = [
- "prost",
-]
-
-[[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=b0b0cb9310d8d8f2038c00a46e3267e21dc3e287#b0b0cb9310d8d8f2038c00a46e3267e21dc3e287"
-dependencies = [
- "reqwest",
- "rustls",
- "rustls-native-certs",
- "tracing",
-]
-
-[[package]]
-name = "datadog-fips"
-version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7#fa1d2f4ea2c4c2596144a1f362935e56cf0cb3c7"
+source = "git+https://github.com/DataDog/serverless-components?rev=936b3440a1ffc3dd68d040354b721a3042aad47d#936b3440a1ffc3dd68d040354b721a3042aad47d"
 dependencies = [
  "reqwest",
  "rustls",
@@ -811,8 +785,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-normalization"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -820,8 +794,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-obfuscation"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -837,8 +811,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-protobuf"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "prost",
  "serde",
@@ -846,20 +820,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "datadog-trace-stats"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
-dependencies = [
- "datadog-ddsketch",
- "datadog-trace-protobuf",
- "datadog-trace-utils",
- "hashbrown 0.15.4",
-]
-
-[[package]]
 name = "datadog-trace-utils"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "bytes",
@@ -886,8 +849,8 @@ dependencies = [
 
 [[package]]
 name = "ddcommon"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "cc",
@@ -1004,9 +967,9 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=b0b0cb9310d8d8f2038c00a46e3267e21dc3e287#b0b0cb9310d8d8f2038c00a46e3267e21dc3e287"
+source = "git+https://github.com/DataDog/serverless-components?rev=936b3440a1ffc3dd68d040354b721a3042aad47d#936b3440a1ffc3dd68d040354b721a3042aad47d"
 dependencies = [
- "datadog-fips 0.1.0 (git+https://github.com/DataDog/serverless-components?rev=b0b0cb9310d8d8f2038c00a46e3267e21dc3e287)",
+ "datadog-fips",
  "datadog-protos",
  "ddsketch-agent",
  "derive_more",
@@ -1159,12 +1122,6 @@ name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
-
-[[package]]
-name = "foldhash"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "form_urlencoded"
@@ -1383,11 +1340,6 @@ name = "hashbrown"
 version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash",
-]
 
 [[package]]
 name = "headers"
@@ -3558,8 +3510,8 @@ dependencies = [
 
 [[package]]
 name = "tinybytes"
-version = "22.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=5c16bbbb8ff0f7e20880e63a07bb48f3099b5116#5c16bbbb8ff0f7e20880e63a07bb48f3099b5116"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "serde",
 ]
