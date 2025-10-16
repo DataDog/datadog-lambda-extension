@@ -34,6 +34,7 @@ pub struct TracerMetadata {
 
 pub enum ConcentratorCommand {
     SetTracerMetadata(TracerMetadata),
+    // Use a box to reduce the size of the command enum
     Add(Box<pb::Span>),
     Flush(bool, oneshot::Sender<Option<ClientStatsPayload>>),
 }
