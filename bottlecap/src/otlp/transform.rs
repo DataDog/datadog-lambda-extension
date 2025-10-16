@@ -861,6 +861,7 @@ pub fn otel_span_to_dd_span(
         metrics: HashMap::new(),
         meta_struct: HashMap::new(),
         span_links: Vec::new(),
+        span_events: Vec::new(),
     };
 
     // Set error status

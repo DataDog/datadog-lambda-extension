@@ -7,7 +7,6 @@ pub mod proxy_aggregator;
 pub mod proxy_flusher;
 pub mod span_pointers;
 pub mod stats_aggregator;
-pub mod stats_concentrator;
 pub mod stats_concentrator_service;
 pub mod stats_flusher;
 pub mod stats_generator;

@@ -39,6 +39,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
+
+[[package]]
 name = "anyhow"
 version = "1.0.98"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -404,7 +410,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "lazy_static",
  "lazycell",
  "log",
@@ -427,7 +433,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.11.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -518,6 +524,7 @@ dependencies = [
  "datadog-trace-normalization",
  "datadog-trace-obfuscation",
  "datadog-trace-protobuf",
+ "datadog-trace-stats",
  "datadog-trace-utils",
  "ddcommon",
  "ddsketch-agent",
@@ -760,6 +767,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "datadog-ddsketch"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
+dependencies = [
+ "prost",
+]
+
+[[package]]
 name = "datadog-fips"
 version = "0.1.0"
 source = "git+https://github.com/DataDog/serverless-components?rev=936b3440a1ffc3dd68d040354b721a3042aad47d#936b3440a1ffc3dd68d040354b721a3042aad47d"
@@ -785,8 +800,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-normalization"
-version = "20.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=9405db9cb4ef733f3954c3ee77ce71a502e98e50#9405db9cb4ef733f3954c3ee77ce71a502e98e50"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -794,8 +809,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-obfuscation"
-version = "20.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=9405db9cb4ef733f3954c3ee77ce71a502e98e50#9405db9cb4ef733f3954c3ee77ce71a502e98e50"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "datadog-trace-protobuf",
@@ -811,8 +826,8 @@ dependencies = [
 
 [[package]]
 name = "datadog-trace-protobuf"
-version = "20.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=9405db9cb4ef733f3954c3ee77ce71a502e98e50#9405db9cb4ef733f3954c3ee77ce71a502e98e50"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "prost",
  "serde",
@@ -820,9 +835,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "datadog-trace-stats"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
+dependencies = [
+ "datadog-ddsketch",
+ "datadog-trace-protobuf",
+ "datadog-trace-utils",
+ "hashbrown 0.15.4",
+]
+
+[[package]]
 name = "datadog-trace-utils"
-version = "20.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=9405db9cb4ef733f3954c3ee77ce71a502e98e50#9405db9cb4ef733f3954c3ee77ce71a502e98e50"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "bytes",
@@ -849,8 +875,8 @@ dependencies = [
 
 [[package]]
 name = "ddcommon"
-version = "20.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=9405db9cb4ef733f3954c3ee77ce71a502e98e50#9405db9cb4ef733f3954c3ee77ce71a502e98e50"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "anyhow",
  "cc",
@@ -1124,6 +1150,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 
 [[package]]
+name = "foldhash"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+
+[[package]]
 name = "form_urlencoded"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1340,6 +1372,11 @@ name = "hashbrown"
 version = "0.15.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash",
+]
 
 [[package]]
 name = "headers"
@@ -1610,7 +1647,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.6.0",
+ "socket2 0.5.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -1781,15 +1818,6 @@ name = "itertools"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1c173a5686ce8bfa551b3563d0c2170bf24ca44da99c7ca4bfdab5418c3fe57"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -2490,7 +2518,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
  "heck",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "log",
  "multimap",
  "once_cell",
@@ -2510,7 +2538,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -3510,8 +3538,8 @@ dependencies = [
 
 [[package]]
 name = "tinybytes"
-version = "20.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=9405db9cb4ef733f3954c3ee77ce71a502e98e50#9405db9cb4ef733f3954c3ee77ce71a502e98e50"
+version = "22.1.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=ba8955394cf35cf24a1a508fbe6264ad84702567#ba8955394cf35cf24a1a508fbe6264ad84702567"
 dependencies = [
  "serde",
 ]

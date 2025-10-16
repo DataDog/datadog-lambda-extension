@@ -3,6 +3,7 @@ addr2line,https://github.com/gimli-rs/addr2line,Apache-2.0 OR MIT,The addr2line 
 adler2,https://github.com/oyvindln/adler2,0BSD OR MIT OR Apache-2.0,"Jonas Schievink <jonasschievink@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>"
 ahash,https://github.com/tkaitchuck/ahash,MIT OR Apache-2.0,Tom Kaitchuck <Tom.Kaitchuck@gmail.com>
 aho-corasick,https://github.com/BurntSushi/aho-corasick,Unlicense OR MIT,Andrew Gallant <jamslam@gmail.com>
+allocator-api2,https://github.com/zakarumych/allocator-api2,MIT OR Apache-2.0,Zakarum <zaq.dev@icloud.com>
 anyhow,https://github.com/dtolnay/anyhow,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 async-trait,https://github.com/dtolnay/async-trait,MIT OR Apache-2.0,David Tolnay <dtolnay@gmail.com>
 atomic,https://github.com/Amanieu/atomic-rs,Apache-2.0 OR MIT,Amanieu d'Antras <amanieu@gmail.com>
@@ -31,11 +32,13 @@ core-foundation-sys,https://github.com/servo/core-foundation-rs,MIT OR Apache-2.
 cpufeatures,https://github.com/RustCrypto/utils,MIT OR Apache-2.0,RustCrypto Developers
 crc32fast,https://github.com/srijs/rust-crc32fast,MIT OR Apache-2.0,"Sam Rijs <srijs@airpost.net>, Alex Crichton <alex@alexcrichton.com>"
 crypto-common,https://github.com/RustCrypto/traits,MIT OR Apache-2.0,RustCrypto Developers
+datadog-ddsketch,https://github.com/DataDog/libdatadog,Apache-2.0,The datadog-ddsketch Authors
 datadog-fips,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-fips Authors
 datadog-protos,https://github.com/DataDog/saluki,Apache-2.0,The datadog-protos Authors
 datadog-trace-normalization,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
 datadog-trace-obfuscation,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
 datadog-trace-protobuf,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
+datadog-trace-stats,https://github.com/DataDog/libdatadog,Apache-2.0,The datadog-trace-stats Authors
 datadog-trace-utils,https://github.com/DataDog/libdatadog,Apache-2.0,The datadog-trace-utils Authors
 ddcommon,https://github.com/DataDog/libdatadog,Apache-2.0,The ddcommon Authors
 ddsketch-agent,https://github.com/DataDog/saluki,Apache-2.0,The ddsketch-agent Authors
@@ -53,6 +56,7 @@ figment,https://github.com/SergioBenitez/Figment,MIT OR Apache-2.0,Sergio Benite
 flate2,https://github.com/rust-lang/flate2-rs,MIT OR Apache-2.0,"Alex Crichton <alex@alexcrichton.com>, Josh Triplett <josh@joshtriplett.org>"
 float-cmp,https://github.com/mikedilger/float-cmp,MIT,Mike Dilger <mike@mikedilger.com>
 fnv,https://github.com/servo/rust-fnv,Apache-2.0  OR  MIT,Alex Crichton <alex@alexcrichton.com>
+foldhash,https://github.com/orlp/foldhash,Zlib,Orson Peters <orsonpeters@gmail.com>
 form_urlencoded,https://github.com/servo/rust-url,MIT OR Apache-2.0,The rust-url developers
 futures,https://github.com/rust-lang/futures-rs,MIT OR Apache-2.0,The futures Authors
 futures-channel,https://github.com/rust-lang/futures-rs,MIT OR Apache-2.0,The futures-channel Authors
