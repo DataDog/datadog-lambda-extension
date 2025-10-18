@@ -10,6 +10,7 @@ scripts/.cache
 scripts/.src
 reports.log
 __pycache__
+integration_tests/recorder/target
 local_tests/logs.txt
 local_tests/META_INF
 local_tests/python
