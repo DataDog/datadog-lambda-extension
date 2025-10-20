@@ -3,11 +3,12 @@
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{any, post},
 };
+use tower_http::limit::RequestBodyLimitLayer;
 use serde_json::json;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -72,6 +73,7 @@ const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
 
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
+pub const TRACE_REQUEST_BODY_LIMIT: usize = 5 * 1024 * 1024;
 pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
 const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 
@@ -231,6 +233,8 @@ impl TraceAgent {
                 V5_TRACE_ENDPOINT_PATH,
                 post(Self::v05_traces).put(Self::v05_traces),
             )
+            .layer(DefaultBodyLimit::disable())
+            .layer(RequestBodyLimitLayer::new(TRACE_REQUEST_BODY_LIMIT))
             .with_state(trace_state);
 
         let stats_router = Router::new()
