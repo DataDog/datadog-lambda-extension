@@ -433,7 +433,12 @@ impl TraceAgent {
     ) -> Response {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
-            Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+            Err(e) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("TRACE_AGENT | handle_traces | Error extracting request body: {e}"),
+                );
+            }
         };
 
         if let Some(content_length) = parts
@@ -551,7 +556,12 @@ impl TraceAgent {
         debug!("TRACE_AGENT | Proxied request for {context}");
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
-            Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+            Err(e) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("TRACE_AGENT | handle_proxy | Error extracting request body: {e}"),
+                );
+            }
         };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
