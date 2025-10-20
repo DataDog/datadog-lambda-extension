@@ -485,10 +485,8 @@ impl TraceAgent {
         let mut reparenting_info = match invocation_processor_handle.get_reparenting_info().await {
             Ok(info) => info,
             Err(e) => {
-                return error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get reparenting info: {e}"),
-                );
+                error!("Failed to get reparenting info: {e}");
+                VecDeque::new()
             }
         };
 
