@@ -3,7 +3,7 @@
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{any, post},
@@ -18,6 +18,7 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
+use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{debug, error};
 
 use crate::traces::trace_processor::SendingTraceProcessor;
@@ -72,7 +73,9 @@ const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
 
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
-pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
+pub const TRACE_REQUEST_BODY_LIMIT: usize = 50 * 1024 * 1024;
+pub const DEFAULT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
+pub const MAX_CONTENT_LENGTH: usize = 50 * 1024 * 1024;
 const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 
 #[derive(Clone)]
@@ -231,10 +234,12 @@ impl TraceAgent {
                 V5_TRACE_ENDPOINT_PATH,
                 post(Self::v05_traces).put(Self::v05_traces),
             )
+            .layer(RequestBodyLimitLayer::new(TRACE_REQUEST_BODY_LIMIT))
             .with_state(trace_state);
 
         let stats_router = Router::new()
             .route(STATS_ENDPOINT_PATH, post(Self::stats).put(Self::stats))
+            .layer(RequestBodyLimitLayer::new(DEFAULT_REQUEST_BODY_LIMIT))
             .with_state(stats_state);
 
         let proxy_router = Router::new()
@@ -254,6 +259,7 @@ impl TraceAgent {
                 INSTRUMENTATION_ENDPOINT_PATH,
                 post(Self::instrumentation_proxy),
             )
+            .layer(RequestBodyLimitLayer::new(DEFAULT_REQUEST_BODY_LIMIT))
             .with_state(proxy_state);
 
         let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
@@ -264,6 +270,8 @@ impl TraceAgent {
             .merge(proxy_router)
             .merge(info_router)
             .fallback(handler_not_found)
+            // Disable the default body limit so we can use our own limit
+            .layer(DefaultBodyLimit::disable())
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {

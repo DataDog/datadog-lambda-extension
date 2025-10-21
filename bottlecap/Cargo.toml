@@ -49,6 +49,7 @@ opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_ex
 rustls-native-certs = { version = "0.8.1", optional = true }
 axum = { version = "0.8.4", default-features = false, features = ["default"] }
 ustr = { version = "1.0.0", default-features = false }
+tower-http = { version = "0.6.6", default-features = false, features = ["limit"] }
 # If you are adding or updating a datadog-owned code dependency, please ensure
 # that it has a clippy.toml rule for disallowing the reqwest::Client::builder
 # method in favor of our
