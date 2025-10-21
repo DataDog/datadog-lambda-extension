@@ -1636,4 +1636,166 @@ mod tests {
             "Should be snapstart span (id=3), not cold start span (id=2)"
         );
     }
+
+    macro_rules! platform_report_managed_instance_tests {
+        ($($name:ident: $value:expr,)*) => {
+            $(
+                #[tokio::test]
+                async fn $name() {
+                    use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+                    let (
+                        request_id,
+                        setup_context,
+                        duration_ms,
+                        status,
+                        error_type,
+                        should_have_context_after,
+                    ): (&str, bool, f64, Status, Option<String>, bool) = $value;
+
+                    let mut processor = setup();
+
+                    // Setup context if needed
+                    if setup_context {
+                        processor.on_invoke_event(request_id.to_string());
+                        let start_time = chrono::Utc::now();
+                        processor.on_platform_start(request_id.to_string(), start_time);
+                    }
+
+                    let metrics = ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms,
+                    });
+
+                    // Create tags_provider
+                    let config = Arc::new(config::Config {
+                        service: Some("test-service".to_string()),
+                        tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+                        ..config::Config::default()
+                    });
+                    let tags_provider = Arc::new(provider::Provider::new(
+                        Arc::clone(&config),
+                        LAMBDA_RUNTIME_SLUG.to_string(),
+                        &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+                    ));
+
+                    // Create stats concentrator for test
+                    let (stats_concentrator_service, stats_concentrator_handle) =
+                        StatsConcentratorService::new(Arc::clone(&config));
+                    tokio::spawn(stats_concentrator_service.run());
+
+                    // Create trace sender
+                    let trace_sender = Arc::new(SendingTraceProcessor {
+                        appsec: None,
+                        processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("Failed to create ObfuscationConfig")),
+                        }),
+                        trace_tx: tokio::sync::mpsc::channel(1).0,
+                        stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+                    });
+
+                    // Call on_platform_report
+                    let request_id_string = request_id.to_string();
+                    processor.on_platform_report(
+                        &request_id_string,
+                        metrics,
+                        chrono::Utc::now().timestamp(),
+                        status,
+                        error_type,
+                        tags_provider,
+                        trace_sender,
+                    ).await;
+
+                    // Verify context state
+                    let request_id_string_for_get = request_id.to_string();
+                    assert_eq!(
+                        processor.context_buffer.get(&request_id_string_for_get).is_some(),
+                        should_have_context_after,
+                        "Context existence mismatch for request_id: {}",
+                        request_id
+                    );
+                }
+            )*
+        }
+    }
+
+    platform_report_managed_instance_tests! {
+        // (request_id, setup_context, duration_ms, status, error_type, should_have_context_after)
+        test_on_platform_report_managed_instance_mode_with_valid_context: (
+            "test-request-id",
+            true,  // setup context
+            123.45,
+            Status::Success,
+            None,
+            true,  // context should still exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_without_context: (
+            "unknown-request-id",
+            false, // no context setup
+            123.45,
+            Status::Success,
+            None,
+            false, // context should not exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_with_error_status: (
+            "test-request-id-error",
+            true,  // setup context
+            200.0,
+            Status::Error,
+            Some("RuntimeError".to_string()),
+            true,  // context should still exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_with_timeout: (
+            "test-request-id-timeout",
+            true,  // setup context
+            30000.0,
+            Status::Timeout,
+            None,
+            true,  // context should still exist
+        ),
+    }
+
+    #[tokio::test]
+    async fn test_is_managed_instance_mode_returns_true() {
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "ec2-capacity-provider".into(), // Managed Instance mode
+        });
+
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(service.run());
+
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+
+        let processor = Processor::new(tags_provider, config, aws_config, handle, propagator);
+
+        assert!(
+            processor.is_managed_instance_mode(),
+            "Should be in Managed Instance mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_managed_instance_mode_returns_false() {
+        let processor = setup(); // Uses "on-demand" initialization_type
+        assert!(
+            !processor.is_managed_instance_mode(),
+            "Should not be in managed instance mode"
+        );
+    }
 }
