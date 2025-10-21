@@ -262,9 +262,7 @@ impl TraceAgent {
             .layer(RequestBodyLimitLayer::new(DEFAULT_REQUEST_BODY_LIMIT))
             .with_state(proxy_state);
 
-        let info_router = Router::new()
-            .route(INFO_ENDPOINT_PATH, any(Self::info))
-            .layer(RequestBodyLimitLayer::new(DEFAULT_REQUEST_BODY_LIMIT));
+            let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
 
         Router::new()
             .merge(trace_router)
