@@ -188,14 +188,58 @@ impl LambdaProcessor {
                     Some(result_status),
                 ))
             },
-            TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
+            TelemetryRecord::PlatformReport { request_id, metrics, status, error_type } => {
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformReport to the main event bus: {}", e);
                 }
-
                 match metrics {
-                    // TODO(duncanista): Figure out how to format this log in elevator mode
-                    ReportMetrics::Elevator(_) => Err("Elevator report log is not supported".into()),
+                    ReportMetrics::ManagedInstance(managed_instance_metrics) => {
+                        let (result_status, message) = match status {
+                            Status::Timeout => (
+                                "error",
+                                format!(
+                                    "REPORT RequestId: {} Runtime Duration: {:.2} ms Task timed out after {:.2} seconds",
+                                    request_id,
+                                    managed_instance_metrics.duration_ms,
+                                    managed_instance_metrics.duration_ms / 1000.0
+                                )
+                            ),
+                            Status::Error => {
+                                let error_detail = error_type
+                                    .as_ref()
+                                    .map_or_else(|| " Task failed with an unknown error".to_string(), |e| format!(" Task failed: {e}"));
+                                (
+                                    "error",
+                                    format!(
+                                        "REPORT RequestId: {} Runtime Duration: {:.2} ms{}",
+                                        request_id,
+                                        managed_instance_metrics.duration_ms,
+                                        error_detail
+                                    )
+                                )
+                            }
+                            _ => (
+                                "info",
+                                format!(
+                                    "REPORT RequestId: {} Runtime Duration: {:.2} ms",
+                                    request_id,
+                                    managed_instance_metrics.duration_ms
+                                )
+                            )
+                        };
+
+                        self.invocation_context.runtime_duration_ms = managed_instance_metrics.duration_ms;
+                        // Remove the `request_id` since no more orphan logs will be processed with this one
+                        self.invocation_context.request_id = String::new();
+
+                        Ok(Message::new(
+                            message,
+                            Some(request_id),
+                            self.function_arn.clone(),
+                            event.time.timestamp_millis(),
+                            Some(result_status.to_string()),
+                        ))
+                    }
                     ReportMetrics::OnDemand(metrics) => {
                         let mut post_runtime_duration_ms = 0.0;
                         // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
@@ -388,7 +432,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::extension::telemetry::events::{
-        InitPhase, InitType, OnDemandReportMetrics, ReportMetrics, RuntimeDoneMetrics, Status,
+        InitPhase, InitType, ManagedInstanceReportMetrics, OnDemandReportMetrics, ReportMetrics,
+        RuntimeDoneMetrics, Status,
     };
     use crate::logs::aggregator_service::AggregatorService;
     use crate::logs::lambda::Lambda;
@@ -586,6 +631,102 @@ mod tests {
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
+        ),
+
+        // platform report - Managed Instance mode success
+        platform_report_managed_instance_success: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 123.45,
+                    }),
+                    status: Status::Success,
+                    error_type: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 123.45 ms".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "info".to_string(),
+            },
+        ),
+
+        // platform report - managed instance mode error with error_type
+        platform_report_managed_instance_error: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 200.0,
+                    }),
+                    status: Status::Error,
+                    error_type: Some("RuntimeError".to_string()),
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 200.00 ms Task failed: RuntimeError".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "error".to_string(),
+            },
+        ),
+
+        // platform report - managed instance mode timeout
+        platform_report_managed_instance_timeout: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 30000.0,
+                    }),
+                    status: Status::Timeout,
+                    error_type: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 30000.00 ms Task timed out after 30.00 seconds".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "error".to_string(),
+            },
+        ),
+
+        // platform report - managed instance mode error without error_type
+        platform_report_managed_instance_error_no_type: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 150.0,
+                    }),
+                    status: Status::Error,
+                    error_type: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 150.00 ms Task failed with an unknown error".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "error".to_string(),
+            },
         ),
     }
 

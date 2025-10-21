@@ -284,7 +284,7 @@ impl Lambda {
                 }
             }
         } else {
-            debug!("Could not find data to generate network enhanced metrics");
+            debug!("Could not find network offset data to generate network enhanced metrics");
         }
     }
 
@@ -522,8 +522,8 @@ impl Lambda {
         }
 
         match metrics {
-            ReportMetrics::Elevator(_) => {
-                // In elevator mode, we can't track these metrics for a given lambda invocation
+            ReportMetrics::ManagedInstance(_) => {
+                // In Managed Instance mode, we can't track these metrics for a given lambda invocation
                 // - billed duration
                 // - max memory used
                 // - memory size

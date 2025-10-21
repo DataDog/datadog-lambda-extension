@@ -40,7 +40,7 @@ impl AwsConfig {
     }
 
     #[must_use]
-    pub fn is_elevator_mode(&self) -> bool {
+    pub fn is_managed_instance_mode(&self) -> bool {
         self.initialization_type.eq("ec2-capacity-provider")
     }
 }

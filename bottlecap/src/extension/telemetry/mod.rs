@@ -10,9 +10,9 @@ pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
 
 // Technically, we could use the same schema version for both modes,
 // but we'll keep them separate for now to avoid regressions. The
-// naming is just to differentiate which one contains Elevator-specific
+// naming is just to differentiate which one contains Managed Instance-specific
 // events.
-pub const ELEVATOR_SCHEMA_VERSION: &str = "2025-01-29";
+pub const MANAGED_INSTANCE_SCHEMA_VERSION: &str = "2025-01-29";
 pub const ON_DEMAND_SCHEMA_VERSION: &str = "2022-12-13";
 // todo(astuyve) should be 8124 on /lambda/logs but
 // telemetry is implemented on a raw socket now and
@@ -44,10 +44,10 @@ pub async fn subscribe(
     extension_id: &str,
     destination_port: u16,
     logs_enabled: bool,
-    elevator_mode: bool,
+    managed_instance_mode: bool,
 ) -> Result<Response, ExtensionSubscriptionError> {
-    let schema_version = if elevator_mode {
-        ELEVATOR_SCHEMA_VERSION
+    let schema_version = if managed_instance_mode {
+        MANAGED_INSTANCE_SCHEMA_VERSION
     } else {
         ON_DEMAND_SCHEMA_VERSION
     };

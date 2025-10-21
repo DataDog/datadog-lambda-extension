@@ -69,6 +69,11 @@ pub enum ProcessorCommand {
         request_id: String,
         metrics: ReportMetrics,
         timestamp: i64,
+        status: Status,
+        error_type: Option<String>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+        response: oneshot::Sender<()>,
     },
     UniversalInstrumentationStart {
         headers: HashMap<String, String>,
@@ -213,19 +218,34 @@ impl InvocationProcessorHandle {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn on_platform_report(
         &self,
         request_id: String,
         metrics: ReportMetrics,
         timestamp: i64,
-    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        status: Status,
+        error_type: Option<String>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+    ) -> Result<(), ProcessorError> {
+        let (tx, rx) = oneshot::channel();
         self.sender
             .send(ProcessorCommand::PlatformReport {
                 request_id,
                 metrics,
                 timestamp,
+                status,
+                error_type,
+                tags_provider,
+                trace_sender,
+                response: tx,
             })
             .await
+            .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
+        rx.await
+            .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?;
+        Ok(())
     }
 
     pub async fn on_universal_instrumentation_start(
@@ -474,9 +494,30 @@ impl InvocationProcessorService {
                     request_id,
                     metrics,
                     timestamp,
+                    status,
+                    error_type,
+                    tags_provider,
+                    trace_sender,
+                    response,
                 } => {
                     self.processor
-                        .on_platform_report(&request_id, metrics, timestamp);
+                        .on_platform_report(
+                            &request_id,
+                            metrics,
+                            timestamp,
+                            status,
+                            error_type,
+                            tags_provider,
+                            trace_sender,
+                        )
+                        .await;
+
+                    // The necessity of having response.send():
+                    // Without it, the caller at line 187-188 (rx.await) would block forever waiting for a response
+                    //  - The async task would never complete
+                    //  - The entire extension could hang during shutdown
+                    // this change also mirrors the behavior of handling PlatformRuntimeDone in OD mode
+                    let _ = response.send(());
                 }
                 ProcessorCommand::UniversalInstrumentationStart {
                     headers,

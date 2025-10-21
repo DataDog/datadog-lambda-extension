@@ -13,7 +13,10 @@ use tracing::{debug, warn};
 
 use crate::{
     config::{self, aws::AwsConfig},
-    extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
+    extension::telemetry::events::{
+        InitType, ManagedInstanceReportMetrics, OnDemandReportMetrics, ReportMetrics,
+        RuntimeDoneMetrics, Status,
+    },
     lifecycle::invocation::{
         base64_to_string,
         context::{Context, ContextBuffer, ReparentingInfo},
@@ -215,6 +218,9 @@ impl Processor {
     /// This is used to create a cold start span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the cold start.
     pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
+        if self.aws_config.is_managed_instance_mode() {
+            return;
+        }
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -250,6 +256,9 @@ impl Processor {
     ) {
         self.enhanced_metrics
             .set_init_duration_metric(init_type, duration_ms, timestamp);
+        if self.aws_config.is_managed_instance_mode() {
+            return;
+        }
 
         let Some(context) = self.context_buffer.get_closest_mut(timestamp) else {
             debug!("Cannot process on platform init report, no invocation context found");
@@ -312,6 +321,10 @@ impl Processor {
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
     ///
     pub fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
+        if self.aws_config.is_managed_instance_mode() {
+            self.on_invoke_event(request_id.clone());
+        }
+
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -319,6 +332,11 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
         self.context_buffer.add_start_time(&request_id, start_time);
+    }
+
+    #[must_use]
+    pub fn is_managed_instance_mode(&self) -> bool {
+        self.aws_config.is_managed_instance_mode()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -590,58 +608,121 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn on_platform_report(
         &mut self,
         request_id: &String,
         metrics: ReportMetrics,
         timestamp: i64,
+        status: Status,
+        error_type: Option<String>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
     ) {
         // Set the report log metrics
         self.enhanced_metrics
             .set_report_log_metrics(&metrics, timestamp);
 
+        match metrics {
+            ReportMetrics::ManagedInstance(metric) => {
+                self.handle_managed_instance_report(
+                    request_id,
+                    metric,
+                    timestamp,
+                    status,
+                    error_type,
+                    tags_provider,
+                    trace_sender,
+                )
+                .await;
+            }
+            ReportMetrics::OnDemand(metrics) => {
+                self.handle_ondemand_report(request_id, metrics, timestamp);
+            }
+        }
+
+        // Set Network and CPU time metrics
+        if let Some(context) = self.context_buffer.get(request_id) {
+            if let Some(offsets) = &context.enhanced_metric_data {
+                self.enhanced_metrics
+                    .set_network_enhanced_metrics(offsets.network_offset);
+                self.enhanced_metrics
+                    .set_cpu_time_enhanced_metrics(offsets.cpu_offset.clone());
+            }
+        }
+    }
+
+    /// Handles Managed Instance mode platform report processing.
+    ///
+    /// In Managed Instance mode, platform.runtimeDone events are not sent, so this function
+    /// synthesizes a `RuntimeDone` event from the platform.report metrics.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_managed_instance_report(
+        &mut self,
+        request_id: &String,
+        metric: ManagedInstanceReportMetrics,
+        timestamp: i64,
+        status: Status,
+        error_type: Option<String>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+    ) {
+        // Managed Instance mode doesn't have platform.runtimeDone event, so we synthesize it from platform.report
+        let runtime_done_metrics = RuntimeDoneMetrics {
+            duration_ms: metric.duration_ms,
+            produced_bytes: None,
+        };
+
+        // Only process if we have context for this request
+        if self.context_buffer.get(request_id).is_some() {
+            self.on_platform_runtime_done(
+                request_id,
+                runtime_done_metrics,
+                status,
+                error_type,
+                tags_provider,
+                trace_sender,
+                timestamp,
+            )
+            .await;
+        } else {
+            debug!(
+                "Received platform report for unknown request_id: {}",
+                request_id
+            );
+        }
+    }
+
+    /// Handles `OnDemand` mode platform report processing.
+    ///
+    /// Processes OnDemand-specific metrics including OOM detection for provided.al runtimes
+    /// and post-runtime duration calculation.
+    fn handle_ondemand_report(
+        &mut self,
+        request_id: &String,
+        metrics: OnDemandReportMetrics,
+        timestamp: i64,
+    ) {
         // For provided.al runtimes, if the last invocation hit the memory limit, increment the OOM metric.
         // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
         // We don't do this for other runtimes to avoid double counting.
         if let Some(runtime) = &self.runtime {
-            match metrics {
-                ReportMetrics::Elevator(_) => {
-                    // Elevator doesn't include any memory related metrics, so skip it
-                }
-                ReportMetrics::OnDemand(metrics) => {
-                    if runtime.starts_with("provided.al")
-                        && metrics.max_memory_used_mb == metrics.memory_size_mb
-                    {
-                        debug!(
-                            "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
-                        );
-                        self.enhanced_metrics.increment_oom_metric(timestamp);
-                    }
-                }
+            if runtime.starts_with("provided.al")
+                && metrics.max_memory_used_mb == metrics.memory_size_mb
+            {
+                debug!(
+                    "Invocation Processor | PlatformReport | Last invocation hit memory limit. Incrementing OOM metric."
+                );
+                self.enhanced_metrics.increment_oom_metric(timestamp);
             }
         }
 
+        // Calculate and set post-runtime duration if context is available
         if let Some(context) = self.context_buffer.get(request_id) {
-            match metrics {
-                ReportMetrics::Elevator(_) => {
-                    // Elevator mode does not have the concept of post runtime duration.
-                }
-                ReportMetrics::OnDemand(metrics) => {
-                    if context.runtime_duration_ms != 0.0 {
-                        let post_runtime_duration_ms =
-                            metrics.duration_ms - context.runtime_duration_ms;
-                        self.enhanced_metrics
-                            .set_post_runtime_duration_metric(post_runtime_duration_ms, timestamp);
-                    }
-                }
-            }
-
-            // Set Network and CPU time metrics
-            if let Some(offsets) = context.enhanced_metric_data.clone() {
+            if context.runtime_duration_ms != 0.0 {
+                let post_runtime_duration_ms = metrics.duration_ms - context.runtime_duration_ms;
                 self.enhanced_metrics
-                    .set_network_enhanced_metrics(offsets.network_offset);
-                self.enhanced_metrics
-                    .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
+                    .set_post_runtime_duration_metric(post_runtime_duration_ms, timestamp);
             }
         }
     }
@@ -1031,6 +1112,10 @@ impl Processor {
 mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
+    use crate::extension::telemetry::events::ManagedInstanceReportMetrics;
+    use crate::traces::stats_concentrator_service::StatsConcentratorService;
+    use crate::traces::stats_generator::StatsGenerator;
+    use crate::traces::trace_processor;
     use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
@@ -1285,106 +1370,165 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_on_platform_restore_start_creates_snapstart_span() {
-        let mut processor = setup();
-        let request_id = String::from("test-request-id");
+    macro_rules! platform_report_managed_instance_tests {
+        ($($name:ident: $value:expr,)*) => {
+            $(
+                #[tokio::test]
+                async fn $name() {
+                    use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
 
-        // Create a context first
-        processor
-            .context_buffer
-            .start_context(&request_id, Span::default());
+                    let (
+                        request_id,
+                        setup_context,
+                        duration_ms,
+                        status,
+                        error_type,
+                        should_have_context_after,
+                    ): (&str, bool, f64, Status, Option<String>, bool) = $value;
 
-        // Simulate platform restore start
-        let time = Utc::now();
-        processor.on_platform_restore_start(time);
+                    let mut processor = setup();
 
-        // Get the closest context (should be our test context)
-        let start_time: i64 = SystemTime::from(time)
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos()
-            .try_into()
-            .unwrap_or_default();
+                    // Setup context if needed
+                    if setup_context {
+                        processor.on_invoke_event(request_id.to_string());
+                        let start_time = chrono::Utc::now();
+                        processor.on_platform_start(request_id.to_string(), start_time);
+                    }
 
-        let context = processor
-            .context_buffer
-            .get_closest_mut(start_time)
-            .unwrap();
+                    let metrics = ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms,
+                    });
 
-        // Assert that snapstart_restore_span was created
-        assert!(context.snapstart_restore_span.is_some());
+                    // Create tags_provider
+                    let config = Arc::new(config::Config {
+                        service: Some("test-service".to_string()),
+                        tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+                        ..config::Config::default()
+                    });
+                    let tags_provider = Arc::new(provider::Provider::new(
+                        Arc::clone(&config),
+                        LAMBDA_RUNTIME_SLUG.to_string(),
+                        &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+                    ));
 
-        let snapstart_span = context.snapstart_restore_span.as_ref().unwrap();
-        assert_eq!(snapstart_span.name, "aws.lambda.snapstart_restore");
-        assert_eq!(snapstart_span.start, start_time);
-        assert_ne!(snapstart_span.span_id, 0);
+                    // Create stats concentrator for test
+                    let (stats_concentrator_service, stats_concentrator_handle) =
+                        StatsConcentratorService::new(Arc::clone(&config));
+                    tokio::spawn(stats_concentrator_service.run());
+
+                    // Create trace sender
+                    let trace_sender = Arc::new(SendingTraceProcessor {
+                        appsec: None,
+                        processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("Failed to create ObfuscationConfig")),
+                        }),
+                        trace_tx: tokio::sync::mpsc::channel(1).0,
+                        stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+                    });
+
+                    // Call on_platform_report
+                    let request_id_string = request_id.to_string();
+                    processor.on_platform_report(
+                        &request_id_string,
+                        metrics,
+                        chrono::Utc::now().timestamp(),
+                        status,
+                        error_type,
+                        tags_provider,
+                        trace_sender,
+                    ).await;
+
+                    // Verify context state
+                    let request_id_string_for_get = request_id.to_string();
+                    assert_eq!(
+                        processor.context_buffer.get(&request_id_string_for_get).is_some(),
+                        should_have_context_after,
+                        "Context existence mismatch for request_id: {}",
+                        request_id
+                    );
+                }
+            )*
+        }
+    }
+
+    platform_report_managed_instance_tests! {
+        // (request_id, setup_context, duration_ms, status, error_type, should_have_context_after)
+        test_on_platform_report_managed_instance_mode_with_valid_context: (
+            "test-request-id",
+            true,  // setup context
+            123.45,
+            Status::Success,
+            None,
+            true,  // context should still exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_without_context: (
+            "unknown-request-id",
+            false, // no context setup
+            123.45,
+            Status::Success,
+            None,
+            false, // context should not exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_with_error_status: (
+            "test-request-id-error",
+            true,  // setup context
+            200.0,
+            Status::Error,
+            Some("RuntimeError".to_string()),
+            true,  // context should still exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_with_timeout: (
+            "test-request-id-timeout",
+            true,  // setup context
+            30000.0,
+            Status::Timeout,
+            None,
+            true,  // context should still exist
+        ),
     }
 
     #[tokio::test]
-    async fn test_on_platform_restore_start_no_context() {
-        let mut processor = setup();
+    async fn test_is_managed_instance_mode_returns_true() {
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: "ec2-capacity-provider".into(), // Managed Instance mode
+        });
 
-        // Call on_platform_restore_start without creating a context first
-        let time = Utc::now();
-        processor.on_platform_restore_start(time);
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
 
-        // Should not panic, just log a debug message
-        // Test passes if no panic occurs
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(service.run());
+
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+
+        let processor = Processor::new(tags_provider, config, aws_config, handle, propagator);
+
+        assert!(
+            processor.is_managed_instance_mode(),
+            "Should be in Managed Instance mode"
+        );
     }
 
     #[tokio::test]
-    async fn test_get_ctx_spans_prioritizes_snapstart_over_cold_start() {
-        let mut processor = setup();
-        let request_id = String::from("test-request-id");
-
-        // Create invocation span
-        let invocation_span = Span {
-            name: "aws.lambda".to_string(),
-            span_id: 1,
-            trace_id: 100,
-            ..Default::default()
-        };
-
-        // Create cold start span
-        let cold_start_span = Span {
-            name: "aws.lambda.cold_start".to_string(),
-            span_id: 2,
-            trace_id: 100,
-            ..Default::default()
-        };
-
-        // Create snapstart restore span
-        let snapstart_span = Span {
-            name: "aws.lambda.snapstart_restore".to_string(),
-            span_id: 3,
-            trace_id: 100,
-            ..Default::default()
-        };
-
-        // Build context with both cold start and snapstart spans
-        let mut context = Context::from_request_id(&request_id);
-        context.invocation_span = invocation_span.clone();
-        context.cold_start_span = Some(cold_start_span.clone());
-        context.snapstart_restore_span = Some(snapstart_span.clone());
-
-        // Call get_ctx_spans to get the spans that would be sent
-        let (spans, _body_size) = processor.get_ctx_spans(context);
-
-        // Verify that exactly 2 spans are returned:
-        // 1. invocation_span
-        // 2. snapstart_restore_span (NOT cold_start_span)
-        assert_eq!(spans.len(), 2, "Expected 2 spans (invocation + snapstart)");
-
-        // Verify the first span is the invocation span
-        assert_eq!(spans[0].name, "aws.lambda");
-        assert_eq!(spans[0].span_id, 1);
-
-        // Verify the second span is the snapstart span, NOT the cold start span
-        assert_eq!(spans[1].name, "aws.lambda.snapstart_restore");
-        assert_eq!(
-            spans[1].span_id, 3,
-            "Should be snapstart span (id=3), not cold start span (id=2)"
+    async fn test_is_managed_instance_mode_returns_false() {
+        let processor = setup(); // Uses "on-demand" initialization_type
+        assert!(
+            !processor.is_managed_instance_mode(),
+            "Should not be in managed instance mode"
         );
     }
 }

@@ -164,7 +164,7 @@ pub enum InitType {
     ProvisionedConcurrency,
     /// `SnapStart`
     SnapStart,
-    /// Elevator mode
+    /// Managed Instance mode
     #[serde(rename = "ec2-capacity-provider")]
     EC2CapacityProvider,
 }
@@ -232,7 +232,7 @@ pub struct RuntimeDoneMetrics {
 #[serde(untagged)]
 pub enum ReportMetrics {
     OnDemand(OnDemandReportMetrics),
-    Elevator(ElevatorReportMetrics),
+    ManagedInstance(ManagedInstanceReportMetrics),
 }
 
 impl ReportMetrics {
@@ -240,7 +240,7 @@ impl ReportMetrics {
     pub fn duration_ms(&self) -> f64 {
         match self {
             ReportMetrics::OnDemand(metrics) => metrics.duration_ms,
-            ReportMetrics::Elevator(metrics) => metrics.duration_ms,
+            ReportMetrics::ManagedInstance(metrics) => metrics.duration_ms,
         }
     }
 }
@@ -267,7 +267,7 @@ pub struct OnDemandReportMetrics {
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ElevatorReportMetrics {
+pub struct ManagedInstanceReportMetrics {
     pub duration_ms: f64,
 }
 
@@ -408,14 +408,14 @@ mod tests {
             },
         ),
 
-        // platform.report - elevator
-        platform_report_elevator: (
+        // platform.report - managed_instance
+        platform_report_managed_instance: (
             r#"{"time":"2025-09-19T19:36:50.881Z","type":"platform.report","record":{"requestId":"13d1305b-a2f5-440c-bfbe-686ccff3d3e0","status":"success","metrics":{"durationMs":1.148},"spans":[{"name":"responseLatency","start":"2025-09-19T19:36:50.880Z","durationMs":0.847},{"name":"responseDuration","start":"2025-09-19T19:36:50.880Z","durationMs":0.127}]}}"#,
             TelemetryRecord::PlatformReport {
                 request_id: "13d1305b-a2f5-440c-bfbe-686ccff3d3e0".to_string(),
                 status: Status::Success,
                 error_type: None,
-                metrics: ReportMetrics::Elevator(ElevatorReportMetrics { duration_ms: 1.148 }),
+                metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics { duration_ms: 1.148 }),
             },
         ),
 
