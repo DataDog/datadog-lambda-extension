@@ -432,7 +432,6 @@ mod tests {
     use crate::proc::{CPUData, NetworkData};
     use serde_json::json;
     use std::collections::HashMap;
-    use tokio::sync::watch;
 
     use super::*;
 
