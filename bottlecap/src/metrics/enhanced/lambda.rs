@@ -546,7 +546,9 @@ impl Lambda {
 
                     _ = monitoring_state_rx.changed() => {
                         is_active = *monitoring_state_rx.borrow();
+                    }
 
+                    _ = interval.tick() => {
                         if is_active {
                             let pids = proc::get_pid_list();
                             let tmp_used = statfs::get_tmp_used().ok();
@@ -556,17 +558,6 @@ impl Lambda {
                             if let Err(e) = enhanced_metrics_handle.update_metrics(tmp_used, fd_use, threads_use) {
                                 debug!("Failed to update process enhanced metrics: {}", e);
                             }
-                        }
-                    }
-
-                    _ = interval.tick(), if is_active => {
-                        let pids = proc::get_pid_list();
-                        let tmp_used = statfs::get_tmp_used().ok();
-                        let fd_use = Some(proc::get_fd_use_data(&pids));
-                        let threads_use = proc::get_threads_use_data(&pids).ok();
-
-                        if let Err(e) = enhanced_metrics_handle.update_metrics(tmp_used, fd_use, threads_use) {
-                            debug!("Failed to update process enhanced metrics: {}", e);
                         }
                     }
                 }
