@@ -23,13 +23,12 @@ use bytes::Bytes;
 use hyper::{HeaderMap, Uri};
 use serde_json::{Value, json};
 use std::{collections::HashMap, net::SocketAddr, sync::Arc};
-use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::{
     http::headers_to_map,
     lifecycle::{
-        invocation::{generate_span_id, processor::Processor as InvocationProcessor},
+        invocation::{generate_span_id, processor_service::InvocationProcessorHandle},
         listener::Listener as LifecycleListener,
     },
     traces::propagation::DatadogCompositePropagator,
@@ -64,7 +63,7 @@ pub fn get_lwa_proxy_socket_address(
 }
 
 pub async fn process_invocation_next(
-    processor: &Arc<Mutex<InvocationProcessor>>,
+    invocation_processor_handle: &InvocationProcessorHandle,
     parts: &http::response::Parts,
     body_bytes: &Bytes,
     propagator: Arc<DatadogCompositePropagator>,
@@ -92,7 +91,7 @@ pub async fn process_invocation_next(
     let headers = headers_to_map(&parts.headers);
     let payload_value =
         serde_json::from_slice::<Value>(&body.clone()).unwrap_or_else(|_| json!({}));
-    let extracted_span_context = InvocationProcessor::extract_span_context(
+    let extracted_span_context = InvocationProcessorHandle::extract_span_context(
         &headers,
         &payload_value,
         Arc::clone(&propagator),
@@ -104,7 +103,7 @@ pub async fn process_invocation_next(
     LifecycleListener::universal_instrumentation_start(
         headers,
         payload_value,
-        Arc::clone(processor),
+        invocation_processor_handle.clone(),
     )
     .await;
 
@@ -114,13 +113,14 @@ pub async fn process_invocation_next(
     }
 
     if let Some(request_id) = request_id {
-        let mut invocation_processor = processor.lock().await;
-        invocation_processor.add_reparenting(request_id.to_string(), generate_span_id(), parent_id);
+        let _ = invocation_processor_handle
+            .add_reparenting(request_id.to_string(), generate_span_id(), parent_id)
+            .await;
     }
 }
 
 pub async fn process_invocation_response(
-    processor: &Arc<Mutex<InvocationProcessor>>,
+    invocation_processor_handle: &InvocationProcessorHandle,
     waited_intercepted_body: &Bytes,
 ) {
     let inner_payload =
@@ -150,7 +150,7 @@ pub async fn process_invocation_response(
     LifecycleListener::universal_instrumentation_end(
         &headers,
         body_bytes.into(),
-        Arc::clone(processor),
+        invocation_processor_handle.clone(),
     )
     .await;
 }
