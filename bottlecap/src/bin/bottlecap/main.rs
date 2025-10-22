@@ -137,6 +137,70 @@ impl PendingFlushHandles {
     }
 
     #[allow(clippy::too_many_lines)]
+    /// Spawns non-blocking flush tasks for all flushers (logs, traces, metrics, stats, proxy).
+    async fn spawn_non_blocking_flushes(
+        &mut self,
+        logs_flusher: &LogsFlusher,
+        trace_flusher: &Arc<ServerlessTraceFlusher>,
+        metrics_flushers: &Arc<TokioMutex<Vec<MetricsFlusher>>>,
+        stats_flusher: &Arc<impl StatsFlusher + Send + Sync + 'static>,
+        proxy_flusher: &Arc<ProxyFlusher>,
+        metrics_aggr_handle: &MetricsAggregatorHandle,
+    ) {
+        // Spawn logs flush
+        let lf = logs_flusher.clone();
+        self.log_flush_handles
+            .push(tokio::spawn(async move { lf.flush(None).await }));
+
+        // Spawn traces flush
+        let tf = trace_flusher.clone();
+        self.trace_flush_handles.push(tokio::spawn(async move {
+            tf.flush(None).await.unwrap_or_default()
+        }));
+
+        // Spawn metrics flush
+        let (metrics_flushers_copy, series, sketches) = {
+            let locked_metrics = metrics_flushers.lock().await;
+            let flush_response = metrics_aggr_handle
+                .clone()
+                .flush()
+                .await
+                .expect("can't flush metrics handle");
+            (
+                locked_metrics.clone(),
+                flush_response.series,
+                flush_response.distributions,
+            )
+        };
+
+        for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
+            let series_clone = series.clone();
+            let sketches_clone = sketches.clone();
+            let handle = tokio::spawn(async move {
+                let (retry_series, retry_sketches) = flusher
+                    .flush_metrics(series_clone, sketches_clone)
+                    .await
+                    .unwrap_or_default();
+                MetricsRetryBatch {
+                    flusher_id: idx,
+                    series: retry_series,
+                    sketches: retry_sketches,
+                }
+            });
+            self.metric_flush_handles.push(handle);
+        }
+
+        // Stats flush (fire and forget, not tracked)
+        let () = stats_flusher.flush(false).await;
+
+        // Spawn proxy flush
+        let pf = proxy_flusher.clone();
+        self.proxy_flush_handles.push(tokio::spawn(async move {
+            pf.flush(None).await.unwrap_or_default()
+        }));
+    }
+
+    #[allow(clippy::too_many_lines)]
     async fn await_flush_handles(
         &mut self,
         logs_flusher: &LogsFlusher,
@@ -510,9 +574,6 @@ async fn extension_loop_active(
     let mut flush_control =
         FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
 
-    let mut race_flush_interval = flush_control.get_flush_interval();
-    race_flush_interval.tick().await; // discard first tick, which is instantaneous
-
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
@@ -526,11 +587,21 @@ async fn extension_loop_active(
         let stats_flusher_clone = Arc::clone(&stats_flusher);
         let proxy_flusher_clone = proxy_flusher.clone();
         let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
-        let mut race_flush_interval_clone = flush_control.get_flush_interval();
-        race_flush_interval_clone.tick().await; // discard first tick
-        // Create a separate cancellation token for shutdown signaling
-        let shutdown_cancel_token = CancellationToken::new();
-        let cancel_token_clone = shutdown_cancel_token.clone();
+
+        // In Managed Instance mode, create a separate interval for the background flusher task.
+        // We don't reuse race_flush_interval because we need to configure the missed tick
+        // behavior before discarding the first tick. While creating a new interval may seem
+        // redundant, it keeps Managed Instance and OnDemand mode flush intervals properly isolated,
+        // making the code easier to maintain and less error-prone.
+        //
+        // Use Skip behavior to prevent accumulating missed ticks if flushes take longer
+        // than the interval. This ensures we maintain a steady flush cadence without
+        // bursts of catch-up ticks, which is important since flushes are non-blocking.
+        let mut managed_instance_mode_flush_interval = flush_control.get_flush_interval();
+        managed_instance_mode_flush_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        managed_instance_mode_flush_interval.tick().await; // discard first tick
+        let cancel_token_clone = telemetry_listener_cancel_token.clone();
 
         // Spawn a background task for continuous periodic flushing in Managed Instance mode.
         // A background task continuously flushes metrics, logs,
@@ -539,24 +610,32 @@ async fn extension_loop_active(
         // The flushing happens independently of invocation lifecycle events.
         // This background task runs until shutdown is signaled via cancel_token_clone.
         let flush_task_handle = tokio::spawn(async move {
+            let mut pending_flush_handles = PendingFlushHandles::new();
+
             loop {
                 tokio::select! {
-                    _ = race_flush_interval_clone.tick() => {
-                      let mut locked_metrics = metrics_flushers_clone.lock().await;
-                      blocking_flush_all(
-                          &logs_flusher_clone,
-                          &mut locked_metrics,
-                          &*trace_flusher_clone,
-                          &*stats_flusher_clone,
-                          &proxy_flusher_clone,
-                          &mut race_flush_interval_clone,
-                          &metrics_aggr_handle_clone,
-                          false,
-                      )
-                      .await;
+                    _ = managed_instance_mode_flush_interval.tick() => {
+                        if !pending_flush_handles.has_pending_handles() {
+                            // Only spawn new flush if no pending flushes to prevent resource buildup
+                            pending_flush_handles.spawn_non_blocking_flushes(
+                                &logs_flusher_clone,
+                                &trace_flusher_clone,
+                                &metrics_flushers_clone,
+                                &stats_flusher_clone,
+                                &proxy_flusher_clone,
+                                &metrics_aggr_handle_clone,
+                            ).await;
+                        }
                     }
-                    () = cancel_token_clone.cancelled() => {
-                        debug!("Periodic flusher task cancelled");
+                   () = cancel_token_clone.cancelled() => {
+                        debug!("Managed Instance mode: periodic flusher task cancelled, waiting for pending flushes");
+                        // Wait for any pending flushes before exiting
+                        pending_flush_handles.await_flush_handles(
+                            &logs_flusher_clone,
+                            &trace_flusher_clone,
+                            &metrics_flushers_clone,
+                            &proxy_flusher_clone,
+                        ).await;
                         break;
                     }
                 }
@@ -567,6 +646,7 @@ async fn extension_loop_active(
         // This task waits for the Lambda runtime to signal shutdown via the Extensions API.
         // When shutdown is received, it cancels the background flusher and signals the main
         // event loop to begin graceful shutdown.
+        let shutdown_cancel_token = CancellationToken::new();
         let shutdown_cancel_token_clone = shutdown_cancel_token.clone();
         let invocation_processor_handle_clone = invocation_processor_handle.clone();
         let runtime_api_clone = aws_config.runtime_api.clone();
@@ -716,6 +796,10 @@ async fn extension_loop_active(
         // In both modes, we pass `force_flush_trace_stats=true` to ensure trace statistics
         // are flushed regardless of timing constraints, as this is our last opportunity to
         // send data before the Lambda execution environment terminates.
+        //
+        // Final flush without interval reset. We pass None for race_flush_interval since
+        // this is the final operation before shutdown and resetting the interval timing
+        // serves no purpose. This avoids creating an unnecessary interval object.
         let mut locked_metrics = metrics_flushers.lock().await;
         blocking_flush_all(
             &logs_flusher,
@@ -723,8 +807,8 @@ async fn extension_loop_active(
             &*trace_flusher,
             &*stats_flusher,
             &proxy_flusher,
-            &mut race_flush_interval,
-            &metrics_aggregator_handle,
+            None,
+            &metrics_aggregator_handle.clone(),
             true, // force_flush_trace_stats
         )
         .await;
@@ -733,6 +817,9 @@ async fn extension_loop_active(
     }
 
     // Below is for On-Demand mode only
+    let mut race_flush_interval = flush_control.get_flush_interval();
+    race_flush_interval.tick().await; // discard first tick, which is instantaneous
+
     let next_lambda_response =
         extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
     // first invoke we must call next
@@ -766,7 +853,7 @@ async fn extension_loop_active(
                                 &*trace_flusher,
                                 &*stats_flusher,
                                 &proxy_flusher,
-                                &mut race_flush_interval,
+                                Some(&mut race_flush_interval),
                                 &metrics_aggregator_handle.clone(),
                                 false,
                             )
@@ -782,7 +869,7 @@ async fn extension_loop_active(
                     &*trace_flusher,
                     &*stats_flusher,
                     &proxy_flusher,
-                    &mut race_flush_interval,
+                    Some(&mut race_flush_interval),
                     &metrics_aggregator_handle.clone(),
                     false,
                 )
@@ -852,7 +939,7 @@ async fn extension_loop_active(
                             &*trace_flusher,
                             &*stats_flusher,
                             &proxy_flusher,
-                            &mut race_flush_interval,
+                            Some(&mut race_flush_interval),
                             &metrics_aggregator_handle,
                             false, // force_flush_trace_stats
                         )
@@ -890,7 +977,7 @@ async fn extension_loop_active(
                                     &*trace_flusher,
                                     &*stats_flusher,
                                     &proxy_flusher,
-                                    &mut race_flush_interval,
+                                    Some(&mut race_flush_interval),
                                     &metrics_aggregator_handle,
                                     false, // force_flush_trace_stats
                                 )
@@ -955,7 +1042,7 @@ async fn extension_loop_active(
                 &*trace_flusher,
                 &*stats_flusher,
                 &proxy_flusher,
-                &mut race_flush_interval,
+                Some(&mut race_flush_interval),
                 &metrics_aggregator_handle,
                 true, // force_flush_trace_stats
             )
@@ -981,7 +1068,7 @@ async fn blocking_flush_all(
     trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
     proxy_flusher: &ProxyFlusher,
-    race_flush_interval: &mut tokio::time::Interval,
+    race_flush_interval: Option<&mut tokio::time::Interval>,
     metrics_aggr_handle: &MetricsAggregatorHandle,
     force_flush_trace_stats: bool,
 ) {
@@ -1006,7 +1093,9 @@ async fn blocking_flush_all(
         stats_flusher.flush(force_flush_trace_stats),
         proxy_flusher.flush(None),
     );
-    race_flush_interval.reset();
+    if let Some(interval) = race_flush_interval {
+        interval.reset();
+    }
 }
 
 /// Wait for the `Tombstone` event from telemetry listener to ensure all events are processed.
