@@ -162,6 +162,7 @@ impl StatsConcentratorService {
         } else {
             Some(ClientStatsPayload {
                 hostname: self.hostname.clone(),
+                // hostname: String::new(),
                 env: self.config.env.clone().unwrap_or("unknown-env".to_string()),
                 // Version is not in the trace payload. Need to read it from config.
                 version: self.config.version.clone().unwrap_or_default(),
