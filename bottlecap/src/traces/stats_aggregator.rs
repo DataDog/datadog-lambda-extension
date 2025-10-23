@@ -101,12 +101,7 @@ mod tests {
     #[test]
     fn test_add() {
         let config = Arc::new(Config::default());
-        let tags_provider = Arc::new(TagProvider::new(
-            config.clone(),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
-        let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
+        let (_, concentrator) = StatsConcentratorService::new(config);
         let mut aggregator = StatsAggregator::new_with_concentrator(concentrator);
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),

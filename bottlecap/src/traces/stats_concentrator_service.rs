@@ -1,7 +1,6 @@
 use tokio::sync::{mpsc, oneshot};
 
 use crate::config::Config;
-use crate::tags::provider::Provider as TagProvider;
 use datadog_trace_protobuf::pb;
 use datadog_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
 use datadog_trace_stats::span_concentrator::SpanConcentrator;
@@ -104,7 +103,6 @@ pub struct StatsConcentratorService {
     concentrator: SpanConcentrator,
     rx: mpsc::UnboundedReceiver<ConcentratorCommand>,
     tracer_metadata: TracerMetadata,
-    hostname: String,
     config: Arc<Config>,
 }
 
@@ -112,10 +110,7 @@ pub struct StatsConcentratorService {
 // to avoid using mutex, which may cause lock contention.
 impl StatsConcentratorService {
     #[must_use]
-    pub fn new(
-        config: Arc<Config>,
-        tags_provider: Arc<TagProvider>,
-    ) -> (Self, StatsConcentratorHandle) {
+    pub fn new(config: Arc<Config>) -> (Self, StatsConcentratorHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = StatsConcentratorHandle::new(tx);
         // TODO: set span_kinds_stats_computed and peer_tag_keys
@@ -125,13 +120,11 @@ impl StatsConcentratorService {
             vec![],
             vec![],
         );
-        let hostname = tags_provider.get_canonical_id().unwrap_or_default();
         let service: StatsConcentratorService = Self {
             concentrator,
             rx,
             // To be set when the first trace is received
             tracer_metadata: TracerMetadata::default(),
-            hostname,
             config,
         };
         (service, handle)
