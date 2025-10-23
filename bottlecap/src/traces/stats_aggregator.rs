@@ -91,22 +91,14 @@ impl StatsAggregator {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::LAMBDA_RUNTIME_SLUG;
     use crate::config::Config;
-    use crate::tags::provider::Provider as TagProvider;
     use crate::traces::stats_concentrator_service::StatsConcentratorService;
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     #[test]
     fn test_add() {
         let config = Arc::new(Config::default());
-        let tags_provider = Arc::new(TagProvider::new(
-            config.clone(),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
-        let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
+        let (_, concentrator) = StatsConcentratorService::new(config);
         let mut aggregator = StatsAggregator::new_with_concentrator(concentrator);
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
@@ -135,12 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_batch() {
         let config = Arc::new(Config::default());
-        let tags_provider = Arc::new(TagProvider::new(
-            config.clone(),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
-        let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
+        let (_, concentrator) = StatsConcentratorService::new(config);
         let mut aggregator = StatsAggregator::new_with_concentrator(concentrator);
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
@@ -169,12 +156,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_batch_full_entries() {
         let config = Arc::new(Config::default());
-        let tags_provider = Arc::new(TagProvider::new(
-            config.clone(),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
-        let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
+        let (_, concentrator) = StatsConcentratorService::new(config);
         let mut aggregator = StatsAggregator::new(704, concentrator);
         // Payload below is 352 bytes
         let payload = ClientStatsPayload {
