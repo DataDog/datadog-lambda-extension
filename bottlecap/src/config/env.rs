@@ -949,7 +949,7 @@ mod tests {
                 lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
-                compute_trace_stats_on_extension: false,
+                compute_trace_stats_on_extension: true,
                 api_key_secret_reload_interval: Some(Duration::from_secs(10)),
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
