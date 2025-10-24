@@ -256,6 +256,17 @@ async fn main() -> anyhow::Result<()> {
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
     debug!("Starting Datadog Extension v{version_without_next}");
+
+    // Debug: Wait for debugger to attach if DD_DEBUG_WAIT_FOR_ATTACH is set
+    if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH") {
+        if let Ok(secs) = wait_secs.parse::<u64>() {
+            debug!("DD_DEBUG_WAIT_FOR_ATTACH: Waiting {secs} seconds for debugger to attach...");
+            debug!("Connect your debugger to port 2345 now!");
+            tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
+            debug!("DD_DEBUG_WAIT_FOR_ATTACH: Continuing execution...");
+        }
+    }
+
     prepare_client_provider()?;
     let client = create_reqwest_client_builder()
         .map_err(|e| anyhow::anyhow!("Failed to create client builder: {e:?}"))?
