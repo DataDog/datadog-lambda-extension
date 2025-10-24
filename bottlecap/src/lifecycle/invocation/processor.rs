@@ -103,7 +103,7 @@ impl Processor {
         );
 
         let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config));
-        enhanced_metrics.start_enhanced_metrics_task(); // starts the long-running task that monitors usage metrics (fd_use, threads_use, tmp_used)
+        enhanced_metrics.start_usage_metrics_task(); // starts the long-running task that monitors usage metrics (fd_use, threads_use, tmp_used)
 
         Processor {
             context_buffer: ContextBuffer::default(),

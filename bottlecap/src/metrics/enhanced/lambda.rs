@@ -526,7 +526,7 @@ impl Lambda {
         }
     }
 
-    pub fn start_enhanced_metrics_task(&self) {
+    pub fn start_usage_metrics_task(&self) {
         if !self.config.enhanced_metrics {
             return;
         }

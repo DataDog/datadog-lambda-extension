@@ -18,12 +18,7 @@ impl UsageMetrics {
         }
     }
 
-    pub fn update_metrics(
-        &mut self,
-        tmp_used: Option<f64>,
-        fd_use: Option<f64>,
-        threads_use: Option<f64>,
-    ) {
+    pub fn update(&mut self, tmp_used: Option<f64>, fd_use: Option<f64>, threads_use: Option<f64>) {
         if let Some(tmp_used) = tmp_used {
             if tmp_used > self.tmp_used {
                 self.tmp_used = tmp_used;
@@ -55,16 +50,16 @@ impl Default for UsageMetrics {
 }
 
 #[derive(Debug)]
-pub enum EnhancedMetricsCommand {
-    UpdateMetrics(Option<f64>, Option<f64>, Option<f64>),
-    ResetMetrics(),
-    GetMetrics(oneshot::Sender<UsageMetrics>),
+pub enum Command {
+    Update(Option<f64>, Option<f64>, Option<f64>),
+    Reset(),
+    Get(oneshot::Sender<UsageMetrics>),
     Shutdown,
 }
 
 #[derive(Clone, Debug)]
 pub struct EnhancedMetricsHandle {
-    tx: mpsc::UnboundedSender<EnhancedMetricsCommand>,
+    tx: mpsc::UnboundedSender<Command>,
     monitoring_state_tx: watch::Sender<bool>, // true = active, false = paused
 }
 
@@ -74,22 +69,18 @@ impl EnhancedMetricsHandle {
         tmp_used: Option<f64>,
         fd_use: Option<f64>,
         threads_use: Option<f64>,
-    ) -> Result<(), mpsc::error::SendError<EnhancedMetricsCommand>> {
-        self.tx.send(EnhancedMetricsCommand::UpdateMetrics(
-            tmp_used,
-            fd_use,
-            threads_use,
-        ))
+    ) -> Result<(), mpsc::error::SendError<Command>> {
+        self.tx.send(Command::Update(tmp_used, fd_use, threads_use))
     }
 
-    pub fn reset_metrics(&self) -> Result<(), mpsc::error::SendError<EnhancedMetricsCommand>> {
-        self.tx.send(EnhancedMetricsCommand::ResetMetrics())
+    pub fn reset_metrics(&self) -> Result<(), mpsc::error::SendError<Command>> {
+        self.tx.send(Command::Reset())
     }
 
     pub async fn get_metrics(&self) -> Result<UsageMetrics, String> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
-            .send(EnhancedMetricsCommand::GetMetrics(response_tx))
+            .send(Command::Get(response_tx))
             .map_err(|e| format!("Failed to send enhanced metrics command: {e}"))?;
         response_rx
             .await
@@ -116,14 +107,14 @@ impl EnhancedMetricsHandle {
         self.monitoring_state_tx.subscribe()
     }
 
-    pub fn shutdown(&self) -> Result<(), mpsc::error::SendError<EnhancedMetricsCommand>> {
-        self.tx.send(EnhancedMetricsCommand::Shutdown)
+    pub fn shutdown(&self) -> Result<(), mpsc::error::SendError<Command>> {
+        self.tx.send(Command::Shutdown)
     }
 }
 
 pub struct EnhancedMetricsService {
     metrics: UsageMetrics,
-    rx: mpsc::UnboundedReceiver<EnhancedMetricsCommand>,
+    rx: mpsc::UnboundedReceiver<Command>,
 }
 
 impl EnhancedMetricsService {
@@ -149,18 +140,18 @@ impl EnhancedMetricsService {
 
         while let Some(command) = self.rx.recv().await {
             match command {
-                EnhancedMetricsCommand::UpdateMetrics(tmp_used, fd_use, threads_use) => {
-                    self.metrics.update_metrics(tmp_used, fd_use, threads_use);
+                Command::Update(tmp_used, fd_use, threads_use) => {
+                    self.metrics.update(tmp_used, fd_use, threads_use);
                 }
-                EnhancedMetricsCommand::ResetMetrics() => {
+                Command::Reset() => {
                     self.metrics.reset();
                 }
-                EnhancedMetricsCommand::GetMetrics(response_tx) => {
+                Command::Get(response_tx) => {
                     if response_tx.send(self.metrics).is_err() {
                         error!("Failed to send enhanced metrics response");
                     }
                 }
-                EnhancedMetricsCommand::Shutdown => {
+                Command::Shutdown => {
                     debug!("Enhanced metrics service shutting down");
                     break;
                 }
