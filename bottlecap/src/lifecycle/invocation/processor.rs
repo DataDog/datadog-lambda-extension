@@ -8,7 +8,6 @@ use chrono::{DateTime, Utc};
 use datadog_trace_protobuf::pb::Span;
 use datadog_trace_utils::tracer_header_tags;
 use serde_json::Value;
-use tokio::sync::watch;
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
@@ -103,11 +102,14 @@ impl Processor {
             config.trace_aws_service_representation_enabled,
         );
 
+        let enhanced_metrics = EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config));
+        enhanced_metrics.start_usage_metrics_task(); // starts the long-running task that monitors usage metrics (fd_use, threads_use, tmp_used)
+
         Processor {
             context_buffer: ContextBuffer::default(),
             inferrer: SpanInferrer::new(Arc::clone(&config)),
             propagator,
-            enhanced_metrics: EnhancedMetrics::new(metrics_aggregator, Arc::clone(&config)),
+            enhanced_metrics,
             aws_config,
             tracer_detected: false,
             runtime: None,
@@ -136,26 +138,18 @@ impl Processor {
             .unwrap_or_default();
 
         if self.config.lambda_proc_enhanced_metrics {
+            // Resume tmp, fd, and threads enhanced metrics monitoring
+            self.enhanced_metrics.resume_usage_metrics_monitoring();
+
             // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
 
-            // Start a channel for monitoring tmp enhanced data
-            let (tmp_chan_tx, tmp_chan_rx) = watch::channel(());
-            self.enhanced_metrics.set_tmp_enhanced_metrics(tmp_chan_rx);
-
-            // Start a channel for monitoring file descriptor and thread count
-            let (process_chan_tx, process_chan_rx) = watch::channel(());
-            self.enhanced_metrics
-                .set_process_enhanced_metrics(process_chan_rx);
-
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
                 cpu_offset,
                 uptime_offset,
-                tmp_chan_tx,
-                process_chan_tx,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -313,6 +307,10 @@ impl Processor {
             }
         }
 
+        // Set tmp, fd, and threads enhanced metrics
+        self.enhanced_metrics.set_max_enhanced_metrics();
+        self.enhanced_metrics.set_usage_enhanced_metrics(); // sets use metric values and pauses monitoring task
+
         self.context_buffer
             .add_runtime_duration(request_id, metrics.duration_ms);
 
@@ -388,10 +386,6 @@ impl Processor {
                 offsets.cpu_offset.clone(),
                 offsets.uptime_offset,
             );
-            // Send the signal to stop monitoring tmp
-            _ = offsets.tmp_chan_tx.send(());
-            // Send the signal to stop monitoring file descriptors and threads
-            _ = offsets.process_chan_tx.send(());
         }
 
         // todo(duncanista): Add missing metric tags for ASM

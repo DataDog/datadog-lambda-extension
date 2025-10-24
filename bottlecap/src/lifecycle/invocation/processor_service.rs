@@ -100,7 +100,7 @@ pub enum ProcessorCommand {
     SendCtxSpans {
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
-        context: Context,
+        context: Box<Context>,
     },
     Shutdown,
 }
@@ -338,7 +338,7 @@ impl InvocationProcessorHandle {
             .send(ProcessorCommand::SendCtxSpans {
                 tags_provider: Arc::clone(tags_provider),
                 trace_sender: Arc::clone(trace_sender),
-                context,
+                context: Box::new(context),
             })
             .await
     }
@@ -491,7 +491,7 @@ impl InvocationProcessorService {
                     context,
                 } => {
                     self.processor
-                        .send_ctx_spans(&tags_provider, &trace_sender, context)
+                        .send_ctx_spans(&tags_provider, &trace_sender, *context)
                         .await;
                 }
                 ProcessorCommand::Shutdown => {

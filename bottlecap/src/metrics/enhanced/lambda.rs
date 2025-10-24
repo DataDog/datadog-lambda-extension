@@ -1,31 +1,16 @@
 use crate::extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics};
-use crate::metrics::enhanced::{
-    constants::{self, BASE_LAMBDA_INVOCATION_PRICE},
-    statfs::statfs_info,
-};
+use crate::metrics::enhanced::constants::{self, BASE_LAMBDA_INVOCATION_PRICE};
+use crate::metrics::enhanced::statfs;
+use crate::metrics::enhanced::usage_metrics::{EnhancedMetricsHandle, EnhancedMetricsService};
 use crate::proc::{self, CPUData, NetworkData};
 use dogstatsd::metric::SortedTags;
 use dogstatsd::metric::{Metric, MetricValue};
 use dogstatsd::{aggregator_service::AggregatorHandle, metric};
 use std::collections::HashMap;
 use std::env::consts::ARCH;
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
-use std::time::Duration;
-use tokio::{
-    sync::watch::{Receiver, Sender},
-    time::interval,
-};
+use std::sync::Arc;
 use tracing::debug;
 use tracing::error;
-// tmp/proc enhanced metrics tasks open and/or read files in the /proc directory using blocking I/O.
-// These tasks can block the async context the task is called under and thus delay other important work.
-// In rare cases, if the tasks start taking longer than the typical invocations take, these tasks can pile up and cause timeouts.
-// So we ensure only one task to measure these is ever running at the same time
-static TMP_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
-static PROCESS_TASK_RUNNING: AtomicBool = AtomicBool::new(false);
 
 pub struct Lambda {
     pub aggr_handle: AggregatorHandle,
@@ -33,16 +18,23 @@ pub struct Lambda {
     // Dynamic value tags are the ones we cannot obtain statically from the sandbox
     dynamic_value_tags: HashMap<String, String>,
     invoked_received: bool,
+    pub enhanced_metrics_handle: EnhancedMetricsHandle,
 }
 
 impl Lambda {
     #[must_use]
     pub fn new(aggregator: AggregatorHandle, config: Arc<crate::config::Config>) -> Lambda {
+        let (enhanced_metrics_service, enhanced_metrics_handle) = EnhancedMetricsService::new();
+        tokio::spawn(async move {
+            enhanced_metrics_service.run().await; // starts the enhanced metrics service for usage metrics
+        });
+
         Lambda {
             aggr_handle: aggregator,
             config,
             dynamic_value_tags: HashMap::new(),
             invoked_received: false,
+            enhanced_metrics_handle,
         }
     }
 
@@ -464,223 +456,6 @@ impl Lambda {
         }
     }
 
-    pub fn generate_tmp_enhanced_metrics(
-        tmp_max: f64,
-        tmp_used: f64,
-        aggr: &AggregatorHandle,
-        tags: Option<SortedTags>,
-    ) {
-        let now = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        let metric = Metric::new(
-            constants::TMP_MAX_METRIC.into(),
-            MetricValue::distribution(tmp_max),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert tmp_max metric: {}", e);
-        }
-
-        let metric = Metric::new(
-            constants::TMP_USED_METRIC.into(),
-            MetricValue::distribution(tmp_used),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert tmp_used metric: {}", e);
-        }
-
-        let tmp_free = tmp_max - tmp_used;
-        let metric = Metric::new(
-            constants::TMP_FREE_METRIC.into(),
-            MetricValue::distribution(tmp_free),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert tmp_free metric: {}", e);
-        }
-    }
-
-    pub fn set_tmp_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        if !self.config.enhanced_metrics {
-            return;
-        }
-
-        if TMP_TASK_RUNNING
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            debug!("Tmp enhanced metrics task already running, skipping");
-            return;
-        }
-
-        let aggr = self.aggr_handle.clone();
-        let tags = self.get_dynamic_value_tags();
-
-        tokio::spawn(async move {
-            // Set tmp_max and initial value for tmp_used
-            let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
-                Ok(stats) => stats,
-                Err(err) => {
-                    debug!("Could not emit tmp enhanced metrics. {:?}", err);
-                    TMP_TASK_RUNNING.store(false, Ordering::Release);
-                    return;
-                }
-            };
-            let tmp_max = bsize * blocks;
-            let mut tmp_used = bsize * (blocks - bavail);
-
-            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
-            loop {
-                tokio::select! {
-                    biased;
-                    // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
-                        Self::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &aggr, tags);
-                        TMP_TASK_RUNNING.store(false, Ordering::Release);
-                        return;
-                    }
-                    // Otherwise keep monitoring tmp usage periodically
-                    _ = interval.tick() => {
-                        let (bsize, blocks, bavail) = match statfs_info(constants::TMP_PATH) {
-                            Ok(stats) => stats,
-                            Err(err) => {
-                                debug!("Could not emit tmp enhanced metrics. {:?}", err);
-                                TMP_TASK_RUNNING.store(false, Ordering::Release);
-                                return;
-                            }
-                        };
-                        tmp_used = tmp_used.max(bsize * (blocks - bavail));
-                    }
-                }
-            }
-        });
-    }
-
-    pub fn generate_process_metrics(
-        fd_max: f64,
-        fd_use: f64,
-        threads_max: f64,
-        threads_use: f64,
-        aggr: &AggregatorHandle,
-        tags: Option<SortedTags>,
-    ) {
-        let now = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        let metric = Metric::new(
-            constants::FD_MAX_METRIC.into(),
-            MetricValue::distribution(fd_max),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert fd_max metric: {}", e);
-        }
-
-        // Check if fd_use value is valid before inserting metric
-        if fd_use > 0.0 {
-            let metric = Metric::new(
-                constants::FD_USE_METRIC.into(),
-                MetricValue::distribution(fd_use),
-                tags.clone(),
-                Some(now),
-            );
-            if let Err(e) = aggr.insert_batch(vec![metric]) {
-                error!("Failed to insert fd_use metric: {}", e);
-            }
-        } else {
-            debug!("Could not get file descriptor usage data.");
-        }
-
-        let metric = Metric::new(
-            constants::THREADS_MAX_METRIC.into(),
-            MetricValue::distribution(threads_max),
-            tags.clone(),
-            Some(now),
-        );
-        if let Err(e) = aggr.insert_batch(vec![metric]) {
-            error!("Failed to insert threads_max metric: {}", e);
-        }
-
-        // Check if threads_use value is valid before inserting metric
-        if threads_use > 0.0 {
-            let metric = Metric::new(
-                constants::THREADS_USE_METRIC.into(),
-                MetricValue::distribution(threads_use),
-                tags,
-                Some(now),
-            );
-            if let Err(e) = aggr.insert_batch(vec![metric]) {
-                error!("Failed to insert threads_use metric: {}", e);
-            }
-        } else {
-            debug!("Could not get thread usage data.");
-        }
-    }
-
-    pub fn set_process_enhanced_metrics(&self, mut send_metrics: Receiver<()>) {
-        if !self.config.enhanced_metrics {
-            return;
-        }
-
-        if PROCESS_TASK_RUNNING
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            debug!("Process enhanced metrics task already running, skipping");
-            return;
-        }
-
-        let aggr = self.aggr_handle.clone();
-        let tags = self.get_dynamic_value_tags();
-
-        tokio::spawn(async move {
-            // get list of all process ids
-            let mut pids = proc::get_pid_list();
-
-            // Set fd_max and initial value for fd_use
-            let fd_max = proc::get_fd_max_data(&pids);
-            let mut fd_use = proc::get_fd_use_data(&pids);
-
-            // Set threads_max and initial value for threads_use
-            let threads_max = proc::get_threads_max_data(&pids);
-            let mut threads_use = proc::get_threads_use_data(&pids).unwrap_or_else(|_| -1_f64);
-
-            let mut interval = interval(Duration::from_millis(constants::MONITORING_INTERVAL));
-            loop {
-                tokio::select! {
-                    biased;
-                    // When the stop signal is received, generate final metrics
-                    _ = send_metrics.changed() => {
-                        Self::generate_process_metrics(fd_max, fd_use, threads_max, threads_use, &aggr, tags.clone());
-                        PROCESS_TASK_RUNNING.store(false, Ordering::Release);
-                        return;
-                    }
-                    // Otherwise keep monitoring file descriptor and thread usage periodically
-                    _ = interval.tick() => {
-                        pids = proc::get_pid_list();
-                        let fd_use_curr = proc::get_fd_use_data(&pids);
-                        fd_use = fd_use.max(fd_use_curr);
-                        if let Ok(threads_use_curr) = proc::get_threads_use_data(&pids) {
-                            threads_use = threads_use.max(threads_use_curr);
-                        }
-                    }
-                }
-            }
-        });
-    }
-
     fn calculate_estimated_cost_usd(billed_duration_ms: u64, memory_size_mb: u64) -> f64 {
         let gb_seconds = (billed_duration_ms as f64 * constants::MS_TO_SEC)
             * (memory_size_mb as f64 / constants::MB_TO_GB);
@@ -750,6 +525,175 @@ impl Lambda {
             error!("failed to insert estimated cost metric: {}", e);
         }
     }
+
+    pub fn start_usage_metrics_task(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let enhanced_metrics_handle = self.enhanced_metrics_handle.clone();
+
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(
+                constants::MONITORING_INTERVAL,
+            ));
+            let mut monitoring_state_rx = enhanced_metrics_handle.get_monitoring_state_receiver();
+            let mut is_active = *monitoring_state_rx.borrow();
+
+            loop {
+                tokio::select! {
+                    biased;
+
+                    _ = monitoring_state_rx.changed() => {
+                        is_active = *monitoring_state_rx.borrow();
+                    }
+
+                    _ = interval.tick() => {
+                        if is_active {
+                            let pids = proc::get_pid_list();
+                            let tmp_used = statfs::get_tmp_used().ok();
+                            let fd_use = Some(proc::get_fd_use_data(&pids));
+                            let threads_use = proc::get_threads_use_data(&pids).ok();
+
+                            if let Err(e) = enhanced_metrics_handle.update_metrics(tmp_used, fd_use, threads_use) {
+                                debug!("Failed to update process enhanced metrics: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn resume_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        // reset metrics for the new invocation
+        if let Err(e) = self.enhanced_metrics_handle.reset_metrics() {
+            debug!("Failed to reset enhanced metrics on new invocation: {}", e);
+        }
+
+        self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    pub fn set_usage_enhanced_metrics(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        self.enhanced_metrics_handle.pause_monitoring();
+
+        let enhanced_metrics_handle = self.enhanced_metrics_handle.clone();
+        let aggr_handle = self.aggr_handle.clone();
+        let tags = self.get_dynamic_value_tags();
+
+        tokio::spawn(async move {
+            match enhanced_metrics_handle.get_metrics().await {
+                Ok(metrics) => {
+                    let now = std::time::UNIX_EPOCH
+                        .elapsed()
+                        .expect("unable to poll clock, unrecoverable")
+                        .as_secs()
+                        .try_into()
+                        .unwrap_or_default();
+
+                    if metrics.tmp_used > 0.0 {
+                        let metric = Metric::new(
+                            constants::TMP_USED_METRIC.into(),
+                            MetricValue::distribution(metrics.tmp_used),
+                            tags.clone(),
+                            Some(now),
+                        );
+                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                            error!("Failed to insert tmp_used metric: {}", e);
+                        }
+                    }
+
+                    if metrics.fd_use > 0.0 {
+                        let metric = Metric::new(
+                            constants::FD_USE_METRIC.into(),
+                            MetricValue::distribution(metrics.fd_use),
+                            tags.clone(),
+                            Some(now),
+                        );
+                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                            error!("Failed to insert fd_use metric: {}", e);
+                        }
+                    }
+
+                    if metrics.threads_use > 0.0 {
+                        let metric = Metric::new(
+                            constants::THREADS_USE_METRIC.into(),
+                            MetricValue::distribution(metrics.threads_use),
+                            tags.clone(),
+                            Some(now),
+                        );
+                        if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                            error!("Failed to insert threads_use metric: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to get final usage metrics: {}", e);
+                }
+            }
+        });
+    }
+
+    pub fn set_max_enhanced_metrics(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        let tmp_max = statfs::get_tmp_max().ok();
+
+        let pids = proc::get_pid_list();
+        let fd_max = proc::get_fd_max_data(&pids);
+        let threads_max = proc::get_threads_max_data(&pids);
+
+        let now = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let tags = self.get_dynamic_value_tags();
+
+        if let Some(tmp_max) = tmp_max {
+            let metric = Metric::new(
+                constants::TMP_MAX_METRIC.into(),
+                MetricValue::distribution(tmp_max),
+                tags.clone(),
+                Some(now),
+            );
+            if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                error!("Failed to insert tmp_max metric: {}", e);
+            }
+        }
+
+        let metric = Metric::new(
+            constants::FD_MAX_METRIC.into(),
+            MetricValue::distribution(fd_max),
+            tags.clone(),
+            Some(now),
+        );
+        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+            error!("Failed to insert fd_max metric: {}", e);
+        }
+
+        let metric = Metric::new(
+            constants::THREADS_MAX_METRIC.into(),
+            MetricValue::distribution(threads_max),
+            tags,
+            Some(now),
+        );
+        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+            error!("Failed to insert threads_max metric: {}", e);
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -757,8 +701,6 @@ pub struct EnhancedMetricData {
     pub network_offset: Option<NetworkData>,
     pub cpu_offset: Option<CPUData>,
     pub uptime_offset: Option<f64>,
-    pub tmp_chan_tx: Sender<()>,
-    pub process_chan_tx: Sender<()>,
 }
 
 impl PartialEq for EnhancedMetricData {
@@ -1300,104 +1242,5 @@ mod tests {
             now,
         )
         .await;
-    }
-
-    #[tokio::test]
-    async fn test_set_tmp_enhanced_metrics() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        let tmp_max = 550_461_440.0;
-        let tmp_used = 12_165_120.0;
-
-        Lambda::generate_tmp_enhanced_metrics(tmp_max, tmp_used, &metrics_aggr, None);
-
-        assert_sketch(&metrics_aggr, constants::TMP_MAX_METRIC, 550_461_440.0, now).await;
-        assert_sketch(&metrics_aggr, constants::TMP_USED_METRIC, 12_165_120.0, now).await;
-        assert_sketch(
-            &metrics_aggr,
-            constants::TMP_FREE_METRIC,
-            538_296_320.0,
-            now,
-        )
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_set_process_enhanced_metrics_valid_use() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        let fd_max = 1024.0;
-        let fd_use = 175.0;
-        let threads_max = 1024.0;
-        let threads_use = 40.0;
-
-        Lambda::generate_process_metrics(
-            fd_max,
-            fd_use,
-            threads_max,
-            threads_use,
-            &metrics_aggr,
-            None,
-        );
-
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now).await;
-        assert_sketch(&metrics_aggr, constants::FD_USE_METRIC, 175.0, now).await;
-        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now).await;
-        assert_sketch(&metrics_aggr, constants::THREADS_USE_METRIC, 40.0, now).await;
-    }
-
-    #[tokio::test]
-    async fn test_set_process_enhanced_metrics_invalid_use() {
-        let (metrics_aggr, my_config) = setup();
-        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let now: i64 = std::time::UNIX_EPOCH
-            .elapsed()
-            .expect("unable to poll clock, unrecoverable")
-            .as_secs()
-            .try_into()
-            .unwrap_or_default();
-        let fd_max = 1024.0;
-        let fd_use = -1.0;
-        let threads_max = 1024.0;
-        let threads_use = -1.0;
-
-        Lambda::generate_process_metrics(
-            fd_max,
-            fd_use,
-            threads_max,
-            threads_use,
-            &metrics_aggr,
-            None,
-        );
-
-        assert_sketch(&metrics_aggr, constants::FD_MAX_METRIC, 1024.0, now).await;
-        assert_sketch(&metrics_aggr, constants::THREADS_MAX_METRIC, 1024.0, now).await;
-
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::FD_USE_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            metrics_aggr
-                .get_entry_by_id(constants::THREADS_USE_METRIC.into(), None, now)
-                .await
-                .unwrap()
-                .is_none()
-        );
     }
 }
