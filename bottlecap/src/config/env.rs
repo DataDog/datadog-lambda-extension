@@ -13,7 +13,8 @@ use crate::{
         deserialize_apm_filter_tags, deserialize_array_from_comma_separated_string,
         deserialize_key_value_pairs, deserialize_option_lossless,
         deserialize_optional_bool_from_anything, deserialize_optional_duration_from_microseconds,
-        deserialize_optional_duration_from_seconds, deserialize_optional_string,
+        deserialize_optional_duration_from_seconds,
+        deserialize_optional_duration_from_seconds_ignore_zero, deserialize_optional_string,
         deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
@@ -395,6 +396,13 @@ pub struct EnvConfig {
     /// Default is `false`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub compute_trace_stats_on_extension: Option<bool>,
+    /// @env `DD_API_KEY_SECRET_RELOAD_INTERVAL`
+    ///
+    /// The interval at which the Datadog API key is reloaded, in seconds.
+    /// If None, the API key will not be reloaded.
+    /// Default is `None`.
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds_ignore_zero")]
+    pub api_key_secret_reload_interval: Option<Duration>,
     /// @env `DD_SERVERLESS_APPSEC_ENABLED`
     ///
     /// Enable Application and API Protection (AAP), previously known as AppSec/ASM, for AWS Lambda.
@@ -598,6 +606,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, capture_lambda_payload);
     merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
     merge_option_to_value!(config, env_config, compute_trace_stats_on_extension);
+    merge_option!(config, env_config, api_key_secret_reload_interval);
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
     merge_option!(config, env_config, appsec_rules);
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
@@ -791,6 +800,7 @@ mod tests {
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "true");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD_MAX_DEPTH", "5");
             jail.set_env("DD_COMPUTE_TRACE_STATS_ON_EXTENSION", "true");
+            jail.set_env("DD_API_KEY_SECRET_RELOAD_INTERVAL", "10");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
             jail.set_env("DD_APPSEC_RULES", "/path/to/rules.json");
             jail.set_env("DD_APPSEC_WAF_TIMEOUT", "1000000"); // Microseconds
@@ -940,6 +950,7 @@ mod tests {
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 compute_trace_stats_on_extension: true,
+                api_key_secret_reload_interval: Some(Duration::from_secs(10)),
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
                 appsec_waf_timeout: Duration::from_secs(1),

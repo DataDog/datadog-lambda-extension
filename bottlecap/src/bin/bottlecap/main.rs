@@ -40,7 +40,7 @@ use bottlecap::{
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
         flush_control::{FlushControl, FlushDecision},
-        invocation::processor::Processor as InvocationProcessor,
+        invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
     logger,
@@ -342,13 +342,17 @@ fn enable_logging_subsystem() {
 fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
+    let api_key_secret_reload_interval = config.api_key_secret_reload_interval;
 
-    Arc::new(ApiKeyFactory::new_from_resolver(Arc::new(move || {
-        let config = Arc::clone(&config);
-        let aws_config = Arc::clone(&aws_config);
+    Arc::new(ApiKeyFactory::new_from_resolver(
+        Arc::new(move || {
+            let config = Arc::clone(&config);
+            let aws_config = Arc::clone(&aws_config);
 
-        Box::pin(async move { resolve_secrets(config, aws_config).await })
-    })))
+            Box::pin(async move { resolve_secrets(config, aws_config).await })
+        }),
+        api_key_secret_reload_interval,
+    ))
 }
 
 async fn extension_loop_idle(
@@ -378,7 +382,7 @@ async fn extension_loop_active(
     api_key_factory: Arc<ApiKeyFactory>,
     start_time: Instant,
 ) -> anyhow::Result<()> {
-    let mut event_bus = EventBus::run();
+    let (mut event_bus, event_bus_tx) = EventBus::run();
 
     let account_id = r
         .account_id
@@ -387,11 +391,11 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    let (logs_agent_channel, logs_flusher) = start_logs_agent(
+    let (logs_agent_channel, logs_flusher, logs_agent_cancel_token) = start_logs_agent(
         config,
         Arc::clone(&api_key_factory),
         &tags_provider,
-        event_bus.get_sender_copy(),
+        event_bus_tx.clone(),
     );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
@@ -399,13 +403,18 @@ async fn extension_loop_active(
 
     let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(config)));
     // Lifecycle Invocation Processor
-    let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
-        Arc::clone(&tags_provider),
-        Arc::clone(config),
-        Arc::clone(&aws_config),
-        metrics_aggregator_handle.clone(),
-        Arc::clone(&propagator),
-    )));
+    let (invocation_processor_handle, invocation_processor_service) =
+        InvocationProcessorService::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(config),
+            Arc::clone(&aws_config),
+            metrics_aggregator_handle.clone(),
+            Arc::clone(&propagator),
+        );
+    tokio::spawn(async move {
+        invocation_processor_service.run().await;
+    });
+
     // AppSec processor (if enabled)
     let appsec_processor = match AppSecProcessor::new(config) {
         Ok(p) => Some(Arc::new(TokioMutex::new(p))),
@@ -430,20 +439,20 @@ async fn extension_loop_active(
         config,
         &api_key_factory,
         &tags_provider,
-        Arc::clone(&invocation_processor),
+        invocation_processor_handle.clone(),
         appsec_processor.clone(),
     );
 
     let api_runtime_proxy_shutdown_signal = start_api_runtime_proxy(
         config,
         Arc::clone(&aws_config),
-        &invocation_processor,
+        &invocation_processor_handle,
         appsec_processor.as_ref(),
         Arc::clone(&propagator),
     );
 
     let lifecycle_listener =
-        LifecycleListener::new(Arc::clone(&invocation_processor), Arc::clone(&propagator));
+        LifecycleListener::new(invocation_processor_handle.clone(), Arc::clone(&propagator));
     let lifecycle_listener_shutdown_token = lifecycle_listener.get_shutdown_token();
     // TODO(astuyve): deprioritize this task after the first request
     tokio::spawn(async move {
@@ -457,6 +466,7 @@ async fn extension_loop_active(
         &r.extension_id,
         &aws_config.runtime_api,
         logs_agent_channel,
+        event_bus_tx.clone(),
         config.serverless_logs_enabled,
     )
     .await?;
@@ -483,7 +493,7 @@ async fn extension_loop_active(
         extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
     // first invoke we must call next
     let mut pending_flush_handles = PendingFlushHandles::new();
-    handle_next_invocation(next_lambda_response, invocation_processor.clone()).await;
+    handle_next_invocation(next_lambda_response, &invocation_processor_handle).await;
     loop {
         let maybe_shutdown_event;
 
@@ -498,7 +508,7 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         Some(event) = event_bus.rx.recv() => {
-                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
+                            if let Some(telemetry_event) = handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await {
                                 if let TelemetryRecord::PlatformRuntimeDone{ .. } = telemetry_event.record {
                                     break 'flush_end;
                                 }
@@ -536,7 +546,7 @@ async fn extension_loop_active(
                 let next_response =
                     extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
                 maybe_shutdown_event =
-                    handle_next_invocation(next_response, invocation_processor.clone()).await;
+                    handle_next_invocation(next_response, &invocation_processor_handle).await;
             }
             FlushDecision::Continuous | FlushDecision::Periodic | FlushDecision::Dont => {
                 match current_flush_decision {
@@ -620,12 +630,12 @@ async fn extension_loop_active(
                     tokio::select! {
                     biased;
                         next_response = &mut next_lambda_response => {
-                            maybe_shutdown_event = handle_next_invocation(next_response, invocation_processor.clone()).await;
+                            maybe_shutdown_event = handle_next_invocation(next_response, &invocation_processor_handle).await;
                             // Need to break here to re-call next
                             break 'next_invocation;
                         }
                         Some(event) = event_bus.rx.recv() => {
-                            handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
+                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                         }
                         _ = race_flush_interval.tick() => {
                             if flush_control.flush_strategy == FlushStrategy::Default {
@@ -649,6 +659,17 @@ async fn extension_loop_active(
         }
 
         if let NextEventResponse::Shutdown { .. } = maybe_shutdown_event {
+            // Cancel Telemetry API listener
+            // Important to do this first, so we can receive the Tombstone event which signals
+            // that there are no more Telemetry events to process
+            telemetry_listener_cancel_token.cancel();
+
+            // Cancel Logs Agent which might have Telemetry API events to process
+            logs_agent_cancel_token.cancel();
+
+            // Drop the event bus sender to allow the channel to close properly
+            drop(event_bus_tx);
+
             // Redrive/block on any failed payloads
             let tf = trace_flusher.clone();
             pending_flush_handles
@@ -663,15 +684,28 @@ async fn extension_loop_active(
             'shutdown: loop {
                 tokio::select! {
                     Some(event) = event_bus.rx.recv() => {
-                    if let Event::Telemetry(TelemetryEvent { record: TelemetryRecord::PlatformTombstone, .. }) = event {
-                            debug!("Received tombstone event, proceeding with shutdown");
-                            break 'shutdown;
+                        if let Event::Tombstone = event {
+                            debug!("Received tombstone event, draining remaining events");
+                            // Drain without waiting
+                            loop {
+                                match event_bus.rx.try_recv() {
+                                    Ok(event) => {
+                                        handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
+                                    },
+                                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break 'shutdown,
+                                    // Empty signals there are still outstanding senders
+                                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                                        debug!("No more events to process but still have senders, continuing to drain...");
+                                    },
+                                }
+                            }
+                        } else {
+                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                         }
-                    handle_event_bus_event(event, invocation_processor.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
                     }
                     // Add timeout to prevent hanging indefinitely
                     () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
-                        debug!("Timeout waiting for tombstone event, proceeding with shutdown");
+                        debug!("Timeout waiting for teardown, proceeding with shutdown");
                         break 'shutdown;
                     }
                 }
@@ -685,7 +719,6 @@ async fn extension_loop_active(
             }
             trace_agent_shutdown_token.cancel();
             dogstatsd_cancel_token.cancel();
-            telemetry_listener_cancel_token.cancel();
             lifecycle_listener_shutdown_token.cancel();
 
             // gotta lock here
@@ -741,9 +774,10 @@ async fn blocking_flush_all(
     race_flush_interval.reset();
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_event_bus_event(
     event: Event,
-    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
     tags_provider: Arc<TagProvider>,
     trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
@@ -752,35 +786,47 @@ async fn handle_event_bus_event(
 ) -> Option<TelemetryEvent> {
     match event {
         Event::OutOfMemory(event_timestamp) => {
-            let mut p = invocation_processor.lock().await;
-            p.on_out_of_memory_error(event_timestamp);
-            drop(p);
+            if let Err(e) = invocation_processor_handle
+                .on_out_of_memory_error(event_timestamp)
+                .await
+            {
+                error!("Failed to send out of memory error to processor: {}", e);
+            }
         }
         Event::Telemetry(event) => {
             debug!("Telemetry event received: {:?}", event);
             match event.record {
                 TelemetryRecord::PlatformInitStart { .. } => {
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_init_start(event.time);
-                    drop(p);
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_init_start(event.time)
+                        .await
+                    {
+                        error!("Failed to send platform init start to processor: {}", e);
+                    }
                 }
                 TelemetryRecord::PlatformInitReport {
                     metrics,
                     initialization_type,
                     ..
                 } => {
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_init_report(
-                        initialization_type,
-                        metrics.duration_ms,
-                        event.time.timestamp(),
-                    );
-                    drop(p);
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_init_report(
+                            initialization_type,
+                            metrics.duration_ms,
+                            event.time.timestamp(),
+                        )
+                        .await
+                    {
+                        error!("Failed to send platform init report to processor: {}", e);
+                    }
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_start(request_id, event.time);
-                    drop(p);
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_start(request_id, event.time)
+                        .await
+                    {
+                        error!("Failed to send platform start to processor: {}", e);
+                    }
                 }
                 TelemetryRecord::PlatformRuntimeDone {
                     ref request_id,
@@ -789,25 +835,27 @@ async fn handle_event_bus_event(
                     ref error_type,
                     ..
                 } => {
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_runtime_done(
-                        request_id,
-                        metrics,
-                        status,
-                        error_type.clone(),
-                        tags_provider.clone(),
-                        Arc::new(SendingTraceProcessor {
-                            appsec: appsec_processor.clone(),
-                            processor: trace_processor.clone(),
-                            trace_tx: trace_agent_channel.clone(),
-                            stats_generator: Arc::new(StatsGenerator::new(
-                                stats_concentrator.clone(),
-                            )),
-                        }),
-                        event.time.timestamp(),
-                    )
-                    .await;
-                    drop(p);
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_runtime_done(
+                            request_id.clone(),
+                            metrics,
+                            status,
+                            error_type.clone(),
+                            tags_provider.clone(),
+                            Arc::new(SendingTraceProcessor {
+                                appsec: appsec_processor.clone(),
+                                processor: trace_processor.clone(),
+                                trace_tx: trace_agent_channel.clone(),
+                                stats_generator: Arc::new(StatsGenerator::new(
+                                    stats_concentrator.clone(),
+                                )),
+                            }),
+                            event.time.timestamp(),
+                        )
+                        .await
+                    {
+                        error!("Failed to send platform runtime done to processor: {}", e);
+                    }
                     return Some(event);
                 }
                 TelemetryRecord::PlatformReport {
@@ -815,9 +863,12 @@ async fn handle_event_bus_event(
                     metrics,
                     ..
                 } => {
-                    let mut p = invocation_processor.lock().await;
-                    p.on_platform_report(request_id, metrics, event.time.timestamp());
-                    drop(p);
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_report(request_id.clone(), metrics, event.time.timestamp())
+                        .await
+                    {
+                        error!("Failed to send platform report to processor: {}", e);
+                    }
                     return Some(event);
                 }
                 _ => {
@@ -825,13 +876,15 @@ async fn handle_event_bus_event(
                 }
             }
         }
+        // Nothing to do with Tombstone event
+        Event::Tombstone => {}
     }
     None
 }
 
 async fn handle_next_invocation(
     next_response: Result<NextEventResponse, ExtensionError>,
-    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    invocation_processor_handle: &InvocationProcessorHandle,
 ) -> NextEventResponse {
     match next_response {
         Ok(NextEventResponse::Invoke {
@@ -845,16 +898,20 @@ async fn handle_next_invocation(
                 deadline_ms,
                 invoked_function_arn.clone()
             );
-            let mut p = invocation_processor.lock().await;
-            p.on_invoke_event(request_id.into());
-            drop(p);
+            if let Err(e) = invocation_processor_handle
+                .on_invoke_event(request_id.into())
+                .await
+            {
+                error!("Failed to send invoke event to processor: {}", e);
+            }
         }
         Ok(NextEventResponse::Shutdown {
             ref shutdown_reason,
             deadline_ms,
         }) => {
-            let mut p = invocation_processor.lock().await;
-            p.on_shutdown_event();
+            if let Err(e) = invocation_processor_handle.on_shutdown_event().await {
+                error!("Failed to send shutdown event to processor: {}", e);
+            }
             println!("Exiting: {shutdown_reason}, deadline: {deadline_ms}");
         }
         Err(ref err) => {
@@ -891,28 +948,30 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
-) -> (Sender<TelemetryEvent>, LogsFlusher) {
+) -> (Sender<TelemetryEvent>, LogsFlusher, CancellationToken) {
     let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
     // Start service in background
     tokio::spawn(async move {
         aggregator_service.run().await;
     });
 
-    let mut agent = LogsAgent::new(
+    let (mut agent, tx) = LogsAgent::new(
         Arc::clone(tags_provider),
         Arc::clone(config),
         event_bus,
         aggregator_handle.clone(),
     );
-    let tx = agent.get_sender_copy();
-
+    let cancel_token = agent.cancel_token();
     // Start logs agent in background
     tokio::spawn(async move {
         agent.spin().await;
+
+        debug!("LOGS_AGENT | Shutting down...");
+        drop(agent);
     });
 
     let flusher = LogsFlusher::new(api_key_factory, aggregator_handle, config.clone());
-    (tx, flusher)
+    (tx, flusher, cancel_token)
 }
 
 #[allow(clippy::type_complexity)]
@@ -920,7 +979,7 @@ fn start_trace_agent(
     config: &Arc<Config>,
     api_key_factory: &Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
-    invocation_processor: Arc<TokioMutex<InvocationProcessor>>,
+    invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
 ) -> (
     Sender<SendDataBuilderInfo>,
@@ -933,7 +992,7 @@ fn start_trace_agent(
 ) {
     // Stats
     let (stats_concentrator_service, stats_concentrator_handle) =
-        StatsConcentratorService::new(Arc::clone(config), tags_provider.clone());
+        StatsConcentratorService::new(Arc::clone(config));
     tokio::spawn(stats_concentrator_service.run());
     let stats_aggregator: Arc<TokioMutex<StatsAggregator>> = Arc::new(TokioMutex::new(
         StatsAggregator::new_with_concentrator(stats_concentrator_handle.clone()),
@@ -983,7 +1042,7 @@ fn start_trace_agent(
         stats_aggregator,
         stats_processor,
         proxy_aggregator,
-        invocation_processor,
+        invocation_processor_handle,
         appsec_processor,
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
@@ -1133,14 +1192,21 @@ async fn setup_telemetry_client(
     client: &Client,
     extension_id: &str,
     runtime_api: &str,
-    logs_agent_channel: Sender<TelemetryEvent>,
+    logs_tx: Sender<TelemetryEvent>,
+    event_bus_tx: Sender<Event>,
     logs_enabled: bool,
 ) -> anyhow::Result<CancellationToken> {
-    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_agent_channel);
+    let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
     let cancel_token = listener.cancel_token();
-    if let Err(e) = listener.start() {
-        error!("Error starting telemetry listener: {e:?}");
+    match listener.start() {
+        Ok(()) => {
+            // Drop the listener, so event_bus_tx is closed
+            drop(listener);
+        }
+        Err(e) => {
+            error!("Error starting telemetry listener: {e:?}");
+        }
     }
 
     telemetry::subscribe(
@@ -1188,7 +1254,7 @@ fn start_otlp_agent(
 fn start_api_runtime_proxy(
     config: &Arc<Config>,
     aws_config: Arc<AwsConfig>,
-    invocation_processor: &Arc<TokioMutex<InvocationProcessor>>,
+    invocation_processor_handle: &InvocationProcessorHandle,
     appsec_processor: Option<&Arc<TokioMutex<AppSecProcessor>>>,
     propagator: Arc<DatadogCompositePropagator>,
 ) -> Option<CancellationToken> {
@@ -1197,11 +1263,10 @@ fn start_api_runtime_proxy(
         return None;
     }
 
-    let invocation_processor = invocation_processor.clone();
     let appsec_processor = appsec_processor.map(Arc::clone);
     interceptor::start(
         aws_config,
-        invocation_processor,
+        invocation_processor_handle.clone(),
         appsec_processor,
         propagator,
     )

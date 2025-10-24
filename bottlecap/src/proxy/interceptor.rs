@@ -1,9 +1,9 @@
+use crate::lifecycle::invocation::processor_service::InvocationProcessorHandle;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::propagation::DatadogCompositePropagator;
 use crate::{
     appsec::processor::Processor as AppSecProcessor, config::aws::AwsConfig,
-    extension::EXTENSION_HOST, lifecycle::invocation::processor::Processor as InvocationProcessor,
-    lwa, proxy::tee_body::TeeBodyWithCompletion,
+    extension::EXTENSION_HOST, lwa, proxy::tee_body::TeeBodyWithCompletion,
 };
 use axum::{
     Router,
@@ -31,7 +31,7 @@ const INTERCEPTOR_DEFAULT_PORT: u16 = 9000;
 type InterceptorState = (
     Arc<AwsConfig>,
     Arc<Client<HttpConnector, Body>>,
-    Arc<Mutex<InvocationProcessor>>,
+    InvocationProcessorHandle,
     Option<Arc<Mutex<AppSecProcessor>>>,
     Arc<DatadogCompositePropagator>,
     Arc<Mutex<JoinSet<()>>>,
@@ -39,7 +39,7 @@ type InterceptorState = (
 
 pub fn start(
     aws_config: Arc<AwsConfig>,
-    invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     propagator: Arc<DatadogCompositePropagator>,
 ) -> Result<CancellationToken, Box<dyn std::error::Error>> {
@@ -58,7 +58,7 @@ pub fn start(
     let state: InterceptorState = (
         aws_config,
         Arc::new(client),
-        invocation_processor,
+        invocation_processor_handle,
         appsec_processor,
         propagator,
         tasks.clone(),
@@ -442,12 +442,12 @@ mod tests {
     use hyper::{server::conn::http1, service::service_fn};
     use hyper_util::rt::TokioIo;
 
+    use super::*;
+    use crate::lifecycle::invocation::processor_service::InvocationProcessorService;
     use crate::{
         LAMBDA_RUNTIME_SLUG, appsec::processor::Error::FeatureDisabled as AppSecFeatureDisabled,
         config::Config, tags::provider::Provider, traces::propagation::DatadogCompositePropagator,
     };
-
-    use super::*;
 
     #[tokio::test]
     async fn test_noop_proxy() {
@@ -499,13 +499,18 @@ mod tests {
             exec_wrapper: None,
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
-        let invocation_processor = Arc::new(TokioMutex::new(InvocationProcessor::new(
-            Arc::clone(&tags_provider),
-            Arc::clone(&config),
-            Arc::clone(&aws_config),
-            metrics_aggregator,
-            Arc::clone(&propagator),
-        )));
+        let (invocation_processor_handle, invocation_processor_service) =
+            InvocationProcessorService::new(
+                Arc::clone(&tags_provider),
+                Arc::clone(&config),
+                Arc::clone(&aws_config),
+                metrics_aggregator,
+                Arc::clone(&propagator),
+            );
+        tokio::spawn(async move {
+            invocation_processor_service.run().await;
+        });
+
         let appsec_processor = match AppSecProcessor::new(&config) {
             Ok(p) => Some(Arc::new(TokioMutex::new(p))),
             Err(AppSecFeatureDisabled) => None,
@@ -519,7 +524,7 @@ mod tests {
 
         let proxy_handle = start(
             aws_config,
-            invocation_processor,
+            invocation_processor_handle,
             appsec_processor,
             propagator,
         )

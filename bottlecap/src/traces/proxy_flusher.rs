@@ -103,7 +103,7 @@ impl Flusher {
         } else {
             let mut aggregator = self.aggregator.lock().await;
             for pr in aggregator.get_batch() {
-                requests.push(self.create_request(pr, api_key).await);
+                requests.push(self.create_request(pr, api_key.as_str()).await);
             }
         }
 

@@ -55,7 +55,9 @@ impl StatsAggregator {
         // Pull stats data from concentrator
         match self.concentrator.flush(force_flush).await {
             Ok(stats) => {
-                self.queue.extend(stats);
+                if let Some(stats) = stats {
+                    self.queue.push_back(stats);
+                }
             }
             Err(e) => {
                 error!("Error getting stats from the stats concentrator: {e:?}");
@@ -89,22 +91,14 @@ impl StatsAggregator {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use crate::LAMBDA_RUNTIME_SLUG;
     use crate::config::Config;
-    use crate::tags::provider::Provider as TagProvider;
     use crate::traces::stats_concentrator_service::StatsConcentratorService;
-    use std::collections::HashMap;
     use std::sync::Arc;
 
     #[test]
     fn test_add() {
         let config = Arc::new(Config::default());
-        let tags_provider = Arc::new(TagProvider::new(
-            config.clone(),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
-        let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
+        let (_, concentrator) = StatsConcentratorService::new(config);
         let mut aggregator = StatsAggregator::new_with_concentrator(concentrator);
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
@@ -121,6 +115,8 @@ mod tests {
             tags: vec![],
             git_commit_sha: "git_commit_sha".to_string(),
             image_tag: "image_tag".to_string(),
+            process_tags: "process_tags".to_string(),
+            process_tags_hash: 0,
         };
 
         aggregator.add(payload.clone());
@@ -131,12 +127,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_batch() {
         let config = Arc::new(Config::default());
-        let tags_provider = Arc::new(TagProvider::new(
-            config.clone(),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
-        let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
+        let (_, concentrator) = StatsConcentratorService::new(config);
         let mut aggregator = StatsAggregator::new_with_concentrator(concentrator);
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
@@ -153,6 +144,8 @@ mod tests {
             tags: vec![],
             git_commit_sha: "git_commit_sha".to_string(),
             image_tag: "image_tag".to_string(),
+            process_tags: "process_tags".to_string(),
+            process_tags_hash: 0,
         };
         aggregator.add(payload.clone());
         assert_eq!(aggregator.queue.len(), 1);
@@ -163,14 +156,9 @@ mod tests {
     #[tokio::test]
     async fn test_get_batch_full_entries() {
         let config = Arc::new(Config::default());
-        let tags_provider = Arc::new(TagProvider::new(
-            config.clone(),
-            LAMBDA_RUNTIME_SLUG.to_string(),
-            &HashMap::new(),
-        ));
-        let (_, concentrator) = StatsConcentratorService::new(config, tags_provider);
-        let mut aggregator = StatsAggregator::new(640, concentrator);
-        // Payload below is 115 bytes
+        let (_, concentrator) = StatsConcentratorService::new(config);
+        let mut aggregator = StatsAggregator::new(704, concentrator);
+        // Payload below is 352 bytes
         let payload = ClientStatsPayload {
             hostname: "hostname".to_string(),
             env: "dev".to_string(),
@@ -186,6 +174,8 @@ mod tests {
             tags: vec![],
             git_commit_sha: "git_commit_sha".to_string(),
             image_tag: "image_tag".to_string(),
+            process_tags: "process_tags".to_string(),
+            process_tags_hash: 0,
         };
 
         // Add 3 payloads

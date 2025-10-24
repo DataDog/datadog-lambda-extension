@@ -3,7 +3,7 @@
 
 use axum::{
     Router,
-    extract::{Request, State},
+    extract::{DefaultBodyLimit, Request, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{any, post},
@@ -18,6 +18,7 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
 };
 use tokio_util::sync::CancellationToken;
+use tower_http::limit::RequestBodyLimitLayer;
 use tracing::{debug, error};
 
 use crate::traces::trace_processor::SendingTraceProcessor;
@@ -26,7 +27,7 @@ use crate::{
     config,
     http::{extract_request_body, handler_not_found},
     lifecycle::invocation::{
-        context::ReparentingInfo, processor::Processor as InvocationProcessor,
+        context::ReparentingInfo, processor_service::InvocationProcessorHandle,
     },
     tags::provider,
     traces::{
@@ -72,14 +73,16 @@ const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
 
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
 const STATS_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
-pub const MAX_CONTENT_LENGTH: usize = 10 * 1024 * 1024;
+pub const TRACE_REQUEST_BODY_LIMIT: usize = 50 * 1024 * 1024;
+pub const DEFAULT_REQUEST_BODY_LIMIT: usize = 2 * 1024 * 1024;
+pub const MAX_CONTENT_LENGTH: usize = 50 * 1024 * 1024;
 const LAMBDA_LOAD_SPAN: &str = "aws.lambda.load";
 
 #[derive(Clone)]
 pub struct TraceState {
     pub config: Arc<config::Config>,
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
-    pub invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    pub invocation_processor_handle: InvocationProcessorHandle,
     pub tags_provider: Arc<provider::Provider>,
 }
 
@@ -102,7 +105,7 @@ pub struct TraceAgent {
     pub stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
     pub proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
     pub tags_provider: Arc<provider::Provider>,
-    invocation_processor: Arc<Mutex<InvocationProcessor>>,
+    invocation_processor_handle: InvocationProcessorHandle,
     appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
@@ -125,7 +128,7 @@ impl TraceAgent {
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
         proxy_aggregator: Arc<Mutex<proxy_aggregator::Aggregator>>,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        invocation_processor_handle: InvocationProcessorHandle,
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
         stats_concentrator: StatsConcentratorHandle,
@@ -150,7 +153,7 @@ impl TraceAgent {
             stats_aggregator,
             stats_processor,
             proxy_aggregator,
-            invocation_processor,
+            invocation_processor_handle,
             appsec_processor,
             tags_provider,
             tx: trace_tx,
@@ -184,9 +187,9 @@ impl TraceAgent {
         let socket = SocketAddr::from(([127, 0, 0, 1], port));
         let listener = tokio::net::TcpListener::bind(&socket).await?;
 
-        debug!("Trace Agent started: listening on port {TRACE_AGENT_PORT}");
+        debug!("TRACE AGENT | Listening on port {TRACE_AGENT_PORT}");
         debug!(
-            "Time taken start the Trace Agent: {} ms",
+            "TRACE AGENT | Time taken to start: {} ms",
             now.elapsed().as_millis()
         );
 
@@ -208,7 +211,7 @@ impl TraceAgent {
                 trace_tx: self.tx.clone(),
                 stats_generator,
             }),
-            invocation_processor: Arc::clone(&self.invocation_processor),
+            invocation_processor_handle: self.invocation_processor_handle.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
         };
 
@@ -231,10 +234,12 @@ impl TraceAgent {
                 V5_TRACE_ENDPOINT_PATH,
                 post(Self::v05_traces).put(Self::v05_traces),
             )
+            .layer(RequestBodyLimitLayer::new(TRACE_REQUEST_BODY_LIMIT))
             .with_state(trace_state);
 
         let stats_router = Router::new()
             .route(STATS_ENDPOINT_PATH, post(Self::stats).put(Self::stats))
+            .layer(RequestBodyLimitLayer::new(DEFAULT_REQUEST_BODY_LIMIT))
             .with_state(stats_state);
 
         let proxy_router = Router::new()
@@ -254,6 +259,7 @@ impl TraceAgent {
                 INSTRUMENTATION_ENDPOINT_PATH,
                 post(Self::instrumentation_proxy),
             )
+            .layer(RequestBodyLimitLayer::new(DEFAULT_REQUEST_BODY_LIMIT))
             .with_state(proxy_state);
 
         let info_router = Router::new().route(INFO_ENDPOINT_PATH, any(Self::info));
@@ -264,11 +270,13 @@ impl TraceAgent {
             .merge(proxy_router)
             .merge(info_router)
             .fallback(handler_not_found)
+            // Disable the default body limit so we can use our own limit
+            .layer(DefaultBodyLimit::disable())
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
         shutdown_token.cancelled().await;
-        debug!("Trace Agent | Shutdown signal received, shutting down");
+        debug!("TRACE_AGENT | Shutdown signal received, shutting down");
     }
 
     async fn v04_traces(State(state): State<TraceState>, request: Request) -> Response {
@@ -276,7 +284,7 @@ impl TraceAgent {
             state.config,
             request,
             state.trace_sender,
-            state.invocation_processor,
+            state.invocation_processor_handle,
             state.tags_provider,
             ApiVersion::V04,
         )
@@ -288,7 +296,7 @@ impl TraceAgent {
             state.config,
             request,
             state.trace_sender,
-            state.invocation_processor,
+            state.invocation_processor_handle,
             state.tags_provider,
             ApiVersion::V05,
         )
@@ -427,13 +435,18 @@ impl TraceAgent {
         config: Arc<config::Config>,
         request: Request,
         trace_sender: Arc<SendingTraceProcessor>,
-        invocation_processor: Arc<Mutex<InvocationProcessor>>,
+        invocation_processor_handle: InvocationProcessorHandle,
         tags_provider: Arc<provider::Provider>,
         version: ApiVersion,
     ) -> Response {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
-            Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+            Err(e) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("TRACE_AGENT | handle_traces | Error extracting request body: {e}"),
+                );
+            }
         };
 
         if let Some(content_length) = parts
@@ -482,9 +495,12 @@ impl TraceAgent {
             },
         };
 
-        let mut reparenting_info = {
-            let invocation_processor = invocation_processor.lock().await;
-            invocation_processor.get_reparenting_info()
+        let mut reparenting_info = match invocation_processor_handle.get_reparenting_info().await {
+            Ok(info) => info,
+            Err(e) => {
+                error!("Failed to get reparenting info: {e}");
+                VecDeque::new()
+            }
         };
 
         for chunk in &mut traces {
@@ -493,29 +509,49 @@ impl TraceAgent {
                 // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
                 // span to the cold start span, and eventually send the cold start span.
                 if span.name == LAMBDA_LOAD_SPAN {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    if let Some(cold_start_span_id) =
-                        invocation_processor.set_cold_start_span_trace_id(span.trace_id)
+                    match invocation_processor_handle
+                        .set_cold_start_span_trace_id(span.trace_id)
+                        .await
                     {
-                        span.parent_id = cold_start_span_id;
+                        Ok(Some(cold_start_span_id)) => {
+                            span.parent_id = cold_start_span_id;
+                        }
+                        Ok(None) => {}
+                        Err(e) => {
+                            error!("Failed to set cold start span trace ID: {e}");
+                        }
                     }
                 }
 
                 if span.resource == INVOCATION_SPAN_RESOURCE {
-                    let mut invocation_processor = invocation_processor.lock().await;
-                    invocation_processor.add_tracer_span(span);
+                    if let Err(e) = invocation_processor_handle
+                        .add_tracer_span(span.clone())
+                        .await
+                    {
+                        error!("Failed to add tracer span to processor: {}", e);
+                    }
                 }
                 handle_reparenting(&mut reparenting_info, span);
             }
         }
 
+        match invocation_processor_handle
+            .update_reparenting(reparenting_info)
+            .await
         {
-            let mut invocation_processor = invocation_processor.lock().await;
-            for ctx_to_send in invocation_processor.update_reparenting(reparenting_info) {
-                debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
-                invocation_processor
-                    .send_ctx_spans(&tags_provider, &trace_sender, ctx_to_send)
-                    .await;
+            Ok(contexts_to_send) => {
+                for ctx_to_send in contexts_to_send {
+                    debug!("Invocation span is now ready. Sending: {ctx_to_send:?}");
+                    if let Err(e) = invocation_processor_handle
+                        .send_ctx_spans(&tags_provider, &trace_sender, ctx_to_send)
+                        .await
+                    {
+                        error!("Failed to send context spans to processor: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to update reparenting: {e}");
             }
         }
 
@@ -548,10 +584,15 @@ impl TraceAgent {
         backend_path: &str,
         context: &str,
     ) -> Response {
-        debug!("Trace Agent | Proxied request for {context}");
+        debug!("TRACE_AGENT | Proxied request for {context}");
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
-            Err(e) => return error_response(StatusCode::INTERNAL_SERVER_ERROR, e),
+            Err(e) => {
+                return error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("TRACE_AGENT | handle_proxy | Error extracting request body: {e}"),
+                );
+            }
         };
 
         let target_url = format!("https://{}.{}{}", backend_domain, config.site, backend_path);
