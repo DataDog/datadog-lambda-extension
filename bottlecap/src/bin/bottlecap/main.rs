@@ -64,7 +64,8 @@ use bottlecap::{
         stats_flusher::{self, StatsFlusher},
         stats_generator::StatsGenerator,
         stats_processor, trace_agent,
-        trace_aggregator::{self, SendDataBuilderInfo},
+        trace_aggregator::SendDataBuilderInfo,
+        trace_aggregator_service::AggregatorService as TraceAggregatorService,
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
     },
@@ -1006,9 +1007,11 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
+    let (trace_aggregator_service, trace_aggregator_handle) = TraceAggregatorService::default();
+    tokio::spawn(trace_aggregator_service.run());
+
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
-        trace_aggregator.clone(),
+        trace_aggregator_handle.clone(),
         config.clone(),
         api_key_factory.clone(),
     ));
@@ -1037,7 +1040,7 @@ fn start_trace_agent(
 
     let trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
-        trace_aggregator,
+        trace_aggregator_handle,
         trace_processor.clone(),
         stats_aggregator,
         stats_processor,

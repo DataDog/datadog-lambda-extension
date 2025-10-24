@@ -13,6 +13,7 @@ pub mod stats_generator;
 pub mod stats_processor;
 pub mod trace_agent;
 pub mod trace_aggregator;
+pub mod trace_aggregator_service;
 pub mod trace_flusher;
 pub mod trace_processor;
 

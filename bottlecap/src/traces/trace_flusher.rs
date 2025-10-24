@@ -2,28 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use async_trait::async_trait;
-use ddcommon::Endpoint;
-use std::str::FromStr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::task::JoinSet;
-use tracing::{debug, error};
-
 use datadog_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
+use ddcommon::Endpoint;
 use dogstatsd::api_key::ApiKeyFactory;
+use std::str::FromStr;
+use std::sync::Arc;
+use tokio::task::JoinSet;
+use tracing::{debug, error};
 
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
-use crate::traces::trace_aggregator::TraceAggregator;
+use crate::traces::trace_aggregator_service::AggregatorHandle;
 
 #[async_trait]
 pub trait TraceFlusher {
     fn new(
-        aggregator: Arc<Mutex<TraceAggregator>>,
+        aggregator_handle: AggregatorHandle,
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
     ) -> Self
@@ -46,7 +44,7 @@ pub trait TraceFlusher {
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceFlusher {
-    pub aggregator: Arc<Mutex<TraceAggregator>>,
+    pub aggregator_handle: AggregatorHandle,
     pub config: Arc<Config>,
     pub api_key_factory: Arc<ApiKeyFactory>,
     pub additional_endpoints: Vec<Endpoint>,
@@ -55,7 +53,7 @@ pub struct ServerlessTraceFlusher {
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
     fn new(
-        aggregator: Arc<Mutex<TraceAggregator>>,
+        aggregator_handle: AggregatorHandle,
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
     ) -> Self {
@@ -77,7 +75,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         }
 
         ServerlessTraceFlusher {
-            aggregator,
+            aggregator_handle,
             config,
             api_key_factory,
             additional_endpoints,
@@ -89,9 +87,8 @@ impl TraceFlusher for ServerlessTraceFlusher {
             error!(
                 "TRACES | Failed to resolve API key, dropping aggregated data and skipping flushing."
             );
-            {
-                let mut guard = self.aggregator.lock().await;
-                guard.clear();
+            if let Err(e) = self.aggregator_handle.clear() {
+                error!("TRACES | Failed to clear aggregator data: {e}");
             }
             return None;
         };
@@ -113,16 +110,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
             }
         }
 
-        let mut all_batches = Vec::new();
-        {
-            let mut guard = self.aggregator.lock().await;
-            let mut trace_builders = guard.get_batch();
-
-            while !trace_builders.is_empty() {
-                all_batches.push(trace_builders);
-                trace_builders = guard.get_batch();
+        let all_batches = match self.aggregator_handle.get_batches().await {
+            Ok(v) => v,
+            Err(e) => {
+                error!("TRACES | Failed to fetch batches from aggregator service: {e}");
+                return None;
             }
-        }
+        };
 
         let mut batch_tasks = JoinSet::new();
 
