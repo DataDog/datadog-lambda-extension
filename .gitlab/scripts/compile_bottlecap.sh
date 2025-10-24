@@ -31,6 +31,13 @@ else
     printf "Fips compile requested: ${FIPS}\n"
 fi
 
+if [ -z "$DEBUG" ] || [ "$DEBUG" != "1" ]; then
+    printf "[WARNING] No DEBUG provided or DEBUG != 1, defaulting to release mode\n"
+    DEBUG=0
+else
+    printf "Debug mode requested: ${DEBUG}\n"
+fi
+
 if [ "$ALPINE" = "0" ]; then
     COMPILE_IMAGE=Dockerfile.bottlecap.compile
 else
@@ -67,6 +74,7 @@ docker_build() {
         -f ./images/${file} \
         --build-arg PLATFORM=$PLATFORM \
         --build-arg FIPS="${FIPS}" \
+        --build-arg DEBUG="${DEBUG}" \
         . -o $BINARY_PATH
 
     # Copy the compiled binary to the target directory with the expected name

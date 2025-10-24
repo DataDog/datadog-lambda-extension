@@ -2,6 +2,7 @@ FROM public.ecr.aws/lambda/provided:al2 AS compiler
 ARG PLATFORM
 
 ARG FIPS
+ARG DEBUG
 
 # Install dependencies
 RUN --mount=type=cache,target=/var/cache/yum \
@@ -35,11 +36,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
     else \
         export FEATURES=default; \
     fi; \
+    if [ "${DEBUG}" = "0" ]; then \
+        export BUILD_MODE=release; \
+        export BUILD_FLAG="--release"; \
+    else \
+        export BUILD_MODE=debug; \
+        export BUILD_FLAG=""; \
+    fi; \
     # The `libddwaf` crate links against static objects that require `libclang_rt.builtins`, but
     # this is not presented to the linker by default on this platform, so we force it in.
     export RUSTFLAGS="${RUSTFLAGS:-} -Clinker=clang -L$(dirname $(clang --print-file-name="libclang_rt.builtins-$(uname -m).a")) -lclang_rt.builtins-$(uname -m)"; \
-    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" --release && \
-    mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/release/bottlecap" /tmp/out/bottlecap
+    cargo +stable build --verbose --locked --no-default-features --features="${FEATURES}" ${BUILD_FLAG} && \
+    mkdir -p /tmp/out && cp "/tmp/dd/bottlecap/target/${BUILD_MODE}/bottlecap" /tmp/out/bottlecap
 
 # Use smallest image possible
 FROM scratch
