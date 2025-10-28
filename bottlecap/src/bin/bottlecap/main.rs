@@ -45,7 +45,10 @@ use bottlecap::{
     },
     logger,
     logs::{
-        agent::LogsAgent, aggregator_service::AggregatorService as LogsAggregatorService,
+        agent::LogsAgent,
+        aggregator_service::{
+            AggregatorHandle as LogsAggregatorHandle, AggregatorService as LogsAggregatorService,
+        },
         flusher::LogsFlusher,
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
@@ -64,7 +67,10 @@ use bottlecap::{
         stats_flusher::{self, StatsFlusher},
         stats_generator::StatsGenerator,
         stats_processor, trace_agent,
-        trace_aggregator::{self, SendDataBuilderInfo},
+        trace_aggregator::SendDataBuilderInfo,
+        trace_aggregator_service::{
+            AggregatorHandle as TraceAggregatorHandle, AggregatorService as TraceAggregatorService,
+        },
         trace_flusher::{self, ServerlessTraceFlusher, TraceFlusher},
         trace_processor::{self, SendingTraceProcessor},
     },
@@ -402,12 +408,13 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
-    let (logs_agent_channel, logs_flusher, logs_agent_cancel_token) = start_logs_agent(
-        config,
-        Arc::clone(&api_key_factory),
-        &tags_provider,
-        event_bus_tx.clone(),
-    );
+    let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
+        start_logs_agent(
+            config,
+            Arc::clone(&api_key_factory),
+            &tags_provider,
+            event_bus_tx.clone(),
+        );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
         start_dogstatsd(tags_provider.clone(), Arc::clone(&api_key_factory), config).await;
@@ -446,6 +453,7 @@ async fn extension_loop_active(
         proxy_flusher,
         trace_agent_shutdown_token,
         stats_concentrator,
+        trace_aggregator_handle,
     ) = start_trace_agent(
         config,
         &api_key_factory,
@@ -745,6 +753,15 @@ async fn extension_loop_active(
                 true, // force_flush_trace_stats
             )
             .await;
+
+            // Shutdown aggregator services
+            if let Err(e) = logs_aggregator_handle.shutdown() {
+                error!("Failed to shutdown logs aggregator: {e}");
+            }
+            if let Err(e) = trace_aggregator_handle.shutdown() {
+                error!("Failed to shutdown trace aggregator: {e}");
+            }
+
             return Ok(());
         }
     }
@@ -959,7 +976,12 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
-) -> (Sender<TelemetryEvent>, LogsFlusher, CancellationToken) {
+) -> (
+    Sender<TelemetryEvent>,
+    LogsFlusher,
+    CancellationToken,
+    LogsAggregatorHandle,
+) {
     let (aggregator_service, aggregator_handle) = LogsAggregatorService::default();
     // Start service in background
     tokio::spawn(async move {
@@ -981,8 +1003,8 @@ fn start_logs_agent(
         drop(agent);
     });
 
-    let flusher = LogsFlusher::new(api_key_factory, aggregator_handle, config.clone());
-    (tx, flusher, cancel_token)
+    let flusher = LogsFlusher::new(api_key_factory, aggregator_handle.clone(), config.clone());
+    (tx, flusher, cancel_token, aggregator_handle)
 }
 
 #[allow(clippy::type_complexity)]
@@ -1000,6 +1022,7 @@ fn start_trace_agent(
     Arc<ProxyFlusher>,
     tokio_util::sync::CancellationToken,
     StatsConcentratorHandle,
+    TraceAggregatorHandle,
 ) {
     // Stats
     let (stats_concentrator_service, stats_concentrator_handle) =
@@ -1017,9 +1040,11 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Traces
-    let trace_aggregator = Arc::new(TokioMutex::new(trace_aggregator::TraceAggregator::default()));
+    let (trace_aggregator_service, trace_aggregator_handle) = TraceAggregatorService::default();
+    tokio::spawn(trace_aggregator_service.run());
+
     let trace_flusher = Arc::new(trace_flusher::ServerlessTraceFlusher::new(
-        trace_aggregator.clone(),
+        trace_aggregator_handle.clone(),
         config.clone(),
         api_key_factory.clone(),
     ));
@@ -1048,7 +1073,7 @@ fn start_trace_agent(
 
     let trace_agent = trace_agent::TraceAgent::new(
         Arc::clone(config),
-        trace_aggregator,
+        trace_aggregator_handle.clone(),
         trace_processor.clone(),
         stats_aggregator,
         stats_processor,
@@ -1075,6 +1100,7 @@ fn start_trace_agent(
         proxy_flusher,
         shutdown_token,
         stats_concentrator_handle,
+        trace_aggregator_handle,
     )
 }
 

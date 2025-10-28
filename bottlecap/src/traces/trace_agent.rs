@@ -36,7 +36,8 @@ use crate::{
         stats_aggregator,
         stats_generator::StatsGenerator,
         stats_processor,
-        trace_aggregator::{self, SendDataBuilderInfo},
+        trace_aggregator::SendDataBuilderInfo,
+        trace_aggregator_service::AggregatorHandle,
         trace_processor,
     },
 };
@@ -123,7 +124,7 @@ impl TraceAgent {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         config: Arc<config::Config>,
-        trace_aggregator: Arc<Mutex<trace_aggregator::TraceAggregator>>,
+        aggregator_handle: AggregatorHandle,
         trace_processor: Arc<dyn trace_processor::TraceProcessor + Send + Sync>,
         stats_aggregator: Arc<Mutex<stats_aggregator::StatsAggregator>>,
         stats_processor: Arc<dyn stats_processor::StatsProcessor + Send + Sync>,
@@ -142,8 +143,9 @@ impl TraceAgent {
         // Start the trace aggregator, which receives and buffers trace payloads to be consumed by the trace flusher.
         tokio::spawn(async move {
             while let Some(tracer_payload_info) = trace_rx.recv().await {
-                let mut aggregator = trace_aggregator.lock().await;
-                aggregator.add(tracer_payload_info);
+                if let Err(e) = aggregator_handle.insert_payload(tracer_payload_info) {
+                    error!("TRACE_AGENT | Failed to insert payload into aggregator: {e}");
+                }
             }
         });
 
