@@ -63,8 +63,8 @@ datadog-trace-utils = { git = "https://github.com/DataDog/libdatadog", rev = "ba
 datadog-trace-normalization = { git = "https://github.com/DataDog/libdatadog",  rev = "ba8955394cf35cf24a1a508fbe6264ad84702567" }
 datadog-trace-obfuscation = { git = "https://github.com/DataDog/libdatadog", rev = "ba8955394cf35cf24a1a508fbe6264ad84702567"  }
 datadog-trace-stats = { git = "https://github.com/DataDog/libdatadog", rev = "ba8955394cf35cf24a1a508fbe6264ad84702567"  }
-dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "936b3440a1ffc3dd68d040354b721a3042aad47d", default-features = false }
-datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "936b3440a1ffc3dd68d040354b721a3042aad47d", default-features = false }
+dogstatsd = { git = "https://github.com/DataDog/serverless-components", rev = "05b9dee1ac7c72d296ea12e85685c026cb6dbaaf", default-features = false }
+datadog-fips = { git = "https://github.com/DataDog/serverless-components", rev = "05b9dee1ac7c72d296ea12e85685c026cb6dbaaf", default-features = false }
 libddwaf = { version = "1.28.1", git = "https://github.com/DataDog/libddwaf-rust", rev = "d1534a158d976bd4f747bf9fcc58e0712d2d17fc", default-features = false, features = ["serde"] }
 
 [dev-dependencies]
