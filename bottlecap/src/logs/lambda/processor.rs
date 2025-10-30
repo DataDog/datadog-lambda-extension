@@ -222,6 +222,18 @@ impl LambdaProcessor {
                     None,
                 ))
             },
+            TelemetryRecord::PlatformRestoreStart { .. } => {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
+                    error!("Failed to send PlatformRestoreStart to the main event bus: {}", e);
+                }
+                Err("Unsupported event type".into())
+            }
+            TelemetryRecord::PlatformRestoreReport { .. } => {
+                if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
+                    error!("Failed to send PlatformRestoreReport to the main event bus: {}", e);
+                }
+                Err("Unsupported event type".into())
+            }
             // TODO: PlatformInitRuntimeDone
             // TODO: PlatformExtension
             // TODO: PlatformTelemetrySubscription

@@ -17,6 +17,8 @@ pub const DURATION_METRIC: &str = "aws.lambda.enhanced.duration";
 pub const POST_RUNTIME_DURATION_METRIC: &str = "aws.lambda.enhanced.post_runtime_duration";
 pub const ESTIMATED_COST_METRIC: &str = "aws.lambda.enhanced.estimated_cost";
 pub const INIT_DURATION_METRIC: &str = "aws.lambda.enhanced.init_duration";
+pub const SNAPSTART_RESTORE_DURATION_METRIC: &str =
+    "aws.lambda.enhanced.snapstart_restore_duration";
 pub const RESPONSE_LATENCY_METRIC: &str = "aws.lambda.enhanced.response_latency";
 pub const RESPONSE_DURATION_METRIC: &str = "aws.lambda.enhanced.response_duration";
 pub const PRODUCED_BYTES_METRIC: &str = "aws.lambda.enhanced.produced_bytes";

@@ -262,6 +262,53 @@ impl Processor {
         }
     }
 
+    /// Called when the `SnapStart` restore phase starts.
+    ///
+    /// This is used to create a `snapstart_restore` span, since this telemetry event does not
+    /// provide a `request_id`, we try to guess which invocation is the restore similar to init.
+    pub fn on_platform_restore_start(&mut self, time: DateTime<Utc>) {
+        let start_time: i64 = SystemTime::from(time)
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+            .try_into()
+            .unwrap_or_default();
+
+        // Get the closest context
+        let Some(context) = self.context_buffer.get_closest_mut(start_time) else {
+            debug!("Cannot process on platform restore start, no invocation context found");
+            return;
+        };
+
+        // Create a SnapStart restore span
+        let mut snapstart_restore_span = create_empty_span(
+            String::from("aws.lambda.snapstart_restore"),
+            &self.resource,
+            &self.service,
+        );
+        snapstart_restore_span.span_id = generate_span_id();
+        snapstart_restore_span.start = start_time;
+        context.snapstart_restore_span = Some(snapstart_restore_span);
+    }
+
+    /// Given the duration of the platform restore report, set the snapstart restore duration.
+    ///
+    #[allow(clippy::cast_possible_truncation)]
+    pub fn on_platform_restore_report(&mut self, duration_ms: f64, timestamp: i64) {
+        self.enhanced_metrics
+            .set_snapstart_restore_duration_metric(duration_ms, timestamp);
+
+        let Some(context) = self.context_buffer.get_closest_mut(timestamp) else {
+            debug!("Cannot process on platform restore report, no invocation context found");
+            return;
+        };
+
+        if let Some(snapstart_restore_span) = &mut context.snapstart_restore_span {
+            // `round` is intentionally meant to be a whole integer
+            snapstart_restore_span.duration = (duration_ms * MS_TO_NS) as i64;
+        }
+    }
+
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
     ///
     pub fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
@@ -409,6 +456,14 @@ impl Processor {
                 cold_start_span.parent_id = context.invocation_span.parent_id;
             }
         }
+
+        // Handle snapstart restore span if present
+        if let Some(snapstart_restore_span) = &mut context.snapstart_restore_span {
+            if context.invocation_span.trace_id != 0 {
+                snapstart_restore_span.trace_id = context.invocation_span.trace_id;
+                snapstart_restore_span.parent_id = context.invocation_span.parent_id;
+            }
+        }
         Some(context.clone())
     }
 
@@ -431,7 +486,14 @@ impl Processor {
             traces.push(ws.clone());
         }
 
-        if let Some(cold_start_span) = &context.cold_start_span {
+        // SnapStart includes telemetry events from Init (Cold Start).
+        // However, these Init events are from when the snapshot was created and
+        // not when the lambda sandbox is actually created.
+        // So, if we have a snapstart restore span, use it instead of cold start span.
+        if let Some(snapstart_restore_span) = &context.snapstart_restore_span {
+            body_size += std::mem::size_of_val(snapstart_restore_span);
+            traces.push(snapstart_restore_span.clone());
+        } else if let Some(cold_start_span) = &context.cold_start_span {
             body_size += std::mem::size_of_val(cold_start_span);
             traces.push(cold_start_span.clone());
         }
