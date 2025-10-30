@@ -1169,16 +1169,16 @@ mod tests {
         assert_eq!(batches.len(), 1);
 
         let batch_str = String::from_utf8(batches[0].clone()).unwrap();
-        
+
         // Verify the START log is NOT in the batch (it should be excluded)
         assert!(!batch_str.contains("START RequestId"));
-        
+
         // Verify the extension log IS in the batch
         assert!(batch_str.contains("Important extension log that should not be excluded"));
-        
+
         // Verify the error log IS in the batch
         assert!(batch_str.contains("NO_REGION environment variable not set"));
-        
+
         // Verify both logs have the correct request_id assigned
         assert!(batch_str.contains("test-request-id"));
 
