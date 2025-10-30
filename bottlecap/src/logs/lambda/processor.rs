@@ -341,6 +341,8 @@ impl LambdaProcessor {
             for mut orphan_log in self.orphan_logs.drain(..) {
                 orphan_log.message.lambda.request_id =
                     Some(self.invocation_context.request_id.clone());
+                let should_send_log = self.logs_enabled
+                    && LambdaProcessor::apply_rules(&self.rules, &mut orphan_log.message.message);
                 if should_send_log {
                     if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
                         drop(orphan_log);
