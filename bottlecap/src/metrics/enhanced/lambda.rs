@@ -118,6 +118,26 @@ impl Lambda {
         }
     }
 
+    pub fn set_snapstart_restore_duration_metric(
+        &mut self,
+        restore_duration_ms: f64,
+        timestamp: i64,
+    ) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        let metric = Metric::new(
+            constants::SNAPSTART_RESTORE_DURATION_METRIC.into(),
+            MetricValue::distribution(restore_duration_ms * constants::MS_TO_SEC),
+            self.get_dynamic_value_tags(),
+            Some(timestamp),
+        );
+
+        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+            error!("failed to insert metric: {}", e);
+        }
+    }
+
     pub fn set_invoked_received(&mut self) {
         self.invoked_received = true;
     }

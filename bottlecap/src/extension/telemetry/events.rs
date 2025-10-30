@@ -142,6 +142,8 @@ pub enum TelemetryRecord {
         status: Status,
         /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
+        /// Metrics about the restore phase
+        metrics: Option<RestoreReportMetrics>,
     },
     #[serde(rename = "platform.restoreRuntimeDone", rename_all = "camelCase")]
     PlatformRestoreRuntimeDone {
@@ -200,6 +202,14 @@ pub enum Status {
 #[serde(rename_all = "camelCase")]
 pub struct InitReportMetrics {
     /// Duration of initialization
+    pub duration_ms: f64,
+}
+
+/// Restore report metrics
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreReportMetrics {
+    /// Duration of restore phase in milliseconds
     pub duration_ms: f64,
 }
 
