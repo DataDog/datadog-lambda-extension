@@ -324,31 +324,30 @@ impl LambdaProcessor {
         }
     }
 
-    pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
-        if let Ok(mut log) = self.make_log(event).await {
-            let should_send_log = self.logs_enabled
-                && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-            if should_send_log {
-                if let Ok(serialized_log) = serde_json::to_string(&log) {
-                    // explicitly drop log so we don't accidentally re-use it and push
-                    // duplicate logs to the aggregator
-                    drop(log);
-                    self.ready_logs.push(serialized_log);
-                }
+    /// Processes a log, applies filtering rules, serializes it, and queues it for aggregation
+    fn process_and_queue_log(&mut self, mut log: IntakeLog) {
+        let should_send_log = self.logs_enabled
+            && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
+        if should_send_log {
+            if let Ok(serialized_log) = serde_json::to_string(&log) {
+                // explicitly drop log so we don't accidentally re-use it and push
+                // duplicate logs to the aggregator
+                drop(log);
+                self.ready_logs.push(serialized_log);
             }
+        }
+    }
+
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
+        if let Ok(log) = self.make_log(event).await {
+            self.process_and_queue_log(log);
 
             // Process orphan logs, since we have a `request_id` now
-            for mut orphan_log in self.orphan_logs.drain(..) {
+            let orphan_logs = std::mem::take(&mut self.orphan_logs);
+            for mut orphan_log in orphan_logs {
                 orphan_log.message.lambda.request_id =
                     Some(self.invocation_context.request_id.clone());
-                let should_send_log = self.logs_enabled
-                    && LambdaProcessor::apply_rules(&self.rules, &mut orphan_log.message.message);
-                if should_send_log {
-                    if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
-                        drop(orphan_log);
-                        self.ready_logs.push(serialized_log);
-                    }
-                }
+                self.process_and_queue_log(orphan_log);
             }
         }
 
