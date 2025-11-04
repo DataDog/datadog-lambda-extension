@@ -13,6 +13,8 @@ const AWS_LWA_LAMBDA_RUNTIME_API_PROXY: &str = "AWS_LWA_LAMBDA_RUNTIME_API_PROXY
 const AWS_LAMBDA_EXEC_WRAPPER: &str = "AWS_LAMBDA_EXEC_WRAPPER";
 const AWS_LAMBDA_INITIALIZATION_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
 
+pub const LAMBDA_MANAGED_INSTANCES_INIT_TYPE: &str = "lambda-managed-instances";
+
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone)]
 pub struct AwsConfig {
@@ -41,7 +43,8 @@ impl AwsConfig {
 
     #[must_use]
     pub fn is_managed_instance_mode(&self) -> bool {
-        self.initialization_type.eq("ec2-capacity-provider")
+        self.initialization_type
+            .eq(LAMBDA_MANAGED_INSTANCES_INIT_TYPE)
     }
 }
 

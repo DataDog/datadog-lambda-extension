@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::fmt::Display;
 
+use crate::config::aws::LAMBDA_MANAGED_INSTANCES_INIT_TYPE;
+
 /// Payload received from the Telemetry API
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct TelemetryEvent {
@@ -165,8 +167,8 @@ pub enum InitType {
     /// `SnapStart`
     SnapStart,
     /// Managed Instance mode
-    #[serde(rename = "ec2-capacity-provider")]
-    EC2CapacityProvider,
+    #[serde(rename = "lambda-managed-instances")]
+    ManagedInstance,
 }
 
 impl Display for InitType {
@@ -175,7 +177,7 @@ impl Display for InitType {
             InitType::OnDemand => "on-demand",
             InitType::ProvisionedConcurrency => "provisioned-concurrency",
             InitType::SnapStart => "SnapStart",
-            InitType::EC2CapacityProvider => "ec2-capacity-provider",
+            InitType::ManagedInstance => LAMBDA_MANAGED_INSTANCES_INIT_TYPE,
         };
         write!(f, "{style}")
     }

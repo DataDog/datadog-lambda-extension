@@ -1492,6 +1492,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_is_managed_instance_mode_returns_true() {
+        use crate::config::aws::LAMBDA_MANAGED_INSTANCES_INIT_TYPE;
+
         let aws_config = Arc::new(AwsConfig {
             region: "us-east-1".into(),
             aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
@@ -1499,7 +1501,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             runtime_api: "***".into(),
             exec_wrapper: None,
-            initialization_type: "ec2-capacity-provider".into(), // Managed Instance mode
+            initialization_type: LAMBDA_MANAGED_INSTANCES_INIT_TYPE.into(), // Managed Instance mode
         });
 
         let config = Arc::new(config::Config::default());
