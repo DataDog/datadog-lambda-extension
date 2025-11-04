@@ -39,7 +39,8 @@ start:
 	-p 2345:2345 \
 	--cap-add=SYS_PTRACE --security-opt seccomp=unconfined \
   	--cpus=1 \
-  	-e AWS_LAMBDA_INITIALIZATION_TYPE="ec2-capacity-provider" \
+  	-e AWS_LAMBDA_INITIALIZATION_TYPE="lambda-managed-instances" \
+	-e AWS_LAMBDA_MAX_CONCURRENCY=5 \
   	-e DD_API_KEY="$(DD_API_KEY)" \
   	-e DD_SITE="datadoghq.com" \
   	-e DD_SERVICE="dd-$(USERNAME_NORMALIZED)-test" \

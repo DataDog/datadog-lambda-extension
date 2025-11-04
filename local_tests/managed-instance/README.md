@@ -2,7 +2,7 @@
 
 ## Overview
 
-This setup enables local testing of the Datadog Lambda Extension running in **Managed Instance Mode** using the AWS Lambda Runtime Interface Emulator (RIE). Managed Instance mode is a specialized initialization mode triggered by setting `AWS_LAMBDA_INITIALIZATION_TYPE="ec2-capacity-provider"`, which changes how the extension behaves during Lambda initialization.
+This setup enables local testing of the Datadog Lambda Extension running in **Managed Instance Mode** using the AWS Lambda Runtime Interface Emulator (RIE). Managed Instance mode is a specialized initialization mode triggered by setting `AWS_LAMBDA_INITIALIZATION_TYPE="lambda-managed-instances"`, which changes how the extension behaves during Lambda initialization.
 
 ## What is Managed Instance Mode?
 
@@ -53,7 +53,7 @@ Managed Instance mode is activated when the extension detects it's running in a 
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  Environment Variables:                                                     │
-│  • AWS_LAMBDA_INITIALIZATION_TYPE="ec2-capacity-provider" (Managed Instance)│
+│  • AWS_LAMBDA_INITIALIZATION_TYPE="lambda-managed-instances" (Managed)      │
 │  • DD_LOG_LEVEL="debug"                                                     │
 │  • DD_FLUSHING_STRATEGY="continuously,1"                                    │
 │                                                                             │
@@ -175,7 +175,7 @@ make start
 The container starts with:
 - **Port 9000**: Lambda invocations endpoint
 - **Port 2345**: GDB remote debugging (optional)
-- **Managed Instance mode**: Enabled via `AWS_LAMBDA_INITIALIZATION_TYPE="ec2-capacity-provider"`
+- **Managed Instance mode**: Enabled via `AWS_LAMBDA_INITIALIZATION_TYPE="lambda-managed-instances"`
 - **CPU limit**: 1 CPU to simulate Lambda resource constraints
 - **Continuous flushing**: Enabled for testing real-time telemetry
 
@@ -307,7 +307,7 @@ The container is configured with these environment variables:
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
-| `AWS_LAMBDA_INITIALIZATION_TYPE` | `ec2-capacity-provider` | Activates managed instance mode |
+| `AWS_LAMBDA_INITIALIZATION_TYPE` | `lambda-managed-instances` | Activates managed instance mode |
 | `DD_API_KEY` | From host env | Authentication for Datadog API |
 | `DD_SITE` | `datadoghq.com` | Datadog site to send data to |
 | `DD_SERVICE` | `dd-<username>-test` | Service name for telemetry |
@@ -361,7 +361,7 @@ make start
 1. Verify environment variable is set:
 ```bash
 docker exec managed-instance-lambda env | grep AWS_LAMBDA_INITIALIZATION_TYPE
-# Should output: AWS_LAMBDA_INITIALIZATION_TYPE=ec2-capacity-provider
+# Should output: AWS_LAMBDA_INITIALIZATION_TYPE=lambda-managed-instances
 ```
 
 2. Check logs for managed instance mode detection:
@@ -438,7 +438,7 @@ start:
 	docker run -d --name $(CONTAINER_NAME) \
 	-p 9000:8080 \
 	-p 2345:2345 \
-	-e AWS_LAMBDA_INITIALIZATION_TYPE="ec2-capacity-provider" \
+	-e AWS_LAMBDA_INITIALIZATION_TYPE="lambda-managed-instances" \
 	-e DD_API_KEY="$(DD_API_KEY)" \
 	-e DD_SITE="datadoghq.com" \
 	-e DD_SERVICE="my-custom-service" \
@@ -497,7 +497,7 @@ make invoke
 
 | Aspect | Bottlecap Setup | Managed Instance Setup |
 |--------|----------------|------------------------|
-| **Initialization Mode** | Standard Lambda | Managed Instance mode (`ec2-capacity-provider`) |
+| **Initialization Mode** | Standard Lambda | Managed Instance mode (`lambda-managed-instances`) |
 | **RIE Binary** | Standard RIE | Custom managed instance RIE |
 | **Telemetry Endpoints** | Standard API routes | Managed-instance-specific routes |
 | **Primary Use Case** | General debugging | Managed instance mode testing |
