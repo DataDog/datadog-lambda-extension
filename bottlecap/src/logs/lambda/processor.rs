@@ -324,29 +324,30 @@ impl LambdaProcessor {
         }
     }
 
-    pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
-        if let Ok(mut log) = self.make_log(event).await {
-            let should_send_log = self.logs_enabled
-                && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
-            if should_send_log {
-                if let Ok(serialized_log) = serde_json::to_string(&log) {
-                    // explicitly drop log so we don't accidentally re-use it and push
-                    // duplicate logs to the aggregator
-                    drop(log);
-                    self.ready_logs.push(serialized_log);
-                }
+    /// Processes a log, applies filtering rules, serializes it, and queues it for aggregation
+    fn process_and_queue_log(&mut self, mut log: IntakeLog) {
+        let should_send_log = self.logs_enabled
+            && LambdaProcessor::apply_rules(&self.rules, &mut log.message.message);
+        if should_send_log {
+            if let Ok(serialized_log) = serde_json::to_string(&log) {
+                // explicitly drop log so we don't accidentally re-use it and push
+                // duplicate logs to the aggregator
+                drop(log);
+                self.ready_logs.push(serialized_log);
             }
+        }
+    }
+
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
+        if let Ok(log) = self.make_log(event).await {
+            self.process_and_queue_log(log);
 
             // Process orphan logs, since we have a `request_id` now
-            for mut orphan_log in self.orphan_logs.drain(..) {
+            let orphan_logs = std::mem::take(&mut self.orphan_logs);
+            for mut orphan_log in orphan_logs {
                 orphan_log.message.lambda.request_id =
                     Some(self.invocation_context.request_id.clone());
-                if should_send_log {
-                    if let Ok(serialized_log) = serde_json::to_string(&orphan_log) {
-                        drop(orphan_log);
-                        self.ready_logs.push(serialized_log);
-                    }
-                }
+                self.process_and_queue_log(orphan_log);
             }
         }
 
@@ -1084,5 +1085,107 @@ mod tests {
             tags: tags_provider.get_tags_string(),
         };
         assert_eq!(intake_log, function_log);
+    }
+
+    #[tokio::test]
+    async fn test_process_orphan_logs_with_exclude_at_match_rule() {
+        use crate::config::processing_rule;
+
+        // This test verifies that the orphan logs are not excluded when the START/END/REPORT
+        // logs matched an exclude_at_match rule.
+        let processing_rules = vec![processing_rule::ProcessingRule {
+            kind: processing_rule::Kind::ExcludeAtMatch,
+            name: "exclude_start_and_end_logs".to_string(),
+            pattern: "(START|END|REPORT) RequestId".to_string(),
+            replace_placeholder: None,
+        }];
+
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            logs_config_processing_rules: Some(processing_rules),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+        let (aggregator_service, aggregator_handle) = AggregatorService::default();
+        let service_handle = tokio::spawn(async move {
+            aggregator_service.run().await;
+        });
+
+        let mut processor =
+            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+
+        // First, send an extension log (orphan) that doesn't have a request_id
+        let extension_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Extension(Value::String(
+                "[Extension] Important extension log that should not be excluded".to_string(),
+            )),
+        };
+        processor
+            .process(extension_event.clone(), &aggregator_handle)
+            .await;
+
+        // Verify the extension log is queued as an orphan
+        assert_eq!(processor.orphan_logs.len(), 1);
+
+        // Send a user error log (orphan) that also doesn't have a request_id
+        let error_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 48).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                "Error: NO_REGION environment variable not set".to_string(),
+            )),
+        };
+        processor
+            .process(error_event.clone(), &aggregator_handle)
+            .await;
+
+        // Now we should have 2 orphan logs
+        assert_eq!(processor.orphan_logs.len(), 2);
+
+        // Now send a PlatformStart event that should be excluded by the rule
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 49).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+        processor
+            .process(start_event.clone(), &aggregator_handle)
+            .await;
+
+        // The START log should be excluded, but the orphan logs should be sent
+        // because they don't match the exclude pattern
+        let batches = aggregator_handle.get_batches().await.unwrap();
+        assert_eq!(batches.len(), 1);
+
+        let batch_str = String::from_utf8(batches[0].clone()).unwrap();
+
+        // Verify the START log is NOT in the batch (it should be excluded)
+        assert!(!batch_str.contains("START RequestId"));
+
+        // Verify the extension log IS in the batch
+        assert!(batch_str.contains("Important extension log that should not be excluded"));
+
+        // Verify the error log IS in the batch
+        assert!(batch_str.contains("NO_REGION environment variable not set"));
+
+        // Verify both logs have the correct request_id assigned
+        assert!(batch_str.contains("test-request-id"));
+
+        aggregator_handle
+            .shutdown()
+            .expect("Failed to shutdown aggregator service");
+        service_handle
+            .await
+            .expect("Aggregator service task failed");
     }
 }
