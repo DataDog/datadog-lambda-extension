@@ -865,6 +865,8 @@ async fn handle_event_bus_event(
                         {
                             error!("Failed to send platform restore report to processor: {}", e);
                         }
+                    } else {
+                        error!("Missing SnapStart RestoreReportMetric. Not creating SnapStart span.")
                     }
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
