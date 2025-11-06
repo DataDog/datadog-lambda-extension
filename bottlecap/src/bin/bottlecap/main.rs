@@ -868,7 +868,7 @@ async fn handle_event_bus_event(
                     } else {
                         error!(
                             "Missing SnapStart RestoreReportMetric. Not creating SnapStart span."
-                        )
+                        );
                     }
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
