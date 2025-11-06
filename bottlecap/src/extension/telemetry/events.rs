@@ -314,6 +314,32 @@ mod tests {
             }
         ),
 
+        // platform.restoreStart
+        platform_restore_start: (
+            r#"{"time":"2022-10-19T13:52:15.636Z","type":"platform.restoreStart","record":{}}"#,
+            TelemetryRecord::PlatformRestoreStart {},
+        ),
+
+        // platform.restoreReport
+        platform_restore_report: (
+            r#"{"time":"2022-10-19T13:52:16.136Z","type":"platform.restoreReport","record":{"status":"success","metrics":{"durationMs":150.5}}}"#,
+            TelemetryRecord::PlatformRestoreReport {
+                status: Status::Success,
+                error_type: None,
+                metrics: Some(RestoreReportMetrics { duration_ms: 150.5 }),
+            }
+        ),
+
+        // platform.restoreReport with failure
+        platform_restore_report_failure: (
+            r#"{"time":"2022-10-19T13:52:16.136Z","type":"platform.restoreReport","record":{"status":"failure","errorType":"RestoreError"}}"#,
+            TelemetryRecord::PlatformRestoreReport {
+                status: Status::Failure,
+                error_type: Some("RestoreError".to_string()),
+                metrics: Some(RestoreReportMetrics { duration_ms: 200.0 }),
+            }
+        ),
+
         // platform.start
         platform_start: (
             r#"{"time":"2022-10-21T14:05:03.165Z","type":"platform.start","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","version":"$LATEST","tracing":{"spanId":"24cd7d670fa455f0","type":"X-Amzn-Trace-Id","value":"Root=1-6352a70e-1e2c502e358361800241fd45;Parent=35465b3a9e2f7c6a;Sampled=1"}}}"#,
