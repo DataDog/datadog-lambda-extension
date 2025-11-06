@@ -336,7 +336,7 @@ mod tests {
             TelemetryRecord::PlatformRestoreReport {
                 status: Status::Failure,
                 error_type: Some("RestoreError".to_string()),
-                metrics: Some(RestoreReportMetrics { duration_ms: 200.0 }),
+                metrics: None,
             }
         ),
 
