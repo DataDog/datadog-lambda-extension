@@ -1533,4 +1533,107 @@ mod tests {
             "Should not be in managed instance mode"
         );
     }
+
+    #[tokio::test]
+    async fn test_on_platform_restore_start_creates_snapstart_span() {
+        let mut processor = setup();
+        let request_id = String::from("test-request-id");
+
+        // Create a context first
+        processor
+            .context_buffer
+            .start_context(&request_id, Span::default());
+
+        // Simulate platform restore start
+        let time = Utc::now();
+        processor.on_platform_restore_start(time);
+
+        // Get the closest context (should be our test context)
+        let start_time: i64 = SystemTime::from(time)
+            .duration_since(UNIX_EPOCH)
+            .expect("time went backwards")
+            .as_nanos()
+            .try_into()
+            .unwrap_or_default();
+
+        let context = processor
+            .context_buffer
+            .get_closest_mut(start_time)
+            .unwrap();
+
+        // Assert that snapstart_restore_span was created
+        assert!(context.snapstart_restore_span.is_some());
+
+        let snapstart_span = context.snapstart_restore_span.as_ref().unwrap();
+        assert_eq!(snapstart_span.name, "aws.lambda.snapstart_restore");
+        assert_eq!(snapstart_span.start, start_time);
+        assert_ne!(snapstart_span.span_id, 0);
+    }
+
+    #[tokio::test]
+    async fn test_on_platform_restore_start_no_context() {
+        let mut processor = setup();
+
+        // Call on_platform_restore_start without creating a context first
+        let time = Utc::now();
+        processor.on_platform_restore_start(time);
+
+        // Should not panic, just log a debug message
+        // Test passes if no panic occurs
+    }
+
+    #[tokio::test]
+    async fn test_get_ctx_spans_prioritizes_snapstart_over_cold_start() {
+        let mut processor = setup();
+        let request_id = String::from("test-request-id");
+
+        // Create invocation span
+        let invocation_span = Span {
+            name: "aws.lambda".to_string(),
+            span_id: 1,
+            trace_id: 100,
+            ..Default::default()
+        };
+
+        // Create cold start span
+        let cold_start_span = Span {
+            name: "aws.lambda.cold_start".to_string(),
+            span_id: 2,
+            trace_id: 100,
+            ..Default::default()
+        };
+
+        // Create snapstart restore span
+        let snapstart_span = Span {
+            name: "aws.lambda.snapstart_restore".to_string(),
+            span_id: 3,
+            trace_id: 100,
+            ..Default::default()
+        };
+
+        // Build context with both cold start and snapstart spans
+        let mut context = Context::from_request_id(&request_id);
+        context.invocation_span = invocation_span.clone();
+        context.cold_start_span = Some(cold_start_span.clone());
+        context.snapstart_restore_span = Some(snapstart_span.clone());
+
+        // Call get_ctx_spans to get the spans that would be sent
+        let (spans, _body_size) = processor.get_ctx_spans(context);
+
+        // Verify that exactly 2 spans are returned:
+        // 1. invocation_span
+        // 2. snapstart_restore_span (NOT cold_start_span)
+        assert_eq!(spans.len(), 2, "Expected 2 spans (invocation + snapstart)");
+
+        // Verify the first span is the invocation span
+        assert_eq!(spans[0].name, "aws.lambda");
+        assert_eq!(spans[0].span_id, 1);
+
+        // Verify the second span is the snapstart span, NOT the cold start span
+        assert_eq!(spans[1].name, "aws.lambda.snapstart_restore");
+        assert_eq!(
+            spans[1].span_id, 3,
+            "Should be snapstart span (id=3), not cold start span (id=2)"
+        );
+    }
 }
