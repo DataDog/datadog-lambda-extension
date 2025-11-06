@@ -118,6 +118,26 @@ impl Lambda {
         }
     }
 
+    pub fn set_snapstart_restore_duration_metric(
+        &mut self,
+        restore_duration_ms: f64,
+        timestamp: i64,
+    ) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+        let metric = Metric::new(
+            constants::SNAPSTART_RESTORE_DURATION_METRIC.into(),
+            MetricValue::distribution(restore_duration_ms * constants::MS_TO_SEC),
+            self.get_dynamic_value_tags(),
+            Some(timestamp),
+        );
+
+        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+            error!("failed to insert metric: {}", e);
+        }
+    }
+
     pub fn set_invoked_received(&mut self) {
         self.invoked_received = true;
     }
@@ -1242,5 +1262,60 @@ mod tests {
             now,
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn test_set_snapstart_restore_duration_metric() {
+        let (metrics_aggr, my_config) = setup();
+        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let restore_duration_ms = 150.5;
+        lambda.set_snapstart_restore_duration_metric(restore_duration_ms, now);
+
+        // Duration should be converted to seconds (ms * 0.001)
+        assert_sketch(
+            &metrics_aggr,
+            constants::SNAPSTART_RESTORE_DURATION_METRIC,
+            restore_duration_ms * constants::MS_TO_SEC,
+            now,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_snapstart_restore_duration_metric_disabled() {
+        let (metrics_aggr, no_config) = setup();
+        let my_config = Arc::new(config::Config {
+            enhanced_metrics: false,
+            ..no_config.as_ref().clone()
+        });
+        let mut lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        lambda.set_snapstart_restore_duration_metric(100.0, now);
+
+        // Metric should not be created when enhanced_metrics is disabled
+        assert!(
+            metrics_aggr
+                .get_entry_by_id(
+                    constants::SNAPSTART_RESTORE_DURATION_METRIC.into(),
+                    None,
+                    now
+                )
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 }

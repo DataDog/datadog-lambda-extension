@@ -44,6 +44,13 @@ pub enum ProcessorCommand {
         duration_ms: f64,
         timestamp: i64,
     },
+    PlatformRestoreStart {
+        time: DateTime<Utc>,
+    },
+    PlatformRestoreReport {
+        duration_ms: f64,
+        timestamp: i64,
+    },
     PlatformStart {
         request_id: String,
         time: DateTime<Utc>,
@@ -138,6 +145,28 @@ impl InvocationProcessorHandle {
         self.sender
             .send(ProcessorCommand::PlatformInitReport {
                 init_type,
+                duration_ms,
+                timestamp,
+            })
+            .await
+    }
+
+    pub async fn on_platform_restore_start(
+        &self,
+        time: DateTime<Utc>,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender
+            .send(ProcessorCommand::PlatformRestoreStart { time })
+            .await
+    }
+
+    pub async fn on_platform_restore_report(
+        &self,
+        duration_ms: f64,
+        timestamp: i64,
+    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        self.sender
+            .send(ProcessorCommand::PlatformRestoreReport {
                 duration_ms,
                 timestamp,
             })
@@ -404,6 +433,16 @@ impl InvocationProcessorService {
                 } => {
                     self.processor
                         .on_platform_init_report(init_type, duration_ms, timestamp);
+                }
+                ProcessorCommand::PlatformRestoreStart { time } => {
+                    self.processor.on_platform_restore_start(time);
+                }
+                ProcessorCommand::PlatformRestoreReport {
+                    duration_ms,
+                    timestamp,
+                } => {
+                    self.processor
+                        .on_platform_restore_report(duration_ms, timestamp);
                 }
                 ProcessorCommand::PlatformStart { request_id, time } => {
                     self.processor.on_platform_start(request_id, time);
