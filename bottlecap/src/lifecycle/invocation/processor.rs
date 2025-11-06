@@ -1325,22 +1325,28 @@ mod tests {
         let request_id = String::from("test-request-id");
 
         // Create invocation span
-        let mut invocation_span = Span::default();
-        invocation_span.name = "aws.lambda".to_string();
-        invocation_span.span_id = 1;
-        invocation_span.trace_id = 100;
+        let invocation_span = Span {
+            name: "aws.lambda".to_string(),
+            span_id: 1,
+            trace_id: 100,
+            ..Default::default()
+        };
 
         // Create cold start span
-        let mut cold_start_span = Span::default();
-        cold_start_span.name = "aws.lambda.cold_start".to_string();
-        cold_start_span.span_id = 2;
-        cold_start_span.trace_id = 100;
+        let cold_start_span = Span {
+            name: "aws.lambda.cold_start".to_string(),
+            span_id: 2,
+            trace_id: 100,
+            ..Default::default()
+        };
 
         // Create snapstart restore span
-        let mut snapstart_span = Span::default();
-        snapstart_span.name = "aws.lambda.snapstart_restore".to_string();
-        snapstart_span.span_id = 3;
-        snapstart_span.trace_id = 100;
+        let snapstart_span = Span {
+            name: "aws.lambda.snapstart_restore".to_string(),
+            span_id: 3,
+            trace_id: 100,
+            ..Default::default()
+        };
 
         // Build context with both cold start and snapstart spans
         let mut context = Context::from_request_id(&request_id);
