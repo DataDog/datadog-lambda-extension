@@ -551,15 +551,17 @@ where
             E: serde::de::Error,
         {
             let mut map = HashMap::new();
-
-            for tag in value.split(',') {
+            for tag in value.split(&[',', ' ']) {
+                if tag.is_empty() {
+                    continue;
+                }
                 let parts = tag.split(':').collect::<Vec<&str>>();
                 if parts.len() == 2 {
                     map.insert(parts[0].to_string(), parts[1].to_string());
                 } else {
                     error!(
                         "Failed to parse tag '{}', expected format 'key:value', ignoring",
-                        tag.trim()
+                        tag
                     );
                 }
             }
@@ -1259,6 +1261,62 @@ pub mod tests {
             jail.set_env("DD_TAGS", 123);
             let config = get_config(Path::new(""));
             assert_eq!(config.tags, HashMap::new());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_comma_separated() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless,env:prod,version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_space_separated() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless env:prod version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_space_separated_with_extra_spaces() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless  env:prod   version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_mixed_separators() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless,env:prod version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
             Ok(())
         });
     }
