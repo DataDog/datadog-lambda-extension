@@ -5,7 +5,7 @@ use crate::{
     traces::context::SpanContext,
 };
 use carrier::{Extractor, Injector};
-use datadog_trace_protobuf::pb::SpanLink;
+use libdd_trace_protobuf::pb::SpanLink;
 use text_map_propagator::{
     BAGGAGE_PREFIX, DATADOG_HIGHER_ORDER_TRACE_ID_BITS_KEY, DATADOG_LAST_PARENT_ID_KEY,
     TRACESTATE_KEY,

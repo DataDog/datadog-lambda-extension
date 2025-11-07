@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::{Buf, Bytes};
-use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::tracer_header_tags;
+use libdd_trace_protobuf::pb::Span;
+use libdd_trace_utils::tracer_header_tags;
 use libddwaf::object::{Keyed, WafMap, WafObject};
 use libddwaf::{Context as WafContext, Handle, RunError, RunOutput, RunResult, waf_map};
 use mime::Mime;

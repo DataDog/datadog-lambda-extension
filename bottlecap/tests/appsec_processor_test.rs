@@ -8,7 +8,7 @@ use bottlecap::appsec::processor::Processor;
 use bottlecap::config::Config;
 use bottlecap::lifecycle::invocation::triggers::IdentifiedTrigger;
 use bytes::Bytes;
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use itertools::Itertools;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
