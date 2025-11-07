@@ -556,7 +556,7 @@ where
                     continue;
                 }
                 let parts = tag.split(':').collect::<Vec<&str>>();
-                if parts.len() == 2 {
+                if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
                     map.insert(parts[0].to_string(), parts[1].to_string());
                 } else {
                     error!(
@@ -1445,5 +1445,35 @@ pub mod tests {
             serde_json::from_str::<Value>(r#"{"duration":0}"#).expect("failed to parse JSON"),
             Value { duration: None }
         );
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pairs_ignores_empty_keys() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pairs")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(r#"{"tags": ":value,valid:tag"}"#)
+            .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert("valid".to_string(), "tag".to_string());
+        assert_eq!(result.tags, expected);
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pairs_ignores_empty_values() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pairs")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(r#"{"tags": "key:,valid:tag"}"#)
+            .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert("valid".to_string(), "tag".to_string());
+        assert_eq!(result.tags, expected);
     }
 }
