@@ -551,15 +551,17 @@ where
             E: serde::de::Error,
         {
             let mut map = HashMap::new();
-
-            for tag in value.split(',') {
+            for tag in value.split(&[',', ' ']) {
+                if tag.is_empty() {
+                    continue;
+                }
                 let parts = tag.split(':').collect::<Vec<&str>>();
-                if parts.len() == 2 {
+                if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
                     map.insert(parts[0].to_string(), parts[1].to_string());
                 } else {
                     error!(
                         "Failed to parse tag '{}', expected format 'key:value', ignoring",
-                        tag.trim()
+                        tag
                     );
                 }
             }
@@ -1264,6 +1266,62 @@ pub mod tests {
     }
 
     #[test]
+    fn test_tags_comma_separated() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless,env:prod,version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_space_separated() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless env:prod version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_space_separated_with_extra_spaces() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless  env:prod   version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_mixed_separators() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless,env:prod version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_parse_bool_from_anything() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
@@ -1387,5 +1445,35 @@ pub mod tests {
             serde_json::from_str::<Value>(r#"{"duration":0}"#).expect("failed to parse JSON"),
             Value { duration: None }
         );
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pairs_ignores_empty_keys() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pairs")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(r#"{"tags": ":value,valid:tag"}"#)
+            .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert("valid".to_string(), "tag".to_string());
+        assert_eq!(result.tags, expected);
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pairs_ignores_empty_values() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pairs")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(r#"{"tags": "key:,valid:tag"}"#)
+            .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert("valid".to_string(), "tag".to_string());
+        assert_eq!(result.tags, expected);
     }
 }
