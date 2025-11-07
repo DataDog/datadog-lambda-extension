@@ -497,6 +497,8 @@ impl TraceAgent {
             },
         };
 
+        debug!("TRACES | Traces: {traces:?}");
+
         let mut reparenting_info = match invocation_processor_handle.get_reparenting_info().await {
             Ok(info) => info,
             Err(e) => {
