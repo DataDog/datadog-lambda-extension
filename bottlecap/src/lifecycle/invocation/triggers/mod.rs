@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};

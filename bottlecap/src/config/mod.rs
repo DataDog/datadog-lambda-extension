@@ -11,7 +11,7 @@ pub mod trace_propagation_style;
 pub mod yaml;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
-use datadog_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
+use libdd_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 
 use serde::{Deserialize, Deserializer};
 use serde_aux::prelude::deserialize_bool_from_anything;

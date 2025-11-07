@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use datadog_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
+use libdd_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
 use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;

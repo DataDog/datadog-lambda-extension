@@ -1,4 +1,4 @@
-use datadog_trace_protobuf::pb::Span as DatadogSpan;
+use libdd_trace_protobuf::pb::Span as DatadogSpan;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use std::{error::Error, sync::Arc};

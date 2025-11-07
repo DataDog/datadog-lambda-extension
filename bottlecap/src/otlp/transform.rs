@@ -1,7 +1,7 @@
-use datadog_trace_normalization::normalize_utils::{
+use libdd_trace_normalization::normalize_utils::{
     normalize_name, normalize_service, normalize_tag,
 };
-use datadog_trace_protobuf::pb::Span as DatadogSpan;
+use libdd_trace_protobuf::pb::Span as DatadogSpan;
 use hex;
 use lazy_static::lazy_static;
 use opentelemetry_proto::tonic::common::v1::{
@@ -566,7 +566,7 @@ fn get_otel_status_code(otel_span: &OtelSpan) -> u32 {
     0
 }
 
-// todo: use from datadog_trace_utils when public
+// todo: use from libdd_trace_utils when public
 fn set_top_level_dd_span(span: &mut DatadogSpan, is_top_level: bool) {
     if is_top_level {
         span.metrics.insert("_top_level".into(), 1.0);
@@ -575,7 +575,7 @@ fn set_top_level_dd_span(span: &mut DatadogSpan, is_top_level: bool) {
     }
 }
 
-// todo: use from datadog_trace_utils when public
+// todo: use from libdd_trace_utils when public
 fn set_measured_dd_span(span: &mut DatadogSpan, measured: bool) {
     if measured {
         span.metrics.remove("_dd.measured");

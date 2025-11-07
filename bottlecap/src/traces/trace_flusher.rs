@@ -2,17 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use async_trait::async_trait;
-use datadog_trace_utils::{
+use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
-use ddcommon::Endpoint;
+use libdd_common::{Endpoint, GenericHttpClient, hyper_migration};
 use dogstatsd::api_key::ApiKeyFactory;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
+use std::error::Error;
+use hyper_http_proxy;
 
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
@@ -165,6 +167,11 @@ impl TraceFlusher for ServerlessTraceFlusher {
         tokio::task::yield_now().await;
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
+        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(proxy_https.as_ref()) else {
+            error!("TRACES | Failed to create HTTP client");
+            return None;
+        };
+
         for trace in &coalesced_traces {
             let trace_with_endpoint = match endpoint {
                 Some(additional_endpoint) => trace.with_endpoint(additional_endpoint.clone()),
@@ -172,7 +179,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
             };
 
             let send_result = trace_with_endpoint
-                .send_proxy(proxy_https.as_deref())
+                .send(&http_client)
                 .await
                 .last_result;
 
@@ -185,5 +192,24 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
         debug!("TRACES | Flushing took {} ms", start.elapsed().as_millis());
         None
+    }
+}
+
+impl ServerlessTraceFlusher {
+    fn get_http_client(proxy_https: Option<&String>) -> Result<GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>, Box<dyn Error>> {
+        if let Some(proxy) = proxy_https {
+            let proxy = hyper_http_proxy::Proxy::new(
+                hyper_http_proxy::Intercept::Https,
+                proxy.parse()?,
+            );
+            let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(
+                libdd_common::connector::Connector::default(),
+                proxy,
+            )?;
+            Ok(hyper_migration::client_builder().build(proxy_connector))
+        } else {
+            let proxy_connector = hyper_http_proxy::ProxyConnector::new(libdd_common::connector::Connector::default())?;
+            Ok(hyper_migration::client_builder().build(proxy_connector))
+        }
     }
 }
