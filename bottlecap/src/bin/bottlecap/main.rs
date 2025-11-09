@@ -24,7 +24,7 @@ use bottlecap::{
     config::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
-        flush_strategy::FlushStrategy,
+        flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
     },
     event_bus::{Event, EventBus},
@@ -39,7 +39,7 @@ use bottlecap::{
     },
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
-        flush_control::{FlushControl, FlushDecision},
+        flush_control::{DEFAULT_CONTINUOUS_FLUSH_INTERVAL, FlushControl, FlushDecision},
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
@@ -99,7 +99,7 @@ use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
@@ -428,6 +428,34 @@ fn enable_logging_subsystem() {
     debug!("Logging subsystem enabled");
 }
 
+/// Returns the appropriate flush strategy for the given mode.
+/// In managed instance mode, continuous flush strategy is required for optimal performance.
+/// If a different strategy is configured, this function will override it and log an info message.
+fn get_flush_strategy_for_mode(
+    aws_config: &AwsConfig,
+    configured_strategy: FlushStrategy,
+) -> FlushStrategy {
+    if !aws_config.is_managed_instance_mode() {
+        return configured_strategy;
+    }
+
+    // Check if flush strategy needs to be enforced and log if so
+    if let FlushStrategy::Continuously(_) = configured_strategy {
+        configured_strategy
+    } else {
+        warn!(
+            "Managed Instance mode detected. Flush strategy '{}' is not compatible with managed instance mode. \
+            Enforcing continuous flush strategy with {}ms interval for optimal performance.",
+            configured_strategy.name(),
+            DEFAULT_CONTINUOUS_FLUSH_INTERVAL
+        );
+
+        FlushStrategy::Continuously(PeriodicStrategy {
+            interval: DEFAULT_CONTINUOUS_FLUSH_INTERVAL,
+        })
+    }
+}
+
 fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
@@ -571,8 +599,9 @@ async fn extension_loop_active(
         stats_concentrator.clone(),
     );
 
-    let mut flush_control =
-        FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
+    // Validate and get the appropriate flush strategy for the current mode
+    let flush_strategy = get_flush_strategy_for_mode(&aws_config, config.serverless_flush_strategy);
+    let mut flush_control = FlushControl::new(flush_strategy, config.flush_timeout);
 
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",

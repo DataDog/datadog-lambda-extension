@@ -8,7 +8,7 @@ ARG TARGET=managed-instance
 ENV LOG_LEVEL=debug
 ENV DD_LOG_LEVEL=debug
 # Enforce flushing
-ENV DD_FLUSHING_STRATEGY=continuously,1
+ENV DD_SERVERLESS_FLUSH_STRATEGY=continuously,1000
 
 
 # ---- Add remote dev tooling ----
