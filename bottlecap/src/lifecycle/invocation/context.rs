@@ -128,12 +128,25 @@ pub struct ContextBuffer {
     platform_runtime_done_events_request_ids: VecDeque<String>,
     universal_instrumentation_start_events: VecDeque<UniversalInstrumentationData>,
     universal_instrumentation_end_events: VecDeque<UniversalInstrumentationData>,
+    /// Managed instance mode: Request ID-aware buffers for concurrent invocations
+    /// Using hash map for O(1) lookups by request id
+    universal_instrumentation_start_events_with_id:
+        HashMap<String, UniversalInstrumentationDataWithRequestId>,
+    universal_instrumentation_end_events_with_id:
+        HashMap<String, UniversalInstrumentationDataWithRequestId>,
     pub sorted_reparenting_info: VecDeque<ReparentingInfo>,
 }
 
 struct UniversalInstrumentationData {
     headers: HashMap<String, String>,
     payload_value: Value,
+}
+
+/// Enhanced version with `request_id` for managed instance mode pairing
+pub struct UniversalInstrumentationDataWithRequestId {
+    pub request_id: String,
+    pub headers: HashMap<String, String>,
+    pub payload_value: Value,
 }
 
 impl Default for ContextBuffer {
@@ -155,6 +168,8 @@ impl ContextBuffer {
             platform_runtime_done_events_request_ids: VecDeque::with_capacity(capacity),
             universal_instrumentation_start_events: VecDeque::with_capacity(capacity),
             universal_instrumentation_end_events: VecDeque::with_capacity(capacity),
+            universal_instrumentation_start_events_with_id: HashMap::with_capacity(capacity),
+            universal_instrumentation_end_events_with_id: HashMap::with_capacity(capacity),
             sorted_reparenting_info: VecDeque::with_capacity(capacity),
         }
     }
@@ -317,6 +332,94 @@ impl ContextBuffer {
                 .push_back(request_id.to_owned());
             None
         }
+    }
+
+    // ========================================================================
+    // Managed Instance Mode: Request ID-Based Pairing Methods
+    // ========================================================================
+
+    /// Managed instance mode: Pair `UniversalInstrumentationStart` with `request_id`.
+    /// Returns true if the Invoke event already occurred (immediate pairing).
+    /// Returns false if the event was buffered (Invoke hasn't happened yet).
+    pub fn pair_universal_instrumentation_start_with_request_id(
+        &mut self,
+        request_id: &str,
+        headers: &HashMap<String, String>,
+        payload_value: &Value,
+    ) -> bool {
+        // Check if this request_id is waiting in the invoke_events queue
+        if let Some(pos) = self
+            .invoke_events_request_ids
+            .iter()
+            .position(|id| id == request_id)
+        {
+            // Found matching Invoke event, remove it and process immediately
+            self.invoke_events_request_ids.remove(pos);
+            return true;
+        }
+
+        // Invoke hasn't happened yet, buffer this event with request_id using HashMap for O(1) lookup
+        self.universal_instrumentation_start_events_with_id.insert(
+            request_id.to_string(),
+            UniversalInstrumentationDataWithRequestId {
+                request_id: request_id.to_string(),
+                headers: headers.clone(),
+                payload_value: payload_value.clone(),
+            },
+        );
+        false
+    }
+
+    /// Managed instance mode: When Invoke event arrives, retrieve and remove buffered
+    /// `UniversalInstrumentationStart` with matching `request_id`.
+    pub fn take_universal_instrumentation_start_for_request_id(
+        &mut self,
+        request_id: &str,
+    ) -> Option<UniversalInstrumentationDataWithRequestId> {
+        self.universal_instrumentation_start_events_with_id
+            .remove(request_id)
+    }
+
+    /// Managed instance mode: Pair `UniversalInstrumentationEnd` with `request_id`.
+    /// Returns true if `PlatformRuntimeDone` already occurred (immediate pairing).
+    /// Returns false if the event was buffered (`RuntimeDone` hasn't happened yet).
+    pub fn pair_universal_instrumentation_end_with_request_id(
+        &mut self,
+        request_id: &str,
+        headers: &HashMap<String, String>,
+        payload_value: &Value,
+    ) -> bool {
+        // Check if this request_id is waiting in the platform_runtime_done queue
+        if let Some(pos) = self
+            .platform_runtime_done_events_request_ids
+            .iter()
+            .position(|id| id == request_id)
+        {
+            // Found matching RuntimeDone event, remove it and process immediately
+            self.platform_runtime_done_events_request_ids.remove(pos);
+            return true;
+        }
+
+        // RuntimeDone hasn't happened yet, buffer this event with request_id using HashMap for O(1) lookup
+        self.universal_instrumentation_end_events_with_id.insert(
+            request_id.to_string(),
+            UniversalInstrumentationDataWithRequestId {
+                request_id: request_id.to_string(),
+                headers: headers.clone(),
+                payload_value: payload_value.clone(),
+            },
+        );
+        false
+    }
+
+    /// Managed instance mode: When `PlatformRuntimeDone` event arrives, retrieve and remove buffered
+    /// `UniversalInstrumentationEnd` with matching `request_id`.
+    pub fn take_universal_instrumentation_end_for_request_id(
+        &mut self,
+        request_id: &str,
+    ) -> Option<UniversalInstrumentationDataWithRequestId> {
+        self.universal_instrumentation_end_events_with_id
+            .remove(request_id)
     }
 
     /// Creates a new `Context` and adds it to the buffer given the `request_id`
@@ -779,5 +882,237 @@ mod tests {
         let result = buffer.pair_universal_instrumentation_start_event(&headers, &payload);
         assert!(result.is_some());
         assert_eq!(result.unwrap(), request_id2);
+    }
+
+    // ========================================================================
+    // Managed Instance Mode Tests: Request ID-Based Pairing
+    // ========================================================================
+
+    #[test]
+    fn test_managed_instance_universal_instrumentation_start_invoke_first() {
+        // Test case: Invoke arrives before UniversalInstrumentationStart (common case)
+        let mut buffer = ContextBuffer::with_capacity(10);
+        let request_id = "req-123";
+        let mut headers = HashMap::new();
+        headers.insert("test-header".to_string(), "test-value".to_string());
+        let payload = json!({ "test": "payload" });
+
+        // Simulate Invoke event arriving first
+        buffer
+            .invoke_events_request_ids
+            .push_back(request_id.to_string());
+
+        // UniversalInstrumentationStart arrives - should pair immediately
+        let result = buffer
+            .pair_universal_instrumentation_start_with_request_id(request_id, &headers, &payload);
+        assert!(result, "Should return true when Invoke already happened");
+        assert_eq!(
+            buffer.invoke_events_request_ids.len(),
+            0,
+            "Should remove paired Invoke event"
+        );
+        assert_eq!(
+            buffer.universal_instrumentation_start_events_with_id.len(),
+            0,
+            "Should not buffer when immediate pairing occurs"
+        );
+    }
+
+    #[test]
+    fn test_managed_instance_universal_instrumentation_start_buffering() {
+        // Test case: UniversalInstrumentationStart arrives before Invoke (out of order)
+        let mut buffer = ContextBuffer::with_capacity(10);
+        let request_id = "req-456";
+        let mut headers = HashMap::new();
+        headers.insert("test-header".to_string(), "test-value".to_string());
+        let payload = json!({ "test": "payload" });
+
+        // UniversalInstrumentationStart arrives first - should buffer
+        let result = buffer
+            .pair_universal_instrumentation_start_with_request_id(request_id, &headers, &payload);
+        assert!(
+            !result,
+            "Should return false when Invoke hasn't happened yet"
+        );
+        assert_eq!(
+            buffer.universal_instrumentation_start_events_with_id.len(),
+            1,
+            "Should buffer the event"
+        );
+
+        // Verify buffered event has correct request_id
+        let buffered = buffer.take_universal_instrumentation_start_for_request_id(request_id);
+        assert!(
+            buffered.is_some(),
+            "Should find buffered event by request_id"
+        );
+        assert_eq!(buffered.unwrap().request_id, request_id);
+    }
+
+    #[test]
+    fn test_managed_instance_concurrent_invocations() {
+        // Test case: Multiple concurrent invocations with interleaved events
+        let mut buffer = ContextBuffer::with_capacity(10);
+        let mut headers_a = HashMap::new();
+        headers_a.insert("req".to_string(), "A".to_string());
+        let mut headers_b = HashMap::new();
+        headers_b.insert("req".to_string(), "B".to_string());
+        let payload_a = json!({ "data": "A" });
+        let payload_b = json!({ "data": "B" });
+
+        // Scenario: A and B invocations interleaved
+        // 1. UniversalInstrumentationStart(A) arrives
+        let result_a = buffer
+            .pair_universal_instrumentation_start_with_request_id("req-A", &headers_a, &payload_a);
+        assert!(!result_a, "A should be buffered");
+
+        // 2. UniversalInstrumentationStart(B) arrives
+        let result_b = buffer
+            .pair_universal_instrumentation_start_with_request_id("req-B", &headers_b, &payload_b);
+        assert!(!result_b, "B should be buffered");
+
+        // 3. Invoke(B) arrives - should pair with B's buffered event
+        let buffered_b = buffer.take_universal_instrumentation_start_for_request_id("req-B");
+        assert!(buffered_b.is_some(), "Should find B's event");
+        assert_eq!(buffered_b.as_ref().unwrap().request_id, "req-B");
+        assert_eq!(
+            buffered_b.as_ref().unwrap().headers.get("req"),
+            Some(&"B".to_string())
+        );
+
+        // 4. Invoke(A) arrives - should pair with A's buffered event
+        let buffered_a = buffer.take_universal_instrumentation_start_for_request_id("req-A");
+        assert!(buffered_a.is_some(), "Should find A's event");
+        assert_eq!(buffered_a.as_ref().unwrap().request_id, "req-A");
+        assert_eq!(
+            buffered_a.as_ref().unwrap().headers.get("req"),
+            Some(&"A".to_string())
+        );
+
+        // Verify no cross-contamination occurred
+        assert_eq!(
+            buffer.universal_instrumentation_start_events_with_id.len(),
+            0,
+            "All events should be paired"
+        );
+    }
+
+    #[test]
+    fn test_managed_instance_universal_instrumentation_end_runtime_done_first() {
+        // Test case: PlatformRuntimeDone arrives before UniversalInstrumentationEnd
+        let mut buffer = ContextBuffer::with_capacity(10);
+        let request_id = "req-789";
+        let mut headers = HashMap::new();
+        headers.insert("status".to_string(), "success".to_string());
+        let payload = json!({ "response": "data" });
+
+        // Simulate PlatformRuntimeDone arriving first
+        buffer
+            .platform_runtime_done_events_request_ids
+            .push_back(request_id.to_string());
+
+        // UniversalInstrumentationEnd arrives - should pair immediately
+        let result = buffer
+            .pair_universal_instrumentation_end_with_request_id(request_id, &headers, &payload);
+        assert!(
+            result,
+            "Should return true when PlatformRuntimeDone already happened"
+        );
+        assert_eq!(
+            buffer.platform_runtime_done_events_request_ids.len(),
+            0,
+            "Should remove paired RuntimeDone event"
+        );
+        assert_eq!(
+            buffer.universal_instrumentation_end_events_with_id.len(),
+            0,
+            "Should not buffer when immediate pairing occurs"
+        );
+    }
+
+    #[test]
+    fn test_managed_instance_universal_instrumentation_end_buffering() {
+        // Test case: UniversalInstrumentationEnd arrives before PlatformRuntimeDone
+        let mut buffer = ContextBuffer::with_capacity(10);
+        let request_id = "req-abc";
+        let mut headers = HashMap::new();
+        headers.insert("status".to_string(), "success".to_string());
+        let payload = json!({ "response": "data" });
+
+        // UniversalInstrumentationEnd arrives first - should buffer
+        let result = buffer
+            .pair_universal_instrumentation_end_with_request_id(request_id, &headers, &payload);
+        assert!(
+            !result,
+            "Should return false when RuntimeDone hasn't happened yet"
+        );
+        assert_eq!(
+            buffer.universal_instrumentation_end_events_with_id.len(),
+            1,
+            "Should buffer the event"
+        );
+
+        // Verify buffered event has correct request_id
+        let buffered = buffer.take_universal_instrumentation_end_for_request_id(request_id);
+        assert!(
+            buffered.is_some(),
+            "Should find buffered event by request_id"
+        );
+        assert_eq!(buffered.unwrap().request_id, request_id);
+    }
+
+    #[test]
+    fn test_managed_instance_no_cross_contamination() {
+        // Test case: Ensure request_id matching prevents cross-contamination
+        let mut buffer = ContextBuffer::with_capacity(10);
+        let mut headers_1 = HashMap::new();
+        headers_1.insert("id".to_string(), "1".to_string());
+        let mut headers_2 = HashMap::new();
+        headers_2.insert("id".to_string(), "2".to_string());
+        let payload_1 = json!({ "data": 1 });
+        let payload_2 = json!({ "data": 2 });
+
+        // Buffer events for two different requests
+        buffer
+            .pair_universal_instrumentation_start_with_request_id("req-1", &headers_1, &payload_1);
+        buffer
+            .pair_universal_instrumentation_start_with_request_id("req-2", &headers_2, &payload_2);
+
+        // Retrieve request-2's event - should NOT get request-1's event
+        let result_2 = buffer.take_universal_instrumentation_start_for_request_id("req-2");
+        assert!(result_2.is_some());
+        assert_eq!(result_2.as_ref().unwrap().request_id, "req-2");
+        assert_eq!(
+            result_2.as_ref().unwrap().headers.get("id"),
+            Some(&"2".to_string()),
+            "Should get correct event for req-2"
+        );
+
+        // Request-1's event should still be buffered
+        let result_1 = buffer.take_universal_instrumentation_start_for_request_id("req-1");
+        assert!(result_1.is_some());
+        assert_eq!(result_1.as_ref().unwrap().request_id, "req-1");
+        assert_eq!(
+            result_1.as_ref().unwrap().headers.get("id"),
+            Some(&"1".to_string()),
+            "Should get correct event for req-1"
+        );
+    }
+
+    #[test]
+    fn test_managed_instance_pop_nonexistent_request() {
+        // Test case: Attempting to pop an event that doesn't exist
+        let mut buffer = ContextBuffer::with_capacity(10);
+        let result = buffer.take_universal_instrumentation_start_for_request_id("nonexistent");
+        assert!(
+            result.is_none(),
+            "Should return None for nonexistent request_id"
+        );
+
+        let result_end = buffer.take_universal_instrumentation_end_for_request_id("nonexistent");
+        assert!(
+            result_end.is_none(),
+            "Should return None for nonexistent request_id"
+        );
     }
 }

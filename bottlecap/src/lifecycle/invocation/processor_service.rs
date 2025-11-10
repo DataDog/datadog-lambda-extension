@@ -78,10 +78,12 @@ pub enum ProcessorCommand {
     UniversalInstrumentationStart {
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     },
     UniversalInstrumentationEnd {
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     },
     AddReparenting {
         request_id: String,
@@ -252,11 +254,13 @@ impl InvocationProcessorHandle {
         &self,
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::UniversalInstrumentationStart {
                 headers,
                 payload_value,
+                request_id,
             })
             .await
     }
@@ -265,11 +269,13 @@ impl InvocationProcessorHandle {
         &self,
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::UniversalInstrumentationEnd {
                 headers,
                 payload_value,
+                request_id,
             })
             .await
     }
@@ -522,16 +528,24 @@ impl InvocationProcessorService {
                 ProcessorCommand::UniversalInstrumentationStart {
                     headers,
                     payload_value,
+                    request_id,
                 } => {
-                    self.processor
-                        .on_universal_instrumentation_start(headers, payload_value);
+                    self.processor.on_universal_instrumentation_start(
+                        headers,
+                        payload_value,
+                        request_id,
+                    );
                 }
                 ProcessorCommand::UniversalInstrumentationEnd {
                     headers,
                     payload_value,
+                    request_id,
                 } => {
-                    self.processor
-                        .on_universal_instrumentation_end(headers, payload_value);
+                    self.processor.on_universal_instrumentation_end(
+                        headers,
+                        payload_value,
+                        request_id,
+                    );
                 }
                 ProcessorCommand::AddReparenting {
                     request_id,

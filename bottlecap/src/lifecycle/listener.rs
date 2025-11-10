@@ -38,6 +38,13 @@ const START_INVOCATION_PATH: &str = "/lambda/start-invocation";
 const END_INVOCATION_PATH: &str = "/lambda/end-invocation";
 const AGENT_PORT: usize = 8124;
 
+/// Extracts the AWS Lambda request ID from the LWA proxy header.
+fn extract_request_id_from_headers(headers: &HashMap<String, String>) -> Option<String> {
+    headers
+        .get("lambda-runtime-aws-request-id")
+        .map(String::to_string)
+}
+
 pub struct Listener {
     propagator: Arc<DatadogCompositePropagator>,
     pub invocation_processor_handle: InvocationProcessorHandle,
@@ -185,10 +192,14 @@ impl Listener {
         payload_value: Value,
         invocation_processor_handle: InvocationProcessorHandle,
     ) {
-        debug!("Received start invocation request");
+        debug!(
+            "Received start invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
+        );
+
+        let request_id = extract_request_id_from_headers(&headers);
 
         if let Err(e) = invocation_processor_handle
-            .on_universal_instrumentation_start(headers, payload_value)
+            .on_universal_instrumentation_start(headers, payload_value, request_id)
             .await
         {
             error!(
@@ -240,13 +251,16 @@ impl Listener {
         body: Bytes,
         invocation_processor_handle: InvocationProcessorHandle,
     ) {
-        debug!("Received end invocation request");
-
         let headers = headers_to_map(headers);
         let payload_value = serde_json::from_slice::<Value>(&body).unwrap_or_else(|_| json!({}));
 
+        debug!(
+            "Received end invocation request from headers:{headers:?}, payload_value:{payload_value:?}"
+        );
+        let request_id = extract_request_id_from_headers(&headers);
+
         if let Err(e) = invocation_processor_handle
-            .on_universal_instrumentation_end(headers, payload_value)
+            .on_universal_instrumentation_end(headers, payload_value, request_id)
             .await
         {
             error!(
@@ -254,5 +268,54 @@ impl Listener {
                 e
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_request_id_from_header() {
+        let headers = HashMap::from([(
+            "lambda-runtime-aws-request-id".to_string(),
+            "req-from-header".to_string(),
+        )]);
+
+        let result = extract_request_id_from_headers(&headers);
+
+        assert_eq!(
+            result,
+            Some("req-from-header".to_string()),
+            "Should extract request_id from lambda-runtime-aws-request-id header"
+        );
+    }
+
+    #[test]
+    fn test_extract_request_id_none_when_missing() {
+        let headers = HashMap::new();
+
+        let result = extract_request_id_from_headers(&headers);
+
+        assert_eq!(
+            result, None,
+            "Should return None when request_id header is not present"
+        );
+    }
+
+    #[test]
+    fn test_extract_request_id_lwa_proxy_header() {
+        let headers = HashMap::from([(
+            "lambda-runtime-aws-request-id".to_string(),
+            "lwa-proxy-request-id".to_string(),
+        )]);
+
+        let result = extract_request_id_from_headers(&headers);
+
+        assert_eq!(
+            result,
+            Some("lwa-proxy-request-id".to_string()),
+            "Should extract request_id from LWA proxy header"
+        );
     }
 }
