@@ -447,6 +447,7 @@ impl TraceAgent {
                     LLM_OBS_SPANS_ENDPOINT_PATH,
                     V1_DEBUGGER_ENDPOINT_PATH,
                     V2_DEBUGGER_ENDPOINT_PATH,
+                    DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
                 ],
                 "client_drop_p0s": true,
             }
