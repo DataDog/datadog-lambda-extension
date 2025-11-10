@@ -282,6 +282,7 @@ impl TraceAgent {
     }
 
     async fn v04_traces(State(state): State<TraceState>, request: Request) -> Response {
+        debug!("TRACE_AGENT | Received v04 traces request");
         Self::handle_traces(
             state.config,
             request,
