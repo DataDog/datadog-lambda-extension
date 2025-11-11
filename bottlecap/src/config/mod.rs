@@ -701,39 +701,6 @@ where
     }
 }
 
-fn validate_metric_namespace(namespace: &str) -> Option<String> {
-    let trimmed = namespace.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let mut chars = trimmed.chars();
-
-    if let Some(first_char) = chars.next() {
-        if !first_char.is_ascii_alphabetic() {
-            error!(
-                "DD_STATSD_METRIC_NAMESPACE must start with a letter, got: '{}'. Ignoring namespace.",
-                trimmed
-            );
-            return None;
-        }
-    } else {
-        return None;
-    }
-
-    if let Some(invalid_char) =
-        chars.find(|&ch| !ch.is_ascii_alphanumeric() && ch != '_' && ch != '.')
-    {
-        error!(
-            "DD_STATSD_METRIC_NAMESPACE contains invalid character '{}' in '{}'. Only ASCII alphanumerics, underscores, and periods are allowed. Ignoring namespace.",
-            invalid_char, trimmed
-        );
-        return None;
-    }
-
-    Some(trimmed.to_string())
-}
-
 pub fn deserialize_option_lossless<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
 where
     D: Deserializer<'de>,
@@ -1510,54 +1477,5 @@ pub mod tests {
         let mut expected = HashMap::new();
         expected.insert("valid".to_string(), "tag".to_string());
         assert_eq!(result.tags, expected);
-    }
-
-    #[test]
-    fn test_validate_metric_namespace_valid() {
-        assert_eq!(
-            validate_metric_namespace("myapp"),
-            Some("myapp".to_string())
-        );
-        assert_eq!(
-            validate_metric_namespace("my_app"),
-            Some("my_app".to_string())
-        );
-        assert_eq!(
-            validate_metric_namespace("my.app"),
-            Some("my.app".to_string())
-        );
-        assert_eq!(
-            validate_metric_namespace("MyApp123"),
-            Some("MyApp123".to_string())
-        );
-        assert_eq!(
-            validate_metric_namespace("  myapp  "),
-            Some("myapp".to_string())
-        );
-    }
-
-    #[test]
-    fn test_validate_metric_namespace_empty() {
-        assert_eq!(validate_metric_namespace(""), None);
-        assert_eq!(validate_metric_namespace("   "), None);
-        assert_eq!(validate_metric_namespace("\t\n"), None);
-    }
-
-    #[test]
-    fn test_validate_metric_namespace_invalid_first_char() {
-        assert_eq!(validate_metric_namespace("1myapp"), None);
-        assert_eq!(validate_metric_namespace("_myapp"), None);
-        assert_eq!(validate_metric_namespace(".myapp"), None);
-        assert_eq!(validate_metric_namespace("-myapp"), None);
-    }
-
-    #[test]
-    fn test_validate_metric_namespace_invalid_chars() {
-        assert_eq!(validate_metric_namespace("my-app"), None);
-        assert_eq!(validate_metric_namespace("my app"), None);
-        assert_eq!(validate_metric_namespace("my@app"), None);
-        assert_eq!(validate_metric_namespace("my#app"), None);
-        assert_eq!(validate_metric_namespace("my$app"), None);
-        assert_eq!(validate_metric_namespace("my!app"), None);
     }
 }
