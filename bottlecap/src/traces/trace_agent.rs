@@ -395,6 +395,7 @@ impl TraceAgent {
 
     // Used for `/debugger/v1/input` in Exception Replay
     async fn debugger_logs_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        debug!("TRACE_AGENT | debugger_logs_proxy()");
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
@@ -408,6 +409,7 @@ impl TraceAgent {
 
     // Used for `/debugger/v1/diagnostics` and `/debugger/v2/input` in Exception Replay
     async fn debugger_intake_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        debug!("TRACE_AGENT | debugger_intake_proxy()");
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
