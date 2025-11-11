@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
+use dogstatsd::util::parse_metric_namespace;
 
 use crate::{
     config::{
@@ -527,7 +528,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, metrics_config_compression_level);
 
     if let Some(namespace) = &env_config.statsd_metric_namespace {
-        config.statsd_metric_namespace = super::validate_metric_namespace(namespace);
+        config.statsd_metric_namespace = parse_metric_namespace(namespace);
     }
 
     // OTLP
