@@ -337,6 +337,7 @@ pub struct Config {
     // AWS Lambda
     pub api_key_secret_arn: String,
     pub kms_api_key: String,
+    pub api_key_ssm_arn: String,
     pub serverless_logs_enabled: bool,
     pub serverless_flush_strategy: FlushStrategy,
     pub enhanced_metrics: bool,
@@ -440,6 +441,7 @@ impl Default for Config {
             // AWS Lambda
             api_key_secret_arn: String::default(),
             kms_api_key: String::default(),
+            api_key_ssm_arn: String::default(),
             serverless_logs_enabled: true,
             serverless_flush_strategy: FlushStrategy::Default,
             enhanced_metrics: true,
