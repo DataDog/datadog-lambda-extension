@@ -158,7 +158,8 @@ impl StatsConcentratorService {
                 hostname: String::new(),
                 env: self.config.env.clone().unwrap_or("unknown-env".to_string()),
                 // Version is not in the trace payload. Need to read it from config.
-                version: self.config.version.clone().unwrap_or_default(),
+                // version: self.config.version.clone().unwrap_or_default(),
+                version: "1.0".to_string(),
                 lang: self.tracer_metadata.language.clone(),
                 tracer_version: self.tracer_metadata.tracer_version.clone(),
                 runtime_id: self.tracer_metadata.runtime_id.clone(),
