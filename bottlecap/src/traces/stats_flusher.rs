@@ -17,7 +17,6 @@ use libdd_trace_protobuf::pb;
 use libdd_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use tracing::{debug, error};
 
-
 #[async_trait]
 pub trait StatsFlusher {
     fn new(
@@ -103,13 +102,20 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let start = std::time::Instant::now();
 
-        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(self.config.proxy_https.as_ref()) else {
+        let Ok(http_client) =
+            ServerlessTraceFlusher::get_http_client(self.config.proxy_https.as_ref())
+        else {
             error!("STATS_FLUSHER | Failed to create HTTP client");
             return;
         };
 
-        let resp =
-            stats_utils::send_stats_payload_with_client(serialized_stats_payload, endpoint, api_key.as_str(), Some(&http_client)).await;
+        let resp = stats_utils::send_stats_payload_with_client(
+            serialized_stats_payload,
+            endpoint,
+            api_key.as_str(),
+            Some(&http_client),
+        )
+        .await;
         let elapsed = start.elapsed();
         debug!(
             "Stats request to {} took {} ms",
