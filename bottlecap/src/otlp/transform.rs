@@ -1,9 +1,9 @@
+use hex;
+use lazy_static::lazy_static;
 use libdd_trace_normalization::normalize_utils::{
     normalize_name, normalize_service, normalize_tag,
 };
 use libdd_trace_protobuf::pb::Span as DatadogSpan;
-use hex;
-use lazy_static::lazy_static;
 use opentelemetry_proto::tonic::common::v1::{
     AnyValue, InstrumentationScope as OtelInstrumentationScope, KeyValue, any_value,
 };

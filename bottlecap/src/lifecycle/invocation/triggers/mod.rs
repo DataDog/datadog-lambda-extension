@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use libdd_trace_protobuf::pb::Span;
 use lazy_static::lazy_static;
+use libdd_trace_protobuf::pb::Span;
 use regex::Regex;
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;

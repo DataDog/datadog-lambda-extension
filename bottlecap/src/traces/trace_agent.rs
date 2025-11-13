@@ -41,9 +41,9 @@ use crate::{
         trace_processor,
     },
 };
+use libdd_common::hyper_migration;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::trace_utils::{self};
-use libdd_common::hyper_migration;
 
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 

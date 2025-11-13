@@ -15,6 +15,7 @@ use crate::traces::{
 use async_trait::async_trait;
 use datadog_trace_obfuscation::obfuscate::obfuscate_span;
 use datadog_trace_obfuscation::obfuscation_config;
+use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::Span;
 use libdd_trace_utils::send_data::{Compression, SendDataBuilder};
@@ -22,7 +23,6 @@ use libdd_trace_utils::send_with_retry::{RetryBackoffType, RetryStrategy};
 use libdd_trace_utils::trace_utils::{self};
 use libdd_trace_utils::tracer_header_tags;
 use libdd_trace_utils::tracer_payload::{TraceChunkProcessor, TracerPayloadCollection};
-use libdd_common::Endpoint;
 use regex::Regex;
 use std::str::FromStr;
 use std::sync::Arc;

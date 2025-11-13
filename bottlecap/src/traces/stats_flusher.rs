@@ -10,10 +10,10 @@ use tokio::sync::OnceCell;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::stats_aggregator::StatsAggregator;
+use dogstatsd::api_key::ApiKeyFactory;
+use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_utils::{config_utils::trace_stats_url, stats_utils};
-use libdd_common::Endpoint;
-use dogstatsd::api_key::ApiKeyFactory;
 use tracing::{debug, error};
 
 #[async_trait]

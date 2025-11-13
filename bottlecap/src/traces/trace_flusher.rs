@@ -2,19 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use async_trait::async_trait;
+use dogstatsd::api_key::ApiKeyFactory;
+use hyper_http_proxy;
+use libdd_common::{Endpoint, GenericHttpClient, hyper_migration};
 use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
-use libdd_common::{Endpoint, GenericHttpClient, hyper_migration};
-use dogstatsd::api_key::ApiKeyFactory;
+use std::error::Error;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
-use std::error::Error;
-use hyper_http_proxy;
 
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
@@ -178,10 +178,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 None => trace.clone(),
             };
 
-            let send_result = trace_with_endpoint
-                .send(&http_client)
-                .await
-                .last_result;
+            let send_result = trace_with_endpoint.send(&http_client).await.last_result;
 
             if let Err(e) = send_result {
                 error!("TRACES | Request failed: {e:?}");
@@ -196,19 +193,24 @@ impl TraceFlusher for ServerlessTraceFlusher {
 }
 
 impl ServerlessTraceFlusher {
-    fn get_http_client(proxy_https: Option<&String>) -> Result<GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>, Box<dyn Error>> {
+    fn get_http_client(
+        proxy_https: Option<&String>,
+    ) -> Result<
+        GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>,
+        Box<dyn Error>,
+    > {
         if let Some(proxy) = proxy_https {
-            let proxy = hyper_http_proxy::Proxy::new(
-                hyper_http_proxy::Intercept::Https,
-                proxy.parse()?,
-            );
+            let proxy =
+                hyper_http_proxy::Proxy::new(hyper_http_proxy::Intercept::Https, proxy.parse()?);
             let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(
                 libdd_common::connector::Connector::default(),
                 proxy,
             )?;
             Ok(hyper_migration::client_builder().build(proxy_connector))
         } else {
-            let proxy_connector = hyper_http_proxy::ProxyConnector::new(libdd_common::connector::Connector::default())?;
+            let proxy_connector = hyper_http_proxy::ProxyConnector::new(
+                libdd_common::connector::Connector::default(),
+            )?;
             Ok(hyper_migration::client_builder().build(proxy_connector))
         }
     }
