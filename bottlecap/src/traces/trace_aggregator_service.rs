@@ -104,10 +104,10 @@ impl AggregatorService {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use libdd_common::Endpoint;
     use libdd_trace_utils::{
         trace_utils::TracerHeaderTags, tracer_payload::TracerPayloadCollection,
     };
-    use libdd_common::Endpoint;
 
     #[tokio::test]
     async fn test_aggregator_service_insert_and_flush() {
