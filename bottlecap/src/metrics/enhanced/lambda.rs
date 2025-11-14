@@ -369,7 +369,7 @@ impl Lambda {
         let num_cores = cpu_data_end.individual_cpu_idle_times.len() as f64;
         let uptime = uptime_data_end - uptime_data_offset;
         let total_idle_time = cpu_data_end.total_idle_time_ms - cpu_data_offset.total_idle_time_ms;
-        
+
         // Change in uptime should be positive and greater than total idle time across all cores
         if uptime <= 0.0 || (uptime * num_cores) < total_idle_time {
             debug!("Invalid uptime, skipping CPU utilization metrics");
@@ -390,7 +390,7 @@ impl Lambda {
             {
                 let idle_time = cpu_idle_time - cpu_idle_time_offset;
                 let idle_time = idle_time.max(0.0); // Ensure idle time is non-negative
-                
+
                 if idle_time < min_idle_time {
                     min_idle_time = idle_time;
                 }

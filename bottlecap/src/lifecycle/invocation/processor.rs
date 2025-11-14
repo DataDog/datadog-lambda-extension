@@ -22,7 +22,8 @@ use crate::{
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
-        self, CPUData, NetworkData, constants::{ETC_PATH, PROC_PATH}
+        self, CPUData, NetworkData,
+        constants::{ETC_PATH, PROC_PATH},
     },
     tags::{lambda::tags::resolve_runtime_from_proc, provider},
     traces::{
@@ -314,7 +315,7 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
         self.context_buffer.add_start_time(&request_id, start_time);
-        
+
         if self.config.lambda_proc_enhanced_metrics {
             let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
             let uptime_offset: Option<f64> = proc::get_uptime().ok();
