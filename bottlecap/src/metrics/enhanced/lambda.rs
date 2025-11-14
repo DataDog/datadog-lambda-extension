@@ -369,6 +369,12 @@ impl Lambda {
         let num_cores = cpu_data_end.individual_cpu_idle_times.len() as f64;
         let uptime = uptime_data_end - uptime_data_offset;
         let total_idle_time = cpu_data_end.total_idle_time_ms - cpu_data_offset.total_idle_time_ms;
+        
+        // Change in uptime should be positive and greater than total idle time across all cores
+        if uptime <= 0.0 || (uptime * num_cores) < total_idle_time {
+            debug!("Invalid uptime, skipping CPU utilization metrics");
+            return;
+        }
 
         let mut max_idle_time = 0.0;
         let mut min_idle_time = f64::MAX;
@@ -383,6 +389,8 @@ impl Lambda {
                 cpu_data_offset.individual_cpu_idle_times.get(cpu_name)
             {
                 let idle_time = cpu_idle_time - cpu_idle_time_offset;
+                let idle_time = idle_time.max(0.0); // Ensure idle time is non-negative
+                
                 if idle_time < min_idle_time {
                     min_idle_time = idle_time;
                 }
@@ -394,15 +402,15 @@ impl Lambda {
 
         // Maximally utilized CPU is the one with the least time spent in the idle process
         // Multiply by 100 to report as percentage
-        let cpu_max_utilization = ((uptime - min_idle_time) / uptime) * 100.0;
+        let cpu_max_utilization = ((uptime - min_idle_time).max(0.0) / uptime) * 100.0;
 
         // Minimally utilized CPU is the one with the most time spent in the idle process
         // Multiply by 100 to report as percentage
-        let cpu_min_utilization = ((uptime - max_idle_time) / uptime) * 100.0;
+        let cpu_min_utilization = ((uptime - max_idle_time).max(0.0) / uptime) * 100.0;
 
         // CPU total utilization is the proportion of total non-idle time to the total uptime across all cores
         let cpu_total_utilization_decimal =
-            ((uptime * num_cores) - total_idle_time) / (uptime * num_cores);
+            ((uptime * num_cores) - total_idle_time).max(0.0) / (uptime * num_cores);
         // Multiply by 100 to report as percentage
         let cpu_total_utilization_pct = cpu_total_utilization_decimal * 100.0;
         // Multiply by num_cores to report in terms of cores
