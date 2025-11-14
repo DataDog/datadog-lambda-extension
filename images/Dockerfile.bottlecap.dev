@@ -4,7 +4,7 @@ ARG FILE_SUFFIX
 RUN apt-get update && apt-get install -y zip binutils
 
 # Copy Go Agent from last release
-COPY --from=public.ecr.aws/datadog/lambda-extension:latest /opt/datadog-agent-go  /datadog-agent-go
+COPY --from=public.ecr.aws/datadog/lambda-extension:latest /opt/extensions/datadog-agent /datadog-agent-go
 RUN mkdir /extensions
 WORKDIR /extensions
 
