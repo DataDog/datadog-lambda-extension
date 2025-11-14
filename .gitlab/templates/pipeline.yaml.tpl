@@ -46,32 +46,10 @@ cargo clippy:
 
 {{ range $flavor := (ds "flavors").flavors }}
 
-go agent ({{ $flavor.name }}):
-  stage: compile
-  image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:amd64"]
-  needs: []
-  artifacts:
-    expire_in: 1 week
-    paths:
-      - .binaries/datadog-agent-{{ $flavor.suffix }}
-  variables:
-    ARCHITECTURE: {{ $flavor.arch }}
-    ALPINE: {{ $flavor.alpine }}
-    FILE_SUFFIX: {{ $flavor.suffix }}
-    FIPS: {{ $flavor.fips }}
-  script:
-    - echo "Building go agent based on $AGENT_BRANCH"
-    # TODO: do this clone once in a separate job so that we can make sure that
-    # we're using the same exact code for all of the builds (main can move
-    # between different runs of the various compile jobs, for example)
-    - cd .. && git clone -b $AGENT_BRANCH --single-branch https://github.com/DataDog/datadog-agent.git && cd datadog-agent && git rev-parse HEAD && cd ../datadog-lambda-extension
-    - .gitlab/scripts/compile_go_agent.sh
-
 bottlecap ({{ $flavor.name }}):
   stage: compile
   image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:amd64"]
+  tags: ["arch:{{ $flavor.arch }}"]
   needs: []
   artifacts:
     expire_in: 1 week
@@ -88,15 +66,13 @@ bottlecap ({{ $flavor.name }}):
 layer ({{ $flavor.name }}):
   stage: build
   image: registry.ddbuild.io/images/docker:20.10
-  tags: ["arch:amd64"]
+  tags: ["arch:{{ $flavor.arch }}"]
   needs:
-    - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
     - cargo fmt
     - cargo check
     - cargo clippy
   dependencies:
-    - go agent ({{ $flavor.name }})
     - bottlecap ({{ $flavor.name }})
   artifacts:
     expire_in: 1 week

@@ -6,9 +6,11 @@ use crate::{
         Config, ConfigError, ConfigSource, ProcessingRule,
         additional_endpoints::deserialize_additional_endpoints,
         deserialize_apm_replace_rules, deserialize_key_value_pair_array_to_hashmap,
-        deserialize_optional_bool_from_anything, deserialize_optional_duration_from_microseconds,
-        deserialize_optional_duration_from_seconds, deserialize_processing_rules,
-        deserialize_string_or_int,
+        deserialize_option_lossless, deserialize_optional_bool_from_anything,
+        deserialize_optional_duration_from_microseconds,
+        deserialize_optional_duration_from_seconds,
+        deserialize_optional_duration_from_seconds_ignore_zero, deserialize_optional_string,
+        deserialize_processing_rules, deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
         logs_additional_endpoints::LogsAdditionalEndpoint,
@@ -32,18 +34,24 @@ use serde::Deserialize;
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
 pub struct YamlConfig {
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub site: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub api_key: Option<String>,
     pub log_level: Option<LogLevel>,
 
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub flush_timeout: Option<u64>,
 
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub compression_level: Option<i32>,
 
     // Proxy
     pub proxy: ProxyConfig,
     // nit: this should probably be in the endpoints section
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub dd_url: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub http_protocol: Option<String>,
 
     // Endpoints
@@ -87,28 +95,35 @@ pub struct YamlConfig {
     pub otlp_config: Option<OtlpConfig>,
 
     // AWS Lambda
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub api_key_secret_arn: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub kms_api_key: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_logs_enabled: Option<bool>,
     pub serverless_flush_strategy: Option<FlushStrategy>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub enhanced_metrics: Option<bool>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub lambda_proc_enhanced_metrics: Option<bool>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub capture_lambda_payload: Option<bool>,
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub capture_lambda_payload_max_depth: Option<u32>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
-    pub compute_trace_stats: Option<bool>,
+    pub compute_trace_stats_on_extension: Option<bool>,
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds_ignore_zero")]
+    pub api_key_secret_reload_interval: Option<Duration>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_appsec_enabled: Option<bool>,
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub appsec_rules: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_duration_from_microseconds")]
     pub appsec_waf_timeout: Option<Duration>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub api_security_enabled: Option<bool>,
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
-    pub extension_version: Option<String>,
 }
 
 /// Proxy Config
@@ -134,6 +149,7 @@ pub struct LogsConfig {
     pub processing_rules: Option<Vec<ProcessingRule>>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub use_compression: Option<bool>,
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub compression_level: Option<i32>,
     pub additional_endpoints: Vec<LogsAdditionalEndpoint>,
 }
@@ -144,6 +160,7 @@ pub struct LogsConfig {
 #[serde(default)]
 #[allow(clippy::module_name_repetitions)]
 pub struct MetricsConfig {
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub compression_level: Option<i32>,
 }
 
@@ -158,6 +175,7 @@ pub struct ApmConfig {
     #[serde(deserialize_with = "deserialize_apm_replace_rules")]
     pub replace_tags: Option<Vec<ReplaceRule>>,
     pub obfuscation: Option<ApmObfuscation>,
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub compression_level: Option<i32>,
     pub features: Vec<String>,
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
@@ -242,6 +260,7 @@ pub struct OtlpReceiverHttpConfig {
 pub struct OtlpReceiverGrpcConfig {
     pub endpoint: Option<String>,
     pub transport: Option<String>,
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub max_recv_msg_size_mib: Option<i32>,
 }
 
@@ -263,6 +282,7 @@ pub struct OtlpTracesConfig {
 
 #[derive(Debug, PartialEq, Clone, Deserialize, Default, Copy)]
 pub struct OtlpTracesProbabilisticSampler {
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub sampling_percentage: Option<i32>,
 }
 
@@ -276,6 +296,7 @@ pub struct OtlpMetricsConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub instrumentation_scope_metadata_as_tags: Option<bool>,
     pub tag_cardinality: Option<String>,
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub delta_ttl: Option<i32>,
     pub histograms: Option<OtlpMetricsHistograms>,
     pub sums: Option<OtlpMetricsSums>,
@@ -656,13 +677,13 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option_to_value!(config, yaml_config, lambda_proc_enhanced_metrics);
     merge_option_to_value!(config, yaml_config, capture_lambda_payload);
     merge_option_to_value!(config, yaml_config, capture_lambda_payload_max_depth);
-    merge_option_to_value!(config, yaml_config, compute_trace_stats);
+    merge_option_to_value!(config, yaml_config, compute_trace_stats_on_extension);
+    merge_option!(config, yaml_config, api_key_secret_reload_interval);
     merge_option_to_value!(config, yaml_config, serverless_appsec_enabled);
     merge_option!(config, yaml_config, appsec_rules);
     merge_option_to_value!(config, yaml_config, appsec_waf_timeout);
     merge_option_to_value!(config, yaml_config, api_security_enabled);
     merge_option_to_value!(config, yaml_config, api_security_sample_delay);
-    merge_option!(config, yaml_config, extension_version);
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -826,13 +847,13 @@ enhanced_metrics: false
 lambda_proc_enhanced_metrics: false
 capture_lambda_payload: true
 capture_lambda_payload_max_depth: 5
-compute_trace_stats: true
+compute_trace_stats_on_extension: true
+api_key_secret_reload_interval: 0
 serverless_appsec_enabled: true
 appsec_rules: "/path/to/rules.json"
 appsec_waf_timeout: 1000000 # Microseconds
 api_security_enabled: false
 api_security_sample_delay: 60 # Seconds
-extension_version: "compatibility"
 "#,
             )?;
 
@@ -959,7 +980,8 @@ extension_version: "compatibility"
                 lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
-                compute_trace_stats: true,
+                compute_trace_stats_on_extension: true,
+                api_key_secret_reload_interval: None,
 
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
@@ -967,11 +989,11 @@ extension_version: "compatibility"
                 api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
 
-                extension_version: Some("compatibility".to_string()),
                 apm_filter_tags_require: None,
                 apm_filter_tags_reject: None,
                 apm_filter_tags_regex_require: None,
                 apm_filter_tags_regex_reject: None,
+                statsd_metric_namespace: None,
             };
 
             // Assert that

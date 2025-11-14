@@ -9,6 +9,7 @@ use tracing::debug;
 
 pub mod context;
 pub mod processor;
+pub mod processor_service;
 pub mod span_inferrer;
 pub mod triggers;
 

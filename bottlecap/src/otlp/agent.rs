@@ -93,21 +93,20 @@ impl Agent {
         default_port
     }
 
-    pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let socket = SocketAddr::from(([127, 0, 0, 1], self.port));
         let router = self.make_router();
 
         let cancel_token_clone = self.cancel_token.clone();
-        tokio::spawn(async move {
-            let listener = TcpListener::bind(&socket)
-                .await
-                .expect("Failed to bind socket");
-            debug!("OTLP | Starting collector on {}", socket);
-            axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
-                .await
-                .expect("Failed to start OTLP agent");
-        });
+
+        let listener = TcpListener::bind(&socket)
+            .await
+            .expect("Failed to bind socket");
+        debug!("OTLP | Starting collector on {}", socket);
+        axum::serve(listener, router)
+            .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
+            .await
+            .expect("Failed to start OTLP agent");
 
         Ok(())
     }
@@ -173,7 +172,7 @@ impl Agent {
                 .into_response();
         }
 
-        let compute_trace_stats = config.compute_trace_stats;
+        let compute_trace_stats_on_extension = config.compute_trace_stats_on_extension;
         let (send_data_builder, processed_traces) = trace_processor.process_traces(
             config,
             tags_provider,
@@ -198,7 +197,7 @@ impl Agent {
 
         // This needs to be after process_traces() because process_traces()
         // performs obfuscation, and we need to compute stats on the obfuscated traces.
-        if compute_trace_stats {
+        if compute_trace_stats_on_extension {
             if let Err(err) = stats_generator.send(&processed_traces) {
                 // Just log the error. We don't think trace stats are critical, so we don't want to
                 // return an error if only stats fail to send.

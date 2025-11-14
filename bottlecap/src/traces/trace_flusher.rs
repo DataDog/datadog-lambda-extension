@@ -2,28 +2,26 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use async_trait::async_trait;
-use ddcommon::Endpoint;
-use std::str::FromStr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::task::JoinSet;
-use tracing::{debug, error};
-
 use datadog_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
+use ddcommon::Endpoint;
 use dogstatsd::api_key::ApiKeyFactory;
+use std::str::FromStr;
+use std::sync::Arc;
+use tokio::task::JoinSet;
+use tracing::{debug, error};
 
 use crate::config::Config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
-use crate::traces::trace_aggregator::TraceAggregator;
+use crate::traces::trace_aggregator_service::AggregatorHandle;
 
 #[async_trait]
 pub trait TraceFlusher {
     fn new(
-        aggregator: Arc<Mutex<TraceAggregator>>,
+        aggregator_handle: AggregatorHandle,
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
     ) -> Self
@@ -46,7 +44,7 @@ pub trait TraceFlusher {
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
 pub struct ServerlessTraceFlusher {
-    pub aggregator: Arc<Mutex<TraceAggregator>>,
+    pub aggregator_handle: AggregatorHandle,
     pub config: Arc<Config>,
     pub api_key_factory: Arc<ApiKeyFactory>,
     pub additional_endpoints: Vec<Endpoint>,
@@ -55,7 +53,7 @@ pub struct ServerlessTraceFlusher {
 #[async_trait]
 impl TraceFlusher for ServerlessTraceFlusher {
     fn new(
-        aggregator: Arc<Mutex<TraceAggregator>>,
+        aggregator_handle: AggregatorHandle,
         config: Arc<Config>,
         api_key_factory: Arc<ApiKeyFactory>,
     ) -> Self {
@@ -77,7 +75,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         }
 
         ServerlessTraceFlusher {
-            aggregator,
+            aggregator_handle,
             config,
             api_key_factory,
             additional_endpoints,
@@ -87,11 +85,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
     async fn flush(&self, failed_traces: Option<Vec<SendData>>) -> Option<Vec<SendData>> {
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
             error!(
-                "Purging the aggregated data and skipping flushing traces: Failed to resolve API key"
+                "TRACES | Failed to resolve API key, dropping aggregated data and skipping flushing."
             );
-            {
-                let mut guard = self.aggregator.lock().await;
-                guard.clear();
+            if let Err(e) = self.aggregator_handle.clear() {
+                error!("TRACES | Failed to clear aggregator data: {e}");
             }
             return None;
         };
@@ -101,7 +98,10 @@ impl TraceFlusher for ServerlessTraceFlusher {
         if let Some(traces) = failed_traces {
             // If we have traces from a previous failed attempt, try to send those first
             if !traces.is_empty() {
-                debug!("Retrying to send {} previously failed traces", traces.len());
+                debug!(
+                    "TRACES | Retrying to send {} previously failed batches",
+                    traces.len()
+                );
                 let retry_result = Self::send(traces, None, &self.config.proxy_https).await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
@@ -110,18 +110,20 @@ impl TraceFlusher for ServerlessTraceFlusher {
             }
         }
 
-        // Process new traces from the aggregator
-        let mut guard = self.aggregator.lock().await;
-        let mut trace_builders = guard.get_batch();
+        let all_batches = match self.aggregator_handle.get_batches().await {
+            Ok(v) => v,
+            Err(e) => {
+                error!("TRACES | Failed to fetch batches from aggregator service: {e}");
+                return None;
+            }
+        };
 
-        // Collect all batches and their tasks
         let mut batch_tasks = JoinSet::new();
 
-        while !trace_builders.is_empty() {
+        for trace_builders in all_batches {
             let traces: Vec<_> = trace_builders
                 .into_iter()
-                // Lazily set the API key
-                .map(|builder| builder.with_api_key(api_key))
+                .map(|builder| builder.with_api_key(api_key.as_str()))
                 .map(SendDataBuilder::build)
                 .collect();
 
@@ -136,10 +138,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     Self::send(traces_clone, Some(&endpoint), &proxy_https).await
                 });
             }
-
-            trace_builders = guard.get_batch();
         }
-
         while let Some(result) = batch_tasks.join_next().await {
             if let Ok(Some(mut failed)) = result {
                 failed_batch.append(&mut failed);
@@ -164,7 +163,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         let start = tokio::time::Instant::now();
         let coalesced_traces = trace_utils::coalesce_send_data(traces);
         tokio::task::yield_now().await;
-        debug!("Flushing {} traces", coalesced_traces.len());
+        debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
         for trace in &coalesced_traces {
             let trace_with_endpoint = match endpoint {
@@ -178,13 +177,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                 .last_result;
 
             if let Err(e) = send_result {
-                error!("Error sending trace: {e:?}");
+                error!("TRACES | Request failed: {e:?}");
                 // Return the original traces for retry
                 return Some(coalesced_traces.clone());
             }
         }
 
-        debug!("Flushing traces took {}ms", start.elapsed().as_millis());
+        debug!("TRACES | Flushing took {} ms", start.elapsed().as_millis());
         None
     }
 }

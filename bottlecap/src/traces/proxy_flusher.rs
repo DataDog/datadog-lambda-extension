@@ -83,7 +83,7 @@ impl Flusher {
     ) -> Option<Vec<reqwest::RequestBuilder>> {
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
             error!(
-                "Purging the aggregated data and skipping flush in proxy flusher: Failed to resolve API key."
+                "PROXY_FLUSHER | Failed to resolve API key, dropping aggregated data and skipping flush."
             );
             {
                 let mut aggregator = self.aggregator.lock().await;
@@ -98,12 +98,12 @@ impl Flusher {
         // If there are any requests to retry, start with those
         if retry_requests.as_ref().is_some_and(|r| !r.is_empty()) {
             let retries = retry_requests.unwrap_or_default();
-            debug!("Proxy Flusher | Retrying {} failed requests", retries.len());
+            debug!("PROXY_FLUSHER | Retrying {} failed requests", retries.len());
             requests = retries;
         } else {
             let mut aggregator = self.aggregator.lock().await;
             for pr in aggregator.get_batch() {
-                requests.push(self.create_request(pr, api_key).await);
+                requests.push(self.create_request(pr, api_key.as_str()).await);
             }
         }
 
@@ -137,7 +137,7 @@ impl Flusher {
     }
 
     async fn send(request: reqwest::RequestBuilder) -> Result<(), Box<dyn Error + Send>> {
-        debug!("Proxy Flusher | Attempting to send request");
+        debug!("PROXY_FLUSHER | Attempting to send request");
         let mut attempts = 0;
 
         loop {
@@ -161,11 +161,11 @@ impl Flusher {
                     let body = r.text().await;
                     if status == 202 || status == 200 {
                         debug!(
-                            "Proxy Flusher | Successfully sent request in {} ms to {url}",
+                            "PROXY_FLUSHER | Successfully sent request in {} ms to {url}",
                             elapsed.as_millis()
                         );
                     } else {
-                        error!("Proxy Flusher | Request failed with status {status}: {body:?}");
+                        error!("PROXY_FLUSHER | Request failed with status {status}: {body:?}");
                     }
 
                     return Ok(());
@@ -173,7 +173,7 @@ impl Flusher {
                 Err(e) => {
                     if attempts >= FLUSH_RETRY_COUNT {
                         error!(
-                            "Proxy Flusher | Failed to send request after {} attempts: {:?}",
+                            "PROXY_FLUSHER | Failed to send request after {} attempts: {:?}",
                             attempts, e
                         );
 

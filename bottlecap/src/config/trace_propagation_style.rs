@@ -1,6 +1,7 @@
 use std::{fmt::Display, str::FromStr};
 
 use serde::{Deserialize, Deserializer};
+use tracing::error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TracePropagationStyle {
@@ -21,7 +22,10 @@ impl FromStr for TracePropagationStyle {
             "b3" => Ok(TracePropagationStyle::B3),
             "tracecontext" => Ok(TracePropagationStyle::TraceContext),
             "none" => Ok(TracePropagationStyle::None),
-            _ => Err(format!("Unknown trace propagation style: {s}")),
+            _ => {
+                error!("Trace propagation style is invalid: {:?}, using None", s);
+                Ok(TracePropagationStyle::None)
+            }
         }
     }
 }
@@ -48,11 +52,15 @@ where
 {
     let s: String = String::deserialize(deserializer)?;
 
-    s.split(',')
-        .map(|style| {
-            TracePropagationStyle::from_str(style.trim()).map_err(|e| {
-                serde::de::Error::custom(format!("Failed to deserialize propagation style: {e}"))
-            })
-        })
-        .collect()
+    Ok(s.split(',')
+        .filter_map(
+            |style| match TracePropagationStyle::from_str(style.trim()) {
+                Ok(parsed_style) => Some(parsed_style),
+                Err(e) => {
+                    tracing::error!("Failed to parse trace propagation style: {}, ignoring", e);
+                    None
+                }
+            },
+        )
+        .collect())
 }

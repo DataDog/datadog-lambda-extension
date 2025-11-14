@@ -17,6 +17,8 @@ pub const DURATION_METRIC: &str = "aws.lambda.enhanced.duration";
 pub const POST_RUNTIME_DURATION_METRIC: &str = "aws.lambda.enhanced.post_runtime_duration";
 pub const ESTIMATED_COST_METRIC: &str = "aws.lambda.enhanced.estimated_cost";
 pub const INIT_DURATION_METRIC: &str = "aws.lambda.enhanced.init_duration";
+pub const SNAPSTART_RESTORE_DURATION_METRIC: &str =
+    "aws.lambda.enhanced.snapstart_restore_duration";
 pub const RESPONSE_LATENCY_METRIC: &str = "aws.lambda.enhanced.response_latency";
 pub const RESPONSE_DURATION_METRIC: &str = "aws.lambda.enhanced.response_duration";
 pub const PRODUCED_BYTES_METRIC: &str = "aws.lambda.enhanced.produced_bytes";
@@ -45,8 +47,6 @@ pub const THREADS_USE_METRIC: &str = "aws.lambda.enhanced.threads_use";
 pub const SHUTDOWNS_METRIC: &str = "aws.lambda.enhanced.shutdowns";
 //pub const ASM_INVOCATIONS_METRIC: &str = "aws.lambda.enhanced.asm.invocations";
 pub const UNUSED_INIT: &str = "aws.lambda.enhanced.unused_init";
-pub const DATADOG_SERVERLESS_EXTENSION_FAILOVER_CONFIG_ISSUE_METRIC: &str =
-    "datadog.serverless.extension.failover";
 pub const ENHANCED_METRICS_ENV_VAR: &str = "DD_ENHANCED_METRICS";
 
 // Monitoring interval for tmp, fd, and threads metrics

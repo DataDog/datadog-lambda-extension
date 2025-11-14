@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::{Mutex, mpsc::Sender};
+use tokio::sync::mpsc::Sender;
 
 use tracing::debug;
 
@@ -7,10 +7,9 @@ use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config::{self, processing_rule};
 use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
-use crate::tags;
-
-use crate::logs::aggregator::Aggregator;
+use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::lambda::processor::LambdaProcessor;
+use crate::tags;
 
 impl LogsProcessor {
     #[must_use]
@@ -29,10 +28,10 @@ impl LogsProcessor {
         }
     }
 
-    pub async fn process(&mut self, event: TelemetryEvent, aggregator: &Arc<Mutex<Aggregator>>) {
+    pub async fn process(&mut self, event: TelemetryEvent, aggregator_handle: &AggregatorHandle) {
         match self {
             LogsProcessor::Lambda(lambda_processor) => {
-                lambda_processor.process(event, aggregator).await;
+                lambda_processor.process(event, aggregator_handle).await;
             }
         }
     }

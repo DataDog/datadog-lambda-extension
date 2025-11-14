@@ -54,21 +54,28 @@ async fn test_logs() {
         &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
     ));
 
-    let bus = EventBus::run();
-    let mut logs_agent =
-        LogsAgent::new(tags_provider, Arc::clone(&arc_conf), bus.get_sender_copy());
-    let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
-    let logs_flusher = LogsFlusher::new(
-        api_key_factory,
-        Arc::clone(&logs_agent.aggregator),
-        arc_conf.clone(),
+    let (_, bus_tx) = EventBus::run();
+
+    let (logs_aggr_service, logs_aggr_handle) =
+        bottlecap::logs::aggregator_service::AggregatorService::default();
+    tokio::spawn(async move {
+        logs_aggr_service.run().await;
+    });
+
+    let (mut logs_agent, logs_agent_tx) = LogsAgent::new(
+        tags_provider,
+        Arc::clone(&arc_conf),
+        bus_tx.clone(),
+        logs_aggr_handle.clone(),
     );
+    let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
+    let logs_flusher = LogsFlusher::new(api_key_factory, logs_aggr_handle, arc_conf.clone());
 
     let telemetry_events: Vec<TelemetryEvent> = serde_json::from_str(
         r#"[{"time":"2022-10-21T14:05:03.165Z","type":"platform.start","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","version":"$LATEST","tracing":{"spanId":"24cd7d670fa455f0","type":"X-Amzn-Trace-Id","value":"Root=1-6352a70e-1e2c502e358361800241fd45;Parent=35465b3a9e2f7c6a;Sampled=1"}}}]"#)
         .map_err(|e| e.to_string()).expect("Failed parsing telemetry events");
 
-    let sender = logs_agent.get_sender_copy();
+    let sender = logs_agent_tx.clone();
 
     for an_event in telemetry_events {
         sender

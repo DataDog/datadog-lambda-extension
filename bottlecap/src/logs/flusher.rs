@@ -1,7 +1,7 @@
 use crate::FLUSH_RETRY_COUNT;
 use crate::config;
 use crate::http::get_client;
-use crate::logs::aggregator::Aggregator;
+use crate::logs::aggregator_service::AggregatorHandle;
 use dogstatsd::api_key::ApiKeyFactory;
 use futures::future::join_all;
 use hyper::StatusCode;
@@ -10,10 +10,7 @@ use std::error::Error;
 use std::time::Instant;
 use std::{io::Write, sync::Arc};
 use thiserror::Error as ThisError;
-use tokio::{
-    sync::{Mutex, OnceCell},
-    task::JoinSet,
-};
+use tokio::{sync::OnceCell, task::JoinSet};
 use tracing::{debug, error};
 use zstd::stream::write::Encoder;
 
@@ -28,24 +25,22 @@ pub struct FailedRequestError {
 pub struct Flusher {
     client: reqwest::Client,
     endpoint: String,
-    aggregator: Arc<Mutex<Aggregator>>,
     config: Arc<config::Config>,
     api_key_factory: Arc<ApiKeyFactory>,
     headers: OnceCell<HeaderMap>,
 }
 
 impl Flusher {
+    #[must_use]
     pub fn new(
         api_key_factory: Arc<ApiKeyFactory>,
         endpoint: String,
-        aggregator: Arc<Mutex<Aggregator>>,
         config: Arc<config::Config>,
     ) -> Self {
         let client = get_client(&config);
         Flusher {
             client,
             endpoint,
-            aggregator,
             config,
             api_key_factory,
             headers: OnceCell::new(),
@@ -54,7 +49,7 @@ impl Flusher {
 
     pub async fn flush(&self, batches: Option<Arc<Vec<Vec<u8>>>>) -> Vec<reqwest::RequestBuilder> {
         let Some(api_key) = self.api_key_factory.get_api_key().await else {
-            error!("Skipping flushing logs: Failed to resolve API key");
+            error!("LOGS | Skipping flushing: Failed to resolve API key");
             return vec![];
         };
 
@@ -65,7 +60,7 @@ impl Flusher {
                 if batch.is_empty() {
                     continue;
                 }
-                let req = self.create_request(batch.clone(), api_key).await;
+                let req = self.create_request(batch.clone(), api_key.as_str()).await;
                 set.spawn(async move { Self::send(req).await });
             }
         }
@@ -73,7 +68,7 @@ impl Flusher {
         let mut failed_requests = Vec::new();
         for result in set.join_all().await {
             if let Err(e) = result {
-                debug!("Failed to join task: {}", e);
+                debug!("LOGS | Failed to join task: {}", e);
                 continue;
             }
 
@@ -88,9 +83,9 @@ impl Flusher {
                             .try_clone()
                             .expect("should be able to clone request"),
                     );
-                    debug!("Failed to send logs after retries, will retry later");
+                    debug!("LOGS | Failed to send request after retries, will retry later");
                 } else {
-                    debug!("Failed to send logs: {}", e);
+                    debug!("LOGS | Failed to send request: {}", e);
                 }
             }
         }
@@ -133,7 +128,7 @@ impl Flusher {
                     if status == StatusCode::FORBIDDEN {
                         // Access denied. Stop retrying.
                         error!(
-                            "Failed to send logs to Datadog: Access denied. Please verify that your API key is valid."
+                            "LOGS | Request was denied by Datadog: Access denied. Please verify that your API key is valid."
                         );
                         return Ok(());
                     }
@@ -146,14 +141,14 @@ impl Flusher {
                         // After 3 failed attempts, return the original request for later retry
                         // Create a custom error that can be downcast to get the RequestBuilder
                         error!(
-                            "Failed to send logs to datadog after {} ms and {} attempts: {:?}",
+                            "LOGS | Failed to send request after {} ms and {} attempts: {:?}",
                             elapsed.as_millis(),
                             attempts,
                             e
                         );
                         return Err(Box::new(FailedRequestError {
                             request: req,
-                            message: format!("Failed after {attempts} attempts: {e}"),
+                            message: format!("LOGS | Failed after {attempts} attempts: {e}"),
                         }));
                     }
                 }
@@ -199,19 +194,20 @@ impl Flusher {
 pub struct LogsFlusher {
     config: Arc<config::Config>,
     pub flushers: Vec<Flusher>,
+    aggregator_handle: AggregatorHandle,
 }
 
 impl LogsFlusher {
     pub fn new(
         api_key_factory: Arc<ApiKeyFactory>,
-        aggregator: Arc<Mutex<Aggregator>>,
+        aggregator_handle: AggregatorHandle,
         config: Arc<config::Config>,
     ) -> Self {
         let mut flushers = Vec::new();
 
         let endpoint = if config.observability_pipelines_worker_logs_enabled {
             if config.observability_pipelines_worker_logs_url.is_empty() {
-                error!("Observability Pipelines Worker Logs are enabled but the URL is empty");
+                error!("LOGS | Observability Pipelines Worker URL is empty");
             }
             config.observability_pipelines_worker_logs_url.clone()
         } else {
@@ -222,22 +218,26 @@ impl LogsFlusher {
         flushers.push(Flusher::new(
             Arc::clone(&api_key_factory),
             endpoint,
-            aggregator.clone(),
             config.clone(),
         ));
 
         // Create flushers for additional endpoints
         for endpoint in &config.logs_config_additional_endpoints {
             let endpoint_url = format!("https://{}:{}", endpoint.host, endpoint.port);
+            let additional_api_key_factory =
+                Arc::new(ApiKeyFactory::new(endpoint.api_key.clone().as_str()));
             flushers.push(Flusher::new(
-                Arc::clone(&api_key_factory),
+                additional_api_key_factory,
                 endpoint_url,
-                aggregator.clone(),
                 config.clone(),
             ));
         }
 
-        LogsFlusher { config, flushers }
+        LogsFlusher {
+            config,
+            flushers,
+            aggregator_handle,
+        }
     }
 
     pub async fn flush(
@@ -261,16 +261,17 @@ impl LogsFlusher {
                 }
             }
         } else {
-            // Get batches from primary flusher's aggregator
             let logs_batches = Arc::new({
-                let mut guard = self.flushers[0].aggregator.lock().await;
-                let mut batches = Vec::new();
-                let mut current_batch = guard.get_batch();
-                while !current_batch.is_empty() {
-                    batches.push(self.compress(current_batch));
-                    current_batch = guard.get_batch();
+                match self.aggregator_handle.get_batches().await {
+                    Ok(batches) => batches
+                        .into_iter()
+                        .map(|batch| self.compress(batch))
+                        .collect(),
+                    Err(e) => {
+                        debug!("Failed to flush from aggregator: {}", e);
+                        Vec::new()
+                    }
                 }
-                batches
             });
 
             // Send batches to each flusher
@@ -298,7 +299,7 @@ impl LogsFlusher {
         match self.encode(&data) {
             Ok(compressed_data) => compressed_data,
             Err(e) => {
-                debug!("Failed to compress data: {}", e);
+                debug!("LOGS | Failed to compress data: {}", e);
                 data
             }
         }

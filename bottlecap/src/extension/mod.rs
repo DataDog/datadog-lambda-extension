@@ -83,6 +83,7 @@ pub fn base_url(route: &str, runtime_api: &str) -> String {
 pub async fn register(
     client: &Client,
     runtime_api: &str,
+    extension_name: &str,
 ) -> Result<RegisterResponse, ExtensionError> {
     let events_to_subscribe_to = serde_json::json!({
         "events": ["INVOKE", "SHUTDOWN"]
@@ -93,7 +94,7 @@ pub async fn register(
 
     let response = client
         .post(&url)
-        .header(EXTENSION_NAME_HEADER, EXTENSION_NAME)
+        .header(EXTENSION_NAME_HEADER, extension_name)
         .header(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
         .json(&events_to_subscribe_to)
         .send()
@@ -139,13 +140,19 @@ pub async fn next_event(
     let text = match response.text().await {
         Ok(t) => t,
         Err(e) => {
-            error!("Next response: Failed to read response body: {}", e);
+            error!(
+                "EXTENSION | Next response: Failed to read response body: {}",
+                e
+            );
             return Err(ExtensionError::ResponseBodyReadError);
         }
     };
 
     if !status.is_success() {
-        error!("Next response HTTP Error {} - Response: {}", status, text);
+        error!(
+            "EXTENSION | Next response HTTP Error {} - Response: {}",
+            status, text
+        );
         return Err(ExtensionError::HttpStatusError {
             status: status.as_u16(),
         });

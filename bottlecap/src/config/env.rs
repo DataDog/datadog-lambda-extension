@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
+use dogstatsd::util::parse_metric_namespace;
 
 use crate::{
     config::{
@@ -11,9 +12,11 @@ use crate::{
         additional_endpoints::deserialize_additional_endpoints,
         apm_replace_rule::deserialize_apm_replace_rules,
         deserialize_apm_filter_tags, deserialize_array_from_comma_separated_string,
-        deserialize_key_value_pairs, deserialize_optional_bool_from_anything,
-        deserialize_optional_duration_from_microseconds,
-        deserialize_optional_duration_from_seconds, deserialize_string_or_int,
+        deserialize_key_value_pairs, deserialize_option_lossless,
+        deserialize_optional_bool_from_anything, deserialize_optional_duration_from_microseconds,
+        deserialize_optional_duration_from_seconds,
+        deserialize_optional_duration_from_seconds_ignore_zero, deserialize_optional_string,
+        deserialize_string_or_int,
         flush_strategy::FlushStrategy,
         log_level::LogLevel,
         logs_additional_endpoints::{
@@ -34,10 +37,12 @@ pub struct EnvConfig {
     /// @env `DD_SITE`
     ///
     /// The Datadog site to send telemetry to
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub site: Option<String>,
     /// @env `DD_API_KEY`
     ///
     /// The Datadog API key used to submit telemetry to Datadog
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub api_key: Option<String>,
     /// @env `DD_LOG_LEVEL`
     ///
@@ -50,12 +55,14 @@ pub struct EnvConfig {
     /// Flush timeout in seconds
     /// todo(duncanista): find out where this comes from
     /// todo(?): go agent adds jitter too
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub flush_timeout: Option<u64>,
 
     // Proxy
     /// @env `DD_PROXY_HTTPS`
     ///
     /// Proxy endpoint for HTTPS connections (most Datadog traffic)
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub proxy_https: Option<String>,
     /// @env `DD_PROXY_NO_PROXY`
     ///
@@ -66,6 +73,7 @@ pub struct EnvConfig {
     ///
     /// The HTTP protocol to use for the Datadog Agent.
     /// The transport type to use for sending logs. Possible values are "auto" or "http1".
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub http_protocol: Option<String>,
 
     // Metrics
@@ -79,10 +87,12 @@ pub struct EnvConfig {
     /// or Live Process intake which have their own "*_`dd_url`" settings.
     ///
     /// If `DD_DD_URL` and `DD_URL` are both set, `DD_DD_URL` is used in priority.
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub dd_url: Option<String>,
     /// @env `DD_URL`
     ///
     /// @default `https://app.datadoghq.com`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub url: Option<String>,
     /// @env `DD_ADDITIONAL_ENDPOINTS`
     ///
@@ -112,12 +122,14 @@ pub struct EnvConfig {
     /// Global level `compression_level` parameter accepts values from 0 (no compression)
     /// to 9 (maximum compression but higher resource usage). This value is effective only if
     /// the individual component doesn't specify its own.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub compression_level: Option<i32>,
 
     // Logs
     /// @env `DD_LOGS_CONFIG_LOGS_DD_URL`
     ///
     /// Define the endpoint and port to hit when using a proxy for logs.
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub logs_config_logs_dd_url: Option<String>,
     /// @env `DD_LOGS_CONFIG_PROCESSING_RULES`
     ///
@@ -136,6 +148,7 @@ pub struct EnvConfig {
     /// The `compression_level` parameter accepts values from 0 (no compression)
     /// to 9 (maximum compression but higher resource usage). Only takes effect if
     /// `use_compression` is set to `true`.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub logs_config_compression_level: Option<i32>,
     /// @env `DD_LOGS_CONFIG_ADDITIONAL_ENDPOINTS`
     ///
@@ -151,6 +164,7 @@ pub struct EnvConfig {
     /// @env `DD_OBSERVABILITY_PIPELINES_WORKER_LOGS_URL`
     ///
     /// The URL endpoint for sending logs to Observability Pipelines Worker
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub observability_pipelines_worker_logs_url: Option<String>,
 
     // APM
@@ -162,6 +176,7 @@ pub struct EnvConfig {
     /// @env `DD_APM_DD_URL`
     ///
     /// Define the endpoint and port to hit when using a proxy for APM.
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub apm_dd_url: Option<String>,
     /// @env `DD_APM_REPLACE_TAGS`
     ///
@@ -186,6 +201,7 @@ pub struct EnvConfig {
     /// The Agent compresses traces before sending them. The `compression_level` parameter
     /// accepts values from 0 (no compression) to 9 (maximum compression but
     /// higher resource usage).
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub apm_config_compression_level: Option<i32>,
     /// @env `DD_APM_FEATURES`
     #[serde(deserialize_with = "deserialize_array_from_comma_separated_string")]
@@ -248,7 +264,13 @@ pub struct EnvConfig {
     /// The metrics compresses traces before sending them. The `compression_level` parameter
     /// accepts values from 0 (no compression) to 9 (maximum compression but
     /// higher resource usage).
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub metrics_config_compression_level: Option<i32>,
+
+    /// @env `DD_STATSD_METRIC_NAMESPACE`
+    /// Prefix all `StatsD` metrics with a namespace.
+    #[serde(deserialize_with = "deserialize_optional_string")]
+    pub statsd_metric_namespace: Option<String>,
 
     // OTLP
     //
@@ -268,15 +290,19 @@ pub struct EnvConfig {
     //
     // - Receiver / HTTP
     /// @env `DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_receiver_protocols_http_endpoint: Option<String>,
     // - Unsupported Configuration
     //
     // - Receiver / GRPC
     /// @env `DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_receiver_protocols_grpc_endpoint: Option<String>,
     /// @env `DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_TRANSPORT`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_receiver_protocols_grpc_transport: Option<String>,
     /// @env `DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_MAX_RECV_MSG_SIZE_MIB`
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib: Option<i32>,
     // - Metrics
     /// @env `DD_OTLP_CONFIG_METRICS_ENABLED`
@@ -289,10 +315,13 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub otlp_config_metrics_instrumentation_scope_metadata_as_tags: Option<bool>,
     /// @env `DD_OTLP_CONFIG_METRICS_TAG_CARDINALITY`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_metrics_tag_cardinality: Option<String>,
     /// @env `DD_OTLP_CONFIG_METRICS_DELTA_TTL`
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub otlp_config_metrics_delta_ttl: Option<i32>,
     /// @env `DD_OTLP_CONFIG_METRICS_HISTOGRAMS_MODE`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_metrics_histograms_mode: Option<String>,
     /// @env `DD_OTLP_CONFIG_METRICS_HISTOGRAMS_SEND_COUNT_SUM_METRICS`
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
@@ -300,13 +329,17 @@ pub struct EnvConfig {
     /// @env `DD_OTLP_CONFIG_METRICS_HISTOGRAMS_SEND_AGGREGATION_METRICS`
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub otlp_config_metrics_histograms_send_aggregation_metrics: Option<bool>,
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_metrics_sums_cumulative_monotonic_mode: Option<String>,
     /// @env `DD_OTLP_CONFIG_METRICS_SUMS_INITIAL_CUMULATIVE_MONOTONIC_VALUE`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_metrics_sums_initial_cumulativ_monotonic_value: Option<String>,
     /// @env `DD_OTLP_CONFIG_METRICS_SUMMARIES_MODE`
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub otlp_config_metrics_summaries_mode: Option<String>,
     // - Traces
     /// @env `DD_OTLP_CONFIG_TRACES_PROBABILISTIC_SAMPLER_SAMPLING_PERCENTAGE`
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub otlp_config_traces_probabilistic_sampler_sampling_percentage: Option<i32>,
     // - Logs
     /// @env `DD_OTLP_CONFIG_LOGS_ENABLED`
@@ -317,10 +350,12 @@ pub struct EnvConfig {
     /// @env `DD_API_KEY_SECRET_ARN`
     ///
     /// The AWS ARN of the secret containing the Datadog API key.
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub api_key_secret_arn: Option<String>,
     /// @env `DD_KMS_API_KEY`
     ///
     /// The AWS KMS API key to use for the Datadog Agent.
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub kms_api_key: Option<String>,
     /// @env `DD_SERVERLESS_LOGS_ENABLED`
     ///
@@ -346,6 +381,7 @@ pub struct EnvConfig {
     /// - File descriptor count
     /// - Thread count
     /// - Temp directory usage
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub lambda_proc_enhanced_metrics: Option<bool>,
     /// @env `DD_CAPTURE_LAMBDA_PAYLOAD`
     ///
@@ -357,14 +393,22 @@ pub struct EnvConfig {
     ///
     /// The maximum depth of the Lambda payload to capture.
     /// Default is `10`. Requires `capture_lambda_payload` to be `true`.
+    #[serde(deserialize_with = "deserialize_option_lossless")]
     pub capture_lambda_payload_max_depth: Option<u32>,
-    /// @env `DD_COMPUTE_TRACE_STATS`
+    /// @env `DD_COMPUTE_TRACE_STATS_ON_EXTENSION`
     ///
     /// If true, enable computation of trace stats on the extension side.
     /// If false, trace stats will be computed on the backend side.
     /// Default is `false`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
-    pub compute_trace_stats: Option<bool>,
+    pub compute_trace_stats_on_extension: Option<bool>,
+    /// @env `DD_API_KEY_SECRET_RELOAD_INTERVAL`
+    ///
+    /// The interval at which the Datadog API key is reloaded, in seconds.
+    /// If None, the API key will not be reloaded.
+    /// Default is `None`.
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds_ignore_zero")]
+    pub api_key_secret_reload_interval: Option<Duration>,
     /// @env `DD_SERVERLESS_APPSEC_ENABLED`
     ///
     /// Enable Application and API Protection (AAP), previously known as AppSec/ASM, for AWS Lambda.
@@ -375,6 +419,7 @@ pub struct EnvConfig {
     /// @env `DD_APPSEC_RULES`
     ///
     /// The path to a user-configured App & API Protection ruleset (in JSON format).
+    #[serde(deserialize_with = "deserialize_optional_string")]
     pub appsec_rules: Option<String>,
     /// @env `DD_APPSEC_WAF_TIMEOUT`
     ///
@@ -391,11 +436,6 @@ pub struct EnvConfig {
     /// The delay between two samples of the API Security schema collection, in seconds.
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
-    /// @env `DD_EXTENSION_VERSION`
-    ///
-    /// Used to decide which version of the Datadog Lambda Extension to use.
-    /// When set to `compatibility`, the extension will boot up in legacy mode.
-    pub extension_version: Option<String>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -487,6 +527,10 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     );
     merge_option_to_value!(config, env_config, metrics_config_compression_level);
 
+    if let Some(namespace) = &env_config.statsd_metric_namespace {
+        config.statsd_metric_namespace = parse_metric_namespace(namespace);
+    }
+
     // OTLP
     merge_option_to_value!(config, env_config, otlp_config_traces_enabled);
     merge_option_to_value!(
@@ -571,13 +615,13 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, lambda_proc_enhanced_metrics);
     merge_option_to_value!(config, env_config, capture_lambda_payload);
     merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
-    merge_option_to_value!(config, env_config, compute_trace_stats);
+    merge_option_to_value!(config, env_config, compute_trace_stats_on_extension);
+    merge_option!(config, env_config, api_key_secret_reload_interval);
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
     merge_option!(config, env_config, appsec_rules);
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
     merge_option_to_value!(config, env_config, api_security_enabled);
     merge_option_to_value!(config, env_config, api_security_sample_delay);
-    merge_option!(config, env_config, extension_version);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -765,13 +809,13 @@ mod tests {
             jail.set_env("DD_LAMBDA_PROC_ENHANCED_METRICS", "false");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "true");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD_MAX_DEPTH", "5");
-            jail.set_env("DD_COMPUTE_TRACE_STATS", "true");
+            jail.set_env("DD_COMPUTE_TRACE_STATS_ON_EXTENSION", "true");
+            jail.set_env("DD_API_KEY_SECRET_RELOAD_INTERVAL", "10");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
             jail.set_env("DD_APPSEC_RULES", "/path/to/rules.json");
             jail.set_env("DD_APPSEC_WAF_TIMEOUT", "1000000"); // Microseconds
             jail.set_env("DD_API_SECURITY_ENABLED", "0"); // Seconds
             jail.set_env("DD_API_SECURITY_SAMPLE_DELAY", "60"); // Seconds
-            jail.set_env("DD_EXTENSION_VERSION", "compatibility");
 
             let mut config = Config::default();
             let env_config_source = EnvConfigSource;
@@ -904,6 +948,7 @@ mod tests {
                 otlp_config_metrics_summaries_mode: Some("quantiles".to_string()),
                 otlp_config_traces_probabilistic_sampler_sampling_percentage: Some(50),
                 otlp_config_logs_enabled: true,
+                statsd_metric_namespace: None,
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
@@ -915,13 +960,13 @@ mod tests {
                 lambda_proc_enhanced_metrics: false,
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
-                compute_trace_stats: true,
+                compute_trace_stats_on_extension: true,
+                api_key_secret_reload_interval: Some(Duration::from_secs(10)),
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
                 appsec_waf_timeout: Duration::from_secs(1),
                 api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
-                extension_version: Some("compatibility".to_string()),
             };
 
             assert_eq!(config, expected_config);

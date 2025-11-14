@@ -35,7 +35,7 @@ rm -rf ${EXTENSION_PATH} 2>/dev/null
 
 cd $ROOT_DIR
 
-ARCHITECTURE=$ARCHITECTURE ALPINE=${ALPINE:-0} FILE_SUFFIX=$FILE_SUFFIX PLATFORM=$PLATFORM .gitlab/scripts/compile_bottlecap.sh
+ARCHITECTURE=$ARCHITECTURE ALPINE=${ALPINE:-0} DEBUG=$DEBUG FILE_SUFFIX=$FILE_SUFFIX PLATFORM=$PLATFORM .gitlab/scripts/compile_bottlecap.sh
 
 docker buildx build --platform linux/${ARCHITECTURE} \
     -t datadog/build-bottlecap-${FILE_SUFFIX} \

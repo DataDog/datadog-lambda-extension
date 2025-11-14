@@ -142,6 +142,8 @@ pub enum TelemetryRecord {
         status: Status,
         /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
+        /// Metrics about the restore phase
+        metrics: Option<RestoreReportMetrics>,
     },
     #[serde(rename = "platform.restoreRuntimeDone", rename_all = "camelCase")]
     PlatformRestoreRuntimeDone {
@@ -150,10 +152,6 @@ pub enum TelemetryRecord {
         /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
     },
-
-    /// Tombstone event to signal shutdown
-    #[serde(rename = "platform.tombstone")]
-    PlatformTombstone,
 }
 
 /// Type of Initialization
@@ -204,6 +202,14 @@ pub enum Status {
 #[serde(rename_all = "camelCase")]
 pub struct InitReportMetrics {
     /// Duration of initialization
+    pub duration_ms: f64,
+}
+
+/// Restore report metrics
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreReportMetrics {
+    /// Duration of restore phase in milliseconds
     pub duration_ms: f64,
 }
 
@@ -305,6 +311,32 @@ mod tests {
                 initialization_type: InitType::OnDemand,
                 phase: InitPhase::Init,
                 metrics: InitReportMetrics { duration_ms: 500.0 },
+            }
+        ),
+
+        // platform.restoreStart
+        platform_restore_start: (
+            r#"{"time":"2022-10-19T13:52:15.636Z","type":"platform.restoreStart","record":{}}"#,
+            TelemetryRecord::PlatformRestoreStart {},
+        ),
+
+        // platform.restoreReport
+        platform_restore_report: (
+            r#"{"time":"2022-10-19T13:52:16.136Z","type":"platform.restoreReport","record":{"status":"success","metrics":{"durationMs":150.5}}}"#,
+            TelemetryRecord::PlatformRestoreReport {
+                status: Status::Success,
+                error_type: None,
+                metrics: Some(RestoreReportMetrics { duration_ms: 150.5 }),
+            }
+        ),
+
+        // platform.restoreReport with failure
+        platform_restore_report_failure: (
+            r#"{"time":"2022-10-19T13:52:16.136Z","type":"platform.restoreReport","record":{"status":"failure","errorType":"RestoreError"}}"#,
+            TelemetryRecord::PlatformRestoreReport {
+                status: Status::Failure,
+                error_type: Some("RestoreError".to_string()),
+                metrics: None,
             }
         ),
 

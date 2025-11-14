@@ -35,6 +35,10 @@ pub struct Context {
     ///
     /// This span is only present if the function is being invoked for the first time.
     pub cold_start_span: Option<Span>,
+    /// The span representing the `SnapStart` restore phase.
+    ///
+    /// This span is only present if the function is using `SnapStart` and being invoked for the first time.
+    pub snapstart_restore_span: Option<Span>,
     /// The extracted span context from the incoming request, used for distributed
     /// tracing.
     ///
@@ -87,6 +91,7 @@ impl Default for Context {
             invocation_span: Span::default(),
             runtime_done_received: false,
             cold_start_span: None,
+            snapstart_restore_span: None,
             tracer_span: None,
             extracted_span_context: None,
         }
@@ -432,7 +437,6 @@ mod tests {
     use crate::proc::{CPUData, NetworkData};
     use serde_json::json;
     use std::collections::HashMap;
-    use tokio::sync::watch;
 
     use super::*;
 
@@ -567,15 +571,10 @@ mod tests {
         });
 
         let uptime_offset = Some(50f64);
-        let (tmp_chan_tx, _) = watch::channel(());
-        let (process_chan_tx, _) = watch::channel(());
-
         let enhanced_metric_data = Some(EnhancedMetricData {
             network_offset,
             cpu_offset,
             uptime_offset,
-            tmp_chan_tx,
-            process_chan_tx,
         });
 
         buffer.add_enhanced_metric_data(&request_id, enhanced_metric_data.clone());

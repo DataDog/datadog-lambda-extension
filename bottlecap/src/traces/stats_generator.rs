@@ -1,11 +1,8 @@
-use crate::traces::stats_concentrator::{AggregationKey, Stats, StatsEvent};
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 use datadog_trace_utils::tracer_payload::TracerPayloadCollection;
 use tracing::error;
 
-use tokio::sync::mpsc::error::SendError;
-
-use crate::traces::stats_concentrator_service::ConcentratorCommand;
+use crate::traces::stats_concentrator_service::StatsError;
 
 pub struct StatsGenerator {
     stats_concentrator: StatsConcentratorHandle,
@@ -14,7 +11,7 @@ pub struct StatsGenerator {
 #[derive(Debug, thiserror::Error)]
 pub enum StatsGeneratorError {
     #[error("Error sending trace stats to the stats concentrator: {0}")]
-    ConcentratorCommandError(SendError<ConcentratorCommand>),
+    ConcentratorCommandError(StatsError),
     #[error("Unsupported trace payload version. Failed to send trace stats.")]
     TracePayloadVersionError,
 }
@@ -29,14 +26,16 @@ impl StatsGenerator {
     pub fn send(&self, traces: &TracerPayloadCollection) -> Result<(), StatsGeneratorError> {
         if let TracerPayloadCollection::V07(traces) = traces {
             for trace in traces {
+                // Set tracer metadata
+                if let Err(err) = self.stats_concentrator.set_tracer_metadata(trace) {
+                    error!("Failed to set tracer metadata: {err}");
+                    return Err(StatsGeneratorError::ConcentratorCommandError(err));
+                }
+
+                // Generate stats for each span in the trace
                 for chunk in &trace.chunks {
                     for span in &chunk.spans {
-                        let stats = StatsEvent {
-                            time: span.start.try_into().unwrap_or_default(),
-                            aggregation_key: AggregationKey {},
-                            stats: Stats {},
-                        };
-                        if let Err(err) = self.stats_concentrator.add(stats) {
+                        if let Err(err) = self.stats_concentrator.add(span) {
                             error!("Failed to send trace stats: {err}");
                             return Err(StatsGeneratorError::ConcentratorCommandError(err));
                         }

@@ -32,7 +32,6 @@ use crate::config::{
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
 };
-use crate::proc::has_dotnet_binary;
 
 /// Helper macro to merge Option<String> fields to String fields
 ///
@@ -299,6 +298,7 @@ pub struct Config {
 
     // Metrics
     pub metrics_config_compression_level: i32,
+    pub statsd_metric_namespace: Option<String>,
 
     // OTLP
     //
@@ -343,15 +343,14 @@ pub struct Config {
     pub lambda_proc_enhanced_metrics: bool,
     pub capture_lambda_payload: bool,
     pub capture_lambda_payload_max_depth: u32,
-    pub compute_trace_stats: bool,
+    pub compute_trace_stats_on_extension: bool,
+    pub api_key_secret_reload_interval: Option<Duration>,
 
     pub serverless_appsec_enabled: bool,
     pub appsec_rules: Option<String>,
     pub appsec_waf_timeout: Duration,
     pub api_security_enabled: bool,
     pub api_security_sample_delay: Duration,
-
-    pub extension_version: Option<String>,
 }
 
 impl Default for Config {
@@ -413,6 +412,7 @@ impl Default for Config {
 
             // Metrics
             metrics_config_compression_level: 3,
+            statsd_metric_namespace: None,
 
             // OTLP
             otlp_config_traces_enabled: true,
@@ -446,100 +446,49 @@ impl Default for Config {
             lambda_proc_enhanced_metrics: true,
             capture_lambda_payload: false,
             capture_lambda_payload_max_depth: 10,
-            compute_trace_stats: false,
+            compute_trace_stats_on_extension: false,
+            api_key_secret_reload_interval: None,
 
             serverless_appsec_enabled: false,
             appsec_rules: None,
             appsec_waf_timeout: Duration::from_millis(5),
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
-
-            extension_version: None,
         }
     }
 }
 
-fn log_unsupported_reason(reason: &str) {
-    error!("Found unsupported config: {reason} is no longer available.");
-}
-
-#[must_use = "Unsupported reasons should be processed to emit appropriate metrics"]
-pub fn inspect_config(config: &Config) -> Vec<String> {
-    let mut unsupported_reasons = Vec::new();
-
-    // Customer explicitly opted out of the Next Gen extension
-    let opted_out = match config.extension_version.as_deref() {
-        Some("compatibility") => true,
-        // We want customers using the `next` to not be affected
-        _ => false,
-    };
-
-    if opted_out {
-        let reason = "extension_version";
-        log_unsupported_reason(reason);
-        unsupported_reasons.push(reason.to_string());
-    }
-
-    // ASM / .NET
-    // todo(duncanista): Remove once the .NET runtime is fixed
-    if config.serverless_appsec_enabled && has_dotnet_binary() {
-        let reason = "serverless_appsec_enabled_dotnet";
-        log_unsupported_reason(reason);
-        unsupported_reasons.push(reason.to_string());
-    }
-    // OTLP
-    let has_otlp_config = config
-        .otlp_config_receiver_protocols_grpc_endpoint
-        .is_some()
-        || config
-            .otlp_config_receiver_protocols_grpc_transport
-            .is_some()
-        || config
-            .otlp_config_receiver_protocols_grpc_max_recv_msg_size_mib
-            .is_some()
-        || config.otlp_config_metrics_enabled
-        || config.otlp_config_metrics_resource_attributes_as_tags
-        || config.otlp_config_metrics_instrumentation_scope_metadata_as_tags
-        || config.otlp_config_metrics_tag_cardinality.is_some()
-        || config.otlp_config_metrics_delta_ttl.is_some()
-        || config.otlp_config_metrics_histograms_mode.is_some()
-        || config.otlp_config_metrics_histograms_send_count_sum_metrics
-        || config.otlp_config_metrics_histograms_send_aggregation_metrics
-        || config
-            .otlp_config_metrics_sums_cumulative_monotonic_mode
-            .is_some()
-        || config
-            .otlp_config_metrics_sums_initial_cumulativ_monotonic_value
-            .is_some()
-        || config.otlp_config_metrics_summaries_mode.is_some()
-        || config
-            .otlp_config_traces_probabilistic_sampler_sampling_percentage
-            .is_some()
-        || config.otlp_config_logs_enabled;
-
-    if has_otlp_config {
-        let reason = "otel";
-        log_unsupported_reason(reason);
-        unsupported_reasons.push(reason.to_string());
-    }
-
-    unsupported_reasons
-}
-
 #[allow(clippy::module_name_repetitions)]
-#[must_use = "configuration must be used to initialize the application"]
+#[inline]
+#[must_use]
 pub fn get_config(config_directory: &Path) -> Config {
     let path: std::path::PathBuf = config_directory.join("datadog.yaml");
-    let mut config_builder = ConfigBuilder::default()
+    ConfigBuilder::default()
         .add_source(Box::new(YamlConfigSource { path }))
-        .add_source(Box::new(EnvConfigSource));
-    config_builder.build()
+        .add_source(Box::new(EnvConfigSource))
+        .build()
 }
 
 #[inline]
 #[must_use]
 fn build_fqdn_logs(site: String) -> String {
     format!("https://http-intake.logs.{site}")
+}
+
+pub fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Value::deserialize(deserializer)? {
+        Value::String(s) => Ok(Some(s)),
+        other => {
+            error!(
+                "Failed to parse value, expected a string, got: {}, ignoring",
+                other
+            );
+            Ok(None)
+        }
+    }
 }
 
 pub fn deserialize_string_or_int<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
@@ -556,7 +505,10 @@ where
             }
         }
         Value::Number(n) => Ok(Some(n.to_string())),
-        _ => Err(serde::de::Error::custom("expected a string or an integer")),
+        _ => {
+            error!("Failed to parse value, expected a string or an integer, ignoring");
+            Ok(None)
+        }
     }
 }
 
@@ -571,13 +523,13 @@ where
 
     match opt {
         None => Ok(None),
-        Some(value) => {
-            // Use your existing method by deserializing the value
-            let bool_result = deserialize_bool_from_anything(value).map_err(|e| {
-                serde::de::Error::custom(format!("Failed to deserialize bool: {e}"))
-            })?;
-            Ok(Some(bool_result))
-        }
+        Some(value) => match deserialize_bool_from_anything(value) {
+            Ok(bool_result) => Ok(Some(bool_result)),
+            Err(e) => {
+                error!("Failed to parse bool value: {}, ignoring", e);
+                Ok(None)
+            }
+        },
     }
 }
 
@@ -601,19 +553,70 @@ where
             E: serde::de::Error,
         {
             let mut map = HashMap::new();
-
-            for tag in value.split(',') {
+            for tag in value.split(&[',', ' ']) {
+                if tag.is_empty() {
+                    continue;
+                }
                 let parts = tag.split(':').collect::<Vec<&str>>();
-                if parts.len() == 2 {
+                if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
                     map.insert(parts[0].to_string(), parts[1].to_string());
+                } else {
+                    error!(
+                        "Failed to parse tag '{}', expected format 'key:value', ignoring",
+                        tag
+                    );
                 }
             }
 
             Ok(map)
         }
+
+        fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got number {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
+
+        fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got number {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
+
+        fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got number {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
+
+        fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            error!(
+                "Failed to parse tags: expected string in format 'key:value', got boolean {}, ignoring",
+                value
+            );
+            Ok(HashMap::new())
+        }
     }
 
-    deserializer.deserialize_str(KeyValueVisitor)
+    deserializer.deserialize_any(KeyValueVisitor)
 }
 
 pub fn deserialize_array_from_comma_separated_string<'de, D>(
@@ -641,6 +644,11 @@ where
         let parts = s.split(':').collect::<Vec<&str>>();
         if parts.len() == 2 {
             map.insert(parts[0].to_string(), parts[1].to_string());
+        } else {
+            error!(
+                "Failed to parse tag '{}', expected format 'key:value', ignoring",
+                s.trim()
+            );
         }
     }
     Ok(map)
@@ -693,6 +701,20 @@ where
     }
 }
 
+pub fn deserialize_option_lossless<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    match Option::<T>::deserialize(deserializer) {
+        Ok(value) => Ok(value),
+        Err(e) => {
+            error!("Failed to deserialize optional value: {}, ignoring", e);
+            Ok(None)
+        }
+    }
+}
+
 pub fn deserialize_optional_duration_from_microseconds<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Duration>, D::Error> {
@@ -713,18 +735,31 @@ pub fn deserialize_optional_duration_from_seconds<'de, D: Deserializer<'de>>(
         }
         fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<Self::Value, E> {
             if v < 0 {
-                return Err(E::custom("negative durations are not allowed"));
+                error!("Failed to parse duration: negative durations are not allowed, ignoring");
+                return Ok(None);
             }
             self.visit_u64(u64::try_from(v).expect("positive i64 to u64 conversion never fails"))
         }
         fn visit_f64<E: serde::de::Error>(self, v: f64) -> Result<Self::Value, E> {
             if v < 0f64 {
-                return Err(E::custom("negative durations are not allowed"));
+                error!("Failed to parse duration: negative durations are not allowed, ignoring");
+                return Ok(None);
             }
             Ok(Some(Duration::from_secs_f64(v)))
         }
     }
     deserializer.deserialize_any(DurationVisitor)
+}
+
+// Like deserialize_optional_duration_from_seconds(), but return None if the value is 0
+pub fn deserialize_optional_duration_from_seconds_ignore_zero<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Duration>, D::Error> {
+    let duration: Option<Duration> = deserialize_optional_duration_from_seconds(deserializer)?;
+    if duration.is_some_and(|d| d.as_secs() == 0) {
+        return Ok(None);
+    }
+    Ok(duration)
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
@@ -740,133 +775,6 @@ pub mod tests {
         processing_rule::ProcessingRule,
         trace_propagation_style::TracePropagationStyle,
     };
-
-    #[test]
-    fn test_baseline_case() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            let _config = get_config(Path::new(""));
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_inspect_config() {
-        struct TestCase {
-            name: &'static str,
-            env_vars: Vec<(&'static str, &'static str)>,
-            yaml_content: Option<&'static str>,
-            expected_reasons: Vec<&'static str>,
-        }
-
-        let test_cases = vec![
-            TestCase {
-                name: "default config - no unsupported reasons",
-                env_vars: vec![],
-                yaml_content: None,
-                expected_reasons: vec![],
-            },
-            TestCase {
-                name: "extension_version compatibility - should discover",
-                env_vars: vec![("DD_EXTENSION_VERSION", "compatibility")],
-                yaml_content: None,
-                expected_reasons: vec!["extension_version"],
-            },
-            TestCase {
-                name: "otlp config enabled - should discover",
-                env_vars: vec![(
-                    "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
-                    "localhost:4317",
-                )],
-                yaml_content: None,
-                expected_reasons: vec!["otel"],
-            },
-            TestCase {
-                name: "multiple unsupported reasons",
-                env_vars: vec![
-                    ("DD_EXTENSION_VERSION", "compatibility"),
-                    ("DD_OTLP_CONFIG_METRICS_ENABLED", "true"),
-                ],
-                yaml_content: None,
-                expected_reasons: vec!["extension_version", "otel"],
-            },
-            TestCase {
-                name: "otlp config via yaml - should discover",
-                env_vars: vec![],
-                yaml_content: Some(
-                    r"
-                    otlp_config:
-                      receiver:
-                        protocols:
-                          grpc:
-                            endpoint: localhost:4317
-                ",
-                ),
-                expected_reasons: vec!["otel"],
-            },
-        ];
-
-        for test_case in test_cases {
-            figment::Jail::expect_with(|jail| {
-                jail.clear_env();
-
-                // Set environment variables
-                for (key, value) in &test_case.env_vars {
-                    jail.set_env(key, value);
-                }
-
-                // Create YAML file if provided
-                if let Some(yaml_content) = test_case.yaml_content {
-                    jail.create_file("datadog.yaml", yaml_content)?;
-                }
-
-                let config = get_config(Path::new(""));
-                let unsupported_reasons = inspect_config(&config);
-
-                assert_eq!(
-                    unsupported_reasons, test_case.expected_reasons,
-                    "Test case '{}' failed: expected {:?}, got {:?}",
-                    test_case.name, test_case.expected_reasons, unsupported_reasons
-                );
-
-                Ok(())
-            });
-        }
-    }
-
-    #[test]
-    fn test_fallback_on_otel() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.set_env(
-                "DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_GRPC_ENDPOINT",
-                "localhost:4138",
-            );
-
-            let _config = get_config(Path::new(""));
-            Ok(())
-        });
-    }
-
-    #[test]
-    fn test_fallback_on_otel_yaml() {
-        figment::Jail::expect_with(|jail| {
-            jail.clear_env();
-            jail.create_file(
-                "datadog.yaml",
-                r"
-                otlp_config:
-                  receiver:
-                    protocols:
-                      grpc:
-                        endpoint: localhost:4138
-            ",
-            )?;
-
-            let _config = get_config(Path::new(""));
-            Ok(())
-        });
-    }
 
     #[test]
     fn test_default_logs_intake_url() {
@@ -1175,7 +1083,6 @@ pub mod tests {
             jail.create_file(
                 "datadog.yaml",
                 r"
-                extension_version: next
                 logs_config:
                   processing_rules:
                     - type: exclude_at_match
@@ -1313,7 +1220,6 @@ pub mod tests {
                 "DD_TRACE_PROPAGATION_STYLE",
                 "datadog,tracecontext,b3,b3multi",
             );
-            jail.set_env("DD_EXTENSION_VERSION", "next");
             let config = get_config(Path::new(""));
 
             let expected_styles = vec![
@@ -1351,14 +1257,68 @@ pub mod tests {
     }
 
     #[test]
-    fn test_ignore_apm_replace_tags() {
+    fn test_bad_tags() {
         figment::Jail::expect_with(|jail| {
             jail.clear_env();
-            jail.set_env(
-                "DD_APM_REPLACE_TAGS",
-                r#"[{"name":"resource.name","pattern":"(.*)/(foo[:%].+)","repl":"$1/{foo}"}]"#,
-            );
-            let _config = get_config(Path::new(""));
+            jail.set_env("DD_TAGS", 123);
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags, HashMap::new());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_comma_separated() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless,env:prod,version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_space_separated() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless env:prod version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_space_separated_with_extra_spaces() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless  env:prod   version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_tags_mixed_separators() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_TAGS", "team:serverless,env:prod version:1.0");
+            let config = get_config(Path::new(""));
+            assert_eq!(config.tags.get("team"), Some(&"serverless".to_string()));
+            assert_eq!(config.tags.get("env"), Some(&"prod".to_string()));
+            assert_eq!(config.tags.get("version"), Some(&"1.0".to_string()));
+            assert_eq!(config.tags.len(), 3);
             Ok(())
         });
     }
@@ -1445,21 +1405,77 @@ pub mod tests {
             serde_json::from_str::<Value>("{}").expect("failed to parse JSON"),
             Value { duration: None }
         );
-        serde_json::from_str::<Value>(r#"{"duration":-1}"#)
-            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":-1}"#).expect("failed to parse JSON"),
+            Value { duration: None }
+        );
         assert_eq!(
             serde_json::from_str::<Value>(r#"{"duration":1}"#).expect("failed to parse JSON"),
             Value {
                 duration: Some(Duration::from_secs(1))
             }
         );
-        serde_json::from_str::<Value>(r#"{"duration":-1.5}"#)
-            .expect_err("should have failed parsing");
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":-1.5}"#).expect("failed to parse JSON"),
+            Value { duration: None }
+        );
         assert_eq!(
             serde_json::from_str::<Value>(r#"{"duration":1.5}"#).expect("failed to parse JSON"),
             Value {
                 duration: Some(Duration::from_millis(1500))
             }
         );
+    }
+
+    #[test]
+    fn test_parse_duration_from_seconds_ignore_zero() {
+        #[derive(Deserialize, Debug, PartialEq, Eq)]
+        struct Value {
+            #[serde(default)]
+            #[serde(deserialize_with = "deserialize_optional_duration_from_seconds_ignore_zero")]
+            duration: Option<Duration>,
+        }
+
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":1}"#).expect("failed to parse JSON"),
+            Value {
+                duration: Some(Duration::from_secs(1))
+            }
+        );
+
+        assert_eq!(
+            serde_json::from_str::<Value>(r#"{"duration":0}"#).expect("failed to parse JSON"),
+            Value { duration: None }
+        );
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pairs_ignores_empty_keys() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pairs")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(r#"{"tags": ":value,valid:tag"}"#)
+            .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert("valid".to_string(), "tag".to_string());
+        assert_eq!(result.tags, expected);
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pairs_ignores_empty_values() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pairs")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(r#"{"tags": "key:,valid:tag"}"#)
+            .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert("valid".to_string(), "tag".to_string());
+        assert_eq!(result.tags, expected);
     }
 }
