@@ -1,0 +1,36 @@
+FROM public.ecr.aws/lambda/provided:al2 AS compiler
+ARG PLATFORM
+
+ARG FIPS
+
+# Install dependencies
+RUN --mount=type=cache,target=/var/cache/yum \
+    yum install -y clang cmake3 compiler-rt curl go make perl unzip
+
+COPY ./scripts/install-protoc.sh /
+RUN chmod +x /install-protoc.sh && /install-protoc.sh
+
+# Install Rust Toolchain
+RUN curl https://sh.rustup.rs -sSf | \
+    sh -s -- --profile minimal \
+             --default-host "${PLATFORM}-unknown-linux-gnu" \
+             --default-toolchain "stable-${PLATFORM}-unknown-linux-gnu" \
+             --component rust-src \
+             -y
+ENV PATH="${PATH}:/root/.cargo/bin"
+
+ENV RUSTFLAGS="-Cpanic=abort"
+
+WORKDIR /tmp/dd/integration_tests/recorder
+RUN --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=bind,source=.,target=/tmp/dd,rw \
+    --mount=type=cache,target=/tmp/dd/integration_tests/recorder/target \
+    cargo +stable build --verbose --locked --no-default-features --release && \
+    mkdir -p /tmp/out && cp "/tmp/dd/integration_tests/recorder/target/release/recorder" /tmp/out/recorder
+
+# Use smallest image possible
+FROM scratch
+COPY --from=compiler /tmp/out/recorder /
+ENTRYPOINT ["/recorder"]
+
