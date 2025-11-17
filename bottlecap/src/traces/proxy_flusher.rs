@@ -165,7 +165,9 @@ impl Flusher {
                             elapsed.as_millis()
                         );
                     } else {
-                        error!("PROXY_FLUSHER | Request failed with status {status}: {body:?}");
+                        error!(
+                            "PROXY_FLUSHER | Request failed with status {status} to {url}: {body:?}"
+                        );
                     }
 
                     return Ok(());
