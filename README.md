@@ -15,14 +15,15 @@ Follow the [installation instructions](https://docs.datadoghq.com/serverless/ins
 
 We're excited to share that our next-generation, low-overhead Lambda Extension is now generally available. This new extension is packaged alongside our existing extension, yet offers substantially faster cold starts as well as lower resource consumption.
 
-You can opt out of the next-generation Lambda Extension by setting the environment variable `DD_EXTENSION_VERSION: compatibility` and using extension version `v67` or later.
+For `v67` through `v87`, you can opt out of the next-generation Lambda Extension by setting the environment variable `DD_EXTENSION_VERSION: compatibility`.
+
+`v88+` only supports the next-generation Lambda Extension.
 
 ### Supported Configurations
 
 Today, all workloads using Logs and Metrics are supported.
 
 APM Tracing is supported for Python, NodeJS, Go, Java, and .NET runtimes.
-ASM is not yet supported, and will fallback to compatibility mode.
 
 ### Feedback
 

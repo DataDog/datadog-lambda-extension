@@ -803,6 +803,7 @@ async fn blocking_flush_all(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_lines)]
 async fn handle_event_bus_event(
     event: Event,
     invocation_processor_handle: InvocationProcessorHandle,
@@ -846,6 +847,28 @@ async fn handle_event_bus_event(
                         .await
                     {
                         error!("Failed to send platform init report to processor: {}", e);
+                    }
+                }
+                TelemetryRecord::PlatformRestoreStart { .. } => {
+                    if let Err(e) = invocation_processor_handle
+                        .on_platform_restore_start(event.time)
+                        .await
+                    {
+                        error!("Failed to send platform restore start to processor: {}", e);
+                    }
+                }
+                TelemetryRecord::PlatformRestoreReport { metrics, .. } => {
+                    if let Some(m) = metrics {
+                        if let Err(e) = invocation_processor_handle
+                            .on_platform_restore_report(m.duration_ms, event.time.timestamp())
+                            .await
+                        {
+                            error!("Failed to send platform restore report to processor: {}", e);
+                        }
+                    } else {
+                        error!(
+                            "Missing SnapStart RestoreReportMetric. Not creating SnapStart span."
+                        );
                     }
                 }
                 TelemetryRecord::PlatformStart { request_id, .. } => {
@@ -1141,6 +1164,7 @@ async fn start_dogstatsd(
     let dogstatsd_config = DogStatsDConfig {
         host: EXTENSION_HOST.to_string(),
         port: DOGSTATSD_PORT,
+        metric_namespace: config.statsd_metric_namespace.clone(),
     };
     let cancel_token = tokio_util::sync::CancellationToken::new();
     let dogstatsd_agent = DogStatsD::new(

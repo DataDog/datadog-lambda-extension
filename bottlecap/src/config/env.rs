@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use datadog_trace_obfuscation::replacer::ReplaceRule;
+use dogstatsd::util::parse_metric_namespace;
 
 use crate::{
     config::{
@@ -266,6 +267,11 @@ pub struct EnvConfig {
     #[serde(deserialize_with = "deserialize_option_lossless")]
     pub metrics_config_compression_level: Option<i32>,
 
+    /// @env `DD_STATSD_METRIC_NAMESPACE`
+    /// Prefix all `StatsD` metrics with a namespace.
+    #[serde(deserialize_with = "deserialize_optional_string")]
+    pub statsd_metric_namespace: Option<String>,
+
     // OTLP
     //
     // - APM / Traces
@@ -520,6 +526,10 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
         compression_level
     );
     merge_option_to_value!(config, env_config, metrics_config_compression_level);
+
+    if let Some(namespace) = &env_config.statsd_metric_namespace {
+        config.statsd_metric_namespace = parse_metric_namespace(namespace);
+    }
 
     // OTLP
     merge_option_to_value!(config, env_config, otlp_config_traces_enabled);
@@ -938,6 +948,7 @@ mod tests {
                 otlp_config_metrics_summaries_mode: Some("quantiles".to_string()),
                 otlp_config_traces_probabilistic_sampler_sampling_percentage: Some(50),
                 otlp_config_logs_enabled: true,
+                statsd_metric_namespace: None,
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
