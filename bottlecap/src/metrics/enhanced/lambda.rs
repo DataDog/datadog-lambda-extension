@@ -627,6 +627,7 @@ impl Lambda {
                         .try_into()
                         .unwrap_or_default();
 
+                    // Set all tmp metrics - need tmp_max and tmp_used to calculate tmp_free
                     if metrics.tmp_used > 0.0 {
                         let metric = Metric::new(
                             constants::TMP_USED_METRIC.into(),
@@ -637,8 +638,32 @@ impl Lambda {
                         if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
                             error!("Failed to insert tmp_used metric: {}", e);
                         }
+
+                        if let Ok(tmp_max) = statfs::get_tmp_max() {
+                            let metric = Metric::new(
+                                constants::TMP_MAX_METRIC.into(),
+                                MetricValue::distribution(tmp_max),
+                                tags.clone(),
+                                Some(now),
+                            );
+                            if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                                error!("Failed to insert tmp_max metric: {}", e);
+                            }
+
+                            let tmp_free = tmp_max - metrics.tmp_used;
+                            let metric = Metric::new(
+                                constants::TMP_FREE_METRIC.into(),
+                                MetricValue::distribution(tmp_free),
+                                tags.clone(),
+                                Some(now),
+                            );
+                            if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                                error!("Failed to insert tmp_free metric: {}", e);
+                            }
+                        }
                     }
 
+                    // Set file descriptor use
                     if metrics.fd_use > 0.0 {
                         let metric = Metric::new(
                             constants::FD_USE_METRIC.into(),
@@ -651,6 +676,7 @@ impl Lambda {
                         }
                     }
 
+                    // Set threads use
                     if metrics.threads_use > 0.0 {
                         let metric = Metric::new(
                             constants::THREADS_USE_METRIC.into(),
@@ -675,8 +701,6 @@ impl Lambda {
             return;
         }
 
-        let tmp_max = statfs::get_tmp_max().ok();
-
         let pids = proc::get_pid_list();
         let fd_max = proc::get_fd_max_data(&pids);
         let threads_max = proc::get_threads_max_data(&pids);
@@ -689,18 +713,6 @@ impl Lambda {
             .unwrap_or_default();
 
         let tags = self.get_dynamic_value_tags();
-
-        if let Some(tmp_max) = tmp_max {
-            let metric = Metric::new(
-                constants::TMP_MAX_METRIC.into(),
-                MetricValue::distribution(tmp_max),
-                tags.clone(),
-                Some(now),
-            );
-            if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-                error!("Failed to insert tmp_max metric: {}", e);
-            }
-        }
 
         let metric = Metric::new(
             constants::FD_MAX_METRIC.into(),
