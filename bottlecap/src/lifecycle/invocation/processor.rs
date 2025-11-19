@@ -141,11 +141,15 @@ impl Processor {
             // Resume tmp, fd, and threads enhanced metrics monitoring
             self.enhanced_metrics.resume_usage_metrics_monitoring();
 
+            // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
+            let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
+            let uptime_offset: Option<f64> = proc::get_uptime().ok();
+
             let enhanced_metric_offsets = Some(EnhancedMetricData {
                 network_offset,
-                cpu_offset: None,
-                uptime_offset: None,
+                cpu_offset,
+                uptime_offset,
             });
             self.context_buffer
                 .add_enhanced_metric_data(&request_id, enhanced_metric_offsets);
@@ -315,23 +319,6 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
         self.context_buffer.add_start_time(&request_id, start_time);
-
-        if self.config.lambda_proc_enhanced_metrics {
-            let cpu_offset: Option<CPUData> = proc::get_cpu_data().ok();
-            let uptime_offset: Option<f64> = proc::get_uptime().ok();
-            if let Some(context) = self.context_buffer.get_mut(&request_id) {
-                if let Some(ref mut enhanced_data) = context.enhanced_metric_data {
-                    enhanced_data.cpu_offset = cpu_offset;
-                    enhanced_data.uptime_offset = uptime_offset;
-                } else {
-                    context.enhanced_metric_data = Some(EnhancedMetricData {
-                        network_offset: None,
-                        cpu_offset,
-                        uptime_offset,
-                    });
-                }
-            }
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
