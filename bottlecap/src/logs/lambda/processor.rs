@@ -34,6 +34,8 @@ pub struct LambdaProcessor {
     event_bus: Sender<Event>,
     // Logs enabled
     logs_enabled: bool,
+    // Managed Instance mode
+    is_managed_instance_mode: bool,
 }
 
 const OOM_ERRORS: [&str; 7] = [
@@ -60,6 +62,7 @@ impl LambdaProcessor {
         tags_provider: Arc<provider::Provider>,
         datadog_config: Arc<config::Config>,
         event_bus: Sender<Event>,
+        is_managed_instance_mode: bool,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
@@ -78,6 +81,7 @@ impl LambdaProcessor {
             orphan_logs: Vec::new(),
             ready_logs: Vec::new(),
             event_bus,
+            is_managed_instance_mode,
         }
     }
 
@@ -340,10 +344,14 @@ impl LambdaProcessor {
             }
         };
 
-        if log.message.lambda.request_id.is_some() {
+        if log.message.lambda.request_id.is_some() || self.is_managed_instance_mode {
+            // In On-Demand mode, ship logs with request_id.
+            // In Managed Instance mode, ship logs without request_id immediately as well.
+            // These are inter-invocation/sandbox logs that should be aggregated without
+            // waiting to be attached to the next invocation.
             Ok(log)
         } else {
-            // No request_id available, queue as orphan log
+            // In On-Demand mode, if no request_id is available, queue as orphan log
             self.orphan_logs.push(log);
             Err("No request_id available, queueing for later".into())
         }
@@ -466,6 +474,7 @@ mod tests {
                             tags,
                             ..config::Config::default()}),
                         tx.clone(),
+                        false, // On-Demand mode
                     );
 
                     let result = processor.get_message(input.clone()).await.unwrap();
@@ -744,7 +753,8 @@ mod tests {
 
         let (tx, _) = tokio::sync::mpsc::channel(2);
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -777,7 +787,8 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -823,7 +834,8 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -856,7 +868,8 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -883,6 +896,45 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_get_intake_log_managed_instance_mode() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
+        // Set is_managed_instance_mode to true
+        let mut processor =
+            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone(), true);
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
+        };
+
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
+        assert_eq!(lambda_message.lambda.request_id, None);
+
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        assert_eq!(intake_log.message.lambda.request_id, None);
+        assert_eq!(processor.orphan_logs.len(), 0);
+
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        assert_eq!(intake_log.message.message, "test-function".to_string());
+        assert_eq!(intake_log.tags, tags_provider.get_tags_string());
+    }
+
     // process
     #[tokio::test]
     async fn test_process() {
@@ -905,8 +957,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -969,8 +1025,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1014,7 +1074,8 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1056,8 +1117,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1147,8 +1212,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
-        let mut processor =
-            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            tags_provider.clone(),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::PlatformStart {
@@ -1205,8 +1274,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
-        let mut processor =
-            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            tags_provider.clone(),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::PlatformStart {
@@ -1278,8 +1351,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         // First, send an extension log (orphan) that doesn't have a request_id
         let extension_event = TelemetryEvent {

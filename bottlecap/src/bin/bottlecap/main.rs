@@ -514,6 +514,7 @@ async fn extension_loop_active(
             Arc::clone(&api_key_factory),
             &tags_provider,
             event_bus_tx.clone(),
+            aws_config.is_managed_instance_mode(),
         );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
@@ -1398,6 +1399,7 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
+    is_managed_instance_mode: bool,
 ) -> (
     Sender<TelemetryEvent>,
     LogsFlusher,
@@ -1415,6 +1417,7 @@ fn start_logs_agent(
         Arc::clone(config),
         event_bus,
         aggregator_handle.clone(),
+        is_managed_instance_mode,
     );
     let cancel_token = agent.cancel_token();
     // Start logs agent in background

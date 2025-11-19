@@ -67,6 +67,7 @@ async fn test_logs() {
         Arc::clone(&arc_conf),
         bus_tx.clone(),
         logs_aggr_handle.clone(),
+        false,
     );
     let api_key_factory = Arc::new(ApiKeyFactory::new(dd_api_key));
     let logs_flusher = LogsFlusher::new(api_key_factory, logs_aggr_handle, arc_conf.clone());

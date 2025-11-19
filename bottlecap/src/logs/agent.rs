@@ -24,12 +24,14 @@ impl LogsAgent {
         datadog_config: Arc<config::Config>,
         event_bus: Sender<Event>,
         aggregator_handle: AggregatorHandle,
+        is_managed_instance_mode: bool,
     ) -> (Self, Sender<TelemetryEvent>) {
         let processor = LogsProcessor::new(
             Arc::clone(&datadog_config),
             tags_provider,
             event_bus,
             LAMBDA_RUNTIME_SLUG.to_string(),
+            is_managed_instance_mode,
         );
 
         let (tx, rx) = mpsc::channel::<TelemetryEvent>(1000);

@@ -386,7 +386,7 @@ mod tests {
         let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_ok());
         let network_data = network_data_result.unwrap();
-        assert!((network_data.rx_bytes - 309048.0).abs() < f64::EPSILON);
+        assert!((network_data.rx_bytes - 309_048.0).abs() < f64::EPSILON);
         assert!((network_data.tx_bytes - 84870.0).abs() < f64::EPSILON);
 
         let path = "./tests/proc/net/managed_instance_invalid_dev";
