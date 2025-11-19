@@ -357,6 +357,11 @@ pub struct EnvConfig {
     /// The AWS KMS API key to use for the Datadog Agent.
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub kms_api_key: Option<String>,
+    /// @env `DD_API_KEY_SSM_ARN`
+    ///
+    /// The AWS Systems Manager Parameter Store parameter ARN containing the Datadog API key.
+    #[serde(deserialize_with = "deserialize_optional_string")]
+    pub api_key_ssm_arn: Option<String>,
     /// @env `DD_SERVERLESS_LOGS_ENABLED`
     ///
     /// Enable logs for AWS Lambda. Default is `true`.
@@ -609,6 +614,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     // AWS Lambda
     merge_string!(config, env_config, api_key_secret_arn);
     merge_string!(config, env_config, kms_api_key);
+    merge_string!(config, env_config, api_key_ssm_arn);
     merge_option_to_value!(config, env_config, serverless_logs_enabled);
     merge_option_to_value!(config, env_config, serverless_flush_strategy);
     merge_option_to_value!(config, env_config, enhanced_metrics);
@@ -952,6 +958,7 @@ mod tests {
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
+                api_key_ssm_arn: String::default(),
                 serverless_logs_enabled: false,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,

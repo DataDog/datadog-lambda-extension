@@ -972,6 +972,7 @@ api_security_sample_delay: 60 # Seconds
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
+                api_key_ssm_arn: String::default(),
                 serverless_logs_enabled: false,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,
