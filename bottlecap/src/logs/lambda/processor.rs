@@ -301,7 +301,10 @@ impl LambdaProcessor {
         lambda_message.lambda.request_id = match lambda_message.lambda.request_id {
             Some(request_id) => Some(request_id.clone()),
             None => {
-                if self.invocation_context.request_id.is_empty() {
+                // If there is no request_id available in the current invocation context,
+                // then set to None, same goes if we are in a Managed Instance – as concurrent
+                // requests doesn't allow us to infer which invocation the logs belong to.
+                if self.invocation_context.request_id.is_empty() || self.is_managed_instance_mode {
                     None
                 } else {
                     Some(self.invocation_context.request_id.clone())
@@ -1423,5 +1426,68 @@ mod tests {
         service_handle
             .await
             .expect("Aggregator service task failed");
+    }
+
+    #[tokio::test]
+    async fn test_orphan_logs_no_request_id_in_managed_instance() {
+        // This test verifies that in managed instance mode, logs without a request_id
+        // are sent immediately without being queued as orphans, and they never get
+        // a request_id attached even when one becomes available in the invocation context.
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
+        // Create processor in managed instance mode (is_managed_instance_mode = true)
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            true, // Managed Instance mode
+        );
+
+        // Send a function log without a request_id (inter-invocation log)
+        let function_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                "Inter-invocation log without request_id".to_string(),
+            )),
+        };
+        let log1 = processor.make_log(function_event).await.unwrap();
+        assert_eq!(log1.message.lambda.request_id, None);
+        assert_eq!(processor.orphan_logs.len(), 0);
+
+        // Now send a PlatformStart event with a request_id to set the context
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 49).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+        processor.make_log(start_event).await.unwrap();
+        assert_eq!(processor.invocation_context.request_id, "test-request-id");
+
+        // Send another function log without explicit request_id
+        let another_function_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 50).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                "Another log after request_id available".to_string(),
+            )),
+        };
+        let log2 = processor.make_log(another_function_event).await.unwrap();
+
+        // In managed instance mode, logs should not inherit request_id from context
+        assert_eq!(log2.message.lambda.request_id, None);
+        assert_eq!(processor.orphan_logs.len(), 0);
     }
 }
