@@ -8,8 +8,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use cookie::Cookie;
-use datadog_trace_protobuf::pb::Span;
 use itertools::Itertools;
+use libdd_trace_protobuf::pb::Span;
 use libddwaf::object::{WafMap, WafOwned};
 use libddwaf::{Builder, Config as WafConfig, Handle};
 use tokio::sync::Mutex;

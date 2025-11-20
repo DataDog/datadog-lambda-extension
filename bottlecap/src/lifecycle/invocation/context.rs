@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use tracing::debug;
 

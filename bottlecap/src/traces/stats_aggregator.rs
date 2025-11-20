@@ -1,5 +1,5 @@
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
-use datadog_trace_protobuf::pb::ClientStatsPayload;
+use libdd_trace_protobuf::pb::ClientStatsPayload;
 use std::collections::VecDeque;
 use tracing::error;
 

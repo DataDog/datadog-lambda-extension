@@ -12,9 +12,9 @@ use axum::{
 use tokio::sync::mpsc::Sender;
 use tracing::{debug, error};
 
-use datadog_trace_protobuf::pb;
-use datadog_trace_utils::stats_utils;
-use ddcommon::hyper_migration;
+use libdd_common::hyper_migration;
+use libdd_trace_protobuf::pb;
+use libdd_trace_utils::stats_utils;
 
 use super::trace_agent::MAX_CONTENT_LENGTH;
 use crate::http::extract_request_body;

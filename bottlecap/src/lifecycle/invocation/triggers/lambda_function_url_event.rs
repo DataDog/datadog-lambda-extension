@@ -1,6 +1,6 @@
 use std::{collections::HashMap, env};
 
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

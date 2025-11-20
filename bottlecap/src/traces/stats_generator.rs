@@ -1,5 +1,5 @@
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
-use datadog_trace_utils::tracer_payload::TracerPayloadCollection;
+use libdd_trace_utils::tracer_payload::TracerPayloadCollection;
 use tracing::error;
 
 use crate::traces::stats_concentrator_service::StatsError;

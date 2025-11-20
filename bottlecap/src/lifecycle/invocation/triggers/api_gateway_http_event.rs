@@ -6,7 +6,7 @@ use crate::lifecycle::invocation::{
         parameterize_api_resource,
     },
 };
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

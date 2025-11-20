@@ -32,15 +32,9 @@ core-foundation-sys,https://github.com/servo/core-foundation-rs,MIT OR Apache-2.
 cpufeatures,https://github.com/RustCrypto/utils,MIT OR Apache-2.0,RustCrypto Developers
 crc32fast,https://github.com/srijs/rust-crc32fast,MIT OR Apache-2.0,"Sam Rijs <srijs@airpost.net>, Alex Crichton <alex@alexcrichton.com>"
 crypto-common,https://github.com/RustCrypto/traits,MIT OR Apache-2.0,RustCrypto Developers
-datadog-ddsketch,https://github.com/DataDog/libdatadog,Apache-2.0,The datadog-ddsketch Authors
 datadog-fips,https://github.com/DataDog/serverless-components,Apache-2.0,The datadog-fips Authors
 datadog-protos,https://github.com/DataDog/saluki,Apache-2.0,The datadog-protos Authors
-datadog-trace-normalization,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
 datadog-trace-obfuscation,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
-datadog-trace-protobuf,https://github.com/DataDog/libdatadog,Apache-2.0,David Lee <david.lee@datadoghq.com>
-datadog-trace-stats,https://github.com/DataDog/libdatadog,Apache-2.0,The datadog-trace-stats Authors
-datadog-trace-utils,https://github.com/DataDog/libdatadog,Apache-2.0,The datadog-trace-utils Authors
-ddcommon,https://github.com/DataDog/libdatadog,Apache-2.0,The ddcommon Authors
 ddsketch-agent,https://github.com/DataDog/saluki,Apache-2.0,The ddsketch-agent Authors
 deranged,https://github.com/jhpratt/deranged,MIT OR Apache-2.0,Jacob Pratt <jacob@jhpratt.dev>
 derive_more,https://github.com/JelteF/derive_more,MIT,Jelte Fennema <github-tech@jeltef.nl>
@@ -108,6 +102,13 @@ jobserver,https://github.com/rust-lang/jobserver-rs,MIT OR Apache-2.0,Alex Crich
 js-sys,https://github.com/rustwasm/wasm-bindgen/tree/master/crates/js-sys,MIT OR Apache-2.0,The wasm-bindgen Developers
 lazy_static,https://github.com/rust-lang-nursery/lazy-static.rs,MIT OR Apache-2.0,Marvin Löbel <loebel.marvin@gmail.com>
 libc,https://github.com/rust-lang/libc,MIT OR Apache-2.0,The Rust Project Developers
+libdd-common,https://github.com/DataDog/libdatadog/tree/main/datadog-common,Apache-2.0,The libdd-common Authors
+libdd-ddsketch,https://github.com/DataDog/libdatadog/tree/main/libdd-ddsketch,Apache-2.0,The libdd-ddsketch Authors
+libdd-tinybytes,https://github.com/DataDog/libdatadog/tree/main/libdd-tinybytes,Apache-2.0,The libdd-tinybytes Authors
+libdd-trace-normalization,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-normalization,Apache-2.0,David Lee <david.lee@datadoghq.com>
+libdd-trace-protobuf,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-protobuf,Apache-2.0,The libdd-trace-protobuf Authors
+libdd-trace-stats,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-stats,Apache-2.0,The libdd-trace-stats Authors
+libdd-trace-utils,https://github.com/DataDog/libdatadog/tree/main/libdd-trace-utils,Apache-2.0,The libdd-trace-utils Authors
 libddwaf,https://github.com/DataDog/libddwaf-rust,Apache-2.0,"DataDog, Inc. <support@datadoghq.com>"
 libddwaf-sys,https://github.com/DataDog/libddwaf-rust,Apache-2.0,"DataDog, Inc. <support@datadoghq.com>"
 linux-raw-sys,https://github.com/sunfishcode/linux-raw-sys,Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT,Dan Gohman <dev@sunfishcode.online>
@@ -221,7 +222,6 @@ tikv-jemallocator,https://github.com/tikv/jemallocator,MIT OR Apache-2.0,"Alex C
 time,https://github.com/time-rs/time,MIT OR Apache-2.0,"Jacob Pratt <open-source@jhpratt.dev>, Time contributors"
 time-core,https://github.com/time-rs/time,MIT OR Apache-2.0,"Jacob Pratt <open-source@jhpratt.dev>, Time contributors"
 time-macros,https://github.com/time-rs/time,MIT OR Apache-2.0,"Jacob Pratt <open-source@jhpratt.dev>, Time contributors"
-tinybytes,https://github.com/DataDog/libdatadog,Apache-2.0,The tinybytes Authors
 tinystr,https://github.com/unicode-org/icu4x,Unicode-3.0,The ICU4X Project Developers
 tinyvec,https://github.com/Lokathor/tinyvec,Zlib OR Apache-2.0 OR MIT,Lokathor <zefria@gmail.com>
 tinyvec_macros,https://github.com/Soveu/tinyvec_macros,MIT OR Apache-2.0 OR Zlib,Soveu <marx.tomasz@gmail.com>

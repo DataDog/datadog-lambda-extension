@@ -1,4 +1,4 @@
-use datadog_trace_utils::send_data::SendDataBuilder;
+use libdd_trace_utils::send_data::SendDataBuilder;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error};
 
@@ -104,10 +104,10 @@ impl AggregatorService {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use datadog_trace_utils::{
+    use libdd_common::Endpoint;
+    use libdd_trace_utils::{
         trace_utils::TracerHeaderTags, tracer_payload::TracerPayloadCollection,
     };
-    use ddcommon::Endpoint;
 
     #[tokio::test]
     async fn test_aggregator_service_insert_and_flush() {

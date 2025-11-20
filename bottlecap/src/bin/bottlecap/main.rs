@@ -78,7 +78,6 @@ use bottlecap::{
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
 use datadog_trace_obfuscation::obfuscation_config;
-use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator_service::AggregatorHandle as MetricsAggregatorHandle,
@@ -93,6 +92,7 @@ use dogstatsd::{
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
 };
+use libdd_trace_utils::send_data::SendData;
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::{Duration, Instant};
