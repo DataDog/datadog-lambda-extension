@@ -3,54 +3,44 @@
 
 use std::collections::{HashSet, VecDeque};
 
-const DEFAULT_MAX_SIZE: usize = 50;
+const DEFAULT_CAPACITY: usize = 50;
 
 /// A deduplicator that maintains a fixed-size cache of recently seen IDs.
-/// When the maximum size is reached, the oldest ID is evicted (FIFO).
+/// When the capacity is reached, the oldest ID is evicted (FIFO).
 pub struct Deduper {
     /// Set for O(1) existence checks
     seen: HashSet<u64>,
     /// Queue to maintain insertion order for FIFO eviction
     order: VecDeque<u64>,
     /// Maximum number of IDs to keep
-    max_size: usize,
+    capacity: usize,
+}
+
+impl Default for Deduper {
+    fn default() -> Self {
+        Self::new(DEFAULT_CAPACITY)
+    }
 }
 
 impl Deduper {
-    /// Creates a new `Deduper` with the specified maximum size.
+    /// Creates a new `Deduper` with the specified capacity.
     ///
     /// # Arguments
     ///
-    /// * `max_size` - Maximum number of IDs to track
+    /// * `capacity` - Maximum number of IDs to track
     ///
     /// # Examples
     ///
     /// ```
-    /// use bottlecap::traces::dedup::Deduper;
-    ///
     /// let deduper = Deduper::new(100);
     /// ```
     #[must_use]
-    pub fn new(max_size: usize) -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
-            seen: HashSet::with_capacity(max_size),
-            order: VecDeque::with_capacity(max_size),
-            max_size,
+            seen: HashSet::with_capacity(capacity),
+            order: VecDeque::with_capacity(capacity),
+            capacity,
         }
-    }
-
-    /// Creates a new `Deduper` with the default maximum size of 50.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use bottlecap::traces::dedup::Deduper;
-    ///
-    /// let deduper = Deduper::default();
-    /// ```
-    #[must_use]
-    pub fn default() -> Self {
-        Self::new(DEFAULT_MAX_SIZE)
     }
 
     /// Checks if an ID exists and adds it if it doesn't.
@@ -66,8 +56,6 @@ impl Deduper {
     /// # Examples
     ///
     /// ```
-    /// use bottlecap::traces::dedup::Deduper;
-    ///
     /// let mut deduper = Deduper::default();
     /// assert!(deduper.check_and_add(12345)); // Returns true, ID was added
     /// assert!(!deduper.check_and_add(12345)); // Returns false, ID already exists
@@ -78,8 +66,8 @@ impl Deduper {
             return false;
         }
 
-        // If we're at max capacity, evict the oldest entry
-        if self.order.len() >= self.max_size {
+        // If we're at capacity, evict the oldest entry
+        if self.order.len() >= self.capacity {
             if let Some(oldest) = self.order.pop_front() {
                 self.seen.remove(&oldest);
             }
@@ -107,7 +95,7 @@ mod tests {
     #[test]
     fn test_default_deduper() {
         let deduper = Deduper::default();
-        assert_eq!(deduper.max_size, DEFAULT_MAX_SIZE);
+        assert_eq!(deduper.capacity, DEFAULT_CAPACITY);
     }
 
     #[test]

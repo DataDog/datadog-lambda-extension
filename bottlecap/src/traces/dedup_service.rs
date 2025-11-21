@@ -50,22 +50,21 @@ pub struct DedupService {
     rx: mpsc::UnboundedReceiver<DedupCommand>,
 }
 
-/// A service that handles add() and exists() requests in the same queue,
-/// to avoid using mutex, which may cause lock contention.
+/// A service that handles `check_and_add()` requests without using mutex.
 impl DedupService {
-    /// Creates a new dedup service with the default maximum size (50).
+    /// Creates a new dedup service with the default capacity (50).
     #[must_use]
     pub fn new() -> (Self, DedupHandle) {
-        Self::with_max_size(50)
+        Self::with_capacity(50)
     }
 
-    /// Creates a new dedup service with the specified maximum size.
+    /// Creates a new dedup service with the specified capacity.
     #[must_use]
-    pub fn with_max_size(max_size: usize) -> (Self, DedupHandle) {
+    pub fn with_capacity(capacity: usize) -> (Self, DedupHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = DedupHandle::new(tx);
         let service = Self {
-            deduper: Deduper::new(max_size),
+            deduper: Deduper::new(capacity),
             rx,
         };
         (service, handle)
@@ -125,7 +124,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_dedup_service_eviction() {
-        let (service, handle) = DedupService::with_max_size(3);
+        let (service, handle) = DedupService::with_capacity(3);
         
         tokio::spawn(async move {
             service.run().await;
