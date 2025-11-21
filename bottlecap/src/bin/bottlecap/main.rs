@@ -443,7 +443,7 @@ fn get_flush_strategy_for_mode(
     if let FlushStrategy::Continuously(_) = configured_strategy {
         configured_strategy
     } else {
-        warn!(
+        debug!(
             "Managed Instance mode detected. Flush strategy '{}' is not compatible with managed instance mode. \
             Enforcing continuous flush strategy with {}ms interval for optimal performance.",
             configured_strategy.name(),
