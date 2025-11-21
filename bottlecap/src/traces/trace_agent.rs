@@ -32,6 +32,7 @@ use crate::{
     tags::provider,
     traces::{
         INVOCATION_SPAN_RESOURCE,
+        dedup_service::DedupHandle,
         proxy_aggregator::{self, ProxyRequest},
         stats_aggregator,
         stats_generator::StatsGenerator,
@@ -85,6 +86,7 @@ pub struct TraceState {
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
     pub invocation_processor_handle: InvocationProcessorHandle,
     pub tags_provider: Arc<provider::Provider>,
+    pub deduper: DedupHandle,
 }
 
 #[derive(Clone)]
@@ -111,6 +113,7 @@ pub struct TraceAgent {
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
+    deduper: DedupHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -133,6 +136,7 @@ impl TraceAgent {
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
         stats_concentrator: StatsConcentratorHandle,
+        deduper: DedupHandle,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -161,6 +165,7 @@ impl TraceAgent {
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
+            deduper,
         }
     }
 
@@ -215,6 +220,7 @@ impl TraceAgent {
             }),
             invocation_processor_handle: self.invocation_processor_handle.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
+            deduper: self.deduper.clone(),
         };
 
         let stats_state = StatsState {
@@ -288,6 +294,7 @@ impl TraceAgent {
             state.trace_sender,
             state.invocation_processor_handle,
             state.tags_provider,
+            state.deduper,
             ApiVersion::V04,
         )
         .await
@@ -300,6 +307,7 @@ impl TraceAgent {
             state.trace_sender,
             state.invocation_processor_handle,
             state.tags_provider,
+            state.deduper,
             ApiVersion::V05,
         )
         .await
@@ -439,8 +447,10 @@ impl TraceAgent {
         trace_sender: Arc<SendingTraceProcessor>,
         invocation_processor_handle: InvocationProcessorHandle,
         tags_provider: Arc<provider::Provider>,
+        deduper: DedupHandle,
         version: ApiVersion,
     ) -> Response {
+        let start = Instant::now();
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -506,7 +516,26 @@ impl TraceAgent {
         };
 
         for chunk in &mut traces {
-            for span in chunk.iter_mut() {
+            let original_chunk = std::mem::take(chunk);
+            for mut span in original_chunk {
+                // Check for duplicates
+                let should_keep = match deduper.check_and_add(span.span_id).await {
+                    Ok(should_keep) => {
+                        if !should_keep {
+                            debug!("Dropping duplicate span with span_id: {}", span.span_id);
+                        }
+                        should_keep
+                    }
+                    Err(e) => {
+                        error!("Failed to check span_id in deduper, keeping span: {e}");
+                        true
+                    }
+                };
+
+                if !should_keep {
+                    continue;
+                }
+
                 // If the aws.lambda.load span is found, we're in Python or Node.
                 // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
                 // span to the cold start span, and eventually send the cold start span.
@@ -533,9 +562,15 @@ impl TraceAgent {
                         error!("Failed to add tracer span to processor: {}", e);
                     }
                 }
-                handle_reparenting(&mut reparenting_info, span);
+                handle_reparenting(&mut reparenting_info, &mut span);
+
+                // Keep the span
+                chunk.push(span);
             }
         }
+
+        // Remove empty chunks
+        traces.retain(|chunk| !chunk.is_empty());
 
         match invocation_processor_handle
             .update_reparenting(reparenting_info)
@@ -573,6 +608,11 @@ impl TraceAgent {
                 format!("Error sending traces to the trace aggregator: {err:?}"),
             );
         }
+
+        debug!(
+            "TRACE_AGENT | Processing traces took: {} ms",
+            start.elapsed().as_millis()
+        );
 
         success_response("Successfully buffered traces to be aggregated.")
     }
