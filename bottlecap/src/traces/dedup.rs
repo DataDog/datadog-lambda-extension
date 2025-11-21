@@ -76,7 +76,7 @@ impl Deduper {
         // Add the new ID
         self.seen.insert(id);
         self.order.push_back(id);
-        
+
         // Return true to indicate the ID was added
         true
     }
@@ -101,16 +101,16 @@ mod tests {
     #[test]
     fn test_check_and_add() {
         let mut deduper = Deduper::new(3);
-        
+
         // First call should return true (ID was added)
         assert!(deduper.check_and_add(123));
-        
+
         // Second call should return false (ID already exists)
         assert!(!deduper.check_and_add(123));
-        
+
         // Different ID should return true
         assert!(deduper.check_and_add(456));
-        
+
         // Calling again should return false
         assert!(!deduper.check_and_add(456));
     }
@@ -118,18 +118,17 @@ mod tests {
     #[test]
     fn test_check_and_add_with_eviction() {
         let mut deduper = Deduper::new(2);
-        
+
         assert!(deduper.check_and_add(1));
         assert!(deduper.check_and_add(2));
-        
+
         // Adding 3rd should evict 1
         assert!(deduper.check_and_add(3));
-        
+
         // Now 1 should be addable again (was evicted)
         assert!(deduper.check_and_add(1));
-        
+
         // But 2 should have been evicted
         assert!(deduper.check_and_add(2));
     }
 }
-

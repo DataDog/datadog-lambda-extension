@@ -563,7 +563,7 @@ impl TraceAgent {
                     }
                 }
                 handle_reparenting(&mut reparenting_info, &mut span);
-                
+
                 // Keep the span
                 chunk.push(span);
             }

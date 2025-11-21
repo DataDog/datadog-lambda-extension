@@ -99,24 +99,23 @@ impl Default for DedupService {
 mod tests {
     use super::*;
 
-
     #[tokio::test]
     async fn test_dedup_service_check_and_add() {
         let (service, handle) = DedupService::new();
-        
+
         tokio::spawn(async move {
             service.run().await;
         });
 
         // First call should return true (ID was added)
         assert!(handle.check_and_add(123).await.unwrap());
-        
+
         // Second call should return false (ID already exists)
         assert!(!handle.check_and_add(123).await.unwrap());
-        
+
         // Different ID should return true again
         assert!(handle.check_and_add(456).await.unwrap());
-        
+
         // Calling again on already-added IDs should return false
         assert!(!handle.check_and_add(123).await.unwrap());
         assert!(!handle.check_and_add(456).await.unwrap());
@@ -125,7 +124,7 @@ mod tests {
     #[tokio::test]
     async fn test_dedup_service_eviction() {
         let (service, handle) = DedupService::with_capacity(3);
-        
+
         tokio::spawn(async move {
             service.run().await;
         });
@@ -137,12 +136,11 @@ mod tests {
 
         // Add a 4th ID, should evict the oldest (1)
         assert!(handle.check_and_add(4).await.unwrap());
-        
+
         // Now 1 should be addable again (was evicted)
         assert!(handle.check_and_add(1).await.unwrap());
-        
+
         // But 2 should now be evicted
         assert!(handle.check_and_add(2).await.unwrap());
     }
 }
-
