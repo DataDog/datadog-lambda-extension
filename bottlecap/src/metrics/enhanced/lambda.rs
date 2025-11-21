@@ -616,7 +616,8 @@ impl Lambda {
         });
     }
 
-    pub fn resume_usage_metrics_monitoring(&self) {
+    // Reset metrics and resume monitoring for the next invocation
+    pub fn restart_usage_metrics_monitoring(&self) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -627,6 +628,25 @@ impl Lambda {
         }
 
         self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Resume monitoring without resetting metrics. Used in managed instance mode to resume monitoring between invocations.
+    pub fn resume_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        debug!("Starting sandbox-level usage metrics monitoring (managed instance mode)");
+        self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Pause monitoring without emitting metrics. Used in managed instance mode to pause between invocations.
+    pub fn pause_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        self.enhanced_metrics_handle.pause_monitoring();
     }
 
     pub fn set_usage_enhanced_metrics(&self) {

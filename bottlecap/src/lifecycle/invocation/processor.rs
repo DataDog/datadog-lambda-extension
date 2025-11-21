@@ -83,6 +83,8 @@ pub struct Processor {
     ///
     /// These tags are used to capture runtime and initialization.
     dynamic_tags: HashMap<String, String>,
+    /// Tracks active concurrent invocations for monitoring enhanced metrics in Managed Instance mode.
+    active_invocations: usize,
 }
 
 impl Processor {
@@ -119,6 +121,7 @@ impl Processor {
             service,
             resource,
             dynamic_tags: HashMap::new(),
+            active_invocations: 0,
         }
     }
 
@@ -140,8 +143,19 @@ impl Processor {
             .unwrap_or_default();
 
         if self.config.lambda_proc_enhanced_metrics {
-            // Resume tmp, fd, and threads enhanced metrics monitoring
-            self.enhanced_metrics.resume_usage_metrics_monitoring();
+            if self.aws_config.is_managed_instance_mode() {
+                // In Managed Instance mode, track concurrent invocations
+                self.active_invocations += 1;
+
+                // Start monitoring on the first active invocation
+                if self.active_invocations == 1 {
+                    debug!("Starting usage metrics monitoring");
+                    self.enhanced_metrics.resume_usage_metrics_monitoring();
+                }
+            } else {
+                // In On-Demand mode, we reset metrics and resume monitoring on each invocation
+                self.enhanced_metrics.restart_usage_metrics_monitoring();
+            }
 
             // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
@@ -394,9 +408,11 @@ impl Processor {
             }
         }
 
-        // Set tmp, fd, and threads enhanced metrics
-        self.enhanced_metrics.set_max_enhanced_metrics();
-        self.enhanced_metrics.set_usage_enhanced_metrics(); // sets use metric values and pauses monitoring task
+        // In On-Demand mode, pause monitoring between invocations and emit the metrics on each invocation
+        if !self.aws_config.is_managed_instance_mode() {
+            self.enhanced_metrics.set_max_enhanced_metrics();
+            self.enhanced_metrics.set_usage_enhanced_metrics();
+        }
 
         self.context_buffer
             .add_runtime_duration(request_id, metrics.duration_ms);
@@ -714,6 +730,19 @@ impl Processor {
             produced_bytes: None,
         };
 
+        // Track concurrent invocations - decrement after handling report
+        if self.active_invocations > 0 {
+            self.active_invocations -= 1;
+        } else {
+            debug!("Active invocations already at 0, not updating active invocations");
+        }
+
+        // Only pause monitoring when there are no active invocations
+        if self.active_invocations == 0 {
+            debug!("No active invocations, pausing usage metrics monitoring");
+            self.enhanced_metrics.pause_usage_metrics_monitoring();
+        }
+
         // Only process if we have context for this request
         if self.context_buffer.get(request_id).is_some() {
             self.on_platform_runtime_done(
@@ -777,6 +806,12 @@ impl Processor {
             .set_shutdown_metric(i64::try_from(now).expect("can't convert now to i64"));
         self.enhanced_metrics
             .set_unused_init_metric(i64::try_from(now).expect("can't convert now to i64"));
+
+        // In managed instance mode, emit sandbox-level usage metrics at shutdown
+        if self.aws_config.is_managed_instance_mode() {
+            self.enhanced_metrics.set_max_enhanced_metrics(); // Emit system limits (fd_max, threads_max, tmp_max)
+            self.enhanced_metrics.set_usage_enhanced_metrics(); // Emit sandbox-wide peak usage
+        }
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented
