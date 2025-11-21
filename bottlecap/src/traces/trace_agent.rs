@@ -450,6 +450,7 @@ impl TraceAgent {
         deduper: DedupHandle,
         version: ApiVersion,
     ) -> Response {
+        let start = Instant::now();
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -568,6 +569,9 @@ impl TraceAgent {
             }
         }
 
+        // Remove empty chunks
+        traces.retain(|chunk| !chunk.is_empty());
+
         match invocation_processor_handle
             .update_reparenting(reparenting_info)
             .await
@@ -604,6 +608,11 @@ impl TraceAgent {
                 format!("Error sending traces to the trace aggregator: {err:?}"),
             );
         }
+
+        debug!(
+            "TRACE_AGENT | Processing traces took: {} ms",
+            start.elapsed().as_millis()
+        );
 
         success_response("Successfully buffered traces to be aggregated.")
     }
