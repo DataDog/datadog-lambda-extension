@@ -4,7 +4,7 @@
 use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
-use crate::traces::dedup::Deduper;
+use crate::traces::span_dedup::{Deduper, DedupKey};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DedupError {
@@ -15,7 +15,7 @@ pub enum DedupError {
 }
 
 pub enum DedupCommand {
-    CheckAndAdd(u64, oneshot::Sender<bool>),
+    CheckAndAdd(DedupKey, oneshot::Sender<bool>),
 }
 
 #[derive(Clone)]
@@ -29,17 +29,17 @@ impl DedupHandle {
         Self { tx }
     }
 
-    /// Checks if an ID exists and adds it if it doesn't.
-    /// Returns `true` if the ID was added (didn't exist), `false` if it already existed.
+    /// Checks if a span key exists and adds it if it doesn't.
+    /// Returns `true` if the key was added (didn't exist), `false` if it already existed.
     ///
     /// # Errors
     ///
     /// Returns an error if the command cannot be sent to the deduper service
     /// or if the response cannot be received.
-    pub async fn check_and_add(&self, id: u64) -> Result<bool, DedupError> {
+    pub async fn check_and_add(&self, key: DedupKey) -> Result<bool, DedupError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
-            .send(DedupCommand::CheckAndAdd(id, response_tx))
+            .send(DedupCommand::CheckAndAdd(key, response_tx))
             .map_err(DedupError::SendError)?;
         response_rx.await.map_err(DedupError::RecvError)
     }
@@ -74,8 +74,8 @@ impl DedupService {
     pub async fn run(mut self) {
         while let Some(command) = self.rx.recv().await {
             match command {
-                DedupCommand::CheckAndAdd(id, response_tx) => {
-                    let was_added = self.deduper.check_and_add(id);
+                DedupCommand::CheckAndAdd(key, response_tx) => {
+                    let was_added = self.deduper.check_and_add(key);
                     if let Err(e) = response_tx.send(was_added) {
                         error!("Failed to send check_and_add response: {e:?}");
                     }
@@ -108,18 +108,21 @@ mod tests {
             service.run().await;
         });
 
-        // First call should return true (ID was added)
-        assert!(handle.check_and_add(123).await.unwrap());
+        let key1 = DedupKey::new(100, 123);
+        let key2 = DedupKey::new(100, 456);
 
-        // Second call should return false (ID already exists)
-        assert!(!handle.check_and_add(123).await.unwrap());
+        // First call should return true (key was added)
+        assert!(handle.check_and_add(key1).await.unwrap());
 
-        // Different ID should return true again
-        assert!(handle.check_and_add(456).await.unwrap());
+        // Second call should return false (key already exists)
+        assert!(!handle.check_and_add(key1).await.unwrap());
 
-        // Calling again on already-added IDs should return false
-        assert!(!handle.check_and_add(123).await.unwrap());
-        assert!(!handle.check_and_add(456).await.unwrap());
+        // Different key should return true again
+        assert!(handle.check_and_add(key2).await.unwrap());
+
+        // Calling again on already-added keys should return false
+        assert!(!handle.check_and_add(key1).await.unwrap());
+        assert!(!handle.check_and_add(key2).await.unwrap());
     }
 
     #[tokio::test]
@@ -130,18 +133,23 @@ mod tests {
             service.run().await;
         });
 
-        // Add 3 IDs
-        assert!(handle.check_and_add(1).await.unwrap());
-        assert!(handle.check_and_add(2).await.unwrap());
-        assert!(handle.check_and_add(3).await.unwrap());
+        let key1 = DedupKey::new(1, 10);
+        let key2 = DedupKey::new(2, 20);
+        let key3 = DedupKey::new(3, 30);
+        let key4 = DedupKey::new(4, 40);
 
-        // Add a 4th ID, should evict the oldest (1)
-        assert!(handle.check_and_add(4).await.unwrap());
+        // Add 3 keys
+        assert!(handle.check_and_add(key1).await.unwrap());
+        assert!(handle.check_and_add(key2).await.unwrap());
+        assert!(handle.check_and_add(key3).await.unwrap());
 
-        // Now 1 should be addable again (was evicted)
-        assert!(handle.check_and_add(1).await.unwrap());
+        // Add a 4th key, should evict the oldest (key1)
+        assert!(handle.check_and_add(key4).await.unwrap());
 
-        // But 2 should now be evicted
-        assert!(handle.check_and_add(2).await.unwrap());
+        // Now key1 should be addable again (was evicted)
+        assert!(handle.check_and_add(key1).await.unwrap());
+
+        // But key2 should now be evicted
+        assert!(handle.check_and_add(key2).await.unwrap());
     }
 }

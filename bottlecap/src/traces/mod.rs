@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 pub mod context;
-pub mod dedup;
-pub mod dedup_service;
+pub mod span_dedup;
+pub mod span_dedup_service;
 pub mod propagation;
 pub mod proxy_aggregator;
 pub mod proxy_flusher;

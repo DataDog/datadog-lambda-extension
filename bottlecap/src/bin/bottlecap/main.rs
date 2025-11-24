@@ -59,7 +59,7 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     traces::{
-        dedup_service,
+        span_dedup_service,
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
@@ -1064,7 +1064,7 @@ fn start_trace_agent(
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
     // Deduper
-    let (dedup_service, dedup_handle) = dedup_service::DedupService::new();
+    let (dedup_service, dedup_handle) = span_dedup_service::DedupService::new();
     tokio::spawn(dedup_service.run());
 
     // Traces

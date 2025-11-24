@@ -32,7 +32,8 @@ use crate::{
     tags::provider,
     traces::{
         INVOCATION_SPAN_RESOURCE,
-        dedup_service::DedupHandle,
+        span_dedup::DedupKey,
+        span_dedup_service::DedupHandle,
         proxy_aggregator::{self, ProxyRequest},
         stats_aggregator,
         stats_generator::StatsGenerator,
@@ -86,7 +87,7 @@ pub struct TraceState {
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
     pub invocation_processor_handle: InvocationProcessorHandle,
     pub tags_provider: Arc<provider::Provider>,
-    pub deduper: DedupHandle,
+    pub span_deduper: DedupHandle,
 }
 
 #[derive(Clone)]
@@ -113,7 +114,7 @@ pub struct TraceAgent {
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
-    deduper: DedupHandle,
+    span_deduper: DedupHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -136,7 +137,7 @@ impl TraceAgent {
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
         stats_concentrator: StatsConcentratorHandle,
-        deduper: DedupHandle,
+        span_deduper: DedupHandle,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -165,7 +166,7 @@ impl TraceAgent {
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
-            deduper,
+            span_deduper,
         }
     }
 
@@ -220,7 +221,7 @@ impl TraceAgent {
             }),
             invocation_processor_handle: self.invocation_processor_handle.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
-            deduper: self.deduper.clone(),
+            span_deduper: self.span_deduper.clone(),
         };
 
         let stats_state = StatsState {
@@ -294,7 +295,7 @@ impl TraceAgent {
             state.trace_sender,
             state.invocation_processor_handle,
             state.tags_provider,
-            state.deduper,
+            state.span_deduper,
             ApiVersion::V04,
         )
         .await
@@ -307,7 +308,7 @@ impl TraceAgent {
             state.trace_sender,
             state.invocation_processor_handle,
             state.tags_provider,
-            state.deduper,
+            state.span_deduper,
             ApiVersion::V05,
         )
         .await
@@ -519,15 +520,19 @@ impl TraceAgent {
             let original_chunk = std::mem::take(chunk);
             for mut span in original_chunk {
                 // Check for duplicates
-                let should_keep = match deduper.check_and_add(span.span_id).await {
+                let key = DedupKey::new(span.trace_id, span.span_id);
+                let should_keep = match deduper.check_and_add(key).await {
                     Ok(should_keep) => {
                         if !should_keep {
-                            debug!("Dropping duplicate span with span_id: {}", span.span_id);
+                            debug!(
+                                "Dropping duplicate span with trace_id: {}, span_id: {}",
+                                span.trace_id, span.span_id
+                            );
                         }
                         should_keep
                     }
                     Err(e) => {
-                        error!("Failed to check span_id in deduper, keeping span: {e}");
+                        error!("Failed to check span in deduper, keeping span: {e}");
                         true
                     }
                 };
