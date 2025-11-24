@@ -367,6 +367,11 @@ pub struct EnvConfig {
     /// Enable logs for AWS Lambda. Default is `true`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_logs_enabled: Option<bool>,
+    /// @env `DD_LOGS_ENABLED`
+    ///
+    /// Enable logs for AWS Lambda. Alias for `DD_SERVERLESS_LOGS_ENABLED`. Default is `true`.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub logs_enabled: Option<bool>,
     /// @env `DD_SERVERLESS_FLUSH_STRATEGY`
     ///
     /// The flush strategy to use for AWS Lambda.
@@ -616,6 +621,13 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_string!(config, env_config, kms_api_key);
     merge_string!(config, env_config, api_key_ssm_arn);
     merge_option_to_value!(config, env_config, serverless_logs_enabled);
+
+    // Handle serverless_logs_enabled with OR logic: if either DD_LOGS_ENABLED or DD_SERVERLESS_LOGS_ENABLED is true, enable logs
+    if env_config.serverless_logs_enabled.is_some() || env_config.logs_enabled.is_some() {
+        config.serverless_logs_enabled = env_config.serverless_logs_enabled.unwrap_or(false)
+            || env_config.logs_enabled.unwrap_or(false);
+    }
+
     merge_option_to_value!(config, env_config, serverless_flush_strategy);
     merge_option_to_value!(config, env_config, enhanced_metrics);
     merge_option_to_value!(config, env_config, lambda_proc_enhanced_metrics);
@@ -978,6 +990,165 @@ mod tests {
 
             assert_eq!(config, expected_config);
 
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dd_logs_enabled_true() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_LOGS_ENABLED", "true");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert!(config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dd_logs_enabled_false() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_LOGS_ENABLED", "false");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert!(!config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dd_serverless_logs_enabled_true() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "true");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert!(config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_dd_serverless_logs_enabled_false() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "false");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert!(!config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_both_logs_enabled_true() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_LOGS_ENABLED", "true");
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "true");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert!(config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_both_logs_enabled_false() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_LOGS_ENABLED", "false");
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "false");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            assert!(!config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_logs_enabled_true_serverless_logs_enabled_false() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_LOGS_ENABLED", "true");
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "false");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            // OR logic: if either is true, logs are enabled
+            assert!(config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_logs_enabled_false_serverless_logs_enabled_true() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+            jail.set_env("DD_LOGS_ENABLED", "false");
+            jail.set_env("DD_SERVERLESS_LOGS_ENABLED", "true");
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            // OR logic: if either is true, logs are enabled
+            assert!(config.serverless_logs_enabled);
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn test_neither_logs_enabled_set_uses_default() {
+        figment::Jail::expect_with(|jail| {
+            jail.clear_env();
+
+            let mut config = Config::default();
+            let env_config_source = EnvConfigSource;
+            env_config_source
+                .load(&mut config)
+                .expect("Failed to load config");
+
+            // Default value is true
+            assert!(config.serverless_logs_enabled);
             Ok(())
         });
     }
