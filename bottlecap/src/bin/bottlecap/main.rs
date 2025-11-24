@@ -1063,10 +1063,6 @@ fn start_trace_agent(
 
     let stats_processor = Arc::new(stats_processor::ServerlessStatsProcessor {});
 
-    // Deduper
-    let (dedup_service, dedup_handle) = span_dedup_service::DedupService::new();
-    tokio::spawn(dedup_service.run());
-
     // Traces
     let (trace_aggregator_service, trace_aggregator_handle) = TraceAggregatorService::default();
     tokio::spawn(trace_aggregator_service.run());
@@ -1090,6 +1086,9 @@ fn start_trace_agent(
         obfuscation_config: Arc::new(obfuscation_config),
     });
 
+    let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
+    tokio::spawn(span_dedup_service.run());
+
     // Proxy
     let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
     let proxy_flusher = Arc::new(ProxyFlusher::new(
@@ -1110,7 +1109,7 @@ fn start_trace_agent(
         appsec_processor,
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
-        dedup_handle,
+        span_dedup_handle,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
