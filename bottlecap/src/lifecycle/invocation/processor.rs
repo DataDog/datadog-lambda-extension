@@ -673,6 +673,7 @@ impl Processor {
         timestamp: i64,
         status: Status,
         error_type: Option<String>,
+        spans: Option<Vec<crate::extension::telemetry::events::TelemetrySpan>>,
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
     ) {
@@ -688,6 +689,7 @@ impl Processor {
                     timestamp,
                     status,
                     error_type,
+                    spans,
                     tags_provider,
                     trace_sender,
                 )
@@ -721,12 +723,24 @@ impl Processor {
         timestamp: i64,
         status: Status,
         error_type: Option<String>,
+        spans: Option<Vec<crate::extension::telemetry::events::TelemetrySpan>>,
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
     ) {
         // Managed Instance mode doesn't have platform.runtimeDone event, so we synthesize it from platform.report
+        // Try to get duration from responseLatency span, otherwise fall back to metric.duration_ms
+        let duration_ms = spans
+            .as_ref()
+            .and_then(|span_vec| {
+                span_vec
+                    .iter()
+                    .find(|span| span.name == "responseLatency")
+                    .map(|span| span.duration_ms)
+            })
+            .unwrap_or(metric.duration_ms);
+
         let runtime_done_metrics = RuntimeDoneMetrics {
-            duration_ms: metric.duration_ms,
+            duration_ms,
             produced_bytes: None,
         };
 
@@ -1579,6 +1593,7 @@ mod tests {
                         chrono::Utc::now().timestamp(),
                         status,
                         error_type,
+                        None, // spans
                         tags_provider,
                         trace_sender,
                     ).await;

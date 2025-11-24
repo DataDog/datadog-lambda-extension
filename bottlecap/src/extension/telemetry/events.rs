@@ -16,6 +16,14 @@ pub struct TelemetryEvent {
     pub record: TelemetryRecord,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct TelemetrySpan {
+    pub name: String,
+    pub start: DateTime<Utc>,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: f64,
+}
+
 /// Record in a `LambdaTelemetry` entry
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "record", rename_all = "lowercase")]
@@ -94,6 +102,7 @@ pub enum TelemetryRecord {
         /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
         metrics: ReportMetrics,
+        spans: Option<Vec<TelemetrySpan>>,
     },
 
     /// Extension-specific record
@@ -276,6 +285,7 @@ pub struct ManagedInstanceReportMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Timelike};
 
     macro_rules! deserialize_tests {
         ($($name:ident: $value:expr,)*) => {
@@ -407,6 +417,7 @@ mod tests {
                     init_duration_ms: Some(549.04),
                     restore_duration_ms: None,
                 }),
+                spans: None,
             },
         ),
 
@@ -418,6 +429,18 @@ mod tests {
                 status: Status::Success,
                 error_type: None,
                 metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics { duration_ms: 1.148 }),
+                spans: Some(vec![
+                    TelemetrySpan {
+                        name: "responseLatency".to_string(),
+                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50).unwrap().with_nanosecond(880_000_000).unwrap(),
+                        duration_ms: 0.847,
+                    },
+                    TelemetrySpan {
+                        name: "responseDuration".to_string(),
+                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50).unwrap().with_nanosecond(880_000_000).unwrap(),
+                        duration_ms: 0.127,
+                    },
+                ]),
             },
         ),
 

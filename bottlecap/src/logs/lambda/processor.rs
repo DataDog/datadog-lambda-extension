@@ -192,7 +192,7 @@ impl LambdaProcessor {
                     Some(result_status),
                 ))
             },
-            TelemetryRecord::PlatformReport { request_id, metrics, status, error_type } => {
+            TelemetryRecord::PlatformReport { request_id, metrics, status, error_type, .. } => {
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformReport to the main event bus: {}", e);
                 }
@@ -631,7 +631,8 @@ mod tests {
                         max_memory_used_mb: 64,
                         init_duration_ms: Some(50.0),
                         restore_duration_ms: None
-                    })
+                    }),
+                    spans: None,
                 }
             },
             Message {
@@ -656,6 +657,7 @@ mod tests {
                     }),
                     status: Status::Success,
                     error_type: None,
+                    spans: None,
                 }
             },
             Message {
@@ -680,6 +682,7 @@ mod tests {
                     }),
                     status: Status::Error,
                     error_type: Some("RuntimeError".to_string()),
+                    spans: None,
                 }
             },
             Message {
@@ -704,6 +707,7 @@ mod tests {
                     }),
                     status: Status::Timeout,
                     error_type: None,
+                    spans: None,
                 }
             },
             Message {
@@ -728,6 +732,7 @@ mod tests {
                     }),
                     status: Status::Error,
                     error_type: None,
+                    spans: None,
                 }
             },
             Message {

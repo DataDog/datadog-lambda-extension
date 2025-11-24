@@ -1298,14 +1298,16 @@ async fn handle_event_bus_event(
                     metrics,
                     status,
                     ref error_type,
+                    ref spans,
                 } => {
                     if let Err(e) = invocation_processor_handle
                         .on_platform_report(
-                            request_id.clone(),
+                            request_id,
                             metrics,
                             event.time.timestamp(),
                             status,
-                            error_type.clone(),
+                            error_type,
+                            spans,
                             tags_provider.clone(),
                             Arc::new(SendingTraceProcessor {
                                 appsec: appsec_processor.clone(),

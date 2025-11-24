@@ -10,7 +10,9 @@ use tracing::{debug, error};
 
 use crate::{
     config::{self, aws::AwsConfig},
-    extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
+    extension::telemetry::events::{
+        InitType, ReportMetrics, RuntimeDoneMetrics, Status, TelemetrySpan,
+    },
     lifecycle::invocation::{
         context::{Context, ReparentingInfo},
         processor::Processor,
@@ -71,6 +73,7 @@ pub enum ProcessorCommand {
         timestamp: i64,
         status: Status,
         error_type: Option<String>,
+        spans: Option<Vec<TelemetrySpan>>,
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
         response: oneshot::Sender<()>,
@@ -223,22 +226,24 @@ impl InvocationProcessorHandle {
     #[allow(clippy::too_many_arguments)]
     pub async fn on_platform_report(
         &self,
-        request_id: String,
+        request_id: &str,
         metrics: ReportMetrics,
         timestamp: i64,
         status: Status,
-        error_type: Option<String>,
+        error_type: &Option<String>,
+        spans: &Option<Vec<TelemetrySpan>>,
         tags_provider: Arc<provider::Provider>,
         trace_sender: Arc<SendingTraceProcessor>,
     ) -> Result<(), ProcessorError> {
         let (tx, rx) = oneshot::channel();
         self.sender
             .send(ProcessorCommand::PlatformReport {
-                request_id,
+                request_id: request_id.to_string(),
                 metrics,
                 timestamp,
                 status,
-                error_type,
+                error_type: error_type.clone(),
+                spans: spans.clone(),
                 tags_provider,
                 trace_sender,
                 response: tx,
@@ -502,6 +507,7 @@ impl InvocationProcessorService {
                     timestamp,
                     status,
                     error_type,
+                    spans,
                     tags_provider,
                     trace_sender,
                     response,
@@ -513,6 +519,7 @@ impl InvocationProcessorService {
                             timestamp,
                             status,
                             error_type,
+                            spans,
                             tags_provider,
                             trace_sender,
                         )
