@@ -4,7 +4,7 @@
 use tokio::sync::{mpsc, oneshot};
 use tracing::error;
 
-use crate::traces::span_dedup::{Deduper, DedupKey};
+use crate::traces::span_dedup::{DedupKey, Deduper};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DedupError {

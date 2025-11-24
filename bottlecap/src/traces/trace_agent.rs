@@ -32,9 +32,9 @@ use crate::{
     tags::provider,
     traces::{
         INVOCATION_SPAN_RESOURCE,
+        proxy_aggregator::{self, ProxyRequest},
         span_dedup::DedupKey,
         span_dedup_service::DedupHandle,
-        proxy_aggregator::{self, ProxyRequest},
         stats_aggregator,
         stats_generator::StatsGenerator,
         stats_processor,

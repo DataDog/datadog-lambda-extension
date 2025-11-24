@@ -59,10 +59,10 @@ use bottlecap::{
         provider::Provider as TagProvider,
     },
     traces::{
-        span_dedup_service,
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
+        span_dedup_service,
         stats_aggregator::StatsAggregator,
         stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
         stats_flusher::{self, StatsFlusher},

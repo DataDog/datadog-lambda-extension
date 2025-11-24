@@ -48,7 +48,7 @@ impl Deduper {
     ///
     /// ```
     /// use bottlecap::traces::span_dedup::Deduper;
-    /// 
+    ///
     /// let deduper = Deduper::new(100);
     /// ```
     #[must_use]
@@ -74,7 +74,7 @@ impl Deduper {
     ///
     /// ```
     /// use bottlecap::traces::span_dedup::{Deduper, DedupKey};
-    /// 
+    ///
     /// let mut deduper = Deduper::default();
     /// let key = DedupKey::new(123, 456);
     /// assert!(deduper.check_and_add(key)); // Returns true, key was added
