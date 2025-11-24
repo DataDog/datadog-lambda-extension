@@ -85,6 +85,9 @@ pub struct Processor {
     dynamic_tags: HashMap<String, String>,
     /// Tracks active concurrent invocations for monitoring enhanced metrics in Managed Instance mode.
     active_invocations: usize,
+    /// Tracks whether if first invocation after init has been received in Managed Instance mode.
+    /// Used to determine if we should search for the empty context on an invocation.
+    awaiting_first_invocation: bool,
 }
 
 impl Processor {
@@ -122,18 +125,40 @@ impl Processor {
             resource,
             dynamic_tags: HashMap::new(),
             active_invocations: 0,
+            awaiting_first_invocation: false,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
-        let invocation_span =
-            create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
-        // Important! Call set_init_tags() before adding the invocation to the context buffer
-        self.set_init_tags();
-        self.context_buffer
-            .start_context(&request_id, invocation_span);
+        // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
+        if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
+            if self
+                .context_buffer
+                .update_empty_context_request_id(&request_id)
+            {
+                debug!(
+                    "Updated empty context from init start with request_id: {}",
+                    request_id
+                );
+            } else {
+                debug!("Expected empty context but not found, creating new context");
+                let invocation_span =
+                    create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
+                self.set_init_tags();
+                self.context_buffer
+                    .start_context(&request_id, invocation_span);
+            }
+            self.awaiting_first_invocation = false;
+        } else {
+            let invocation_span =
+                create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
+            // Important! Call set_init_tags() before adding the invocation to the context buffer
+            self.set_init_tags();
+            self.context_buffer
+                .start_context(&request_id, invocation_span);
+        }
 
         let timestamp = std::time::UNIX_EPOCH
             .elapsed()
@@ -254,9 +279,6 @@ impl Processor {
     /// This is used to create a cold start span, since this telemetry event does not
     /// provide a `request_id`, we try to guess which invocation is the cold start.
     pub fn on_platform_init_start(&mut self, time: DateTime<Utc>) {
-        if self.aws_config.is_managed_instance_mode() {
-            return;
-        }
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -264,8 +286,21 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
 
-        // Get the closest context
-        let Some(context) = self.context_buffer.get_closest_mut(start_time) else {
+        // In Managed Instance mode, create a context with empty request_id which will be updated on the first platform start received.
+        // In On-Demand mode, InitStart is received after the Invoke event, so we get the closest context by timestamp as it does not have a request_id.
+        let context = if self.aws_config.is_managed_instance_mode() {
+            let invocation_span =
+                create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
+            self.set_init_tags();
+            self.context_buffer.start_context("", invocation_span);
+            self.awaiting_first_invocation = true;
+
+            self.context_buffer.get_mut(&String::new())
+        } else {
+            self.context_buffer.get_closest_mut(start_time)
+        };
+
+        let Some(context) = context else {
             debug!("Cannot process on platform init start, no invocation context found");
             return;
         };
@@ -292,15 +327,21 @@ impl Processor {
     ) {
         self.enhanced_metrics
             .set_init_duration_metric(init_type, duration_ms, timestamp);
-        if self.aws_config.is_managed_instance_mode() {
-            return;
-        }
 
-        let Some(context) = self.context_buffer.get_closest_mut(timestamp) else {
+        // In Managed Instance mode, find the context with empty request_id
+        // In On-Demand mode, find the closest context by timestamp since we do not have the request_id
+        let context = if self.aws_config.is_managed_instance_mode() {
+            self.context_buffer.get_mut(&String::new())
+        } else {
+            self.context_buffer.get_closest_mut(timestamp)
+        };
+
+        let Some(context) = context else {
             debug!("Cannot process on platform init report, no invocation context found");
             return;
         };
 
+        // Add duration to cold start span
         if let Some(cold_start_span) = &mut context.cold_start_span {
             // `round` is intentionally meant to be a whole integer
             cold_start_span.duration = (duration_ms * MS_TO_NS) as i64;

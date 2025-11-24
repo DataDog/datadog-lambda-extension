@@ -436,6 +436,27 @@ impl ContextBuffer {
         self.insert(context);
     }
 
+    /// Updates the `request_id` of a context with no `request_id` in the buffer.
+    /// Used in Managed Instance mode to update the empty context created on init start.
+    /// Returns true if an empty context was found and updated, false otherwise.
+    ///
+    pub fn update_empty_context_request_id(&mut self, request_id: &str) -> bool {
+        if let Some(context) = self
+            .buffer
+            .iter_mut()
+            .find(|context| context.request_id.is_empty())
+        {
+            context.request_id = request_id.to_string();
+            context
+                .invocation_span
+                .meta
+                .insert("request_id".to_string(), request_id.to_string());
+            true
+        } else {
+            false
+        }
+    }
+
     /// Adds the start time to the invocation span of a `Context` in the buffer.
     ///
     pub fn add_start_time(&mut self, request_id: &String, start_time: i64) {
