@@ -52,15 +52,15 @@ pub struct DedupService {
 
 /// A service that handles `check_and_add()` requests without using mutex.
 impl DedupService {
-    /// Creates a new dedup service with the default capacity (50).
+    /// Creates a new dedup service with the default capacity (100).
     #[must_use]
     pub fn new() -> (Self, DedupHandle) {
-        Self::with_capacity(50)
+        Self::with_capacity(100)
     }
 
     /// Creates a new dedup service with the specified capacity.
     #[must_use]
-    pub fn with_capacity(capacity: usize) -> (Self, DedupHandle) {
+    fn with_capacity(capacity: usize) -> (Self, DedupHandle) {
         let (tx, rx) = mpsc::unbounded_channel();
         let handle = DedupHandle::new(tx);
         let service = Self {

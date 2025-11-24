@@ -3,7 +3,7 @@
 
 use std::collections::{HashSet, VecDeque};
 
-const DEFAULT_CAPACITY: usize = 50;
+const DEFAULT_CAPACITY: usize = 100;
 
 /// A key for span deduplication consisting of `trace_id` and `span_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
