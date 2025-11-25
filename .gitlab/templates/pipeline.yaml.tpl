@@ -337,6 +337,8 @@ publish integration layer (arm64):
     PIPELINE_LAYER_SUFFIX: $$${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
+    - echo "DEBUG - Current AWS Account before assuming role:"
+    - aws sts get-caller-identity
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/publish_layers.sh
