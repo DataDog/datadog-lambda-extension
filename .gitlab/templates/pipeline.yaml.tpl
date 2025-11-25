@@ -322,8 +322,7 @@ publish integration layer (arm64):
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: on_success
+    - when: on_success
   needs:
     - layer (arm64)
   dependencies:
@@ -357,8 +356,7 @@ integration-deploy:
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: on_success
+    - when: on_success
   needs:
     - publish integration layer (arm64)
   dependencies:
@@ -386,8 +384,7 @@ integration-test:
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: on_success
+    - when: on_success
   needs:
     - integration-deploy
   variables:
@@ -417,8 +414,7 @@ integration-cleanup-stacks:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   when: always
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: always
+    - when: always
   needs:
     - integration-test
   variables:
@@ -439,8 +435,7 @@ integration-cleanup-layers:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   when: always
   rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-      when: always
+    - when: always
   needs:
     - integration-test
   variables:
