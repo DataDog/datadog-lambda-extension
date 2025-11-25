@@ -51,7 +51,7 @@ bottlecap ({{ $flavor.name }}):
   image: registry.ddbuild.io/images/docker:20.10
   tags: ["arch:{{ $flavor.arch }}"]
   needs: []
-  # This job sometimes times out on GitLab runner 17227436 for unclear reason.
+  # This job sometimes times out on GitLab for unclear reason.
   # Set a short timeout with retries to work around this.
   timeout: 10m
   retry:
