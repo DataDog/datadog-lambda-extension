@@ -193,7 +193,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
 }
 
 impl ServerlessTraceFlusher {
-    fn get_http_client(
+    pub fn get_http_client(
         proxy_https: Option<&String>,
     ) -> Result<
         GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>,

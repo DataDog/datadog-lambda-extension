@@ -101,6 +101,8 @@ pub struct YamlConfig {
     pub kms_api_key: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub serverless_logs_enabled: Option<bool>,
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub logs_enabled: Option<bool>,
     pub serverless_flush_strategy: Option<FlushStrategy>,
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub enhanced_metrics: Option<bool>,
@@ -671,7 +673,13 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     // AWS Lambda
     merge_string!(config, yaml_config, api_key_secret_arn);
     merge_string!(config, yaml_config, kms_api_key);
-    merge_option_to_value!(config, yaml_config, serverless_logs_enabled);
+
+    // Handle serverless_logs_enabled with OR logic: if either logs_enabled or serverless_logs_enabled is true, enable logs
+    if yaml_config.serverless_logs_enabled.is_some() || yaml_config.logs_enabled.is_some() {
+        config.serverless_logs_enabled = yaml_config.serverless_logs_enabled.unwrap_or(false)
+            || yaml_config.logs_enabled.unwrap_or(false);
+    }
+
     merge_option_to_value!(config, yaml_config, serverless_flush_strategy);
     merge_option_to_value!(config, yaml_config, enhanced_metrics);
     merge_option_to_value!(config, yaml_config, lambda_proc_enhanced_metrics);
@@ -972,6 +980,7 @@ api_security_sample_delay: 60 # Seconds
                 api_key_secret_arn: "arn:aws:secretsmanager:region:account:secret:datadog-api-key"
                     .to_string(),
                 kms_api_key: "test-kms-key".to_string(),
+                api_key_ssm_arn: String::default(),
                 serverless_logs_enabled: false,
                 serverless_flush_strategy: FlushStrategy::Periodically(PeriodicStrategy {
                     interval: 60000,

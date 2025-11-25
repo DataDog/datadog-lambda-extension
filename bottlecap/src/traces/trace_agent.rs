@@ -62,7 +62,9 @@ const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
     "/evp_proxy/v2/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
 const INFO_ENDPOINT_PATH: &str = "/info";
-const DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const V1_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
+const DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH: &str = "/debugger/v1/diagnostics";
 const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
 
 // Intake endpoints
@@ -71,7 +73,8 @@ const LLM_OBS_SPANS_INTAKE_PATH: &str = "/api/v2/llmobs";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH: &str = "/api/intake/llm-obs/v1/eval-metric";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2: &str = "/api/intake/llm-obs/v2/eval-metric";
 const PROFILING_INTAKE_PATH: &str = "/api/v2/profile";
-const DEBUGGER_LOGS_INTAKE_PATH: &str = "/api/v2/logs";
+const V1_DEBUGGER_LOGS_INTAKE_PATH: &str = "/api/v2/logs";
+const V2_DEBUGGER_INTAKE_PATH: &str = "/api/v2/debugger";
 const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
 
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -263,7 +266,12 @@ impl TraceAgent {
                 post(Self::llm_obs_eval_metric_proxy_v2),
             )
             .route(LLM_OBS_SPANS_ENDPOINT_PATH, post(Self::llm_obs_spans_proxy))
-            .route(DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
+            .route(V1_DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
+            .route(V2_DEBUGGER_ENDPOINT_PATH, post(Self::debugger_intake_proxy))
+            .route(
+                DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
+                post(Self::debugger_intake_proxy),
+            )
             .route(
                 INSTRUMENTATION_ENDPOINT_PATH,
                 post(Self::instrumentation_proxy),
@@ -394,14 +402,28 @@ impl TraceAgent {
         .await
     }
 
+    // Used for `/debugger/v1/input` in Exception Replay
     async fn debugger_logs_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
             request,
             "http-intake.logs",
-            DEBUGGER_LOGS_INTAKE_PATH,
+            V1_DEBUGGER_LOGS_INTAKE_PATH,
             "debugger_logs",
+        )
+        .await
+    }
+
+    // Used for `/debugger/v1/diagnostics` and `/debugger/v2/input` in Exception Replay
+    async fn debugger_intake_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        Self::handle_proxy(
+            state.config,
+            state.proxy_aggregator,
+            request,
+            "debugger-intake",
+            V2_DEBUGGER_INTAKE_PATH,
+            "debugger",
         )
         .await
     }
@@ -432,7 +454,9 @@ impl TraceAgent {
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
                     LLM_OBS_SPANS_ENDPOINT_PATH,
-                    DEBUGGER_ENDPOINT_PATH,
+                    V1_DEBUGGER_ENDPOINT_PATH,
+                    V2_DEBUGGER_ENDPOINT_PATH,
+                    DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
                 ],
                 "client_drop_p0s": true,
             }
