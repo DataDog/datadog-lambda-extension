@@ -1,9 +1,9 @@
 use tokio::sync::{mpsc, oneshot};
 
 use crate::config::Config;
-use datadog_trace_protobuf::pb;
-use datadog_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
-use datadog_trace_stats::span_concentrator::SpanConcentrator;
+use libdd_trace_protobuf::pb;
+use libdd_trace_protobuf::pb::{ClientStatsPayload, TracerPayload};
+use libdd_trace_stats::span_concentrator::SpanConcentrator;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};

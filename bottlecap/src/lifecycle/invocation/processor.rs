@@ -5,8 +5,8 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use datadog_trace_protobuf::pb::Span;
-use datadog_trace_utils::tracer_header_tags;
+use libdd_trace_protobuf::pb::Span;
+use libdd_trace_utils::tracer_header_tags;
 use serde_json::Value;
 use tokio::time::Instant;
 use tracing::{debug, warn};

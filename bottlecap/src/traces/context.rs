@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use datadog_trace_protobuf::pb::SpanLink;
+use libdd_trace_protobuf::pb::SpanLink;
 
 #[derive(Copy, Clone, Default, Debug, PartialEq)]
 pub struct Sampling {

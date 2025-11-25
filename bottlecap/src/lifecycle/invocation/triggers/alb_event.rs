@@ -2,7 +2,7 @@ use super::ServiceNameResolver;
 use crate::lifecycle::invocation::triggers::{
     FUNCTION_TRIGGER_EVENT_SOURCE_TAG, Trigger, body::Body,
 };
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;

@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use datadog_trace_protobuf::pb::Span;
 use dogstatsd::aggregator_service::AggregatorHandle;
+use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
