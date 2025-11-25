@@ -263,7 +263,7 @@ publish image ({{ $multi_arch_image_flavor.name }}):
     branch: main
     strategy: depend
   variables:
-    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-${CI_COMMIT_SHORT_SHA}{{ $multi_arch_image_flavor.suffix }}
+    IMG_SOURCES: ${CI_DOCKER_TARGET_IMAGE}:v${CI_PIPELINE_ID}-$${CI_COMMIT_SHORT_SHA}{{ $multi_arch_image_flavor.suffix }}
     IMG_DESTINATIONS: lambda-extension:${VERSION}{{ $multi_arch_image_flavor.suffix }},lambda-extension:latest{{ $multi_arch_image_flavor.suffix }}
     IMG_REGISTRIES: dockerhub,ecr-public,gcr-datadoghq
     IMG_SIGNING: false
@@ -334,14 +334,14 @@ publish integration layer (arm64):
     REGION: us-east-1
     ADD_LAYER_VERSION_PERMISSIONS: "0"
     AUTOMATICALLY_BUMP_VERSION: "1"
-    PIPELINE_LAYER_SUFFIX: ${CI_COMMIT_SHORT_SHA}
+    PIPELINE_LAYER_SUFFIX: $$${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
     - .gitlab/scripts/publish_layers.sh
     # Get the layer ARN we just published and save it as an artifact
-    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name Datadog-Extension-${CI_COMMIT_SHORT_SHA} --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
+    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name Datadog-Extension-$${CI_COMMIT_SHORT_SHA} --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
     - echo "Published layer ARN - ${LAYER_ARN}"
     - echo "${LAYER_ARN}" > integration_layer_arn.txt
   artifacts:
@@ -362,7 +362,7 @@ integration-deploy:
   dependencies:
     - publish integration layer (arm64)
   variables:
-    SUFFIX: ${CI_COMMIT_SHORT_SHA}
+    SUFFIX: $${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
@@ -388,7 +388,7 @@ integration-test:
   needs:
     - integration-deploy
   variables:
-    SUFFIX: ${CI_COMMIT_SHORT_SHA}
+    SUFFIX: $${CI_COMMIT_SHORT_SHA}
     DD_SITE: datadoghq.com
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
@@ -418,7 +418,7 @@ integration-cleanup-stacks:
   needs:
     - integration-test
   variables:
-    SUFFIX: ${CI_COMMIT_SHORT_SHA}
+    SUFFIX: $${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
@@ -439,7 +439,7 @@ integration-cleanup-layers:
   needs:
     - integration-test
   variables:
-    LAYER_NAME_PREFIX: ${CI_COMMIT_SHORT_SHA}
+    LAYER_NAME_PREFIX: $${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
