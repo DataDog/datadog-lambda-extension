@@ -2,6 +2,7 @@ stages:
   - test
   - compile
   - build
+  - integration-tests
   - self-monitoring
   - sign
   - publish
@@ -314,3 +315,154 @@ signed layer bundle:
     - rm -rf datadog_extension-signed-bundle-${CI_JOB_ID}
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
+
+# Integration Tests - Publish arm64 layer with integration test prefix
+publish integration layer (arm64):
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+  needs:
+    - layer (arm64)
+  dependencies:
+    - layer (arm64)
+  variables:
+    LAYER_NAME_BASE_SUFFIX: ""
+    ARCHITECTURE: arm64
+    LAYER_FILE: datadog_extension-arm64.zip
+    REGION: us-east-1
+    ADD_LAYER_VERSION_PERMISSIONS: "0"
+    AUTOMATICALLY_BUMP_VERSION: "1"
+    PIPELINE_LAYER_SUFFIX: ${CI_COMMIT_SHORT_SHA}
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  script:
+    - .gitlab/scripts/publish_layers.sh
+    # Get the layer ARN we just published and save it as an artifact
+    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name Datadog-Extension-${CI_COMMIT_SHORT_SHA} --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
+    - echo "Published layer ARN - ${LAYER_ARN}"
+    - echo "${LAYER_ARN}" > integration_layer_arn.txt
+  artifacts:
+    paths:
+      - integration_layer_arn.txt
+    expire_in: 1 hour
+  {{ end }}
+
+# Integration Tests - Deploy CDK stacks with commit hash prefix
+integration-deploy:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+  needs:
+    - publish integration layer (arm64)
+  dependencies:
+    - publish integration layer (arm64)
+  variables:
+    SUFFIX: ${CI_COMMIT_SHORT_SHA}
+    AWS_DEFAULT_REGION: us-east-1
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - cd integration-tests
+    - npm ci
+  {{ end }}
+  script:
+    - echo "Deploying CDK stacks with suffix ${SUFFIX}..."
+    # Get the integration test layer ARN from artifact
+    - export EXTENSION_LAYER_ARN=$(cat ../integration_layer_arn.txt)
+    - echo "Using integration test layer - ${EXTENSION_LAYER_ARN}"
+    - npm run build
+    - npx cdk deploy "*-${SUFFIX}" --require-approval never
+
+# Integration Tests - Run Jest test suite
+integration-test:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: on_success
+  needs:
+    - integration-deploy
+  variables:
+    SUFFIX: ${CI_COMMIT_SHORT_SHA}
+    DD_SITE: datadoghq.com
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - cd integration-tests
+  {{ end }}
+  script:
+    - echo "Running integration tests with suffix ${SUFFIX}..."
+    # DD_API_KEY and DD_APP_KEY are already exported by get_secrets.sh
+    - npm test
+  artifacts:
+    when: always
+    paths:
+      - integration-tests/test-results/
+    reports:
+      junit: integration-tests/test-results/junit.xml
+    expire_in: 30 days
+
+# Integration Tests - Cleanup stacks
+integration-cleanup-stacks:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  when: always
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+  needs:
+    - integration-test
+  variables:
+    SUFFIX: ${CI_COMMIT_SHORT_SHA}
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - cd integration-tests
+  {{ end }}
+  script:
+    - echo "Destroying CDK stacks with suffix ${SUFFIX}..."
+    - npx cdk destroy "*-${SUFFIX}" --force || echo "Failed to destroy some stacks, but continuing..."
+
+# Integration Tests - Cleanup layers
+integration-cleanup-layers:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  when: always
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+  needs:
+    - integration-test
+  variables:
+    LAYER_NAME_PREFIX: ${CI_COMMIT_SHORT_SHA}
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  {{ end }}
+  script:
+    - echo "Deleting integration test layers with commit hash ${LAYER_NAME_PREFIX}..."
+    # Get layer name
+    - LAYER_NAME="Datadog-Extension-${LAYER_NAME_PREFIX}"
+    - echo "Layer name - ${LAYER_NAME}"
+    # Get all versions of the layer
+    - VERSIONS=$(aws lambda list-layer-versions --layer-name ${LAYER_NAME} --region us-east-1 --query 'LayerVersions[*].Version' --output text || echo "")
+    # Delete each version
+    - |
+      if [ -n "$VERSIONS" ]; then
+        for VERSION in $VERSIONS; do
+          echo "Deleting layer ${LAYER_NAME} version ${VERSION}..."
+          aws lambda delete-layer-version --layer-name ${LAYER_NAME} --version-number ${VERSION} --region us-east-1 || echo "Failed to delete version ${VERSION}"
+        done
+      else
+        echo "No layer versions found for ${LAYER_NAME}"
+      fi

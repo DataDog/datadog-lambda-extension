@@ -37,6 +37,27 @@ export DD_API_KEY=$(aws ssm get-parameter \
     --query "Parameter.Value" \
     --out text)
 
+if [ -n "$DD_API_KEY" ]; then
+    printf "✓ DD_API_KEY retrieved successfully\n"
+else
+    printf "✗ Failed to retrieve DD_API_KEY\n"
+fi
+
+printf "Getting DD APP KEY...\n"
+
+export DD_APP_KEY=$(aws ssm get-parameter \
+    --region us-east-1 \
+    --name ci.datadog-lambda-extension.dd-app-key \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --out text)
+
+if [ -n "$DD_APP_KEY" ]; then
+    printf "✓ DD_APP_KEY retrieved successfully\n"
+else
+    printf "✗ Failed to retrieve DD_APP_KEY\n"
+fi
+
 printf "Assuming role...\n"
 
 export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" \
