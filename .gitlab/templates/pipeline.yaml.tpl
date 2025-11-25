@@ -52,7 +52,7 @@ bottlecap ({{ $flavor.name }}):
   tags: ["arch:{{ $flavor.arch }}"]
   needs: []
   # This job sometimes times out on GitLab runner 17227436 for unclear reason.
-  # Setting a short timeout with retries to work around this.
+  # Set a short timeout with retries to work around this.
   timeout: 10m
   retry:
     max: 1
