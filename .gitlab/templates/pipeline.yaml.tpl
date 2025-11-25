@@ -55,8 +55,10 @@ bottlecap ({{ $flavor.name }}):
   # Setting a short timeout with retries to work around this.
   timeout: 10m
   retry:
-    max: 2
-    when: stuck_or_timeout_failure
+    max: 1
+    when:
+      - stuck_or_timeout_failure
+      - runner_system_failure
   artifacts:
     expire_in: 1 week
     paths:
