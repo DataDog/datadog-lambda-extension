@@ -543,6 +543,7 @@ mod tests {
                 sandbox_init_time: Instant::now(),
                 runtime_api: String::new(),
                 exec_wrapper: None,
+                initialization_type: "on-demand".into(),
             }),
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
@@ -602,6 +603,7 @@ mod tests {
                 sandbox_init_time: Instant::now(),
                 runtime_api: String::new(),
                 exec_wrapper: None,
+                initialization_type: "on-demand".into(),
             }),
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),

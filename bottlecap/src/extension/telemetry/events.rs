@@ -432,12 +432,20 @@ mod tests {
                 spans: Some(vec![
                     TelemetrySpan {
                         name: "responseLatency".to_string(),
-                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50).unwrap().with_nanosecond(880_000_000).unwrap(),
+                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50)
+                            .single()
+                            .expect("test date should be valid")
+                            .with_nanosecond(880_000_000)
+                            .expect("test nanosecond should be valid"),
                         duration_ms: 0.847,
                     },
                     TelemetrySpan {
                         name: "responseDuration".to_string(),
-                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50).unwrap().with_nanosecond(880_000_000).unwrap(),
+                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50)
+                            .single()
+                            .expect("test date should be valid")
+                            .with_nanosecond(880_000_000)
+                            .expect("test nanosecond should be valid"),
                         duration_ms: 0.127,
                     },
                 ]),

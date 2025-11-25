@@ -99,7 +99,7 @@ use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
@@ -443,12 +443,15 @@ fn get_flush_strategy_for_mode(
     if let FlushStrategy::Continuously(_) = configured_strategy {
         configured_strategy
     } else {
-        debug!(
-            "Managed Instance mode detected. Flush strategy '{}' is not compatible with managed instance mode. \
-            Enforcing continuous flush strategy with {}ms interval for optimal performance.",
-            configured_strategy.name(),
-            DEFAULT_CONTINUOUS_FLUSH_INTERVAL
-        );
+        // Only log if the user explicitly configured a non-default strategy
+        if !matches!(configured_strategy, FlushStrategy::Default) {
+            warn!(
+                "Managed Instance mode detected. Flush strategy '{}' is not compatible with managed instance mode. \
+                Enforcing continuous flush strategy with {}ms interval for optimal performance.",
+                configured_strategy.name(),
+                DEFAULT_CONTINUOUS_FLUSH_INTERVAL
+            );
+        }
 
         FlushStrategy::Continuously(PeriodicStrategy {
             interval: DEFAULT_CONTINUOUS_FLUSH_INTERVAL,
