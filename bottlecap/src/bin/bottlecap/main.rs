@@ -62,6 +62,7 @@ use bottlecap::{
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
+        span_dedup_service,
         stats_aggregator::StatsAggregator,
         stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
         stats_flusher::{self, StatsFlusher},
@@ -1085,6 +1086,9 @@ fn start_trace_agent(
         obfuscation_config: Arc::new(obfuscation_config),
     });
 
+    let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
+    tokio::spawn(span_dedup_service.run());
+
     // Proxy
     let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
     let proxy_flusher = Arc::new(ProxyFlusher::new(
@@ -1105,6 +1109,7 @@ fn start_trace_agent(
         appsec_processor,
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
+        span_dedup_handle,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
