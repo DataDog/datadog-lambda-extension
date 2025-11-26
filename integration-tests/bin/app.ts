@@ -27,7 +27,7 @@ function getSuffix(): string {
   } catch (error) {
   }
   
-  return 'local-testing';
+  return 'integration';
 }
 
 const suffix = getSuffix();

@@ -334,20 +334,16 @@ publish integration layer (arm64):
     REGION: us-east-1
     ADD_LAYER_VERSION_PERMISSIONS: "0"
     AUTOMATICALLY_BUMP_VERSION: "1"
-    PIPELINE_LAYER_SUFFIX: $$CI_COMMIT_SHORT_SHA
+    PIPELINE_LAYER_SUFFIX: ""
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - echo "DEBUG - Current AWS Account before assuming role:"
     - aws sts get-caller-identity
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
-    - echo "DEBUG - CI_COMMIT_SHORT_SHA is:" $${CI_COMMIT_SHORT_SHA}
-    - echo "DEBUG - PIPELINE_LAYER_SUFFIX is set to:" $${PIPELINE_LAYER_SUFFIX}
-    - export PIPELINE_LAYER_SUFFIX=$${CI_COMMIT_SHORT_SHA}
-    - echo "DEBUG - After export, PIPELINE_LAYER_SUFFIX is:" $${PIPELINE_LAYER_SUFFIX}
     - .gitlab/scripts/publish_layers.sh
     # Get the layer ARN we just published and save it as an artifact
-    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-$${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
+    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name Datadog-Extension --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
     - echo "Published layer ARN - ${LAYER_ARN}"
     - echo "${LAYER_ARN}" > integration_layer_arn.txt
   artifacts:
@@ -368,7 +364,7 @@ integration-deploy:
   dependencies:
     - publish integration layer (arm64)
   variables:
-    SUFFIX: $$CI_COMMIT_SHORT_SHA
+    SUFFIX: integration
     AWS_DEFAULT_REGION: us-east-1
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
@@ -398,7 +394,7 @@ integration-test:
   needs:
     - integration-deploy
   variables:
-    SUFFIX: $$CI_COMMIT_SHORT_SHA
+    SUFFIX: integration
     DD_SITE: datadoghq.com
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
@@ -429,7 +425,7 @@ integration-cleanup-stacks:
   needs:
     - integration-test
   variables:
-    SUFFIX: $$CI_COMMIT_SHORT_SHA
+    SUFFIX: integration
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
