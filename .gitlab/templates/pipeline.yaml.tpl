@@ -334,7 +334,7 @@ publish integration layer (arm64):
     REGION: us-east-1
     ADD_LAYER_VERSION_PERMISSIONS: "0"
     AUTOMATICALLY_BUMP_VERSION: "1"
-    PIPELINE_LAYER_SUFFIX: $$${CI_COMMIT_SHORT_SHA}
+    PIPELINE_LAYER_SUFFIX: $${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - echo "DEBUG - Current AWS Account before assuming role:"
