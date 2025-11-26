@@ -341,6 +341,9 @@ publish integration layer (arm64):
     - aws sts get-caller-identity
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   script:
+    - echo "DEBUG - PIPELINE_LAYER_SUFFIX is set to:" $$PIPELINE_LAYER_SUFFIX
+    - export PIPELINE_LAYER_SUFFIX=$$CI_COMMIT_SHORT_SHA
+    - echo "DEBUG - After export, PIPELINE_LAYER_SUFFIX is:" $$PIPELINE_LAYER_SUFFIX
     - .gitlab/scripts/publish_layers.sh
     # Get the layer ARN we just published and save it as an artifact
     - LAYER_ARN=$(aws lambda list-layer-versions --layer-name Datadog-Extension-$$CI_COMMIT_SHORT_SHA --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
