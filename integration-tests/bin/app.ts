@@ -19,15 +19,12 @@ function getSuffix(): string {
   }
   
   try {
-    // Get username (equivalent to whoami)
     const username = os.userInfo().username;
-    // Parse first.last format to get first name
     const firstName = username.split('.')[0];
     if (firstName && firstName.length > 0) {
       return firstName;
     }
   } catch (error) {
-    // Fall through to default
   }
   
   return 'local-testing';

@@ -372,6 +372,7 @@ integration-deploy:
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - apk add --no-cache nodejs npm
     - cd integration-tests
     - npm ci
   {{ end }}
@@ -380,6 +381,9 @@ integration-deploy:
     # Get the integration test layer ARN from artifact
     - export EXTENSION_LAYER_ARN=$(cat ../integration_layer_arn.txt)
     - echo "Using integration test layer - ${EXTENSION_LAYER_ARN}"
+    # Set CDK environment variables
+    - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+    - export CDK_DEFAULT_REGION=us-east-1
     - npm run build
     - npx cdk deploy "*-${SUFFIX}" --require-approval never
 
@@ -398,6 +402,7 @@ integration-test:
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - apk add --no-cache nodejs npm
     - cd integration-tests
   {{ end }}
   script:
@@ -427,6 +432,7 @@ integration-cleanup-stacks:
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - apk add --no-cache nodejs npm
     - cd integration-tests
   {{ end }}
   script:
