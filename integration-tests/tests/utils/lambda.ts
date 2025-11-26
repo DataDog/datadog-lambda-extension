@@ -8,9 +8,6 @@ export interface LambdaInvocationResult {
   payload: any;
 }
 
-/**
- * Invoke a Lambda function
- */
 export async function invokeLambda(
   functionName: string,
   payload: any = {},
@@ -28,7 +25,7 @@ export async function invokeLambda(
   const command = new InvokeCommand({
     FunctionName: functionName,
     Payload: JSON.stringify(payload),
-    LogType: 'Tail', // Get last 4KB of logs in response
+    LogType: 'Tail',
   });
 
   console.log('Sending Lambda invocation request...');
@@ -51,9 +48,7 @@ export async function invokeLambda(
     throw error;
   }
 
-  // Extract requestId from the Lambda function's response payload
   const requestId: string = response.$metadata.requestId || '';
-  console.log(`RequestId: ${requestId}`);
 
   return {
     requestId,
@@ -62,17 +57,12 @@ export async function invokeLambda(
   };
 }
 
-/**
- * Force a cold start by updating the Lambda function's environment variables
- */
 export async function forceColdStart(functionName: string): Promise<void> {
-  // Get current configuration
   const getConfigCommand = new GetFunctionConfigurationCommand({
     FunctionName: functionName,
   });
   const config = await lambdaClient.send(getConfigCommand);
 
-  // Update environment variables with a new timestamp to force cold start
   const updateCommand = new UpdateFunctionConfigurationCommand({
     FunctionName: functionName,
     Environment: {
