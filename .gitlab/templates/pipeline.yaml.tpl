@@ -369,7 +369,7 @@ integration-deploy:
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - apk add --no-cache nodejs npm
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm
     - cd integration-tests
     - npm ci
   {{ end }}
@@ -399,7 +399,7 @@ integration-test:
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - apk add --no-cache nodejs npm
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm
     - cd integration-tests
   {{ end }}
   script:
@@ -429,7 +429,7 @@ integration-cleanup-stacks:
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - apk add --no-cache nodejs npm
+    - apt-get update && apt-get install -y --no-install-recommends nodejs npm
     - cd integration-tests
   {{ end }}
   script:
