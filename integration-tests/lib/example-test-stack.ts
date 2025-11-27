@@ -1,6 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as path from 'path';
 import { Construct } from 'constructs';
 import { createLogGroup, datadogEnvVariables, secretPolicy, getExtensionLayer, Props } from './util';
 
@@ -13,7 +12,7 @@ export class ExampleTestStack extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_20_X,
       architecture: lambda.Architecture.ARM_64,
       handler: 'index.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/example')),
+      code: lambda.Code.fromAsset('./lambda/example'),
       functionName: functionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
