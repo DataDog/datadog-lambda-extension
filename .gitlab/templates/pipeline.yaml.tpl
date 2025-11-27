@@ -316,7 +316,7 @@ signed layer bundle:
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
 
-Integration Tests - Publish arm64 layer with integration test prefix
+# Integration Tests - Publish arm64 layer with integration test prefix
 publish integration layer (arm64):
   stage: integration-tests
   tags: ["arch:amd64"]
