@@ -11,6 +11,7 @@
     "synth": "cdk synth",
     "diff": "cdk diff",
     "test": "SUFFIX=$SUFFIX DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_SITE=datadoghq.com aws-vault exec sso-serverless-sandbox-account-admin -- jest",
+    "test:ci": "jest",
     "test:watch": "SUFFIX=$SUFFIX DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_SITE=datadoghq.com aws-vault exec sso-serverless-sandbox-account-admin -- jest --watch",
     "test:coverage": "SUFFIX=$SUFFIX DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_SITE=datadoghq.com aws-vault exec sso-serverless-sandbox-account-admin -- jest --coverage"
   },

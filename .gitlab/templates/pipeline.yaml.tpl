@@ -406,8 +406,9 @@ integration-test:
   {{ end }}
   script:
     - echo "Running integration tests with suffix ${SUFFIX}..."
-    # DD_API_KEY and DD_APP_KEY are already exported by get_secrets.sh
-    - npm test
+    # DD_API_KEY, DD_APP_KEY, and DD_SITE are already exported by get_secrets.sh
+    # AWS credentials are also already configured
+    - npm run test:ci
   artifacts:
     when: always
     paths:
@@ -439,36 +440,3 @@ integration-cleanup-stacks:
     - echo "Destroying CDK stacks with suffix ${SUFFIX}..."
     - npx cdk destroy "*-${SUFFIX}" --force || echo "Failed to destroy some stacks, but continuing..."
 
-# Integration Tests - Cleanup layers
-integration-cleanup-layers:
-  stage: integration-tests
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  when: always
-  rules:
-    - when: always
-  needs:
-    - integration-test
-  variables:
-    LAYER_NAME_PREFIX: $$CI_COMMIT_SHORT_SHA
-  {{ with $environment := (ds "environments").environments.sandbox }}
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  {{ end }}
-  script:
-    - echo "Deleting integration test layers with commit hash ${LAYER_NAME_PREFIX}..."
-    # Get layer name
-    - LAYER_NAME="Datadog-Extension-${LAYER_NAME_PREFIX}"
-    - echo "Layer name - ${LAYER_NAME}"
-    # Get all versions of the layer
-    - VERSIONS=$(aws lambda list-layer-versions --layer-name ${LAYER_NAME} --region us-east-1 --query 'LayerVersions[*].Version' --output text || echo "")
-    # Delete each version
-    - |
-      if [ -n "$VERSIONS" ]; then
-        for VERSION in $VERSIONS; do
-          echo "Deleting layer ${LAYER_NAME} version ${VERSION}..."
-          aws lambda delete-layer-version --layer-name ${LAYER_NAME} --version-number ${VERSION} --region us-east-1 || echo "Failed to delete version ${VERSION}"
-        done
-      else
-        echo "No layer versions found for ${LAYER_NAME}"
-      fi
