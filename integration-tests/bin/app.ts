@@ -12,12 +12,16 @@ const env = {
   region: process.env.CDK_DEFAULT_REGION || process.env.AWS_REGION || 'us-east-1',
 };
 
-// Get suffix from environment variable, or derive from username, or default
+// Get identifier from environment variable, or derive from username, or default
 function getIdentifier(): string {
+  if (process.env.IDENTIFIER) {
+    return process.env.IDENTIFIER;
+  }
+
   if (process.env.SUFFIX) {
     return process.env.SUFFIX;
   }
-  
+
   try {
     const username = os.userInfo().username;
     const firstName = username.split('.')[0];
@@ -26,7 +30,7 @@ function getIdentifier(): string {
     }
   } catch (error) {
   }
-  
+
   return 'integration';
 }
 
