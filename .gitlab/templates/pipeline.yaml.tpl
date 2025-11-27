@@ -1,8 +1,8 @@
 stages:
-  - integration-tests
   - test
   - compile
   - build
+  - integration-tests
   - self-monitoring
   - sign
   - publish
