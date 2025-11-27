@@ -358,10 +358,10 @@ integration-deploy:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   rules:
     - when: on_success
-#  needs:
-#    - publish integration layer (arm64)
-#  dependencies:
-#    - publish integration layer (arm64)
+  needs:
+    - publish integration layer (arm64)
+  dependencies:
+    - publish integration layer (arm64)
   variables:
     IDENTIFIER: integration
     AWS_DEFAULT_REGION: us-east-1
@@ -375,8 +375,8 @@ integration-deploy:
   {{ end }}
   script:
     - echo "Deploying CDK stacks with identifier ${IDENTIFIER}..."
-    # - export EXTENSION_LAYER_ARN=$(cat ../integration_layer_arn.txt)
-    # - echo "Using integration test layer - ${EXTENSION_LAYER_ARN}"
+    - export EXTENSION_LAYER_ARN=$(cat ../integration_layer_arn.txt)
+    - echo "Using integration test layer - ${EXTENSION_LAYER_ARN}"
     - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
     - export CDK_DEFAULT_REGION=us-east-1
     - npm run build

@@ -5,8 +5,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import { LayerVersion } from "aws-cdk-lib/aws-lambda";
 
 export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN || '';
-// export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN || '';
-export const extensionLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Extension-ARM:89' 
+export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN || 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Extension-ARM:89' 
 
 export interface Props extends cdk.StackProps{
   identifier: string
