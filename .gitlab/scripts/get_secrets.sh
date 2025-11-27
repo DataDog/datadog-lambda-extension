@@ -48,6 +48,7 @@ printf "Getting DD API KEY Secret ARN...\n"
 export DATADOG_API_SECRET_ARN=$(aws ssm get-parameter \
     --region us-east-1 \
     --name ci.datadog-lambda-extension.dd-api-key-secret-arn \
+    --with-decryption \
     --query "Parameter.Value" \
     --out text)
 
