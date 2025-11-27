@@ -43,6 +43,20 @@ else
     printf "✗ Failed to retrieve DD_API_KEY\n"
 fi
 
+printf "Getting DD API KEY Secret ARN...\n"
+
+export DATADOG_API_SECRET_ARN=$(aws ssm get-parameter \
+    --region us-east-1 \
+    --name ci.datadog-lambda-extension.dd-api-key-secret-arn \
+    --query "Parameter.Value" \
+    --out text)
+
+if [ -n "$DATADOG_API_SECRET_ARN" ]; then
+    printf "✓ DATADOG_API_SECRET_ARN retrieved successfully\n"
+else
+    printf "✗ Failed to retrieve DATADOG_API_SECRET_ARN\n"
+fi
+
 printf "Getting DD APP KEY...\n"
 
 export DD_APP_KEY=$(aws ssm get-parameter \
