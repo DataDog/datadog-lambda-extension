@@ -316,41 +316,40 @@ signed layer bundle:
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
 
-# Integration Tests - Publish arm64 layer with integration test prefix
-# publish integration layer (arm64):
-#   stage: integration-tests
-#   tags: ["arch:amd64"]
-#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-#   rules:
-#     - when: on_success
-#   needs:
-#     - layer (arm64)
-#   dependencies:
-#     - layer (arm64)
-#   variables:
-#     LAYER_NAME_BASE_SUFFIX: ""
-#     ARCHITECTURE: arm64
-#     LAYER_FILE: datadog_extension-arm64.zip
-#     REGION: us-east-1
-#     ADD_LAYER_VERSION_PERMISSIONS: "0"
-#     AUTOMATICALLY_BUMP_VERSION: "1"
-#     PIPELINE_LAYER_SUFFIX: ""
-#   {{ with $environment := (ds "environments").environments.sandbox }}
-#   before_script:
-#     - echo "DEBUG - Current AWS Account before assuming role:"
-#     - aws sts get-caller-identity
-#     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-#   script:
-#     - .gitlab/scripts/publish_layers.sh
-#     # Get the layer ARN we just published and save it as an artifact
-#     - LAYER_ARN=$(aws lambda list-layer-versions --layer-name Datadog-Extension --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
-#     - echo "Published layer ARN - ${LAYER_ARN}"
-#     - echo "${LAYER_ARN}" > integration_layer_arn.txt
-#   artifacts:
-#     paths:
-#       - integration_layer_arn.txt
-#     expire_in: 1 hour
-#   {{ end }}
+Integration Tests - Publish arm64 layer with integration test prefix
+publish integration layer (arm64):
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - when: on_success
+  needs:
+    - layer (arm64)
+  dependencies:
+    - layer (arm64)
+  variables:
+    LAYER_NAME_BASE_SUFFIX: ""
+    ARCHITECTURE: arm64
+    LAYER_FILE: datadog_extension-arm64.zip
+    REGION: us-east-1
+    ADD_LAYER_VERSION_PERMISSIONS: "0"
+    AUTOMATICALLY_BUMP_VERSION: "1"
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - export PIPELINE_LAYER_SUFFIX="${CI_COMMIT_SHORT_SHA}"
+    - echo "Publishing layer with suffix - ${PIPELINE_LAYER_SUFFIX}"
+  script:
+    - .gitlab/scripts/publish_layers.sh
+    # Get the layer ARN we just published and save it as an artifact
+    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
+    - echo "Published layer ARN - ${LAYER_ARN}"
+    - echo "${LAYER_ARN}" > integration_layer_arn.txt
+  artifacts:
+    paths:
+      - integration_layer_arn.txt
+    expire_in: 1 hour
+  {{ end }}
 
 # Integration Tests - Deploy CDK stacks with commit hash prefix
 integration-deploy:

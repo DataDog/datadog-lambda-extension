@@ -13,7 +13,6 @@ export async function invokeLambdaAndGetDatadogData(functionName: string, payloa
     const result = await invokeLambda(functionName, payload, coldStart, false);
 
     await new Promise(resolve => setTimeout(resolve, 600000));
-    // await new Promise(resolve => setTimeout(resolve, 60));
 
     const traces = await getTraces(functionName, result.requestId);
     const logs = await getLogs(functionName, result.requestId);
