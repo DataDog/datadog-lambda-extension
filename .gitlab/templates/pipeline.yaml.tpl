@@ -401,10 +401,10 @@ integration-test:
     - apt-get install -y nodejs
     - cd integration-tests
     - npm ci
-  {{ end }}
   script:
     - echo "Running integration tests with identifier ${IDENTIFIER}..."
     - npm run test:ci
+  {{ end }}
   artifacts:
     when: always
     paths:
