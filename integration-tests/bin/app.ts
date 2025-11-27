@@ -13,7 +13,7 @@ const env = {
 };
 
 // Get suffix from environment variable, or derive from username, or default
-function getSuffix(): string {
+function getIdentifier(): string {
   if (process.env.SUFFIX) {
     return process.env.SUFFIX;
   }
@@ -30,11 +30,11 @@ function getSuffix(): string {
   return 'integration';
 }
 
-const suffix = getSuffix();
+const identifier = getIdentifier();
 
-new ExampleTestStack(app, `ExampleTestStack-${suffix}`, {
+new ExampleTestStack(app, `IntegrationTests-${identifier}-ExampleTestStack`, {
   env,
-  suffix,
+  identifier,
 });
 
 app.synth();

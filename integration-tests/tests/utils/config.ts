@@ -7,13 +7,13 @@ import * as os from 'os';
 /**
  * Get the suffix for resource naming
  * Priority:
- * 1. SUFFIX environment variable
+ * 1. IDENTIFIER environment variable
  * 2. First name from username (e.g., 'john' from 'john.doe')
- * 3. Default: 'local-testing'
+ * 3. Default: 'integration'
  */
-function getSuffix(): string {
-  if (process.env.SUFFIX) {
-    return process.env.SUFFIX;
+function getIdentifier(): string {
+  if (process.env.IDENTIFIER) {
+    return process.env.IDENTIFIER;
   }
   
   try {
@@ -28,15 +28,15 @@ function getSuffix(): string {
     // Fall through to default
   }
   
-  return 'local-testing';
+  return 'integration';
 }
 
 /**
- * Get a full function name with the configured suffix
+ * Get a full function name with the configured identifier
  * @param name - The base name of the function (e.g., 'exampleTestFunction')
- * @returns The full function name with suffix (e.g., 'exampleTestFunction-john')
+ * @returns The full function name with identifier (e.g., 'exampleTestFunction-integration')
  */
 export function getFunctionName(name: string): string {
-  const suffix = getSuffix();
-  return `${name}-${suffix}`;
+  const identifier = getIdentifier();
+  return `${name}-${identifier}`;
 }

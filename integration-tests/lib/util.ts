@@ -9,7 +9,7 @@ export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN || '';
 export const extensionLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Extension-ARM:89' 
 
 export interface Props extends cdk.StackProps{
-  suffix: string
+  identifier: string
 }
 
 export const datadogEnvVariables = {
