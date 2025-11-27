@@ -363,7 +363,7 @@ integration-deploy:
   dependencies:
     - publish integration layer (arm64)
   variables:
-    IDENTIFIER: integration
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
@@ -392,7 +392,7 @@ integration-test:
   needs:
     - integration-deploy
   variables:
-    IDENTIFIER: integration
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     DD_SITE: datadoghq.com
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
