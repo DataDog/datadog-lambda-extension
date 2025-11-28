@@ -7,6 +7,9 @@ import { LayerVersion } from "aws-cdk-lib/aws-lambda";
 export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN || '';
 export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN || 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Extension-ARM:89' 
 
+// TODO
+export const node20LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node20-x:130';
+
 export interface Props extends cdk.StackProps{
   identifier: string
 }
@@ -43,5 +46,13 @@ export const getExtensionLayer = (scope: Construct) => {
     scope,
     'DatadogExtension',
     extensionLayerArn
+  );
+};
+
+export const getNode20Layer = (scope: Construct) => {
+  return LayerVersion.fromLayerVersionArn(
+    scope,
+    'DatadogNode20Layer',
+    node20LayerArn
   );
 };

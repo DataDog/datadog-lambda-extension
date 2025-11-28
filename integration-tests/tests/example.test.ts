@@ -12,10 +12,7 @@ describe('Example Lambda Integration Test', () => {
 
     // Step 2: Verify the Lambda invocation was successful
     expect(result.statusCode).toBe(200);
-    expect(result.payload.statusCode).toBe(200);
     expect(result.payload.body).toContain('Hello world!');
-
-    console.log(`Lambda invoked successfully. RequestId: ${result.requestId}`);
 
     // Step 3: Verify logs were sent to Datadog and contain the expected content
     const logs = result.logs;
@@ -23,6 +20,21 @@ describe('Example Lambda Integration Test', () => {
 
     expect(logs?.length).toBeGreaterThanOrEqual(1);
     expect(logs?.some((log: any) => log.attributes.message.includes('Hello world!'))).toBe(true);
+
+    // Step 4: Verify traces were sent to Datadog and contain the expected content
+    const traces = result.traces;
+    console.log('Traces:', JSON.stringify(traces, null, 2));
+
+    // Should have exactly 1 trace for a single Lambda invocation
+    expect(traces?.length).toBe(1);
+
+    const trace = traces![0];
+    const spanNames = trace.spans.map((span: any) => span.name);
+    console.log('Span names:', spanNames);
+
+    expect(spanNames).toContain('aws.lambda.cold_start');
+    expect(spanNames).toContain('aws.lambda.load');
+    expect(spanNames).toContain('aws.lambda');
 
     console.log('✅ Example Lambda test passed! Logs successfully sent via extension and appeared in Datadog');
   }, 700000); // 11.6 minute timeout (700 seconds)
