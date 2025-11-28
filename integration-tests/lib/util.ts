@@ -9,6 +9,9 @@ export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN || 'arn:aws:lam
 
 // TODO
 export const node20LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node20-x:130';
+export const python312LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python312-ARM:120';
+export const javaLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-java:21';
+export const dotnetLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-dotnet-ARM:19';
 
 export interface Props extends cdk.StackProps{
   identifier: string
@@ -54,5 +57,29 @@ export const getNode20Layer = (scope: Construct) => {
     scope,
     'DatadogNode20Layer',
     node20LayerArn
+  );
+};
+
+export const getPython312Layer = (scope: Construct) => {
+  return LayerVersion.fromLayerVersionArn(
+    scope,
+    'DatadogPython312Layer',
+    python312LayerArn
+  );
+};
+
+export const getJavaLayer = (scope: Construct) => {
+  return LayerVersion.fromLayerVersionArn(
+    scope,
+    'DatadogJavaLayer',
+    javaLayerArn
+  );
+};
+
+export const getDotnetLayer = (scope: Construct) => {
+  return LayerVersion.fromLayerVersionArn(
+    scope,
+    'DatadogDotnetLayer',
+    dotnetLayerArn
   );
 };
