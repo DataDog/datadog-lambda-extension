@@ -12,6 +12,7 @@ export interface LambdaInvocationDatadogData {
 export async function invokeLambdaAndGetDatadogData(functionName: string, payload: any = {}, coldStart: boolean = false): Promise<LambdaInvocationDatadogData> {
     const result = await invokeLambda(functionName, payload, coldStart, false);
 
+    console.log('Waiting 10 minutes for logs and traces to be indexed in Datadog...');
     await new Promise(resolve => setTimeout(resolve, 600000));
 
     const traces = await getTraces(functionName, result.requestId);

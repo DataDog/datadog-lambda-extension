@@ -1,1 +1,5 @@
-/bottlecap/target/
+bottlecap/target/
+integration-tests/node_modules/
+integration-tests/cdk.out/
+integration-tests/test-results/
+.layers/

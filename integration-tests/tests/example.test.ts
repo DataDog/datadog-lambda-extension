@@ -23,15 +23,35 @@ describe('Example Lambda Integration Test', () => {
 
     // Step 4: Verify traces were sent to Datadog and contain the expected content
     const traces = result.traces;
-    console.log('Traces:', JSON.stringify(traces, null, 2));
+    console.log('========== TRACES DEBUG INFO ==========');
+    console.log('Number of traces:', traces?.length);
+    console.log('Full traces object:', JSON.stringify(traces, null, 2));
 
-    // Should have exactly 1 trace for a single Lambda invocation
+    if (traces && traces.length > 0) {
+      traces.forEach((trace: any, traceIndex: number) => {
+        console.log(`\n--- Trace ${traceIndex + 1} ---`);
+        console.log('Trace ID:', trace.trace_id);
+        console.log('Number of spans:', trace.spans.length);
+
+        trace.spans.forEach((span: any, spanIndex: number) => {
+          console.log(`\n  Span ${spanIndex + 1}:`);
+          console.log('    Name:', span.name);
+          console.log('    Resource:', span.resource);
+          console.log('    Service:', span.service);
+          console.log('    Span ID:', span.span_id);
+        });
+      });
+    }
+    console.log('========================================\n');
+
+    // Assertions for traces
     expect(traces?.length).toBe(1);
 
     const trace = traces![0];
     const spanNames = trace.spans.map((span: any) => span.name);
     console.log('Span names:', spanNames);
 
+    // Should contain 'aws.lambda.cold_start' and 'aws.lambda' spans
     expect(spanNames).toContain('aws.lambda.cold_start');
     expect(spanNames).toContain('aws.lambda.load');
     expect(spanNames).toContain('aws.lambda');
