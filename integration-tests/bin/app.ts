@@ -2,7 +2,7 @@
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import * as os from 'os';
-import { ExampleTestStack } from '../lib/example-test-stack';
+import { BaseStack } from '../lib/base-stack';
 
 const app = new cdk.App();
 
@@ -36,9 +36,8 @@ function getIdentifier(): string {
 
 const identifier = getIdentifier();
 
-new ExampleTestStack(app, `IntegrationTests-${identifier}-ExampleTestStack`, {
+new BaseStack(app, `integ-${identifier}-base`, {
   env,
-  identifier,
 });
 
 app.synth();

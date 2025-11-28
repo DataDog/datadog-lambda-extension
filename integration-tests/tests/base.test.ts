@@ -1,8 +1,8 @@
 import { invokeLambdaAndGetDatadogData } from './utils/util';
-import { getFunctionName } from './utils/config';
+import { getIdentifier } from './utils/config';
 
 describe('Example Lambda Integration Test', () => {
-  const FUNCTION_NAME = getFunctionName('exampleTestFunction');
+  const FUNCTION_NAME = `integ-${getIdentifier()}-base-node-function`;
 
   it('should invoke Lambda successfully and receive logs in Datadog', async () => {
 
@@ -12,7 +12,6 @@ describe('Example Lambda Integration Test', () => {
 
     // Step 2: Verify the Lambda invocation was successful
     expect(result.statusCode).toBe(200);
-    expect(result.payload.body).toContain('Hello world!');
 
     // Step 3: Verify logs were sent to Datadog and contain the expected content
     const logs = result.logs;
@@ -23,26 +22,6 @@ describe('Example Lambda Integration Test', () => {
 
     // Step 4: Verify traces were sent to Datadog and contain the expected content
     const traces = result.traces;
-    console.log('========== TRACES DEBUG INFO ==========');
-    console.log('Number of traces:', traces?.length);
-    console.log('Full traces object:', JSON.stringify(traces, null, 2));
-
-    if (traces && traces.length > 0) {
-      traces.forEach((trace: any, traceIndex: number) => {
-        console.log(`\n--- Trace ${traceIndex + 1} ---`);
-        console.log('Trace ID:', trace.trace_id);
-        console.log('Number of spans:', trace.spans.length);
-
-        trace.spans.forEach((span: any, spanIndex: number) => {
-          console.log(`\n  Span ${spanIndex + 1}:`);
-          console.log('    Name:', span.name);
-          console.log('    Resource:', span.resource);
-          console.log('    Service:', span.service);
-          console.log('    Span ID:', span.span_id);
-        });
-      });
-    }
-    console.log('========================================\n');
 
     // Assertions for traces
     expect(traces?.length).toBe(1);

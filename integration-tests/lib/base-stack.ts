@@ -1,19 +1,18 @@
 import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
-import { createLogGroup, datadogEnvVariables, secretPolicy, getExtensionLayer, Props, getNode20Layer } from './util';
+import { createLogGroup, datadogEnvVariables, secretPolicy, getExtensionLayer, getNode20Layer } from './util';
 
-export class ExampleTestStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props: Props) {
+export class BaseStack extends cdk.Stack {
+  constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
-    const functionName = `exampleTestFunction-${props.identifier}`
-    const typescriptFunction = new lambda.Function(this, functionName, {
+    const functionName = `${id}-node-function`
+    const nodeFunction = new lambda.Function(this, functionName, {
       runtime: lambda.Runtime.NODEJS_20_X,
       architecture: lambda.Architecture.ARM_64,
-      // handler: 'index.handler',
       handler: '/opt/nodejs/node_modules/datadog-lambda-js/handler.handler',
-      code: lambda.Code.fromAsset('./lambda/example'),
+      code: lambda.Code.fromAsset('./lambda/base'),
       functionName: functionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
@@ -25,8 +24,8 @@ export class ExampleTestStack extends cdk.Stack {
       },
       logGroup: createLogGroup(this, functionName)
     });
-    typescriptFunction.addToRolePolicy(secretPolicy)
-    typescriptFunction.addLayers(getExtensionLayer(this));
-    typescriptFunction.addLayers(getNode20Layer(this));
+    nodeFunction.addToRolePolicy(secretPolicy)
+    nodeFunction.addLayers(getExtensionLayer(this));
+    nodeFunction.addLayers(getNode20Layer(this));
   }
 }

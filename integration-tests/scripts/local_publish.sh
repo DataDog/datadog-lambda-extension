@@ -27,7 +27,7 @@ LAYER_NAME="Datadog-Extension-ARM-$IDENTIFIER"
 REGION="us-east-1"
 
 echo "Building extension for arm64 (debug mode for faster builds)..."
-ALPINE=0 FIPS=0 DEBUG=1 ARCHITECTURE=arm64 ./scripts/build_bottlecap_layer.sh
+FIPS=0 ARCHITECTURE=arm64 ./scripts/build_bottlecap_layer.sh
 
 echo "Publishing layer $LAYER_NAME to $REGION..."
 NEW_VERSION=$(aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda publish-layer-version \
