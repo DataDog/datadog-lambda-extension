@@ -414,25 +414,61 @@ integration-test:
     expire_in: 30 days
 
 # Integration Tests - Cleanup stacks
-# integration-cleanup-stacks:
-#   stage: integration-tests
-#   tags: ["arch:amd64"]
-#   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-#   when: always
-#   rules:
-#     - when: always
-#   needs:
-#     - integration-test
-#   variables:
-#     IDENTIFIER: integration
-#   {{ with $environment := (ds "environments").environments.sandbox }}
-#   before_script:
-#     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-#     - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-#     - apt-get install -y nodejs
-#     - cd integration-tests
-#   {{ end }}
-#   script:
-#     - echo "Destroying CDK stacks with identifier ${IDENTIFIER}..."
-#     - npx cdk destroy "IntegrationTests-$IDENTIFIER-*" --force || echo "Failed to destroy some stacks, but continuing..."
+integration-cleanup-stacks:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  when: always
+  rules:
+    - when: always
+  needs:
+    - integration-test
+  variables:
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    - apt-get install -y nodejs
+    - cd integration-tests
+  {{ end }}
+  script:
+    - echo "Destroying CDK stacks with identifier ${IDENTIFIER}..."
+    - npx cdk destroy "integ-$IDENTIFIER-*" --force || echo "Failed to destroy some stacks, but continuing..."
+
+# Integration Tests - Cleanup layer
+integration-cleanup-layer:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  when: always
+  rules:
+    - when: always
+  needs:
+    - integration-cleanup-stacks
+  variables:
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  {{ end }}
+  script:
+    - echo "Deleting integration test layer with identifier ${IDENTIFIER}..."
+    - |
+      LAYER_NAME="Datadog-Extension-${IDENTIFIER}"
+      echo "Looking for layer: ${LAYER_NAME}"
+
+      # Get all versions of the layer
+      VERSIONS=$(aws lambda list-layer-versions --layer-name "${LAYER_NAME}" --query 'LayerVersions[*].Version' --output text --region us-east-1 2>/dev/null || echo "")
+
+      if [ -z "$VERSIONS" ]; then
+        echo "No versions found for layer ${LAYER_NAME}"
+      else
+        echo "Found versions: ${VERSIONS}"
+        for VERSION in $VERSIONS; do
+          echo "Deleting ${LAYER_NAME} version ${VERSION}..."
+          aws lambda delete-layer-version --layer-name "${LAYER_NAME}" --version-number "${VERSION}" --region us-east-1 || echo "Failed to delete version ${VERSION}, continuing..."
+        done
+        echo "Successfully deleted all versions of ${LAYER_NAME}"
+      fi
 

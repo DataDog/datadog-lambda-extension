@@ -186,8 +186,6 @@ export async function getLogs(
   const fromTime = now - (2 * 60 * 60 * 1000); // 2 hours ago
   const toTime = now;
   try {
-    // NOTE: Logs use the original service name casing, unlike traces which use lowercase
-    // Build query with service name and optional request ID
     let query = `service:${serviceName}`;
     if (requestId) {
       query += ` ${requestId}`;
@@ -247,43 +245,4 @@ export async function queryMetrics(
     console.error('Error querying metrics:', error.response?.data || error.message);
     throw error;
   }
-}
-
-/**
- * Wait for data to appear in Datadog with retries
- */
-export async function waitForData<T>(
-  fetchFn: () => Promise<T[]>,
-  options: {
-    timeout?: number;
-    interval?: number;
-    minCount?: number;
-  } = {}
-): Promise<T[]> {
-  const timeout = options.timeout || 180000; // 3 minutes default
-  const interval = options.interval || 10000; // 10 seconds default
-  const minCount = options.minCount || 1;
-
-  const startTime = Date.now();
-  let attempts = 0;
-
-  while (Date.now() - startTime < timeout) {
-    attempts++;
-    console.log(`Attempt ${attempts}: Checking for data in Datadog...`);
-
-    try {
-      const data = await fetchFn();
-      if (data.length >= minCount) {
-        console.log(`Found ${data.length} items in Datadog`);
-        return data;
-      }
-      console.log(`Found ${data.length} items, waiting for at least ${minCount}...`);
-    } catch (error) {
-      console.log(`Error fetching data (attempt ${attempts}):`, error);
-    }
-
-    await new Promise(resolve => setTimeout(resolve, interval));
-  }
-
-  throw new Error(`Timeout waiting for data in Datadog after ${timeout}ms`);
 }

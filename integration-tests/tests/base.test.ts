@@ -15,22 +15,17 @@ describe('Example Lambda Integration Test', () => {
 
     // Step 3: Verify logs were sent to Datadog and contain the expected content
     const logs = result.logs;
-    console.log('Logs:', JSON.stringify(logs, null, 2));
-
     expect(logs?.length).toBeGreaterThanOrEqual(1);
     expect(logs?.some((log: any) => log.attributes.message.includes('Hello world!'))).toBe(true);
 
     // Step 4: Verify traces were sent to Datadog and contain the expected content
     const traces = result.traces;
-
-    // Assertions for traces
     expect(traces?.length).toBe(1);
 
     const trace = traces![0];
     const spanNames = trace.spans.map((span: any) => span.name);
     console.log('Span names:', spanNames);
 
-    // Should contain 'aws.lambda.cold_start' and 'aws.lambda' spans
     expect(spanNames).toContain('aws.lambda.cold_start');
     expect(spanNames).toContain('aws.lambda.load');
     expect(spanNames).toContain('aws.lambda');

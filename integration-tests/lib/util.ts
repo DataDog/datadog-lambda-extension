@@ -21,7 +21,7 @@ export const datadogEnvVariables = {
     DD_VERSION: '1.0.0',
     DD_SERVERLESS_FLUSH_STRATEGY: 'end',
     DD_SERVERLESS_LOGS_ENABLED: 'true',
-    DD_LOG_LEVEL: 'debug',
+    DD_LOG_LEVEL: 'info',
   };
 
 export const secretPolicy = new iam.PolicyStatement({
