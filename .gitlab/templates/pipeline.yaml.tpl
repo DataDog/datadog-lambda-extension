@@ -380,7 +380,7 @@ integration-deploy:
     - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
     - export CDK_DEFAULT_REGION=us-east-1
     - npm run build
-    - npx cdk deploy "IntegrationTests-$IDENTIFIER-*" --require-approval never
+    - npx cdk deploy "integ-$IDENTIFIER-*" --require-approval never
 
 # Integration Tests - Run Jest test suite
 integration-test:
