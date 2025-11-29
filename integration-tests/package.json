@@ -1,0 +1,53 @@
+{
+  "name": "datadog-lambda-extension-testing",
+  "version": "1.0.0",
+  "description": "CDK testing infrastructure for Datadog Lambda Extension",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "cdk": "cdk",
+    "deploy": "cdk deploy",
+    "destroy": "cdk destroy",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "test": "SUFFIX=$SUFFIX DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_SITE=datadoghq.com aws-vault exec sso-serverless-sandbox-account-admin -- jest",
+    "test:ci": "jest",
+    "test:watch": "SUFFIX=$SUFFIX DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_SITE=datadoghq.com aws-vault exec sso-serverless-sandbox-account-admin -- jest --watch",
+    "test:coverage": "SUFFIX=$SUFFIX DD_API_KEY=$DD_API_KEY DD_APP_KEY=$DD_APP_KEY DD_SITE=datadoghq.com aws-vault exec sso-serverless-sandbox-account-admin -- jest --coverage"
+  },
+  "keywords": [
+    "datadog",
+    "lambda",
+    "extension",
+    "cdk",
+    "testing"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.159",
+    "@types/jest": "^29.5.12",
+    "@types/node": "^24.10.1",
+    "aws-cdk": "^2.1033.0",
+    "aws-cdk-lib": "^2.226.0",
+    "constructs": "^10.4.3",
+    "jest": "^29.7.0",
+    "jest-html-reporters": "^3.1.7",
+    "jest-junit": "^16.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-cloudwatch-logs": "^3.540.0",
+    "@aws-sdk/client-lambda": "^3.540.0",
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.56.0",
+    "@opentelemetry/resources": "^1.28.0",
+    "@opentelemetry/sdk-trace-base": "^1.28.0",
+    "@opentelemetry/sdk-trace-node": "^1.28.0",
+    "@opentelemetry/semantic-conventions": "^1.28.0",
+    "axios": "^1.6.7",
+    "source-map-support": "^0.5.21"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "example",
+  "version": "1.0.0",
+  "description": "Example Lambda function for testing with Datadog extension",
+  "main": "index.js",
+  "scripts": {
+    "clean": "rm -rf node_modules package-lock.json"
+  }
+}
