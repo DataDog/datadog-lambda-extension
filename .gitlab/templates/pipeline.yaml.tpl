@@ -337,12 +337,12 @@ publish integration layer (arm64):
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - export PIPELINE_LAYER_SUFFIX="${CI_COMMIT_SHORT_SHA}"
+    - export PIPELINE_LAYER_SUFFIX="ARM-${CI_COMMIT_SHORT_SHA}"
     - echo "Publishing layer with suffix - ${PIPELINE_LAYER_SUFFIX}"
   script:
     - .gitlab/scripts/publish_layers.sh
     # Get the layer ARN we just published and save it as an artifact
-    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
+    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-ARM-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
     - echo "Published layer ARN - ${LAYER_ARN}"
     - echo "${LAYER_ARN}" > integration_layer_arn.txt
   artifacts:
