@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
-import { createLogGroup, datadogEnvVariables, secretPolicy, getExtensionLayer, getNode20Layer } from './util';
+import { createLogGroup, defaultDatadogEnvVariables, defaultDatadogSecretPolicy, getExtensionLayer, getNode20Layer } from '../util';
 
 export class BaseNodeStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
@@ -17,14 +17,14 @@ export class BaseNodeStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
       environment: {
-        ...datadogEnvVariables,
+        ...defaultDatadogEnvVariables,
         DD_SERVICE: nodeFunctionName,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'index.handler',
       },
       logGroup: createLogGroup(this, nodeFunctionName)
     });
-    nodeFunction.addToRolePolicy(secretPolicy)
+    nodeFunction.addToRolePolicy(defaultDatadogSecretPolicy)
     nodeFunction.addLayers(getExtensionLayer(this));
     nodeFunction.addLayers(getNode20Layer(this));
   }

@@ -11,10 +11,9 @@ export interface LambdaInvocationResult {
 export async function invokeLambda(
   functionName: string,
   payload: any = {},
-  coldStart: boolean = false,
-  getLogs: boolean = false
+  coldStart: boolean = false
 ): Promise<LambdaInvocationResult> {
-  console.log(`Invoking Lambda: ${functionName}, coldStart: ${coldStart}, getLogs: ${getLogs}, payload: ${JSON.stringify(payload)}`);
+  console.log(`Invoking Lambda: ${functionName}, coldStart: ${coldStart}, payload: ${JSON.stringify(payload)}`);
 
   if (coldStart) {
     console.log('Forcing cold start...');

@@ -45,12 +45,6 @@ export interface DatadogLog {
   };
 }
 
-export interface DatadogMetric {
-  metric: string;
-  points: Array<[number, number]>;
-  tags: string[];
-}
-
 /**
  * Search for traces in Datadog using the v2 API
  * @param serviceName - Datadog service name
@@ -210,39 +204,6 @@ export async function getLogs(
     return logs;
   } catch (error: any) {
     console.error('Error searching logs:', error.response?.data || error.message);
-    throw error;
-  }
-}
-
-/**
- * Query metrics from Datadog
- * @param query - Metrics query (e.g., "avg:aws.lambda.duration{function_name:my-function}")
- * @param from - Start time in seconds since epoch
- * @param to - End time in seconds since epoch
- */
-export async function queryMetrics(
-  serviceName: string,
-): Promise<DatadogMetric[]> {
-  const now = Date.now();
-  const fromTime = now - (15 * 60 * 1000); // 15 minutes ago
-  const toTime = now;
-  try {
-    const response = await datadogClient.post('/api/v2/metrics/query', {
-      params: {
-        data: {
-          type: 'query_request',
-          attributes: {
-            query: `service:${serviceName}`,
-            from: new Date(fromTime).toISOString(),
-            to: new Date(toTime).toISOString(),
-          },
-        },
-      },
-    });
-
-    return response.data.series || [];
-  } catch (error: any) {
-    console.error('Error querying metrics:', error.response?.data || error.message);
     throw error;
   }
 }

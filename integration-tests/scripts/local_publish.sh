@@ -19,7 +19,7 @@ echo "Layer name will be: Datadog-Extension-ARM-$IDENTIFIER"
 ORIGINAL_DIR=$(pwd)
 
 # Navigate to the extension root directory
-cd /Users/john.chrostek/Projects/lambda-agent/datadog-lambda-extension
+cd "$(dirname "$0")/../.."
 
 # Build and publish for ARM64 with custom layer name
 LAYER_PATH=".layers/datadog_extension-arm64.zip"
@@ -39,8 +39,6 @@ NEW_VERSION=$(aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda 
 echo ""
 echo "=========================================="
 echo "DONE: Published version $NEW_VERSION"
-echo "Layer: $LAYER_NAME"
-echo "Region: $REGION"
 echo "=========================================="
 
 # Return to original directory

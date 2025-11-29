@@ -2,8 +2,7 @@
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import * as os from 'os';
-import { BaseNodeStack } from '../lib/base-node-stack';
-import { BasePythonStack } from '../lib/base-python-stack';
+import { BaseNodeStack } from '../lib/stacks/base-node-stack';
 
 const app = new cdk.App();
 
@@ -38,10 +37,6 @@ function getIdentifier(): string {
 const identifier = getIdentifier();
 
 new BaseNodeStack(app, `integ-${identifier}-base-node`, {
-  env,
-});
-
-new BasePythonStack(app, `integ-${identifier}-base-python`, {
   env,
 });
 
