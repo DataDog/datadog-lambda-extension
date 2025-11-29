@@ -7,7 +7,7 @@ export class BaseNodeStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
-    const nodeFunctionName = `${id}-node-function`
+    const nodeFunctionName = `${id}-lambda`
     const nodeFunction = new lambda.Function(this, nodeFunctionName, {
       runtime: lambda.Runtime.NODEJS_20_X,
       architecture: lambda.Architecture.ARM_64,

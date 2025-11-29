@@ -1,5 +1,10 @@
+import logging
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 def handler(event, context):
-    print('Hello world!')
+    logger.info('Hello world!')
     return {
         'statusCode': 200
     }

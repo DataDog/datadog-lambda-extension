@@ -7,7 +7,7 @@ export class BasePythonStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
-    const pythonFunctionName = `${id}-python-function`
+    const pythonFunctionName = `${id}-lambda`
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
       runtime: lambda.Runtime.PYTHON_3_12,
       architecture: lambda.Architecture.ARM_64,

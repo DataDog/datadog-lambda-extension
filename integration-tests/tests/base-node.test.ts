@@ -2,7 +2,7 @@ import { invokeLambdaAndGetDatadogData } from './utils/util';
 import { getIdentifier } from './utils/config';
 
 describe('Base Node Lambda Integration Test', () => {
-  const NODE_FUNCTION_NAME = `integ-${getIdentifier()}-base-node-node-function`;
+  const NODE_FUNCTION_NAME = `integ-${getIdentifier()}-base-node-lambda`;
 
   it('should invoke Node.js Lambda successfully and receive logs and traces in Datadog', async () => {
 
