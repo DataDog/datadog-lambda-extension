@@ -30,7 +30,7 @@ fi
 
 echo "Using extension layer: $EXTENSION_LAYER_ARN"
 
-FULL_STACK_NAME="IntegrationTests-$IDENTIFIER-$STACK_NAME"
+FULL_STACK_NAME="integ-$IDENTIFIER-$STACK_NAME"
 echo "Deploying stack: $FULL_STACK_NAME"
 
 # Build and deploy

@@ -11,7 +11,7 @@ export class BasePythonStack extends cdk.Stack {
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
       runtime: lambda.Runtime.PYTHON_3_12,
       architecture: lambda.Architecture.ARM_64,
-      handler: '/opt/python/lib/python3.12/site-packages/datadog_lambda/handler.handler',
+      handler: 'datadog_lambda.handler.handler',
       code: lambda.Code.fromAsset('./lambda/base-python'),
       functionName: pythonFunctionName,
       timeout: cdk.Duration.seconds(30),
