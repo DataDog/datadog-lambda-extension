@@ -38,13 +38,3 @@ Thumbs.db
 # Lambda artifacts
 response.json
 lambda-bundle.zip
-
-# Java build artifacts
-lambda/base-java/target/
-lambda/base-java/dependency-reduced-pom.xml
-
-# .NET build artifacts
-lambda/base-dotnet/bin/
-lambda/base-dotnet/obj/
-lambda/base-dotnet/publish/
-lambda/base-dotnet/lambda.zip
