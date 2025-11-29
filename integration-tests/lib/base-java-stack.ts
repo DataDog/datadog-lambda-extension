@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { Construct } from 'constructs';
-import { createLogGroup, datadogEnvVariables, secretPolicy, getExtensionLayer, getJavaLayer } from './util';
+import { createLogGroup, datadogEnvVariables, secretPolicy, getExtensionLayer, getJavaLayer, getJavaCode } from './util';
 
 export class BaseJavaStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
@@ -12,7 +12,7 @@ export class BaseJavaStack extends cdk.Stack {
       runtime: lambda.Runtime.JAVA_21,
       architecture: lambda.Architecture.ARM_64,
       handler: 'Handler::handleRequest',
-      code: lambda.Code.fromAsset('./lambda/base-java'),
+      code: getJavaCode('./lambda/base-java'),
       functionName: javaFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 512,

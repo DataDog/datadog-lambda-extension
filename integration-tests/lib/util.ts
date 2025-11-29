@@ -2,6 +2,7 @@ import { Construct } from "constructs";
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { LayerVersion } from "aws-cdk-lib/aws-lambda";
 
 export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN || '';
@@ -82,4 +83,30 @@ export const getDotnetLayer = (scope: Construct) => {
     'DatadogDotnetLayer',
     dotnetLayerArn
   );
+};
+
+export const getJavaCode = (directory: string) => {
+  return lambda.Code.fromAsset(directory, {
+    bundling: {
+      image: lambda.Runtime.JAVA_21.bundlingImage,
+      command: [
+        '/bin/sh', '-c',
+        'mvn clean package -q && find target -name "*.jar" -not -name "original-*.jar" -exec cp {} /asset-output/ \\;'
+      ],
+      user: 'root'
+    }
+  });
+};
+
+export const getDotnetCode = (directory: string) => {
+  return lambda.Code.fromAsset(directory, {
+    bundling: {
+      image: lambda.Runtime.DOTNET_8.bundlingImage,
+      command: [
+        '/bin/sh', '-c',
+        'dotnet publish -c Release -o /asset-output --runtime linux-arm64'
+      ],
+      user: 'root'
+    }
+  });
 };

@@ -1,4 +1,5 @@
 using Amazon.Lambda.Core;
+using System;
 using System.Collections.Generic;
 
 [assembly: LambdaSerializer(typeof(Amazon.Lambda.Serialization.SystemTextJson.DefaultLambdaJsonSerializer))]
