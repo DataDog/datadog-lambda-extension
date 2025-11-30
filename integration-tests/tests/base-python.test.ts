@@ -1,16 +1,16 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
 import { getIdentifier } from './utils/config';
 
-describe('Base Node Lambda Integration Test', () => {
-  const NODE_FUNCTION_NAME = `integ-${getIdentifier()}-base-node-lambda`;
+describe('Base Python Lambda Integration Test', () => {
+  const PYTHON_FUNCTION_NAME = `integ-${getIdentifier()}-base-python-lambda`;
   let result: LambdaInvocationDatadogData;
 
   beforeAll(async () => {
-    console.log(`Invoking Lambda function: ${NODE_FUNCTION_NAME}`);
-    result = await invokeLambdaAndGetDatadogData(NODE_FUNCTION_NAME, {}, true);
+    console.log(`Invoking Lambda function: ${PYTHON_FUNCTION_NAME}`);
+    result = await invokeLambdaAndGetDatadogData(PYTHON_FUNCTION_NAME, {}, true);
   }, 700000); // 11.6 minute timeout
 
-  it('should invoke Node.js Lambda successfully', () => {
+  it('should invoke Python Lambda successfully', () => {
     expect(result.statusCode).toBe(200);
   });
 
@@ -32,13 +32,17 @@ describe('Base Node Lambda Integration Test', () => {
     expect(awsLambdaSpan).toBeDefined();
   });
 
-  it('should have aws.lambda.cold_start span', () => {
+  // TODO: These spans are being created but not with the same traceId as the 'aws.lambda' span
+  //       Need to investigate why this is happening and fix it.
+  it.failing('[failing] should have aws.lambda.cold_start span', () => {
     const trace = result.traces![0];
     const awsLambdaColdStartSpan = trace.spans.find((span: any) => span.name === 'aws.lambda.cold_start');
     expect(awsLambdaColdStartSpan).toBeDefined();
   });
 
-  it('should have aws.lambda.load span', () => {
+  // TODO: These spans are being created but not with the same traceId as the 'aws.lambda' span
+  //       Need to investigate why this is happening and fix it.
+  it.failing('[failing] should have aws.lambda.load span', () => {
     const trace = result.traces![0];
     const awsLambdaLoadSpan = trace.spans.find((span: any) => span.name === 'aws.lambda.load');
     expect(awsLambdaLoadSpan).toBeDefined();

@@ -38,3 +38,19 @@ Thumbs.db
 # Lambda artifacts
 response.json
 lambda-bundle.zip
+
+# Java build artifacts
+lambda/base-java/target/
+lambda/base-java/?/
+lambda/base-java/.mvn/
+lambda/base-java/mvnw
+lambda/base-java/mvnw.cmd
+lambda/**/target/
+lambda/**/?/
+lambda/**/.mvn/
+lambda/**/mvnw
+lambda/**/mvnw.cmd
+lambda/**/*.class
+lambda/**/.classpath
+lambda/**/.project
+lambda/**/.settings/

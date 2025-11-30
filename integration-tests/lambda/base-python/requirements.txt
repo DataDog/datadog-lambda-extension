@@ -1,0 +1,1 @@
+# No additional requirements needed - datadog-lambda layer provides dependencies
