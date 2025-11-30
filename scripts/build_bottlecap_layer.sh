@@ -6,9 +6,7 @@
 # Copyright 2021 Datadog, Inc.
 
 # Usage examples :
-# ARCHITECTURE=amd64 VERSION=100 RACE_DETECTION_ENABLED=true ./scripts/build_binary_and_layer_dockerized.sh
-# or
-# VERSION=100 AGENT_VERSION=6.11.0 ./scripts/build_binary_and_layer_dockerized.sh
+# ARCHITECTURE=[amd64|arm64] FIPS=[false|true] ./scripts/build_bottlecap_layer.sh
 
 set -e
 
