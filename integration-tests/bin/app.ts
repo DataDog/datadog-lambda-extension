@@ -4,7 +4,6 @@ import * as cdk from 'aws-cdk-lib';
 import * as os from 'os';
 import { BaseNodeStack } from '../lib/stacks/base-node-stack';
 import { BasePythonStack } from '../lib/stacks/base-python-stack';
-import { BaseJavaStack } from '../lib/stacks/base-java-stack';
 import { DynamicInstrumentationPythonStack } from '../lib/stacks/dynamic-instrumentation-python-stack';
 
 const app = new cdk.App();
@@ -44,10 +43,6 @@ new BaseNodeStack(app, `integ-${identifier}-base-node`, {
 });
 
 new BasePythonStack(app, `integ-${identifier}-base-python`, {
-  env,
-});
-
-new BaseJavaStack(app, `integ-${identifier}-base-java`, {
   env,
 });
 
