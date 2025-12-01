@@ -30,17 +30,21 @@ Bottlecap supports several flush strategies that control when and how observabil
 ### Managed Instance Mode vs On-Demand Mode
 
 #### Managed Instance Mode
-- **Activation**: Automatically enabled when Lambda uses managed instances (concurrent execution environment)
+Lambda Managed Instances run your functions on EC2 instances (managed by AWS) with multi-concurrent invocations. This requires setting up a **capacity provider** - a configuration that defines VPC settings, instance requirements, and scaling parameters for the managed instances.
+
+- **Activation**: Detected automatically via the `AWS_LAMBDA_INITIALIZATION_TYPE` environment variable. When this equals `"lambda-managed-instances"`, Bottlecap enters Managed Instance mode
 - **Flush Behavior**:
-  - A dedicated background task continuously flushes data at regular intervals (default: 60 seconds)
+  - A dedicated background task continuously flushes data at regular intervals (default: 30 seconds)
   - All flushes are **non-blocking** and run concurrently with invocation processing
   - Prevents resource buildup by skipping a flush cycle if the previous flush is still in progress
   - `DD_SERVERLESS_FLUSH_STRATEGY` is **ignored** in this mode
 - **Shutdown Behavior**:
   - Background flusher waits for pending flushes to complete before shutdown
   - Final flush ensures all remaining data is sent before the execution environment terminates
-- **Use case**: High-concurrency Lambda functions with multiple concurrent invocations
+- **Execution Model**: Multi-concurrent invocations where one execution environment handles multiple invocations simultaneously (unlike traditional Lambda's one-invocation-per-environment model)
+- **Use case**: Steady-state, high-volume workloads where optimizing costs with predictable capacity is desired
 - **Key advantage**: Zero flush overhead per invocation - flushing happens independently in the background
+- **Infrastructure**: Lambda launches 3 instances by default for availability zone resiliency when a function version is published to a capacity provider
 
 #### On-Demand Mode (Traditional Mode)
 - **Activation**: Default mode for standard Lambda execution (one invocation at a time)
@@ -89,7 +93,7 @@ Bottlecap supports several flush strategies that control when and how observabil
 
 | Mode | Strategy | Blocking? | Adapts? | Best For |
 |------|----------|-----------|---------|----------|
-| **Managed Instance** | *Always Continuous* | ❌ No | ❌ No | High-concurrency Lambda with concurrent invocations |
+| **Managed Instance** | *Always Continuous* | ❌ No | ❌ No | Steady-state high-volume workloads with multi-concurrent invocations |
 | **On-Demand** | Default | Initially yes, then no | ✅ Yes | General use - auto-optimizes |
 | **On-Demand** | End | ✅ Yes | ❌ No | Minimal overhead, sporadic invocations |
 | **On-Demand** | EndPeriodically | ✅ Yes | ❌ No | Long-running functions with progress visibility |
@@ -99,32 +103,55 @@ Bottlecap supports several flush strategies that control when and how observabil
 ### Implementation Details
 
 #### Managed Instance Mode Implementation
-Located in `bottlecap/src/bin/bottlecap/main.rs` (lines 581-828):
-- **Background Flusher Task** (lines 611-653):
+Located in `bottlecap/src/bin/bottlecap/main.rs`:
+- **Mode Detection** (`bottlecap/src/config/aws.rs`):
+  - Checks if `AWS_LAMBDA_INITIALIZATION_TYPE` environment variable equals `"lambda-managed-instances"`
+- **Event Subscription** (`bottlecap/src/extension/mod.rs`):
+  - Only subscribes to `SHUTDOWN` events (not `INVOKE` events)
+  - On-Demand mode subscribes to both `INVOKE` and `SHUTDOWN` events
+- **Flush Strategy Override**:
+  - Function: `get_flush_strategy_for_mode()`
+  - If user configures a non-continuous strategy, it's overridden to continuous with a warning
+  - Uses `DEFAULT_CONTINUOUS_FLUSH_INTERVAL` (30 seconds) from `flush_control.rs`
+- **Main Event Loop**:
+  - Processes events from the event bus (telemetry events like `platform.start`, `platform.report`)
+  - Does NOT call `/next` endpoint for each invocation (only for shutdown)
+  - Uses `tokio::select!` with biased ordering to prioritize telemetry events over shutdown signals
+- **Background Flusher Task**:
   - Spawns at startup and runs until shutdown
   - Uses `tokio::select!` to handle periodic flush ticks and shutdown signals
   - Calls `PendingFlushHandles::spawn_non_blocking_flushes()` for each flush cycle
   - Skips flush if previous flush handles are still pending
-- **Non-Blocking Flush Spawning** (lines 140-200):
+- **Non-Blocking Flush Spawning**:
+  - Method: `PendingFlushHandles::spawn_non_blocking_flushes()`
   - Spawns separate async tasks for logs, traces, metrics, stats, and proxy flushes
   - Each task runs independently without blocking the main event loop
   - Failed payloads are tracked for retry in `await_flush_handles()`
-- **Shutdown Handling** (lines 655-728):
+- **Shutdown Handling**:
   - Separate task waits for SHUTDOWN event from Extensions API
   - Cancels background flusher and signals main event loop
-  - Final flush ensures all data is sent before termination (lines 788-826)
+- **Final Flush**:
+  - Function: `blocking_flush_all()`
+  - Ensures all remaining data is sent before termination
+  - Uses blocking flush with `force_flush_trace_stats=true`
 
 #### On-Demand Mode Implementation
-Located in `bottlecap/src/bin/bottlecap/main.rs` (lines 830-1072):
-- **Flush Control**: `bottlecap/src/lifecycle/flush_control.rs`
+Located in `bottlecap/src/bin/bottlecap/main.rs`:
+- **Flush Control** (`bottlecap/src/lifecycle/flush_control.rs`):
+  - Function: `evaluate_flush_decision()`
   - Evaluates flush strategy and invocation history
   - Returns `FlushDecision` enum: `End`, `Periodic`, `Continuous`, or `Dont`
+  - Adaptive behavior: After ~20 invocations, Default strategy switches from End to Continuous
 - **Event Loop**: Uses `FlushControl::evaluate_flush_decision()` to determine flush behavior
   - `FlushDecision::End`: Waits for `platform.runtimeDone`, then performs blocking flush
   - `FlushDecision::Periodic`: Performs blocking flush at configured interval
   - `FlushDecision::Continuous`: Spawns non-blocking flush tasks (similar to Managed Instance)
   - `FlushDecision::Dont`: Skips flushing for this cycle
-- **Configuration**: `bottlecap/src/config/flush_strategy.rs`
+- **Final Flush**:
+  - Function: `blocking_flush_all()`
+  - Blocking flush with `force_flush_trace_stats=true`
+  - Ensures all remaining data is sent before shutdown
+- **Configuration** (`bottlecap/src/config/flush_strategy.rs`):
   - Deserializes `DD_SERVERLESS_FLUSH_STRATEGY` environment variable
   - Supports formats: `"end"`, `"end,<ms>"`, `"periodically,<ms>"`, `"continuously,<ms>"`
 
@@ -133,8 +160,16 @@ Located in `bottlecap/src/bin/bottlecap/main.rs` (lines 830-1072):
 | Aspect | Managed Instance Mode | On-Demand Mode |
 |--------|----------------------|----------------|
 | **Event Source** | Telemetry API (platform events) | Extensions API `/next` endpoint |
-| **Invocation Model** | Concurrent invocations | Sequential invocations |
+| **Invocation Model** | Multi-concurrent (one environment handles multiple invocations) | Single-concurrent (one invocation per environment) |
+| **Scaling** | Asynchronous, CPU-based scaling | Reactive scaling with cold starts |
+| **Pricing** | EC2 instance-based | Per-request duration-based |
 | **Flush Trigger** | Background interval timer | Invocation lifecycle + interval |
 | **Strategy Config** | Ignored (always continuous) | Configurable via env var |
 | **Main Loop** | Event bus processing | `/next` + event bus processing |
 | **Shutdown Detection** | Separate task monitors `/next` | Main loop receives from `/next` |
+
+## References
+
+### AWS Lambda Managed Instances Documentation
+- [Introducing AWS Lambda Managed Instances: Serverless simplicity with EC2 flexibility](https://aws.amazon.com/blogs/aws/introducing-aws-lambda-managed-instances-serverless-simplicity-with-ec2-flexibility/) - AWS Blog announcement
+- [Lambda Managed Instances - AWS Lambda Developer Guide](https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances.html) - Official AWS documentation
