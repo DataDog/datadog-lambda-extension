@@ -349,14 +349,8 @@ publish integration layer (arm64):
     - echo "Publishing layer with suffix - ${PIPELINE_LAYER_SUFFIX}"
   script:
     - .gitlab/scripts/publish_layers.sh
-    # Get the layer ARN we just published and save it as an artifact
     - LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-ARM-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
     - echo "Published layer ARN - ${LAYER_ARN}"
-    - echo "${LAYER_ARN}" > integration_layer_arn.txt
-  artifacts:
-    paths:
-      - integration_layer_arn.txt
-    expire_in: 1 hour
   {{ end }}
 
 # Integration Tests - Deploy CDK stacks with commit hash prefix
@@ -367,8 +361,6 @@ integration-deploy:
   rules:
     - when: on_success
   needs:
-    - publish integration layer (arm64)
-  dependencies:
     - publish integration layer (arm64)
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
@@ -383,7 +375,7 @@ integration-deploy:
   {{ end }}
   script:
     - echo "Deploying CDK stacks with identifier ${IDENTIFIER}..."
-    - export EXTENSION_LAYER_ARN=$(cat ../integration_layer_arn.txt)
+    - export EXTENSION_LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-ARM-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
     - echo "Using integration test layer - ${EXTENSION_LAYER_ARN}"
     - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
     - export CDK_DEFAULT_REGION=us-east-1

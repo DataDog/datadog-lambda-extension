@@ -36,7 +36,7 @@ For simplicity, integraiton tests are setup to only test against ARM runtimes.
 First, publish your extension layer. 
 
 ```bash
-./scripts/publish_local.sh
+./scripts/local_publish.sh
 ```
 
 This will create and publish `Datadog-Extension-ARM-<your name>`.
@@ -46,7 +46,7 @@ This will create and publish `Datadog-Extension-ARM-<your name>`.
 Deploy the CDK stacks that create Lambda functions for testing.
 
 ```bash
-./scripts/deploy.sh <stack name> 
+./scripts/local_deploy.sh <stack name> 
 ```
 
 This will create `integ-<your name>-<stack name>`. The stacks will use the lambda extension created in the previous step.
@@ -56,8 +56,15 @@ This will create `integ-<your name>-<stack name>`. The stacks will use the lambd
 Run Jest tests that invoke Lambda functions and verify Datadog telemetry:
 
 ```bash
+# All tests
 npm test
+
+# Single test
+npm test -- <my test file>
 ```
-**Note**: Tests wait 10 minutes after Lambda invocation to allow telemetry to appear in Datadog. 
+
+
+
+**Note**: Tests wait for a few minutes after Lambda invocation to allow telemetry to appear in Datadog. 
 
 
