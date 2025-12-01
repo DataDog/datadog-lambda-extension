@@ -5,6 +5,7 @@ use tokio::time::{Interval, MissedTickBehavior::Skip};
 use crate::lifecycle::invocation_times::InvocationTimes;
 
 const DEFAULT_FLUSH_INTERVAL: u64 = 60 * 1000; // 60s
+pub const DEFAULT_CONTINUOUS_FLUSH_INTERVAL: u64 = 30 * 1000; // 30s
 const FIFTEEN_MINUTES: u64 = 15 * 60 * 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]

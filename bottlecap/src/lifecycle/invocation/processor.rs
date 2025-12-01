@@ -13,12 +13,16 @@ use tracing::{debug, warn};
 
 use crate::{
     config::{self, aws::AwsConfig},
-    extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
+    extension::telemetry::events::{
+        InitType, ManagedInstanceReportMetrics, OnDemandReportMetrics, ReportMetrics,
+        RuntimeDoneMetrics, Status,
+    },
     lifecycle::invocation::{
         base64_to_string,
         context::{Context, ContextBuffer, ReparentingInfo},
         create_empty_span, generate_span_id, get_metadata_from_value,
         span_inferrer::{self, SpanInferrer},
+        triggers::get_default_service_name,
     },
     metrics::enhanced::lambda::{EnhancedMetricData, Lambda as EnhancedMetrics},
     proc::{
@@ -38,8 +42,6 @@ use crate::{
         trace_processor::SendingTraceProcessor,
     },
 };
-
-use crate::lifecycle::invocation::triggers::get_default_service_name;
 
 pub const MS_TO_NS: f64 = 1_000_000.0;
 pub const S_TO_MS: u64 = 1_000;
@@ -81,6 +83,11 @@ pub struct Processor {
     ///
     /// These tags are used to capture runtime and initialization.
     dynamic_tags: HashMap<String, String>,
+    /// Tracks active concurrent invocations for monitoring enhanced metrics in Managed Instance mode.
+    active_invocations: usize,
+    /// Tracks whether if first invocation after init has been received in Managed Instance mode.
+    /// Used to determine if we should search for the empty context on an invocation.
+    awaiting_first_invocation: bool,
 }
 
 impl Processor {
@@ -117,18 +124,41 @@ impl Processor {
             service,
             resource,
             dynamic_tags: HashMap::new(),
+            active_invocations: 0,
+            awaiting_first_invocation: false,
         }
     }
 
     /// Given a `request_id`, creates the context and adds the enhanced metric offsets to the context buffer.
     ///
     pub fn on_invoke_event(&mut self, request_id: String) {
-        let invocation_span =
-            create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
-        // Important! Call set_init_tags() before adding the invocation to the context buffer
-        self.set_init_tags();
-        self.context_buffer
-            .start_context(&request_id, invocation_span);
+        // In Managed Instance mode, if awaiting the first invocation after init, find and update the empty context created on init start
+        if self.aws_config.is_managed_instance_mode() && self.awaiting_first_invocation {
+            if self
+                .context_buffer
+                .update_empty_context_request_id(&request_id)
+            {
+                debug!(
+                    "Updated empty context from init start with request_id: {}",
+                    request_id
+                );
+            } else {
+                debug!("Expected empty context but not found, creating new context");
+                let invocation_span =
+                    create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
+                self.set_init_tags();
+                self.context_buffer
+                    .start_context(&request_id, invocation_span);
+            }
+            self.awaiting_first_invocation = false;
+        } else {
+            let invocation_span =
+                create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
+            // Important! Call set_init_tags() before adding the invocation to the context buffer
+            self.set_init_tags();
+            self.context_buffer
+                .start_context(&request_id, invocation_span);
+        }
 
         let timestamp = std::time::UNIX_EPOCH
             .elapsed()
@@ -138,8 +168,19 @@ impl Processor {
             .unwrap_or_default();
 
         if self.config.lambda_proc_enhanced_metrics {
-            // Resume tmp, fd, and threads enhanced metrics monitoring
-            self.enhanced_metrics.resume_usage_metrics_monitoring();
+            if self.aws_config.is_managed_instance_mode() {
+                // In Managed Instance mode, track concurrent invocations
+                self.active_invocations += 1;
+
+                // Start monitoring on the first active invocation
+                if self.active_invocations == 1 {
+                    debug!("Starting usage metrics monitoring");
+                    self.enhanced_metrics.resume_usage_metrics_monitoring();
+                }
+            } else {
+                // In On-Demand mode, we reset metrics and resume monitoring on each invocation
+                self.enhanced_metrics.restart_usage_metrics_monitoring();
+            }
 
             // Collect offsets for network and cpu metrics
             let network_offset: Option<NetworkData> = proc::get_network_data().ok();
@@ -159,6 +200,29 @@ impl Processor {
         self.enhanced_metrics.increment_invocation_metric(timestamp);
         self.enhanced_metrics.set_invoked_received();
 
+        // MANAGED INSTANCE MODE: Check for buffered UniversalInstrumentationStart with request_id
+        if self.aws_config.is_managed_instance_mode() {
+            if let Some(buffered_event) = self
+                .context_buffer
+                .take_universal_instrumentation_start_for_request_id(&request_id)
+            {
+                debug!(
+                    "Managed Instance: Found buffered UniversalInstrumentationStart for request_id: {}",
+                    request_id
+                );
+                // Infer span
+                self.inferrer
+                    .infer_span(&buffered_event.payload_value, &self.aws_config);
+                self.process_on_universal_instrumentation_start(
+                    request_id,
+                    buffered_event.headers,
+                    buffered_event.payload_value,
+                );
+            }
+            return;
+        }
+
+        // ON-DEMAND MODE: Use existing FIFO pairing logic (unchanged)
         // If `UniversalInstrumentationStart` event happened first, process it
         if let Some((headers, payload_value)) = self.context_buffer.pair_invoke_event(&request_id) {
             // Infer span
@@ -222,8 +286,21 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
 
-        // Get the closest context
-        let Some(context) = self.context_buffer.get_closest_mut(start_time) else {
+        // In Managed Instance mode, create a context with empty request_id which will be updated on the first platform start received.
+        // In On-Demand mode, InitStart is received after the Invoke event, so we get the closest context by timestamp as it does not have a request_id.
+        let context = if self.aws_config.is_managed_instance_mode() {
+            let invocation_span =
+                create_empty_span(String::from("aws.lambda"), &self.resource, &self.service);
+            self.set_init_tags();
+            self.context_buffer.start_context("", invocation_span);
+            self.awaiting_first_invocation = true;
+
+            self.context_buffer.get_mut(&String::new())
+        } else {
+            self.context_buffer.get_closest_mut(start_time)
+        };
+
+        let Some(context) = context else {
             debug!("Cannot process on platform init start, no invocation context found");
             return;
         };
@@ -251,11 +328,20 @@ impl Processor {
         self.enhanced_metrics
             .set_init_duration_metric(init_type, duration_ms, timestamp);
 
-        let Some(context) = self.context_buffer.get_closest_mut(timestamp) else {
+        // In Managed Instance mode, find the context with empty request_id
+        // In On-Demand mode, find the closest context by timestamp since we do not have the request_id
+        let context = if self.aws_config.is_managed_instance_mode() {
+            self.context_buffer.get_mut(&String::new())
+        } else {
+            self.context_buffer.get_closest_mut(timestamp)
+        };
+
+        let Some(context) = context else {
             debug!("Cannot process on platform init report, no invocation context found");
             return;
         };
 
+        // Add duration to cold start span
         if let Some(cold_start_span) = &mut context.cold_start_span {
             // `round` is intentionally meant to be a whole integer
             cold_start_span.duration = (duration_ms * MS_TO_NS) as i64;
@@ -312,6 +398,10 @@ impl Processor {
     /// Given a `request_id` and the time of the platform start, add the start time to the context buffer.
     ///
     pub fn on_platform_start(&mut self, request_id: String, time: DateTime<Utc>) {
+        if self.aws_config.is_managed_instance_mode() {
+            self.on_invoke_event(request_id.clone());
+        }
+
         let start_time: i64 = SystemTime::from(time)
             .duration_since(UNIX_EPOCH)
             .expect("time went backwards")
@@ -319,6 +409,11 @@ impl Processor {
             .try_into()
             .unwrap_or_default();
         self.context_buffer.add_start_time(&request_id, start_time);
+    }
+
+    #[must_use]
+    pub fn is_managed_instance_mode(&self) -> bool {
+        self.aws_config.is_managed_instance_mode()
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -354,19 +449,40 @@ impl Processor {
             }
         }
 
-        // Set tmp, fd, and threads enhanced metrics
-        self.enhanced_metrics.set_max_enhanced_metrics();
-        self.enhanced_metrics.set_usage_enhanced_metrics(); // sets use metric values and pauses monitoring task
+        // In On-Demand mode, pause monitoring between invocations and emit the metrics on each invocation
+        if !self.aws_config.is_managed_instance_mode() {
+            self.enhanced_metrics.set_max_enhanced_metrics();
+            self.enhanced_metrics.set_usage_enhanced_metrics();
+        }
 
         self.context_buffer
             .add_runtime_duration(request_id, metrics.duration_ms);
 
-        // If `UniversalInstrumentationEnd` event happened first, process it first
-        if let Some((headers, payload)) = self
-            .context_buffer
-            .pair_platform_runtime_done_event(request_id)
-        {
-            self.process_on_universal_instrumentation_end(request_id.clone(), headers, payload);
+        // MANAGED INSTANCE MODE: Check for buffered UniversalInstrumentationEnd with request_id
+        if self.aws_config.is_managed_instance_mode() {
+            if let Some(buffered_event) = self
+                .context_buffer
+                .take_universal_instrumentation_end_for_request_id(request_id)
+            {
+                debug!(
+                    "Managed Instance: Found buffered UniversalInstrumentationEnd for request_id: {}",
+                    request_id
+                );
+                self.process_on_universal_instrumentation_end(
+                    request_id.clone(),
+                    buffered_event.headers,
+                    buffered_event.payload_value,
+                );
+            }
+        } else {
+            // ON-DEMAND MODE: Use existing FIFO pairing logic (unchanged)
+            // If `UniversalInstrumentationEnd` event happened first, process it first
+            if let Some((headers, payload)) = self
+                .context_buffer
+                .pair_platform_runtime_done_event(request_id)
+            {
+                self.process_on_universal_instrumentation_end(request_id.clone(), headers, payload);
+            }
         }
 
         self.process_on_platform_runtime_done(request_id, status, tags_provider, trace_sender)
@@ -590,16 +706,128 @@ impl Processor {
     /// If the `request_id` is not found in the context buffer, return `None`.
     /// If the `runtime_duration_ms` hasn't been seen, return `None`.
     ///
-    pub fn on_platform_report(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn on_platform_report(
         &mut self,
         request_id: &String,
         metrics: ReportMetrics,
         timestamp: i64,
+        status: Status,
+        error_type: Option<String>,
+        spans: Option<Vec<crate::extension::telemetry::events::TelemetrySpan>>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
     ) {
         // Set the report log metrics
         self.enhanced_metrics
             .set_report_log_metrics(&metrics, timestamp);
 
+        match metrics {
+            ReportMetrics::ManagedInstance(metric) => {
+                self.handle_managed_instance_report(
+                    request_id,
+                    metric,
+                    timestamp,
+                    status,
+                    error_type,
+                    spans,
+                    tags_provider,
+                    trace_sender,
+                )
+                .await;
+            }
+            ReportMetrics::OnDemand(metrics) => {
+                self.handle_ondemand_report(request_id, metrics, timestamp);
+            }
+        }
+
+        // Set Network and CPU time metrics
+        if let Some(context) = self.context_buffer.get(request_id) {
+            if let Some(offsets) = &context.enhanced_metric_data {
+                self.enhanced_metrics
+                    .set_network_enhanced_metrics(offsets.network_offset);
+                self.enhanced_metrics
+                    .set_cpu_time_enhanced_metrics(offsets.cpu_offset.clone());
+            }
+        }
+    }
+
+    /// Handles Managed Instance mode platform report processing.
+    ///
+    /// In Managed Instance mode, platform.runtimeDone events are not sent, so this function
+    /// synthesizes a `RuntimeDone` event from the platform.report metrics.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_managed_instance_report(
+        &mut self,
+        request_id: &String,
+        metric: ManagedInstanceReportMetrics,
+        timestamp: i64,
+        status: Status,
+        error_type: Option<String>,
+        spans: Option<Vec<crate::extension::telemetry::events::TelemetrySpan>>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+    ) {
+        // Managed Instance mode doesn't have platform.runtimeDone event, so we synthesize it from platform.report
+        // Try to get duration from responseLatency span, otherwise fall back to metric.duration_ms
+        let duration_ms = spans
+            .as_ref()
+            .and_then(|span_vec| {
+                span_vec
+                    .iter()
+                    .find(|span| span.name == "responseLatency")
+                    .map(|span| span.duration_ms)
+            })
+            .unwrap_or(metric.duration_ms);
+
+        let runtime_done_metrics = RuntimeDoneMetrics {
+            duration_ms,
+            produced_bytes: None,
+        };
+
+        // Track concurrent invocations - decrement after handling report
+        if self.active_invocations > 0 {
+            self.active_invocations -= 1;
+        } else {
+            debug!("Active invocations already at 0, not updating active invocations");
+        }
+
+        // Only pause monitoring when there are no active invocations
+        if self.active_invocations == 0 {
+            debug!("No active invocations, pausing usage metrics monitoring");
+            self.enhanced_metrics.pause_usage_metrics_monitoring();
+        }
+
+        // Only process if we have context for this request
+        if self.context_buffer.get(request_id).is_some() {
+            self.on_platform_runtime_done(
+                request_id,
+                runtime_done_metrics,
+                status,
+                error_type,
+                tags_provider,
+                trace_sender,
+                timestamp,
+            )
+            .await;
+        } else {
+            debug!(
+                "Received platform report for unknown request_id: {}",
+                request_id
+            );
+        }
+    }
+
+    /// Handles `OnDemand` mode platform report processing.
+    ///
+    /// Processes OnDemand-specific metrics including OOM detection for provided.al runtimes
+    /// and post-runtime duration calculation.
+    fn handle_ondemand_report(
+        &mut self,
+        request_id: &String,
+        metrics: OnDemandReportMetrics,
+        timestamp: i64,
+    ) {
         // For provided.al runtimes, if the last invocation hit the memory limit, increment the OOM metric.
         // We do this for provided.al runtimes because we didn't find another way to detect this under provided.al.
         // We don't do this for other runtimes to avoid double counting.
@@ -614,21 +842,12 @@ impl Processor {
             }
         }
 
+        // Calculate and set post-runtime duration if context is available
         if let Some(context) = self.context_buffer.get(request_id) {
             if context.runtime_duration_ms != 0.0 {
                 let post_runtime_duration_ms = metrics.duration_ms - context.runtime_duration_ms;
-
-                // Set the post runtime duration metric
                 self.enhanced_metrics
                     .set_post_runtime_duration_metric(post_runtime_duration_ms, timestamp);
-            }
-
-            // Set Network and CPU time metrics
-            if let Some(offsets) = context.enhanced_metric_data.clone() {
-                self.enhanced_metrics
-                    .set_network_enhanced_metrics(offsets.network_offset);
-                self.enhanced_metrics
-                    .set_cpu_time_enhanced_metrics(offsets.cpu_offset);
             }
         }
     }
@@ -642,6 +861,12 @@ impl Processor {
             .set_shutdown_metric(i64::try_from(now).expect("can't convert now to i64"));
         self.enhanced_metrics
             .set_unused_init_metric(i64::try_from(now).expect("can't convert now to i64"));
+
+        // In managed instance mode, emit sandbox-level usage metrics at shutdown
+        if self.aws_config.is_managed_instance_mode() {
+            self.enhanced_metrics.set_max_enhanced_metrics(); // Emit system limits (fd_max, threads_max, tmp_max)
+            self.enhanced_metrics.set_usage_enhanced_metrics(); // Emit sandbox-wide peak usage
+        }
     }
 
     /// If this method is called, it means that we are operating in a Universally Instrumented
@@ -651,12 +876,46 @@ impl Processor {
         &mut self,
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     ) {
         self.tracer_detected = true;
 
         self.inferrer.infer_span(&payload_value, &self.aws_config);
 
-        // If `Invoke` event happened first, process right away
+        // MANAGED INSTANCE MODE: Use request ID-based pairing for concurrent invocations
+        if self.aws_config.is_managed_instance_mode() {
+            if let Some(req_id) = request_id {
+                debug!(
+                    "Managed Instance: Processing UniversalInstrumentationStart for request_id: {}",
+                    req_id
+                );
+                if self
+                    .context_buffer
+                    .pair_universal_instrumentation_start_with_request_id(
+                        &req_id,
+                        &headers,
+                        &payload_value,
+                    )
+                {
+                    // Invoke event already happened, process immediately
+                    self.process_on_universal_instrumentation_start(req_id, headers, payload_value);
+                } else {
+                    // Buffered for later pairing when Invoke event arrives
+                    debug!(
+                        "Managed Instance: Buffered UniversalInstrumentationStart for request_id: {}",
+                        req_id
+                    );
+                }
+                return;
+            }
+            // Missing request_id in managed instance mode - log warning and fall back to FIFO
+            warn!(
+                "Managed Instance: UniversalInstrumentationStart missing request_id header. \
+                Falling back to FIFO pairing (may cause incorrect pairing with concurrent invocations)"
+            );
+        }
+
+        // ON-DEMAND MODE: Use existing FIFO pairing logic (unchanged)
         if let Some(request_id) = self
             .context_buffer
             .pair_universal_instrumentation_start_event(&headers, &payload_value)
@@ -824,7 +1083,42 @@ impl Processor {
         &mut self,
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     ) {
+        // MANAGED INSTANCE MODE: Use request ID-based pairing for concurrent invocations
+        if self.aws_config.is_managed_instance_mode() {
+            if let Some(req_id) = request_id {
+                debug!(
+                    "Managed Instance: Processing UniversalInstrumentationEnd for request_id: {}",
+                    req_id
+                );
+                if self
+                    .context_buffer
+                    .pair_universal_instrumentation_end_with_request_id(
+                        &req_id,
+                        &headers,
+                        &payload_value,
+                    )
+                {
+                    // PlatformRuntimeDone already happened, process immediately
+                    self.process_on_universal_instrumentation_end(req_id, headers, payload_value);
+                } else {
+                    // Buffered for later pairing when PlatformRuntimeDone arrives
+                    debug!(
+                        "Managed Instance: Buffered UniversalInstrumentationEnd for request_id: {}",
+                        req_id
+                    );
+                }
+                return;
+            }
+            // Missing request_id in managed instance mode - log warning and fall back to FIFO
+            warn!(
+                "Managed Instance: UniversalInstrumentationEnd missing request_id header. \
+                Falling back to FIFO pairing (may cause incorrect pairing with concurrent invocations)"
+            );
+        }
+
+        // ON-DEMAND MODE: Use existing FIFO pairing logic (unchanged)
         // If `PlatformRuntimeDone` event happened first, process
         if let Some(request_id) = self
             .context_buffer
@@ -1018,6 +1312,10 @@ impl Processor {
 mod tests {
     use super::*;
     use crate::LAMBDA_RUNTIME_SLUG;
+    use crate::extension::telemetry::events::ManagedInstanceReportMetrics;
+    use crate::traces::stats_concentrator_service::StatsConcentratorService;
+    use crate::traces::stats_generator::StatsGenerator;
+    use crate::traces::trace_processor;
     use base64::{Engine, engine::general_purpose::STANDARD};
     use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
@@ -1031,6 +1329,7 @@ mod tests {
             sandbox_init_time: Instant::now(),
             runtime_api: "***".into(),
             exec_wrapper: None,
+            initialization_type: "on-demand".into(),
         });
 
         let config = Arc::new(config::Config {
@@ -1268,6 +1567,171 @@ mod tests {
                     .unwrap()
                     .is_some(),
             "UNUSED_INIT metric should be created when invoked_received=false"
+        );
+    }
+
+    macro_rules! platform_report_managed_instance_tests {
+        ($($name:ident: $value:expr,)*) => {
+            $(
+                #[tokio::test]
+                async fn $name() {
+                    use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+
+                    let (
+                        request_id,
+                        setup_context,
+                        duration_ms,
+                        status,
+                        error_type,
+                        should_have_context_after,
+                    ): (&str, bool, f64, Status, Option<String>, bool) = $value;
+
+                    let mut processor = setup();
+
+                    // Setup context if needed
+                    if setup_context {
+                        processor.on_invoke_event(request_id.to_string());
+                        let start_time = chrono::Utc::now();
+                        processor.on_platform_start(request_id.to_string(), start_time);
+                    }
+
+                    let metrics = ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms,
+                    });
+
+                    // Create tags_provider
+                    let config = Arc::new(config::Config {
+                        service: Some("test-service".to_string()),
+                        tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+                        ..config::Config::default()
+                    });
+                    let tags_provider = Arc::new(provider::Provider::new(
+                        Arc::clone(&config),
+                        LAMBDA_RUNTIME_SLUG.to_string(),
+                        &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+                    ));
+
+                    // Create stats concentrator for test
+                    let (stats_concentrator_service, stats_concentrator_handle) =
+                        StatsConcentratorService::new(Arc::clone(&config));
+                    tokio::spawn(stats_concentrator_service.run());
+
+                    // Create trace sender
+                    let trace_sender = Arc::new(SendingTraceProcessor {
+                        appsec: None,
+                        processor: Arc::new(trace_processor::ServerlessTraceProcessor {
+                            obfuscation_config: Arc::new(ObfuscationConfig::new().expect("Failed to create ObfuscationConfig")),
+                        }),
+                        trace_tx: tokio::sync::mpsc::channel(1).0,
+                        stats_generator: Arc::new(StatsGenerator::new(stats_concentrator_handle)),
+                    });
+
+                    // Call on_platform_report
+                    let request_id_string = request_id.to_string();
+                    processor.on_platform_report(
+                        &request_id_string,
+                        metrics,
+                        chrono::Utc::now().timestamp(),
+                        status,
+                        error_type,
+                        None, // spans
+                        tags_provider,
+                        trace_sender,
+                    ).await;
+
+                    // Verify context state
+                    let request_id_string_for_get = request_id.to_string();
+                    assert_eq!(
+                        processor.context_buffer.get(&request_id_string_for_get).is_some(),
+                        should_have_context_after,
+                        "Context existence mismatch for request_id: {}",
+                        request_id
+                    );
+                }
+            )*
+        }
+    }
+
+    platform_report_managed_instance_tests! {
+        // (request_id, setup_context, duration_ms, status, error_type, should_have_context_after)
+        test_on_platform_report_managed_instance_mode_with_valid_context: (
+            "test-request-id",
+            true,  // setup context
+            123.45,
+            Status::Success,
+            None,
+            true,  // context should still exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_without_context: (
+            "unknown-request-id",
+            false, // no context setup
+            123.45,
+            Status::Success,
+            None,
+            false, // context should not exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_with_error_status: (
+            "test-request-id-error",
+            true,  // setup context
+            200.0,
+            Status::Error,
+            Some("RuntimeError".to_string()),
+            true,  // context should still exist
+        ),
+
+        test_on_platform_report_managed_instance_mode_with_timeout: (
+            "test-request-id-timeout",
+            true,  // setup context
+            30000.0,
+            Status::Timeout,
+            None,
+            true,  // context should still exist
+        ),
+    }
+
+    #[tokio::test]
+    async fn test_is_managed_instance_mode_returns_true() {
+        use crate::config::aws::LAMBDA_MANAGED_INSTANCES_INIT_TYPE;
+
+        let aws_config = Arc::new(AwsConfig {
+            region: "us-east-1".into(),
+            aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+            function_name: "test-function".into(),
+            sandbox_init_time: Instant::now(),
+            runtime_api: "***".into(),
+            exec_wrapper: None,
+            initialization_type: LAMBDA_MANAGED_INSTANCES_INIT_TYPE.into(), // Managed Instance mode
+        });
+
+        let config = Arc::new(config::Config::default());
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::new(),
+        ));
+
+        let (service, handle) =
+            AggregatorService::new(EMPTY_TAGS, 1024).expect("failed to create aggregator service");
+        tokio::spawn(service.run());
+
+        let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
+
+        let processor = Processor::new(tags_provider, config, aws_config, handle, propagator);
+
+        assert!(
+            processor.is_managed_instance_mode(),
+            "Should be in Managed Instance mode"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_is_managed_instance_mode_returns_false() {
+        let processor = setup(); // Uses "on-demand" initialization_type
+        assert!(
+            !processor.is_managed_instance_mode(),
+            "Should not be in managed instance mode"
         );
     }
 

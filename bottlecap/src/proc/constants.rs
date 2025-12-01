@@ -7,5 +7,7 @@ pub const VAR_LANG_BIN_PATH: &str = "/var/lang/bin";
 
 pub const LAMBDA_NETWORK_INTERFACE: &str = "vinternal_1";
 pub const LAMBDA_RUNTIME_NETWORK_INTERFACE: &str = "vint_runtime";
+pub const MANAGED_INSTANCE_NETWORK_INTERFACE: &str = "Ceth1";
+
 pub const LAMBDA_FILE_DESCRIPTORS_DEFAULT_LIMIT: f64 = 1024.0;
 pub const LAMBDA_EXECUTION_PROCESSES_DEFAULT_LIMIT: f64 = 1024.0;

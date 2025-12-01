@@ -284,7 +284,7 @@ impl Lambda {
                 }
             }
         } else {
-            debug!("Could not find data to generate network enhanced metrics");
+            debug!("Could not find network offset data to generate network enhanced metrics");
         }
     }
 
@@ -513,51 +513,67 @@ impl Lambda {
         }
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
-            MetricValue::distribution(metrics.duration_ms * constants::MS_TO_SEC),
+            MetricValue::distribution(metrics.duration_ms() * constants::MS_TO_SEC),
             self.get_dynamic_value_tags(),
             Some(timestamp),
         );
         if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
             error!("failed to insert duration metric: {}", e);
         }
-        let metric = metric::Metric::new(
-            constants::BILLED_DURATION_METRIC.into(),
-            MetricValue::distribution(metrics.billed_duration_ms as f64 * constants::MS_TO_SEC),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert billed duration metric: {}", e);
-        }
-        let metric = metric::Metric::new(
-            constants::MAX_MEMORY_USED_METRIC.into(),
-            MetricValue::distribution(metrics.max_memory_used_mb as f64),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert max memory used metric: {}", e);
-        }
-        let metric = metric::Metric::new(
-            constants::MEMORY_SIZE_METRIC.into(),
-            MetricValue::distribution(metrics.memory_size_mb as f64),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert memory size metric: {}", e);
-        }
 
-        let cost_usd =
-            Self::calculate_estimated_cost_usd(metrics.billed_duration_ms, metrics.memory_size_mb);
-        let metric = metric::Metric::new(
-            constants::ESTIMATED_COST_METRIC.into(),
-            MetricValue::distribution(cost_usd),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert estimated cost metric: {}", e);
+        match metrics {
+            ReportMetrics::ManagedInstance(_) => {
+                // In Managed Instance mode, we can't track these metrics for a given lambda invocation
+                // - billed duration
+                // - max memory used
+                // - memory size
+                // - estimated cost
+            }
+            ReportMetrics::OnDemand(metrics) => {
+                let metric = metric::Metric::new(
+                    constants::BILLED_DURATION_METRIC.into(),
+                    MetricValue::distribution(
+                        metrics.billed_duration_ms as f64 * constants::MS_TO_SEC,
+                    ),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert billed duration metric: {}", e);
+                }
+                let metric = metric::Metric::new(
+                    constants::MAX_MEMORY_USED_METRIC.into(),
+                    MetricValue::distribution(metrics.max_memory_used_mb as f64),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert max memory used metric: {}", e);
+                }
+                let metric = metric::Metric::new(
+                    constants::MEMORY_SIZE_METRIC.into(),
+                    MetricValue::distribution(metrics.memory_size_mb as f64),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert memory size metric: {}", e);
+                }
+
+                let cost_usd = Self::calculate_estimated_cost_usd(
+                    metrics.billed_duration_ms,
+                    metrics.memory_size_mb,
+                );
+                let metric = metric::Metric::new(
+                    constants::ESTIMATED_COST_METRIC.into(),
+                    MetricValue::distribution(cost_usd),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert estimated cost metric: {}", e);
+                }
+            }
         }
     }
 
@@ -600,7 +616,8 @@ impl Lambda {
         });
     }
 
-    pub fn resume_usage_metrics_monitoring(&self) {
+    // Reset metrics and resume monitoring for the next invocation
+    pub fn restart_usage_metrics_monitoring(&self) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -611,6 +628,25 @@ impl Lambda {
         }
 
         self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Resume monitoring without resetting metrics. Used in managed instance mode to resume monitoring between invocations.
+    pub fn resume_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        debug!("Starting sandbox-level usage metrics monitoring (managed instance mode)");
+        self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Pause monitoring without emitting metrics. Used in managed instance mode to pause between invocations.
+    pub fn pause_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        self.enhanced_metrics_handle.pause_monitoring();
     }
 
     pub fn set_usage_enhanced_metrics(&self) {
@@ -765,6 +801,7 @@ mod tests {
 
     use super::*;
     use crate::config;
+    use crate::extension::telemetry::events::{OnDemandReportMetrics, ReportMetrics};
     use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
@@ -871,14 +908,14 @@ mod tests {
         );
         lambda.set_post_runtime_duration_metric(100.0, now);
         lambda.set_report_log_metrics(
-            &ReportMetrics {
+            &ReportMetrics::OnDemand(OnDemandReportMetrics {
                 duration_ms: 100.0,
                 billed_duration_ms: 100,
                 max_memory_used_mb: 128,
                 memory_size_mb: 256,
                 init_duration_ms: Some(50.0),
                 restore_duration_ms: None,
-            },
+            }),
             now,
         );
         assert!(
@@ -1127,14 +1164,14 @@ mod tests {
     async fn test_set_report_log_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let report_metrics = ReportMetrics {
+        let report_metrics = ReportMetrics::OnDemand(OnDemandReportMetrics {
             duration_ms: 100.0,
             billed_duration_ms: 100,
             max_memory_used_mb: 128,
             memory_size_mb: 256,
             init_duration_ms: Some(50.0),
             restore_duration_ms: None,
-        };
+        });
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
