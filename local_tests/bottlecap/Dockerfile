@@ -32,8 +32,9 @@ RUN curl https://sh.rustup.rs -sSf | bash -s -- -y
 ENV PATH=/root/.cargo/bin:$PATH
 
 
-# The first path is where the custom RIE lives.
-COPY local_tests/rie/${TARGET}/arm64/rie /usr/local/bin/aws-lambda-rie
+# Download the AWS Lambda Runtime Interface Emulator from GitHub releases
+RUN curl -Lo /usr/local/bin/aws-lambda-rie https://github.com/aws/aws-lambda-runtime-interface-emulator/releases/latest/download/aws-lambda-rie-arm64 \
+    && chmod +x /usr/local/bin/aws-lambda-rie
 
 # The first path is the location of your local agent binary
 COPY .binaries/bottlecap-arm64 /opt/extensions/datadog-agent
