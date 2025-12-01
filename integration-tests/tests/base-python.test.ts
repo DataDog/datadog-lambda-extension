@@ -16,35 +16,52 @@ describe('Base Python Lambda Integration Test', () => {
 
   it('should have "Hello world!" log message', () => {
     const helloWorldLog = result.logs?.find((log: any) =>
-      log.attributes.message.includes('Hello world!')
+      log.message.includes('Hello world!')
     );
     expect(helloWorldLog).toBeDefined();
-    console.log('Hello world log:', JSON.stringify(helloWorldLog, null, 2));
   });
 
   it('should send one trace to Datadog', () => {
     expect(result.traces?.length).toEqual(1);
   });
 
-  it('should have aws.lambda span', () => {
+  it('should have aws.lambda span with correct properties', () => {
     const trace = result.traces![0];
-    const awsLambdaSpan = trace.spans.find((span: any) => span.name === 'aws.lambda');
+    const awsLambdaSpan = trace.spans.find((span: any) => span.attributes.operation_name === 'aws.lambda');
     expect(awsLambdaSpan).toBeDefined();
+    expect(awsLambdaSpan).toMatchObject({
+      attributes: {
+        operation_name: 'aws.lambda',
+        custom: {
+          cold_start: 'true'
+        }
+      }
+    });
   });
 
   // TODO: These spans are being created but not with the same traceId as the 'aws.lambda' span
   //       Need to investigate why this is happening and fix it.
   it.failing('[failing] should have aws.lambda.cold_start span', () => {
     const trace = result.traces![0];
-    const awsLambdaColdStartSpan = trace.spans.find((span: any) => span.name === 'aws.lambda.cold_start');
+    const awsLambdaColdStartSpan = trace.spans.find((span: any) => span.attributes.operation_name === 'aws.lambda.cold_start');
     expect(awsLambdaColdStartSpan).toBeDefined();
+    expect(awsLambdaColdStartSpan).toMatchObject({
+      attributes: {
+        operation_name: 'aws.lambda.cold_start',
+      }
+    });
   });
 
   // TODO: These spans are being created but not with the same traceId as the 'aws.lambda' span
   //       Need to investigate why this is happening and fix it.
   it.failing('[failing] should have aws.lambda.load span', () => {
     const trace = result.traces![0];
-    const awsLambdaLoadSpan = trace.spans.find((span: any) => span.name === 'aws.lambda.load');
+    const awsLambdaLoadSpan = trace.spans.find((span: any) => span.attributes.operation_name === 'aws.lambda.load');
     expect(awsLambdaLoadSpan).toBeDefined();
+    expect(awsLambdaLoadSpan).toMatchObject({
+      attributes: {
+        operation_name: 'aws.lambda.load',
+      }
+    });
   });
 });

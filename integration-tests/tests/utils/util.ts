@@ -13,7 +13,7 @@ export async function invokeLambdaAndGetDatadogData(functionName: string, payloa
     const result = await invokeLambda(functionName, payload, coldStart);
 
     console.log('Waiting 10 minutes for logs and traces to be indexed in Datadog...');
-    await new Promise(resolve => setTimeout(resolve, 600000));
+    await new Promise(resolve => setTimeout(resolve, 300000));
 
     const traces = await getTraces(functionName, result.requestId);
     const logs = await getLogs(functionName, result.requestId);

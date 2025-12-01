@@ -23,26 +23,15 @@ export interface DatadogTrace {
 }
 
 export interface DatadogSpan {
-  trace_id: string;
-  span_id: string;
-  service: string;
-  name: string;
-  resource: string;
-  start: number;
-  duration: number;
-  meta?: Record<string, string>;
-  metrics?: Record<string, number>;
+  attributes: Record<string, any>;
 }
 
 export interface DatadogLog {
-  id: string;
-  attributes: {
-    timestamp: string;
-    message: string;
-    service?: string;
-    tags?: string[];
-    [key: string]: any;
-  };
+  attributes: Record<string, any>;
+  message: string;
+  status: string;
+  timestamp: string;
+  tags: string[];
 }
 
 /**
@@ -128,20 +117,14 @@ export async function getTraces(
     const traceMap = new Map<string, DatadogSpan[]>();
 
     for (const spanData of allSpans) {
+      console.log('Span data:', JSON.stringify(spanData, null, 2));
       const attrs = spanData.attributes || {};
+
       const span: DatadogSpan = {
-        trace_id: attrs['trace_id'] || attrs.trace_id || '',
-        span_id: attrs['span_id'] || attrs.span_id || '',
-        service: attrs['service'] || attrs.service || '',
-        name: attrs['operation_name'] || attrs['name'] || attrs.name || '',
-        resource: attrs['resource_name'] || attrs.resource || '',
-        start: attrs['start'] || attrs.start || 0,
-        duration: attrs['duration'] || attrs.duration || 0,
-        meta: attrs['tags'] || attrs.meta || {},
-        metrics: attrs['metrics'] || {},
+        attributes: attrs,
       };
 
-      const traceId = span.trace_id;
+      const traceId = attrs['trace_id'] || attrs.trace_id || '';
       if (traceId && !traceMap.has(traceId)) {
         traceMap.set(traceId, []);
       }
@@ -198,8 +181,20 @@ export async function getLogs(
       },
     });
 
-    const logs = response.data.data || [];
-    console.log(`Found ${logs.length} log(s)`);
+    const rawLogs = response.data.data || [];
+    console.log(`Found ${rawLogs.length} log(s)`);
+
+    // Transform raw logs to DatadogLog format
+    const logs: DatadogLog[] = rawLogs.map((logData: any) => {
+      const attrs = logData.attributes || {};
+      return {
+        attributes: attrs,
+        message: attrs.message || '',
+        status: attrs.status || '',
+        timestamp: attrs.timestamp || '',
+        tags: attrs.tags || [],
+      };
+    });
 
     return logs;
   } catch (error: any) {
