@@ -21,7 +21,6 @@ export class BasePythonStack extends cdk.Stack {
         DD_SERVICE: pythonFunctionName,
         DD_TRACE_ENABLED: 'true',
         DD_LAMBDA_HANDLER: 'lambda_function.handler',
-        DD_LOG_LEVEL: 'debug',
         DD_TRACE_AGENT_URL: 'http://127.0.0.1:8126',
         DD_COLD_START_TRACING: 'true',
         DD_MIN_COLD_START_DURATION: '0',

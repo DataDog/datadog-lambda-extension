@@ -9,7 +9,6 @@ export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN!;
 
 export const node20LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node20-x:130';
 export const python313LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python313-ARM:117';
-export const pythonLayerArn = 'arn:aws:lambda:us-east-1:425362996713:layer:John-Datadog-Python312-ARM:20';
 
 export const defaultDatadogEnvVariables = {
     DD_API_KEY_SECRET_ARN: datadogSecretArn,
@@ -59,13 +58,5 @@ export const getPython313Layer = (scope: Construct) => {
     scope,
     'DatadogPython313Layer',
     python313LayerArn
-  );
-};
-
-export const getPythonLayer = (scope: Construct) => {
-  return LayerVersion.fromLayerVersionArn(
-    scope,
-    'DatadogPythonLayer',
-    pythonLayerArn
   );
 };
