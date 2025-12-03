@@ -2,6 +2,7 @@ stages:
   - test
   - compile
   - build
+  - integration-tests
   - self-monitoring
   - sign
   - publish
@@ -322,3 +323,152 @@ signed layer bundle:
     - rm -rf datadog_extension-signed-bundle-${CI_JOB_ID}
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
+
+# Integration Tests - Publish arm64 layer with integration test prefix
+publish integration layer (arm64):
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - when: on_success
+  needs:
+    - layer (arm64)
+  dependencies:
+    - layer (arm64)
+  variables:
+    LAYER_NAME_BASE_SUFFIX: ""
+    ARCHITECTURE: arm64
+    LAYER_FILE: datadog_extension-arm64.zip
+    REGION: us-east-1
+    ADD_LAYER_VERSION_PERMISSIONS: "0"
+    AUTOMATICALLY_BUMP_VERSION: "1"
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - export PIPELINE_LAYER_SUFFIX="ARM-${CI_COMMIT_SHORT_SHA}"
+    - echo "Publishing layer with suffix - ${PIPELINE_LAYER_SUFFIX}"
+  script:
+    - .gitlab/scripts/publish_layers.sh
+    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-ARM-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
+    - echo "Published layer ARN - ${LAYER_ARN}"
+  {{ end }}
+
+# Integration Tests - Deploy CDK stacks with commit hash prefix
+integration-deploy:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - when: on_success
+  needs:
+    - publish integration layer (arm64)
+  variables:
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+    AWS_DEFAULT_REGION: us-east-1
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    - apt-get install -y nodejs
+    - cd integration-tests
+    - npm ci
+  {{ end }}
+  script:
+    - echo "Deploying CDK stacks with identifier ${IDENTIFIER}..."
+    - export EXTENSION_LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-ARM-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
+    - echo "Using integration test layer - ${EXTENSION_LAYER_ARN}"
+    - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+    - export CDK_DEFAULT_REGION=us-east-1
+    - npm run build
+    - npx cdk deploy "integ-$IDENTIFIER-*" --require-approval never
+
+# Integration Tests - Run Jest test suite
+integration-test:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  rules:
+    - when: on_success
+  needs:
+    - integration-deploy
+  variables:
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+    DD_SITE: datadoghq.com
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    - apt-get install -y nodejs
+    - cd integration-tests
+    - npm ci
+  script:
+    - echo "Running integration tests with identifier ${IDENTIFIER}..."
+    - npm run test:ci
+  {{ end }}
+  artifacts:
+    when: always
+    paths:
+      - integration-tests/test-results/
+    reports:
+      junit: integration-tests/test-results/junit.xml
+    expire_in: 30 days
+
+# Integration Tests - Cleanup stacks
+integration-cleanup-stacks:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  when: always
+  rules:
+    - when: always
+  needs:
+    - integration-test
+  variables:
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    - apt-get install -y nodejs
+    - cd integration-tests
+  {{ end }}
+  script:
+    - echo "Destroying CDK stacks with identifier ${IDENTIFIER}..."
+    - npx cdk destroy "integ-$IDENTIFIER-*" --force || echo "Failed to destroy some stacks, but continuing..."
+
+# Integration Tests - Cleanup layer
+integration-cleanup-layer:
+  stage: integration-tests
+  tags: ["arch:amd64"]
+  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  when: always
+  rules:
+    - when: always
+  needs:
+    - integration-cleanup-stacks
+  variables:
+    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  before_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+  {{ end }}
+  script:
+    - echo "Deleting integration test layer with identifier ${IDENTIFIER}..."
+    - |
+      LAYER_NAME="Datadog-Extension-${IDENTIFIER}"
+      echo "Looking for layer: ${LAYER_NAME}"
+
+      # Get all versions of the layer
+      VERSIONS=$(aws lambda list-layer-versions --layer-name "${LAYER_NAME}" --query 'LayerVersions[*].Version' --output text --region us-east-1 2>/dev/null || echo "")
+
+      if [ -z "$VERSIONS" ]; then
+        echo "No versions found for layer ${LAYER_NAME}"
+      else
+        echo "Found versions: ${VERSIONS}"
+        for VERSION in $VERSIONS; do
+          echo "Deleting ${LAYER_NAME} version ${VERSION}..."
+          aws lambda delete-layer-version --layer-name "${LAYER_NAME}" --version-number "${VERSION}" --region us-east-1 || echo "Failed to delete version ${VERSION}, continuing..."
+        done
+        echo "Successfully deleted all versions of ${LAYER_NAME}"
+      fi
+
