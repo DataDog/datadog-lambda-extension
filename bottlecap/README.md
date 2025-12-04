@@ -24,7 +24,7 @@ Step 3: Test your change running `./runBottlecap.sh`
 Bottlecap supports several flush strategies that control when and how observability data (metrics, logs, traces) is sent to Datadog. The strategy is configured via the `DD_SERVERLESS_FLUSH_STRATEGY` environment variable.
 
 **Important**: Flush strategies behave differently depending on the Lambda execution mode:
-- **Managed Instance**: Uses continuous background flushing (flush strategies are ignored)
+- **Managed Instance**: Always uses continuous background flushing (only custom continuous intervals are respected)
 - **On-Demand**: Uses configurable flush strategies
 
 ### Managed Instance Mode vs On-Demand Mode
@@ -37,7 +37,7 @@ Lambda Managed Instances run your functions on EC2 instances (managed by AWS) wi
   - A dedicated background task continuously flushes data at regular intervals (default: 30 seconds)
   - All flushes are **non-blocking** and run concurrently with invocation processing
   - Prevents resource buildup by skipping a flush cycle if the previous flush is still in progress
-  - `DD_SERVERLESS_FLUSH_STRATEGY` is **ignored** in this mode
+  - Only `DD_SERVERLESS_FLUSH_STRATEGY=continuously,<ms>` is respected; all other strategies are overridden to continuous with default interval
 - **Shutdown Behavior**:
   - Background flusher waits for pending flushes to complete before shutdown
   - Final flush ensures all remaining data is sent before the execution environment terminates
@@ -164,7 +164,7 @@ Located in `bottlecap/src/bin/bottlecap/main.rs`:
 | **Scaling** | Asynchronous, CPU-based scaling | Reactive scaling with cold starts |
 | **Pricing** | EC2 instance-based | Per-request duration-based |
 | **Flush Trigger** | Background interval timer | Invocation lifecycle + interval |
-| **Strategy Config** | Ignored (always continuous) | Configurable via env var |
+| **Strategy Config** | Always continuous (custom intervals respected) | Configurable via env var |
 | **Main Loop** | Event bus processing | `/next` + event bus processing |
 | **Shutdown Detection** | Separate task monitors `/next` | Main loop receives from `/next` |
 
