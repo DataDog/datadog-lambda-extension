@@ -535,6 +535,21 @@ where
     }
 }
 
+/// Parse a single "key:value" string into a (key, value) tuple
+/// Returns None if the string is invalid (e.g., missing colon, empty key/value)
+fn parse_key_value_tag(tag: &str) -> Option<(String, String)> {
+    let parts: Vec<&str> = tag.splitn(2, ':').collect();
+    if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+        Some((parts[0].to_string(), parts[1].to_string()))
+    } else {
+        error!(
+            "Failed to parse tag '{}', expected format 'key:value', ignoring",
+            tag
+        );
+        None
+    }
+}
+
 pub fn deserialize_key_value_pairs<'de, D>(
     deserializer: D,
 ) -> Result<HashMap<String, String>, D::Error>
@@ -559,14 +574,8 @@ where
                 if tag.is_empty() {
                     continue;
                 }
-                let parts = tag.split(':').collect::<Vec<&str>>();
-                if parts.len() == 2 && !parts[0].is_empty() && !parts[1].is_empty() {
-                    map.insert(parts[0].to_string(), parts[1].to_string());
-                } else {
-                    error!(
-                        "Failed to parse tag '{}', expected format 'key:value', ignoring",
-                        tag
-                    );
+                if let Some((key, val)) = parse_key_value_tag(tag) {
+                    map.insert(key, val);
                 }
             }
 
@@ -643,14 +652,8 @@ where
     let array: Vec<String> = Vec::deserialize(deserializer)?;
     let mut map = HashMap::new();
     for s in array {
-        let parts = s.split(':').collect::<Vec<&str>>();
-        if parts.len() == 2 {
-            map.insert(parts[0].to_string(), parts[1].to_string());
-        } else {
-            error!(
-                "Failed to parse tag '{}', expected format 'key:value', ignoring",
-                s.trim()
-            );
+        if let Some((key, val)) = parse_key_value_tag(&s) {
+            map.insert(key, val);
         }
     }
     Ok(map)
@@ -1479,5 +1482,79 @@ pub mod tests {
         let mut expected = HashMap::new();
         expected.insert("valid".to_string(), "tag".to_string());
         assert_eq!(result.tags, expected);
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pairs_with_url_values() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pairs")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(
+            r#"{"tags": "git.repository_url:https://gitlab.ddbuild.io/DataDog/serverless-e2e-tests.git,env:prod"}"#
+        )
+        .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert(
+            "git.repository_url".to_string(),
+            "https://gitlab.ddbuild.io/DataDog/serverless-e2e-tests.git".to_string(),
+        );
+        expected.insert("env".to_string(), "prod".to_string());
+        assert_eq!(result.tags, expected);
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pair_array_with_urls() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pair_array_to_hashmap")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(
+            r#"{"tags": ["git.repository_url:https://gitlab.ddbuild.io/DataDog/serverless-e2e-tests.git", "env:prod", "version:1.2.3"]}"#
+        )
+        .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert(
+            "git.repository_url".to_string(),
+            "https://gitlab.ddbuild.io/DataDog/serverless-e2e-tests.git".to_string(),
+        );
+        expected.insert("env".to_string(), "prod".to_string());
+        expected.insert("version".to_string(), "1.2.3".to_string());
+        assert_eq!(result.tags, expected);
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pair_array_ignores_invalid() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pair_array_to_hashmap")]
+            tags: HashMap<String, String>,
+        }
+
+        let result = serde_json::from_str::<TestStruct>(
+            r#"{"tags": ["valid:tag", "invalid_no_colon", "another:good:value:with:colons"]}"#,
+        )
+        .expect("failed to parse JSON");
+        let mut expected = HashMap::new();
+        expected.insert("valid".to_string(), "tag".to_string());
+        expected.insert("another".to_string(), "good:value:with:colons".to_string());
+        assert_eq!(result.tags, expected);
+    }
+
+    #[test]
+    fn test_deserialize_key_value_pair_array_empty() {
+        #[derive(Deserialize, Debug, PartialEq)]
+        struct TestStruct {
+            #[serde(deserialize_with = "deserialize_key_value_pair_array_to_hashmap")]
+            tags: HashMap<String, String>,
+        }
+
+        let result =
+            serde_json::from_str::<TestStruct>(r#"{"tags": []}"#).expect("failed to parse JSON");
+        assert_eq!(result.tags, HashMap::new());
     }
 }
