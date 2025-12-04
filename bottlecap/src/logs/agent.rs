@@ -70,9 +70,9 @@ impl LogsAgent {
                             },
                             // Empty signals there are still outstanding senders
                             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                                // Log at most once every 10ms to avoid spamming the logs
+                                // Log at most once every 100ms to avoid spamming the logs
                                 let now = Instant::now();
-                                if now.duration_since(last_drain_log_time) >= Duration::from_millis(10) {
+                                if now.duration_since(last_drain_log_time) >= Duration::from_millis(100) {
                                     debug!("LOGS_AGENT | No more events to process but still have senders, continuing to drain...");
                                     last_drain_log_time = now;
                                 }
