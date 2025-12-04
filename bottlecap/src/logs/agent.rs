@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{self, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
@@ -57,6 +58,7 @@ impl LogsAgent {
                     debug!("LOGS_AGENT | Received shutdown signal, draining remaining events");
 
                     // Drain remaining events
+                    let mut last_drain_log_time = Instant::now();
                     'drain_logs_loop: loop {
                         match self.rx.try_recv() {
                             Ok(event) => {
@@ -68,7 +70,12 @@ impl LogsAgent {
                             },
                             // Empty signals there are still outstanding senders
                             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                                debug!("LOGS_AGENT | No more events to process but still have senders, continuing to drain...");
+                                // Log at most once every 10ms to avoid spamming the logs
+                                let now = Instant::now();
+                                if now.duration_since(last_drain_log_time) >= Duration::from_millis(10) {
+                                    debug!("LOGS_AGENT | No more events to process but still have senders, continuing to drain...");
+                                    last_drain_log_time = now;
+                                }
                             },
                         }
                     }
