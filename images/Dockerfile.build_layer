@@ -1,5 +1,4 @@
-ARG COMPRESSER_IMAGE=registry.ddbuild.io/images/mirror/ubuntu:22.04
-FROM $COMPRESSER_IMAGE AS compresser
+FROM registry.ddbuild.io/images/mirror/ubuntu:22.04 AS compresser
 ARG DATADOG_WRAPPER=datadog_wrapper
 ARG FILE_SUFFIX
 
