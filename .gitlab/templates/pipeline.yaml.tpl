@@ -466,11 +466,11 @@ integration-cleanup-stacks:
   stage: integration-tests
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  when: always
   rules:
     - when: always
   needs:
-    - integration-test
+    - job: integration-test
+      optional: false
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
@@ -490,11 +490,11 @@ integration-cleanup-layer:
   stage: integration-tests
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  when: always
   rules:
     - when: always
   needs:
-    - integration-cleanup-stacks
+    - job: integration-cleanup-stacks
+      optional: false
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
