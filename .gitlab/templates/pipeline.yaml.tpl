@@ -324,6 +324,53 @@ signed layer bundle:
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
 
+# Integration Tests - Build Java Lambda function
+build java lambda:
+  stage: integration-tests
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  tags: ["arch:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/base-java/target/
+  script:
+    - cd integration-tests/lambda/base-java
+    - docker run --rm --platform linux/arm64
+        -v "$(pwd)":/workspace
+        -w /workspace
+        maven:3.9-eclipse-temurin-21-alpine
+        mvn clean package
+
+# Integration Tests - Build .NET Lambda function
+build dotnet lambda:
+  stage: integration-tests
+  image: docker:24-cli
+  services:
+    - docker:24-dind
+  tags: ["arch:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/base-dotnet/bin/
+  script:
+    - cd integration-tests/lambda/base-dotnet
+    - docker run --rm --platform linux/arm64
+        -v "$(pwd)":/workspace
+        -w /workspace
+        mcr.microsoft.com/dotnet/sdk:8.0-alpine
+        sh -c "apk add --no-cache zip &&
+               dotnet tool install -g Amazon.Lambda.Tools || true &&
+               export PATH=\"\$PATH:/root/.dotnet/tools\" &&
+               dotnet lambda package -o bin/function.zip --function-architecture arm64"
+
 # Integration Tests - Publish arm64 layer with integration test prefix
 publish integration layer (arm64):
   stage: integration-tests
@@ -362,6 +409,11 @@ integration-deploy:
     - when: on_success
   needs:
     - publish integration layer (arm64)
+    - build java lambda
+    - build dotnet lambda
+  dependencies:
+    - build java lambda
+    - build dotnet lambda
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1

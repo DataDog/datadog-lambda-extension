@@ -8,7 +8,40 @@ The general flow is:
 3. Wait for data to propagate to Datadog.
 4. Call Datadog to get telemetry data and check the data based on test requirements.
 
-For simplicity, integraiton tests are setup to only test against ARM runtimes.
+For simplicity, integration tests are setup to only test against ARM runtimes.
+
+## Test Suites
+
+### Base Tests
+
+The base test suite provides basic functionality tests across all supported Lambda runtimes. Also serves as an example for other tests.
+
+The base tests verify the extension can:
+- Collect and forward logs to Datadog
+- Generate and send traces with proper span structure
+- Detect cold starts
+
+**Test Coverage:**
+- Lambda invocation succeeds (200 status code)
+- "Hello world!" log message is sent to Datadog
+- One trace is sent to Datadog
+- `aws.lambda` span exists with correct properties including `cold_start: 'true'`
+- `aws.lambda.cold_start` span is created
+- `aws.lambda.load` spand is created for python and node.
+
+**Build Requirements:**
+
+For Java and .NET tests, Lambda functions must be built before deployment:
+
+```bash
+# Build Java Lambda (uses Docker)
+cd lambda/base-java && ./build.sh
+
+# Build .NET Lambda (uses Docker)
+cd lambda/base-dotnet && ./build.sh
+```
+
+These builds use Docker to ensure cross-platform compatibility and do not require local Maven or .NET SDK installation.
 
 ## Guidelines
 

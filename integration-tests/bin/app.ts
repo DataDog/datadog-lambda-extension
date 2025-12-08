@@ -3,6 +3,8 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import { BaseNodeStack } from '../lib/stacks/base-node-stack';
 import { BasePythonStack } from '../lib/stacks/base-python-stack';
+import { BaseJavaStack } from '../lib/stacks/base-java-stack';
+import { BaseDotnetStack } from '../lib/stacks/base-dotnet-stack';
 import { getIdentifier } from '../tests/utils/config';
 
 const app = new cdk.App();
@@ -19,6 +21,14 @@ new BaseNodeStack(app, `integ-${identifier}-base-node`, {
 });
 
 new BasePythonStack(app, `integ-${identifier}-base-python`, {
+  env,
+});
+
+new BaseJavaStack(app, `integ-${identifier}-base-java`, {
+  env,
+});
+
+new BaseDotnetStack(app, `integ-${identifier}-base-dotnet`, {
   env,
 });
 
