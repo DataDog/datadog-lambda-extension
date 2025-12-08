@@ -431,6 +431,7 @@ integration-cleanup-stacks:
     - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
     - apt-get install -y nodejs
     - cd integration-tests
+    - npm ci
   {{ end }}
   script:
     - echo "Destroying CDK stacks with identifier ${IDENTIFIER}..."
