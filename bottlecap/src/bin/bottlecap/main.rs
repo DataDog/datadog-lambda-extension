@@ -326,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
     let aws_config = AwsConfig::from_env(start_time);
     log_fips_status(&aws_config.region);
     let version_without_next = EXTENSION_VERSION.split('-').next().unwrap_or("NA");
-    debug!("Starting Datadog Extension v{version_without_next}");
+    debug!("Starting  Datadog Extension v{version_without_next}");
 
     // Debug: Wait for debugger to attach if DD_DEBUG_WAIT_FOR_ATTACH is set
     if let Ok(wait_secs) = env::var("DD_DEBUG_WAIT_FOR_ATTACH") {
