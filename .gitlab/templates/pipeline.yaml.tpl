@@ -327,9 +327,9 @@ signed layer bundle:
 # Integration Tests - Build Java Lambda function
 build java lambda:
   stage: integration-tests
-  image: docker:24-cli
+  image: registry.ddbuild.io/images/docker:27.3.1
   services:
-    - docker:24-dind
+    - registry.ddbuild.io/images/docker:27.3.1
   tags: ["arch:arm64"]
   rules:
     - when: on_success
@@ -349,9 +349,9 @@ build java lambda:
 # Integration Tests - Build .NET Lambda function
 build dotnet lambda:
   stage: integration-tests
-  image: docker:24-cli
+  image: registry.ddbuild.io/images/docker:27.3.1
   services:
-    - docker:24-dind
+    - registry.ddbuild.io/images/docker:27.3.1
   tags: ["arch:arm64"]
   rules:
     - when: on_success
