@@ -10,7 +10,13 @@ use libdd_trace_utils::{
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
+use rustls_pki_types::CertificateDer;
+use hyper_rustls::HttpsConnectorBuilder;
+use rustls::{RootCertStore};
+use std::sync::LazyLock;
+use std::fs::File;
 use std::error::Error;
+use std::io::BufReader;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::task::JoinSet;
@@ -35,6 +41,7 @@ pub trait TraceFlusher {
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
         proxy_https: &Option<String>,
+        ssl_ca_cert: &Option<String>,
     ) -> Option<Vec<SendData>>;
 
     /// Flushes traces by getting every available batch on the aggregator.
@@ -104,7 +111,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     "TRACES | Retrying to send {} previously failed batches",
                     traces.len()
                 );
-                let retry_result = Self::send(traces, None, &self.config.proxy_https).await;
+                let retry_result = Self::send(traces, None, &self.config.proxy_https, &self.config.ssl_ca_cert).await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
                     return retry_result;
@@ -131,13 +138,15 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
-            batch_tasks.spawn(async move { Self::send(traces_clone, None, &proxy_https).await });
+            let ssl_ca_cert = self.config.ssl_ca_cert.clone();
+            batch_tasks.spawn(async move { Self::send(traces_clone, None, &proxy_https, &ssl_ca_cert).await });
 
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
                 let proxy_https = self.config.proxy_https.clone();
+                let ssl_ca_cert = self.config.ssl_ca_cert.clone();
                 batch_tasks.spawn(async move {
-                    Self::send(traces_clone, Some(&endpoint), &proxy_https).await
+                    Self::send(traces_clone, Some(&endpoint), &proxy_https, &ssl_ca_cert).await
                 });
             }
         }
@@ -158,6 +167,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
         proxy_https: &Option<String>,
+        ssl_ca_cert: &Option<String>,
     ) -> Option<Vec<SendData>> {
         if traces.is_empty() {
             return None;
@@ -167,7 +177,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         tokio::task::yield_now().await;
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
-        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(proxy_https.as_ref()) else {
+        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(proxy_https.as_ref(), ssl_ca_cert.as_ref()) else {
             error!("TRACES | Failed to create HTTP client");
             return None;
         };
@@ -195,23 +205,85 @@ impl TraceFlusher for ServerlessTraceFlusher {
 impl ServerlessTraceFlusher {
     pub fn get_http_client(
         proxy_https: Option<&String>,
+        ssl_ca_cert: Option<&String>,
     ) -> Result<
         GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>,
         Box<dyn Error>,
     > {
+        // Create the base connector with optional custom TLS config
+        let connector = if let Some(ca_cert_path) = ssl_ca_cert {
+            // Ensure crypto provider is initialized before creating TLS config
+            ServerlessTraceFlusher::ensure_crypto_provider_initialized();
+
+            // Load the custom certificate
+            debug!("TRACES | Loading custom certificate from {}", ca_cert_path);
+            let cert_file = File::open(ca_cert_path)?;
+            let mut reader = BufReader::new(cert_file);
+            let certs: Vec<CertificateDer> = rustls_pemfile::certs(&mut reader)
+                .collect::<Result<Vec<_>, _>>()?;
+
+            // Create a root certificate store and add custom certs
+            debug!("TRACES | Creating root certificate store");
+            let mut root_store = RootCertStore::empty();
+            for cert in certs {
+                root_store.add(cert)?;
+            }
+
+            // Build the TLS config with custom root certificates
+            debug!("TRACES | Building TLS config");
+            let tls_config = rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+
+            // Build the HTTPS connector with custom config
+            debug!("TRACES | Building HTTPS connector");
+            let https_connector = HttpsConnectorBuilder::new()
+                .with_tls_config(tls_config)
+                .https_or_http()
+                .enable_http1()
+                .build();
+
+            debug!("TRACES | Added root certificate from {}", ca_cert_path);
+
+            // Construct the Connector::Https variant directly
+            debug!("TRACES | Constructing Connector::Https variant");
+            libdd_common::connector::Connector::Https(https_connector)
+        } else {
+            // Use default connector
+            libdd_common::connector::Connector::default()
+        };
+
         if let Some(proxy) = proxy_https {
             let proxy =
                 hyper_http_proxy::Proxy::new(hyper_http_proxy::Intercept::Https, proxy.parse()?);
             let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(
-                libdd_common::connector::Connector::default(),
+                connector,
                 proxy,
             )?;
-            Ok(hyper_migration::client_builder().build(proxy_connector))
+            debug!("TRACES | Proxy connector created with proxy: {:?}", proxy_https);
+            // Force HTTP/1.1 when using a proxy - many proxies don't support HTTP/2 CONNECT
+            let client = hyper_migration::client_builder()
+                .http2_only(false)  // Disable HTTP/2-only mode to allow HTTP/1.1
+                .build(proxy_connector);
+            debug!("TRACES | Client configured to allow HTTP/1.1 for proxy compatibility");
+            Ok(client)
         } else {
-            let proxy_connector = hyper_http_proxy::ProxyConnector::new(
-                libdd_common::connector::Connector::default(),
-            )?;
+            let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
+            debug!("TRACES | Proxy connector created without proxy");
             Ok(hyper_migration::client_builder().build(proxy_connector))
         }
+    }
+
+    /// Ensure the rustls crypto provider is initialized.
+    /// This is required before creating custom TLS configurations.
+    fn ensure_crypto_provider_initialized() {
+        static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
+            #[cfg(unix)]
+            rustls::crypto::aws_lc_rs::default_provider()
+                .install_default()
+                .expect("Failed to install default CryptoProvider");
+        });
+
+        let () = &*INIT_CRYPTO_PROVIDER;
     }
 }

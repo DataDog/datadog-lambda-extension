@@ -53,6 +53,8 @@ pub struct YamlConfig {
     pub dd_url: Option<String>,
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub http_protocol: Option<String>,
+    #[serde(deserialize_with = "deserialize_optional_string")]
+    pub ssl_ca_cert: Option<String>,
 
     // Endpoints
     #[serde(deserialize_with = "deserialize_additional_endpoints")]
@@ -417,6 +419,7 @@ fn merge_config(config: &mut Config, yaml_config: &YamlConfig) {
     merge_option!(config, proxy_https, yaml_config.proxy, https);
     merge_option_to_value!(config, proxy_no_proxy, yaml_config.proxy, no_proxy);
     merge_option!(config, yaml_config, http_protocol);
+    merge_option!(config, yaml_config, ssl_ca_cert);
 
     // Endpoints
     merge_hashmap!(config, yaml_config, additional_endpoints);
@@ -746,7 +749,7 @@ proxy:
   https: "https://proxy.example.com"
   no_proxy: ["localhost", "127.0.0.1"]
 dd_url: "https://metrics.datadoghq.com"
-http_protocol: "http1"
+ssl_ca_cert: "/opt/ca-cert.pem"
 
 # Endpoints
 additional_endpoints:
@@ -882,6 +885,7 @@ api_security_sample_delay: 60 # Seconds
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
+                ssl_ca_cert: Some("/opt/ca-cert.pem".to_string()),
                 dd_url: "https://metrics.datadoghq.com".to_string(),
                 url: String::new(), // doesnt exist in yaml
                 additional_endpoints: HashMap::from([
