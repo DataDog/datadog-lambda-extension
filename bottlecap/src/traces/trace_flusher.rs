@@ -4,21 +4,21 @@
 use async_trait::async_trait;
 use dogstatsd::api_key::ApiKeyFactory;
 use hyper_http_proxy;
+use hyper_rustls::HttpsConnectorBuilder;
 use libdd_common::{Endpoint, GenericHttpClient, hyper_migration};
 use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
+use rustls::RootCertStore;
 use rustls_pki_types::CertificateDer;
-use hyper_rustls::HttpsConnectorBuilder;
-use rustls::{RootCertStore};
-use std::sync::LazyLock;
-use std::fs::File;
 use std::error::Error;
+use std::fs::File;
 use std::io::BufReader;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 
@@ -111,7 +111,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     "TRACES | Retrying to send {} previously failed batches",
                     traces.len()
                 );
-                let retry_result = Self::send(traces, None, &self.config.proxy_https, &self.config.ssl_ca_cert).await;
+                let retry_result = Self::send(
+                    traces,
+                    None,
+                    &self.config.proxy_https,
+                    &self.config.ssl_ca_cert,
+                )
+                .await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
                     return retry_result;
@@ -139,7 +145,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
             let ssl_ca_cert = self.config.ssl_ca_cert.clone();
-            batch_tasks.spawn(async move { Self::send(traces_clone, None, &proxy_https, &ssl_ca_cert).await });
+            batch_tasks.spawn(async move {
+                Self::send(traces_clone, None, &proxy_https, &ssl_ca_cert).await
+            });
 
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
@@ -177,7 +185,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
         tokio::task::yield_now().await;
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
-        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(proxy_https.as_ref(), ssl_ca_cert.as_ref()) else {
+        let Ok(http_client) =
+            ServerlessTraceFlusher::get_http_client(proxy_https.as_ref(), ssl_ca_cert.as_ref())
+        else {
             error!("TRACES | Failed to create HTTP client");
             return None;
         };
@@ -229,8 +239,8 @@ impl ServerlessTraceFlusher {
             // Load the custom certificate
             let cert_file = File::open(ca_cert_path)?;
             let mut reader = BufReader::new(cert_file);
-            let certs: Vec<CertificateDer> = rustls_pemfile::certs(&mut reader)
-                .collect::<Result<Vec<_>, _>>()?;
+            let certs: Vec<CertificateDer> =
+                rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
 
             // Create a root certificate store and add custom certs
             let mut root_store = RootCertStore::empty();
@@ -262,15 +272,12 @@ impl ServerlessTraceFlusher {
         if let Some(proxy) = proxy_https {
             let proxy =
                 hyper_http_proxy::Proxy::new(hyper_http_proxy::Intercept::Https, proxy.parse()?);
-            let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(
-                connector,
-                proxy,
-            )?;
-            // Force HTTP/1.1 when using a proxy - many proxies don't support HTTP/2 CONNECT
-            let client = hyper_migration::client_builder()
-                // .http2_only(false)  // Disable HTTP/2-only mode to allow HTTP/1.1
-                .build(proxy_connector);
-            debug!("TRACES | Proxy connector created with proxy: {:?}", proxy_https);
+            let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(connector, proxy)?;
+            let client = hyper_migration::client_builder().build(proxy_connector);
+            debug!(
+                "TRACES | Proxy connector created with proxy: {:?}",
+                proxy_https
+            );
             Ok(client)
         } else {
             let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
