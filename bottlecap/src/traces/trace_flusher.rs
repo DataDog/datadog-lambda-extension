@@ -261,7 +261,10 @@ impl ServerlessTraceFlusher {
                 .enable_http1()
                 .build();
 
-            debug!("TRACES | GET_HTTP_CLIENT | Added root certificate from {}", ca_cert_path);
+            debug!(
+                "TRACES | GET_HTTP_CLIENT | Added root certificate from {}",
+                ca_cert_path
+            );
 
             // Construct the Connector::Https variant directly
             libdd_common::connector::Connector::Https(https_connector)
