@@ -202,6 +202,17 @@ impl TraceFlusher for ServerlessTraceFlusher {
     }
 }
 
+fn ensure_crypto_provider_initialized() {
+    static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
+        #[cfg(unix)]
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install default CryptoProvider");
+    });
+
+    let () = &*INIT_CRYPTO_PROVIDER;
+}
+
 impl ServerlessTraceFlusher {
     pub fn get_http_client(
         proxy_https: Option<&String>,
@@ -213,7 +224,7 @@ impl ServerlessTraceFlusher {
         // Create the base connector with optional custom TLS config
         let connector = if let Some(ca_cert_path) = ssl_ca_cert {
             // Ensure crypto provider is initialized before creating TLS config
-            ServerlessTraceFlusher::ensure_crypto_provider_initialized();
+            ensure_crypto_provider_initialized();
 
             // Load the custom certificate
             debug!("TRACES | Loading custom certificate from {}", ca_cert_path);
@@ -272,18 +283,5 @@ impl ServerlessTraceFlusher {
             debug!("TRACES | Proxy connector created without proxy");
             Ok(hyper_migration::client_builder().build(proxy_connector))
         }
-    }
-
-    /// Ensure the rustls crypto provider is initialized.
-    /// This is required before creating custom TLS configurations.
-    fn ensure_crypto_provider_initialized() {
-        static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
-            #[cfg(unix)]
-            rustls::crypto::aws_lc_rs::default_provider()
-                .install_default()
-                .expect("Failed to install default CryptoProvider");
-        });
-
-        let () = &*INIT_CRYPTO_PROVIDER;
     }
 }
