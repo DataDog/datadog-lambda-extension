@@ -4,6 +4,10 @@ RUN apt-get update && apt-get install -y --fix-missing --no-install-recommends \
   curl gcc gnupg g++ make cmake unzip openssl g++ uuid-runtime libclang-dev \
   clang llvm-dev
 
+# Install Node.js 20 from NodeSource
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+  apt-get install -y nodejs
+
 # Install AWS CLI
 RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
 RUN unzip awscliv2.zip && ./aws/install

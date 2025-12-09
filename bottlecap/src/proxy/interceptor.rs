@@ -497,6 +497,7 @@ mod tests {
             runtime_api: aws_lambda_runtime_api.to_string(),
             aws_lwa_proxy_lambda_runtime_api: Some(aws_lwa_lambda_runtime_api.to_string()),
             exec_wrapper: None,
+            initialization_type: "on-demand".into(),
         });
         let propagator = Arc::new(DatadogCompositePropagator::new(Arc::clone(&config)));
         let (invocation_processor_handle, invocation_processor_service) =

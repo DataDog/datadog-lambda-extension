@@ -18,87 +18,97 @@ use tracing::debug;
 use tracing::error;
 
 pub async fn resolve_secrets(config: Arc<Config>, aws_config: Arc<AwsConfig>) -> Option<String> {
-    let api_key_candidate =
-        if !config.api_key_secret_arn.is_empty() || !config.kms_api_key.is_empty() {
-            let before_decrypt = Instant::now();
+    let api_key_candidate = if !config.api_key_secret_arn.is_empty()
+        || !config.kms_api_key.is_empty()
+        || !config.api_key_ssm_arn.is_empty()
+    {
+        let before_decrypt = Instant::now();
 
-            let builder = match create_reqwest_client_builder() {
-                Ok(builder) => builder,
-                Err(err) => {
-                    error!("Error creating reqwest client builder: {}", err);
-                    return None;
-                }
-            };
-
-            let client = match builder.build() {
-                Ok(client) => client,
-                Err(err) => {
-                    error!("Error creating reqwest client: {}", err);
-                    return None;
-                }
-            };
-
-            let mut aws_credentials = AwsCredentials::from_env();
-
-            if aws_credentials.aws_secret_access_key.is_empty()
-                && aws_credentials.aws_access_key_id.is_empty()
-                && !aws_credentials
-                    .aws_container_credentials_full_uri
-                    .is_empty()
-                && !aws_credentials.aws_container_authorization_token.is_empty()
-            {
-                // We're in Snap Start
-                let credentials = match get_snapstart_credentials(&aws_credentials, &client).await {
-                    Ok(credentials) => credentials,
-                    Err(err) => {
-                        error!("Error getting Snap Start credentials: {}", err);
-                        return None;
-                    }
-                };
-                aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
-                aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
-                aws_credentials.aws_session_token = credentials["Token"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
+        let builder = match create_reqwest_client_builder() {
+            Ok(builder) => builder,
+            Err(err) => {
+                error!("Error creating reqwest client builder: {}", err);
+                return None;
             }
-
-            let decrypted_key = if config.kms_api_key.is_empty() {
-                decrypt_aws_sm(
-                    &client,
-                    config.api_key_secret_arn.clone(),
-                    aws_config,
-                    &aws_credentials,
-                )
-                .await
-            } else {
-                decrypt_aws_kms(
-                    &client,
-                    config.kms_api_key.clone(),
-                    aws_config,
-                    &aws_credentials,
-                )
-                .await
-            };
-
-            debug!("Decrypt took {} ms", before_decrypt.elapsed().as_millis());
-
-            match decrypted_key {
-                Ok(key) => Some(key),
-                Err(err) => {
-                    error!("Error decrypting key: {}", err);
-                    None
-                }
-            }
-        } else {
-            Some(config.api_key.clone())
         };
+
+        let client = match builder.build() {
+            Ok(client) => client,
+            Err(err) => {
+                error!("Error creating reqwest client: {}", err);
+                return None;
+            }
+        };
+
+        let mut aws_credentials = AwsCredentials::from_env();
+
+        if aws_credentials.aws_secret_access_key.is_empty()
+            && aws_credentials.aws_access_key_id.is_empty()
+            && !aws_credentials
+                .aws_container_credentials_full_uri
+                .is_empty()
+            && !aws_credentials.aws_container_authorization_token.is_empty()
+        {
+            // We're in Snap Start
+            let credentials = match get_snapstart_credentials(&aws_credentials, &client).await {
+                Ok(credentials) => credentials,
+                Err(err) => {
+                    error!("Error getting Snap Start credentials: {}", err);
+                    return None;
+                }
+            };
+            aws_credentials.aws_access_key_id = credentials["AccessKeyId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            aws_credentials.aws_secret_access_key = credentials["SecretAccessKey"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            aws_credentials.aws_session_token = credentials["Token"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+        }
+
+        let decrypted_key = if !config.kms_api_key.is_empty() {
+            decrypt_aws_kms(
+                &client,
+                config.kms_api_key.clone(),
+                aws_config,
+                &aws_credentials,
+            )
+            .await
+        } else if !config.api_key_secret_arn.is_empty() {
+            decrypt_aws_sm(
+                &client,
+                config.api_key_secret_arn.clone(),
+                aws_config,
+                &aws_credentials,
+            )
+            .await
+        } else {
+            decrypt_aws_ssm(
+                &client,
+                config.api_key_ssm_arn.clone(),
+                aws_config,
+                &aws_credentials,
+            )
+            .await
+        };
+
+        debug!("Decrypt took {} ms", before_decrypt.elapsed().as_millis());
+
+        match decrypted_key {
+            Ok(key) => Some(key),
+            Err(err) => {
+                error!("Error decrypting key: {}", err);
+                None
+            }
+        }
+    } else {
+        Some(config.api_key.clone())
+    };
 
     clean_api_key(api_key_candidate)
 }
@@ -213,6 +223,39 @@ async fn decrypt_aws_sm(
     } else {
         Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
     }
+}
+
+async fn decrypt_aws_ssm(
+    client: &Client,
+    parameter_arn: String,
+    aws_config: Arc<AwsConfig>,
+    aws_credentials: &AwsCredentials,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let json_body = &serde_json::json!({ "Name": parameter_arn, "WithDecryption": true });
+    let parameter_region = parameter_arn
+        .split(':')
+        .nth(3)
+        .unwrap_or(&aws_config.region)
+        .to_string();
+    let headers = build_get_secret_signed_headers(
+        aws_config,
+        aws_credentials,
+        parameter_region,
+        RequestArgs {
+            service: "ssm".to_string(),
+            body: json_body,
+            time: Utc::now(),
+            x_amz_target: "AmazonSSM.GetParameter".to_string(),
+        },
+    );
+
+    let v = request(json_body, headers?, client).await?;
+    if let Some(parameter) = v["Parameter"].as_object() {
+        if let Some(value) = parameter["Value"].as_str() {
+            return Ok(value.to_string());
+        }
+    }
+    Err(Error::new(std::io::ErrorKind::InvalidData, v.to_string()).into())
 }
 
 async fn get_snapstart_credentials(
@@ -380,6 +423,7 @@ mod tests {
                 sandbox_init_time: Instant::now(),
                 runtime_api: String::new(),
                 exec_wrapper: None,
+                initialization_type: "on-demand".into(),
             }),
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
@@ -439,6 +483,7 @@ mod tests {
                 sandbox_init_time: Instant::now(),
                 runtime_api: String::new(),
                 exec_wrapper: None,
+                initialization_type: "on-demand".into(),
             }),
             &AwsCredentials{
                 aws_access_key_id: "AKIDEXAMPLE".to_string(),
@@ -473,6 +518,126 @@ mod tests {
         expected_headers.insert(
             "x-amz-target",
             HeaderValue::from_str("secretsmanager.GetSecretValue").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-security-token",
+            HeaderValue::from_str("AQoDYXdzEJr...<remainder of session token>").unwrap(),
+        );
+
+        for (k, v) in &expected_headers {
+            assert_eq!(headers.get(k).expect("cannot get header"), v);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_ssm_parameter_headers() {
+        let time = Utc.from_utc_datetime(
+            &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
+        );
+        let headers = build_get_secret_signed_headers(
+            Arc::new(AwsConfig {
+                region: "us-east-1".to_string(),
+                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+                function_name: "arn:some-function".to_string(),
+                sandbox_init_time: Instant::now(),
+                runtime_api: String::new(),
+                exec_wrapper: None,
+                initialization_type: "on-demand".into(),
+            }),
+            &AwsCredentials{
+                aws_access_key_id: "AKIDEXAMPLE".to_string(),
+                aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
+                aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
+                aws_container_authorization_token: String::new(),
+                aws_container_credentials_full_uri: String::new(),
+            },
+            "us-east-1".to_string(),
+            RequestArgs {
+                service: "ssm".to_string(),
+                body: &serde_json::json!({ "Name": "arn:aws:ssm:us-east-1:account-id:parameter/my-parameter", "WithDecryption": true }),
+                time,
+                x_amz_target: "AmazonSSM.GetParameter".to_string(),
+            },
+        ).unwrap();
+
+        let mut expected_headers = HeaderMap::new();
+        expected_headers.insert("authorization", HeaderValue::from_str("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20240530/us-east-1/ssm/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token;x-amz-target, Signature=f45eebacb9f2f575cf1a235c65c97adc1c0d6ca21174044baa0c6457d4518d64").unwrap());
+        expected_headers.insert(
+            "host",
+            HeaderValue::from_str("ssm.us-east-1.amazonaws.com").unwrap(),
+        );
+        expected_headers.insert(
+            "content-type",
+            HeaderValue::from_str("application/x-amz-json-1.1").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-date",
+            HeaderValue::from_str("20240530T091011Z").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-target",
+            HeaderValue::from_str("AmazonSSM.GetParameter").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-security-token",
+            HeaderValue::from_str("AQoDYXdzEJr...<remainder of session token>").unwrap(),
+        );
+
+        for (k, v) in &expected_headers {
+            assert_eq!(headers.get(k).expect("cannot get header"), v);
+        }
+    }
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn test_cross_region_ssm_parameter() {
+        let time = Utc.from_utc_datetime(
+            &NaiveDateTime::parse_from_str("2024-05-30 09:10:11", "%Y-%m-%d %H:%M:%S").unwrap(),
+        );
+        let headers = build_get_secret_signed_headers(
+            Arc::new(AwsConfig {
+                region: "us-east-1".to_string(),
+                aws_lwa_proxy_lambda_runtime_api: Some("***".into()),
+                function_name: "arn:some-function".to_string(),
+                sandbox_init_time: Instant::now(),
+                runtime_api: String::new(),
+                exec_wrapper: None,
+                initialization_type: "on-demand".into(),
+            }),
+            &AwsCredentials{
+                aws_access_key_id: "AKIDEXAMPLE".to_string(),
+                aws_secret_access_key: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string(),
+                aws_session_token: "AQoDYXdzEJr...<remainder of session token>".to_string(),
+                aws_container_authorization_token: String::new(),
+                aws_container_credentials_full_uri: String::new(),
+            },
+            "eu-west-1".to_string(),
+            RequestArgs {
+                service: "ssm".to_string(),
+                body: &serde_json::json!({ "Name": "arn:aws:ssm:eu-west-1:account-id:parameter/my-parameter", "WithDecryption": true }),
+                time,
+                x_amz_target: "AmazonSSM.GetParameter".to_string(),
+            },
+        ).unwrap();
+
+        let mut expected_headers = HeaderMap::new();
+        expected_headers.insert("authorization", HeaderValue::from_str("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20240530/eu-west-1/ssm/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token;x-amz-target, Signature=4bdd2a27b632981c73a70b52ea84e92d3e26fe2c768e9cf18b96630188748b7a").unwrap());
+        expected_headers.insert(
+            "host",
+            HeaderValue::from_str("ssm.eu-west-1.amazonaws.com").unwrap(),
+        );
+        expected_headers.insert(
+            "content-type",
+            HeaderValue::from_str("application/x-amz-json-1.1").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-date",
+            HeaderValue::from_str("20240530T091011Z").unwrap(),
+        );
+        expected_headers.insert(
+            "x-amz-target",
+            HeaderValue::from_str("AmazonSSM.GetParameter").unwrap(),
         );
         expected_headers.insert(
             "x-amz-security-token",

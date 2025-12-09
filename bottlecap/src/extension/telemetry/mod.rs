@@ -7,6 +7,13 @@ pub mod events;
 pub mod listener;
 
 pub const TELEMETRY_SUBSCRIPTION_ROUTE: &str = "2022-07-01/telemetry";
+
+// Technically, we could use the same schema version for both modes,
+// but we'll keep them separate for now to avoid regressions. The
+// naming is just to differentiate which one contains Managed Instance-specific
+// events.
+pub const MANAGED_INSTANCE_SCHEMA_VERSION: &str = "2025-01-29";
+pub const ON_DEMAND_SCHEMA_VERSION: &str = "2022-12-13";
 // todo(astuyve) should be 8124 on /lambda/logs but
 // telemetry is implemented on a raw socket now and
 // does not multiplex routes on the same port.
@@ -37,13 +44,19 @@ pub async fn subscribe(
     extension_id: &str,
     destination_port: u16,
     logs_enabled: bool,
+    managed_instance_mode: bool,
 ) -> Result<Response, ExtensionSubscriptionError> {
+    let schema_version = if managed_instance_mode {
+        MANAGED_INSTANCE_SCHEMA_VERSION
+    } else {
+        ON_DEMAND_SCHEMA_VERSION
+    };
     let url = base_url(TELEMETRY_SUBSCRIPTION_ROUTE, runtime_api);
     let response = client
         .put(&url)
         .header(EXTENSION_ID_HEADER, extension_id)
         .json(&serde_json::json!({
-            "schemaVersion": "2022-12-13",
+            "schemaVersion": schema_version,
             "destination": {
                 "protocol": "HTTP",
                 "URI": format!("http://sandbox:{}/", destination_port),

@@ -45,16 +45,16 @@ jobs:
         ]
     name: "Release Serverless Init (isAlpine: ${{ matrix.arrays.isAlpine }})"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6.0.0
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6.0.0
         with:
           repository: DataDog/datadog-agent
           ref: ${{ github.event.inputs.agentBranch }}
           path: datadog-agent
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 #v3.6.0
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 #v3.7.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3

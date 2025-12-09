@@ -37,6 +37,24 @@ export DD_API_KEY=$(aws ssm get-parameter \
     --query "Parameter.Value" \
     --out text)
 
+printf "Getting DD API KEY Secret ARN...\n"
+
+export DATADOG_API_SECRET_ARN=$(aws ssm get-parameter \
+    --region us-east-1 \
+    --name ci.datadog-lambda-extension.dd-api-key-secret-arn \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --out text)
+
+printf "Getting DD APP KEY...\n"
+
+export DD_APP_KEY=$(aws ssm get-parameter \
+    --region us-east-1 \
+    --name ci.datadog-lambda-extension.dd-app-key \
+    --with-decryption \
+    --query "Parameter.Value" \
+    --out text)
+
 printf "Assuming role...\n"
 
 export $(printf "AWS_ACCESS_KEY_ID=%s AWS_SECRET_ACCESS_KEY=%s AWS_SESSION_TOKEN=%s" \

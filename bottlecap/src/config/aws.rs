@@ -11,6 +11,9 @@ const AWS_LAMBDA_FUNCTION_NAME: &str = "AWS_LAMBDA_FUNCTION_NAME";
 const AWS_LAMBDA_RUNTIME_API: &str = "AWS_LAMBDA_RUNTIME_API";
 const AWS_LWA_LAMBDA_RUNTIME_API_PROXY: &str = "AWS_LWA_LAMBDA_RUNTIME_API_PROXY";
 const AWS_LAMBDA_EXEC_WRAPPER: &str = "AWS_LAMBDA_EXEC_WRAPPER";
+const AWS_LAMBDA_INITIALIZATION_TYPE: &str = "AWS_LAMBDA_INITIALIZATION_TYPE";
+
+pub const LAMBDA_MANAGED_INSTANCES_INIT_TYPE: &str = "lambda-managed-instances";
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, Clone)]
@@ -21,6 +24,7 @@ pub struct AwsConfig {
     pub runtime_api: String,
     pub sandbox_init_time: Instant,
     pub exec_wrapper: Option<String>,
+    pub initialization_type: String,
 }
 
 impl AwsConfig {
@@ -33,7 +37,14 @@ impl AwsConfig {
             runtime_api: env::var(AWS_LAMBDA_RUNTIME_API).unwrap_or_default(),
             sandbox_init_time: start_time,
             exec_wrapper: env::var(AWS_LAMBDA_EXEC_WRAPPER).ok(),
+            initialization_type: env::var(AWS_LAMBDA_INITIALIZATION_TYPE).unwrap_or_default(),
         }
+    }
+
+    #[must_use]
+    pub fn is_managed_instance_mode(&self) -> bool {
+        self.initialization_type
+            .eq(LAMBDA_MANAGED_INSTANCES_INIT_TYPE)
     }
 }
 

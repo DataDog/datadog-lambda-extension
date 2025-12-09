@@ -5,6 +5,8 @@ pub mod context;
 pub mod propagation;
 pub mod proxy_aggregator;
 pub mod proxy_flusher;
+pub mod span_dedup;
+pub mod span_dedup_service;
 pub mod span_pointers;
 pub mod stats_aggregator;
 pub mod stats_concentrator_service;

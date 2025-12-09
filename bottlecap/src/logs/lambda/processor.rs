@@ -7,6 +7,7 @@ use tracing::{debug, error};
 use crate::LAMBDA_RUNTIME_SLUG;
 use crate::config;
 use crate::event_bus::Event;
+use crate::extension::telemetry::events::ReportMetrics;
 use crate::extension::telemetry::events::{Status, TelemetryEvent, TelemetryRecord};
 use crate::lifecycle::invocation::context::Context as InvocationContext;
 use crate::logs::aggregator_service::AggregatorHandle;
@@ -33,6 +34,8 @@ pub struct LambdaProcessor {
     event_bus: Sender<Event>,
     // Logs enabled
     logs_enabled: bool,
+    // Managed Instance mode
+    is_managed_instance_mode: bool,
 }
 
 const OOM_ERRORS: [&str; 7] = [
@@ -59,6 +62,7 @@ impl LambdaProcessor {
         tags_provider: Arc<provider::Provider>,
         datadog_config: Arc<config::Config>,
         event_bus: Sender<Event>,
+        is_managed_instance_mode: bool,
     ) -> Self {
         let service = datadog_config.service.clone().unwrap_or_default();
         let tags = tags_provider.get_tags_string();
@@ -77,6 +81,7 @@ impl LambdaProcessor {
             orphan_logs: Vec::new(),
             ready_logs: Vec::new(),
             event_bus,
+            is_managed_instance_mode,
         }
     }
 
@@ -187,40 +192,89 @@ impl LambdaProcessor {
                     Some(result_status),
                 ))
             },
-            TelemetryRecord::PlatformReport { request_id, metrics, .. } => { // TODO: check what to do with rest of the fields
+            TelemetryRecord::PlatformReport { request_id, metrics, status, error_type, .. } => {
                 if let Err(e) = self.event_bus.send(Event::Telemetry(copy)).await {
                     error!("Failed to send PlatformReport to the main event bus: {}", e);
                 }
+                match metrics {
+                    ReportMetrics::ManagedInstance(managed_instance_metrics) => {
+                        let (result_status, message) = match status {
+                            Status::Timeout => (
+                                "error",
+                                format!(
+                                    "REPORT RequestId: {} Runtime Duration: {:.2} ms Task timed out after {:.2} seconds",
+                                    request_id,
+                                    managed_instance_metrics.duration_ms,
+                                    managed_instance_metrics.duration_ms / 1000.0
+                                )
+                            ),
+                            Status::Error => {
+                                let error_detail = error_type
+                                    .as_ref()
+                                    .map_or_else(|| " Task failed with an unknown error".to_string(), |e| format!(" Task failed: {e}"));
+                                (
+                                    "error",
+                                    format!(
+                                        "REPORT RequestId: {} Runtime Duration: {:.2} ms{}",
+                                        request_id,
+                                        managed_instance_metrics.duration_ms,
+                                        error_detail
+                                    )
+                                )
+                            }
+                            _ => (
+                                "info",
+                                format!(
+                                    "REPORT RequestId: {} Runtime Duration: {:.2} ms",
+                                    request_id,
+                                    managed_instance_metrics.duration_ms
+                                )
+                            )
+                        };
 
-                let mut post_runtime_duration_ms = 0.0;
-                // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
-                if self.invocation_context.runtime_duration_ms > 0.0 {
-                    post_runtime_duration_ms = metrics.duration_ms - self.invocation_context.runtime_duration_ms;
+                        self.invocation_context.runtime_duration_ms = managed_instance_metrics.duration_ms;
+                        // Remove the `request_id` since no more orphan logs will be processed with this one
+                        self.invocation_context.request_id = String::new();
+
+                        Ok(Message::new(
+                            message,
+                            Some(request_id),
+                            self.function_arn.clone(),
+                            event.time.timestamp_millis(),
+                            Some(result_status.to_string()),
+                        ))
+                    }
+                    ReportMetrics::OnDemand(metrics) => {
+                        let mut post_runtime_duration_ms = 0.0;
+                        // Calculate `post_runtime_duration_ms` if we've seen a `runtime_duration_ms`.
+                        if self.invocation_context.runtime_duration_ms > 0.0 {
+                            post_runtime_duration_ms = metrics.duration_ms - self.invocation_context.runtime_duration_ms;
+                        }
+
+                        let mut message = format!(
+                            "REPORT RequestId: {} Duration: {:.2} ms Runtime Duration: {:.2} ms Post Runtime Duration: {:.2} ms Billed Duration: {:.2} ms Memory Size: {} MB Max Memory Used: {} MB",
+                            request_id,
+                            metrics.duration_ms,
+                            self.invocation_context.runtime_duration_ms,
+                            post_runtime_duration_ms,
+                            metrics.billed_duration_ms,
+                            metrics.memory_size_mb,
+                            metrics.max_memory_used_mb,
+                        );
+
+                        if let Some(init_duration_ms) = metrics.init_duration_ms {
+                            message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
+                        }
+
+                        Ok(Message::new(
+                            message,
+                            Some(request_id),
+                            self.function_arn.clone(),
+                            event.time.timestamp_millis(),
+                            None,
+                        ))
+                    }
                 }
-
-                let mut message = format!(
-                    "REPORT RequestId: {} Duration: {:.2} ms Runtime Duration: {:.2} ms Post Runtime Duration: {:.2} ms Billed Duration: {:.2} ms Memory Size: {} MB Max Memory Used: {} MB",
-                    request_id,
-                    metrics.duration_ms,
-                    self.invocation_context.runtime_duration_ms,
-                    post_runtime_duration_ms,
-                    metrics.billed_duration_ms,
-                    metrics.memory_size_mb,
-                    metrics.max_memory_used_mb,
-                );
-
-                let init_duration_ms = metrics.init_duration_ms;
-                if let Some(init_duration_ms) = init_duration_ms {
-                    message = format!("{message} Init Duration: {init_duration_ms:.2} ms");
-                }
-
-                Ok(Message::new(
-                    message,
-                    Some(request_id),
-                    self.function_arn.clone(),
-                    event.time.timestamp_millis(),
-                    None,
-                ))
             },
             TelemetryRecord::PlatformRestoreStart { .. } => {
                 if let Err(e) = self.event_bus.send(Event::Telemetry(event)).await {
@@ -247,7 +301,10 @@ impl LambdaProcessor {
         lambda_message.lambda.request_id = match lambda_message.lambda.request_id {
             Some(request_id) => Some(request_id.clone()),
             None => {
-                if self.invocation_context.request_id.is_empty() {
+                // If there is no request_id available in the current invocation context,
+                // then set to None, same goes if we are in a Managed Instance – as concurrent
+                // requests doesn't allow us to infer which invocation the logs belong to.
+                if self.invocation_context.request_id.is_empty() || self.is_managed_instance_mode {
                     None
                 } else {
                     Some(self.invocation_context.request_id.clone())
@@ -290,10 +347,14 @@ impl LambdaProcessor {
             }
         };
 
-        if log.message.lambda.request_id.is_some() {
+        if log.message.lambda.request_id.is_some() || self.is_managed_instance_mode {
+            // In On-Demand mode, ship logs with request_id.
+            // In Managed Instance mode, ship logs without request_id immediately as well.
+            // These are inter-invocation/sandbox logs that should be aggregated without
+            // waiting to be attached to the next invocation.
             Ok(log)
         } else {
-            // No request_id available, queue as orphan log
+            // In On-Demand mode, if no request_id is available, queue as orphan log
             self.orphan_logs.push(log);
             Err("No request_id available, queueing for later".into())
         }
@@ -382,7 +443,8 @@ mod tests {
     use std::sync::Arc;
 
     use crate::extension::telemetry::events::{
-        InitPhase, InitType, ReportMetrics, RuntimeDoneMetrics, Status,
+        InitPhase, InitType, ManagedInstanceReportMetrics, OnDemandReportMetrics, ReportMetrics,
+        RuntimeDoneMetrics, Status,
     };
     use crate::logs::aggregator_service::AggregatorService;
     use crate::logs::lambda::Lambda;
@@ -415,6 +477,7 @@ mod tests {
                             tags,
                             ..config::Config::default()}),
                         tx.clone(),
+                        false, // On-Demand mode
                     );
 
                     let result = processor.get_message(input.clone()).await.unwrap();
@@ -561,14 +624,15 @@ mod tests {
                     error_type: None,
                     status: Status::Success,
                     request_id: "test-request-id".to_string(),
-                    metrics: ReportMetrics {
+                    metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
                         duration_ms: 100.0,
                         billed_duration_ms: 128,
                         memory_size_mb: 256,
                         max_memory_used_mb: 64,
                         init_duration_ms: Some(50.0),
                         restore_duration_ms: None
-                    }
+                    }),
+                    spans: None,
                 }
             },
             Message {
@@ -580,6 +644,106 @@ mod tests {
                     timestamp: 1_673_061_827_000,
                     status: "info".to_string(),
                 },
+        ),
+
+        // platform report - Managed Instance mode success
+        platform_report_managed_instance_success: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 123.45,
+                    }),
+                    status: Status::Success,
+                    error_type: None,
+                    spans: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 123.45 ms".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "info".to_string(),
+            },
+        ),
+
+        // platform report - managed instance mode error with error_type
+        platform_report_managed_instance_error: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 200.0,
+                    }),
+                    status: Status::Error,
+                    error_type: Some("RuntimeError".to_string()),
+                    spans: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 200.00 ms Task failed: RuntimeError".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "error".to_string(),
+            },
+        ),
+
+        // platform report - managed instance mode timeout
+        platform_report_managed_instance_timeout: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 30000.0,
+                    }),
+                    status: Status::Timeout,
+                    error_type: None,
+                    spans: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 30000.00 ms Task timed out after 30.00 seconds".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "error".to_string(),
+            },
+        ),
+
+        // platform report - managed instance mode error without error_type
+        platform_report_managed_instance_error_no_type: (
+            &TelemetryEvent {
+                time: Utc.with_ymd_and_hms(2023, 1, 7, 2, 30, 27).unwrap(),
+                record: TelemetryRecord::PlatformReport {
+                    request_id: "test-request-id".to_string(),
+                    metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics {
+                        duration_ms: 150.0,
+                    }),
+                    status: Status::Error,
+                    error_type: None,
+                    spans: None,
+                }
+            },
+            Message {
+                message: "REPORT RequestId: test-request-id Runtime Duration: 150.00 ms Task failed with an unknown error".to_string(),
+                lambda: Lambda {
+                    arn: "test-arn".to_string(),
+                    request_id: Some("test-request-id".to_string()),
+                },
+                timestamp: 1_673_058_627_000,
+                status: "error".to_string(),
+            },
         ),
     }
 
@@ -597,7 +761,8 @@ mod tests {
 
         let (tx, _) = tokio::sync::mpsc::channel(2);
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -630,7 +795,8 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -676,7 +842,8 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -709,7 +876,8 @@ mod tests {
         ));
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -736,6 +904,45 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_get_intake_log_managed_instance_mode() {
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
+        // Set is_managed_instance_mode to true
+        let mut processor =
+            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone(), true);
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String("test-function".to_string())),
+        };
+
+        let lambda_message = processor.get_message(event.clone()).await.unwrap();
+        assert_eq!(lambda_message.lambda.request_id, None);
+
+        let intake_log = processor.get_intake_log(lambda_message).unwrap();
+        assert_eq!(intake_log.message.lambda.request_id, None);
+        assert_eq!(processor.orphan_logs.len(), 0);
+
+        assert_eq!(intake_log.source, LAMBDA_RUNTIME_SLUG.to_string());
+        assert_eq!(intake_log.hostname, "test-arn".to_string());
+        assert_eq!(intake_log.service, "test-service".to_string());
+        assert_eq!(intake_log.message.message, "test-function".to_string());
+        assert_eq!(intake_log.tags, tags_provider.get_tags_string());
+    }
+
     // process
     #[tokio::test]
     async fn test_process() {
@@ -758,8 +965,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -822,8 +1033,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -867,7 +1082,8 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor = LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone());
+        let mut processor =
+            LambdaProcessor::new(tags_provider, Arc::clone(&config), tx.clone(), false);
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -909,8 +1125,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1000,8 +1220,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
-        let mut processor =
-            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            tags_provider.clone(),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::PlatformStart {
@@ -1058,8 +1282,12 @@ mod tests {
 
         let (tx, _rx) = tokio::sync::mpsc::channel(2);
 
-        let mut processor =
-            LambdaProcessor::new(tags_provider.clone(), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            tags_provider.clone(),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
         let start_event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
             record: TelemetryRecord::PlatformStart {
@@ -1131,8 +1359,12 @@ mod tests {
             aggregator_service.run().await;
         });
 
-        let mut processor =
-            LambdaProcessor::new(Arc::clone(&tags_provider), Arc::clone(&config), tx.clone());
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            false,
+        );
 
         // First, send an extension log (orphan) that doesn't have a request_id
         let extension_event = TelemetryEvent {
@@ -1199,5 +1431,68 @@ mod tests {
         service_handle
             .await
             .expect("Aggregator service task failed");
+    }
+
+    #[tokio::test]
+    async fn test_orphan_logs_no_request_id_in_managed_instance() {
+        // This test verifies that in managed instance mode, logs without a request_id
+        // are sent immediately without being queued as orphans, and they never get
+        // a request_id attached even when one becomes available in the invocation context.
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: HashMap::from([("test".to_string(), "tags".to_string())]),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _rx) = tokio::sync::mpsc::channel(2);
+
+        // Create processor in managed instance mode (is_managed_instance_mode = true)
+        let mut processor = LambdaProcessor::new(
+            Arc::clone(&tags_provider),
+            Arc::clone(&config),
+            tx.clone(),
+            true, // Managed Instance mode
+        );
+
+        // Send a function log without a request_id (inter-invocation log)
+        let function_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                "Inter-invocation log without request_id".to_string(),
+            )),
+        };
+        let log1 = processor.make_log(function_event).await.unwrap();
+        assert_eq!(log1.message.lambda.request_id, None);
+        assert_eq!(processor.orphan_logs.len(), 0);
+
+        // Now send a PlatformStart event with a request_id to set the context
+        let start_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 49).unwrap(),
+            record: TelemetryRecord::PlatformStart {
+                request_id: "test-request-id".to_string(),
+                version: Some("test".to_string()),
+            },
+        };
+        processor.make_log(start_event).await.unwrap();
+        assert_eq!(processor.invocation_context.request_id, "test-request-id");
+
+        // Send another function log without explicit request_id
+        let another_function_event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 50).unwrap(),
+            record: TelemetryRecord::Function(Value::String(
+                "Another log after request_id available".to_string(),
+            )),
+        };
+        let log2 = processor.make_log(another_function_event).await.unwrap();
+
+        // In managed instance mode, logs should not inherit request_id from context
+        assert_eq!(log2.message.lambda.request_id, None);
+        assert_eq!(processor.orphan_logs.len(), 0);
     }
 }

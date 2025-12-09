@@ -13,6 +13,9 @@ pub const EXTENSION_ID_HEADER: &str = "Lambda-Extension-Identifier";
 pub const EXTENSION_ACCEPT_FEATURE_HEADER: &str = "Lambda-Extension-Accept-Feature";
 pub const EXTENSION_ROUTE: &str = "2020-01-01/extension";
 
+const EXTENSION_ON_DEMAND_EVENTS: &[&str] = &["INVOKE", "SHUTDOWN"];
+const EXTENSION_MANAGED_INSTANCE_EVENTS: &[&str] = &["SHUTDOWN"];
+
 /// Error conditions that can arise from extension operations
 #[derive(thiserror::Error, Debug)]
 pub enum ExtensionError {
@@ -80,13 +83,23 @@ pub fn base_url(route: &str, runtime_api: &str) -> String {
     format!("http://{runtime_api}/{route}")
 }
 
+fn get_subscription_event_types(managed_instance_mode: bool) -> Vec<&'static str> {
+    (if managed_instance_mode {
+        EXTENSION_MANAGED_INSTANCE_EVENTS
+    } else {
+        EXTENSION_ON_DEMAND_EVENTS
+    })
+    .to_vec()
+}
+
 pub async fn register(
     client: &Client,
     runtime_api: &str,
     extension_name: &str,
+    managed_instance_mode: bool,
 ) -> Result<RegisterResponse, ExtensionError> {
-    let events_to_subscribe_to = serde_json::json!({
-        "events": ["INVOKE", "SHUTDOWN"]
+    let events = serde_json::json!({
+        "events": get_subscription_event_types(managed_instance_mode)
     });
 
     let base_url = base_url(EXTENSION_ROUTE, runtime_api);
@@ -96,7 +109,7 @@ pub async fn register(
         .post(&url)
         .header(EXTENSION_NAME_HEADER, extension_name)
         .header(EXTENSION_ACCEPT_FEATURE_HEADER, EXTENSION_FEATURES)
-        .json(&events_to_subscribe_to)
+        .json(&events)
         .send()
         .await?;
 

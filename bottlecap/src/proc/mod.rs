@@ -8,8 +8,8 @@ use std::{
 };
 
 use constants::{
-    LAMBDA_NETWORK_INTERFACE, LAMBDA_RUNTIME_NETWORK_INTERFACE, PROC_NET_DEV_PATH, PROC_PATH,
-    PROC_STAT_PATH, PROC_UPTIME_PATH,
+    LAMBDA_NETWORK_INTERFACE, LAMBDA_RUNTIME_NETWORK_INTERFACE, MANAGED_INSTANCE_NETWORK_INTERFACE,
+    PROC_NET_DEV_PATH, PROC_PATH, PROC_STAT_PATH, PROC_UPTIME_PATH,
 };
 use regex::Regex;
 use tracing::{debug, trace};
@@ -63,6 +63,7 @@ fn get_network_data_from_path(path: &str) -> Result<NetworkData, io::Error> {
         if values.next().is_some_and(|interface_name| {
             interface_name.starts_with(LAMBDA_NETWORK_INTERFACE)
                 || interface_name.starts_with(LAMBDA_RUNTIME_NETWORK_INTERFACE)
+                || interface_name.starts_with(MANAGED_INSTANCE_NETWORK_INTERFACE) // managed instance mode
         }) {
             // Read the value for received bytes if present
             let rx_bytes: Option<f64> = values.next().and_then(|s| s.parse().ok());
@@ -356,6 +357,7 @@ mod tests {
 
     #[test]
     fn test_get_network_data() {
+        // On-demand
         let path = "./tests/proc/net/valid_dev";
         let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_ok());
@@ -376,6 +378,18 @@ mod tests {
         assert!(network_data_result.is_err());
 
         let path = "./tests/proc/net/nonexistent_dev";
+        let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
+        assert!(network_data_result.is_err());
+
+        // Managed Instance
+        let path = "./tests/proc/net/managed_instance_valid_dev";
+        let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
+        assert!(network_data_result.is_ok());
+        let network_data = network_data_result.unwrap();
+        assert!((network_data.rx_bytes - 309_048.0).abs() < f64::EPSILON);
+        assert!((network_data.tx_bytes - 84870.0).abs() < f64::EPSILON);
+
+        let path = "./tests/proc/net/managed_instance_invalid_dev";
         let network_data_result = get_network_data_from_path(path_from_root(path).as_str());
         assert!(network_data_result.is_err());
     }

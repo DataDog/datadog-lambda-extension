@@ -18,10 +18,16 @@ impl LogsProcessor {
         tags_provider: Arc<tags::provider::Provider>,
         event_bus: Sender<Event>,
         runtime: String,
+        is_managed_instance_mode: bool,
     ) -> Self {
         match runtime.as_str() {
             LAMBDA_RUNTIME_SLUG => {
-                let lambda_processor = LambdaProcessor::new(tags_provider, config, event_bus);
+                let lambda_processor = LambdaProcessor::new(
+                    tags_provider,
+                    config,
+                    event_bus,
+                    is_managed_instance_mode,
+                );
                 LogsProcessor::Lambda(lambda_processor)
             }
             _ => panic!("Unsupported runtime: {runtime}"),
