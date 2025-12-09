@@ -534,6 +534,7 @@ dependencies = [
  "httpmock",
  "hyper 1.6.0",
  "hyper-http-proxy",
+ "hyper-rustls",
  "hyper-util",
  "indexmap 2.12.0",
  "itertools 0.14.0",
@@ -559,6 +560,8 @@ dependencies = [
  "reqwest",
  "rustls",
  "rustls-native-certs",
+ "rustls-pemfile",
+ "rustls-pki-types",
  "serde",
  "serde-aux",
  "serde_html_form",
@@ -796,7 +799,7 @@ dependencies = [
 [[package]]
 name = "datadog-trace-obfuscation"
 version = "24.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "anyhow",
  "libdd-common",
@@ -1828,7 +1831,7 @@ checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 [[package]]
 name = "libdd-common"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "anyhow",
  "cc",
@@ -1861,7 +1864,7 @@ dependencies = [
 [[package]]
 name = "libdd-ddsketch"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "prost",
 ]
@@ -1869,7 +1872,7 @@ dependencies = [
 [[package]]
 name = "libdd-tinybytes"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "serde",
 ]
@@ -1877,7 +1880,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-normalization"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "anyhow",
  "libdd-trace-protobuf",
@@ -1886,7 +1889,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-protobuf"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "prost",
  "serde",
@@ -1896,7 +1899,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-stats"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "hashbrown 0.15.4",
  "libdd-ddsketch",
@@ -1907,7 +1910,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-utils"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=6c4e8fdf053ae0ba200e37a0d5f35885e8060c39#6c4e8fdf053ae0ba200e37a0d5f35885e8060c39"
+source = "git+https://github.com/DataDog/libdatadog?rev=21eecb036ed4b5e6df57d9dfa7ac0922837401e7#21eecb036ed4b5e6df57d9dfa7ac0922837401e7"
 dependencies = [
  "anyhow",
  "bytes",
@@ -2971,6 +2974,15 @@ dependencies = [
  "rustls-pki-types",
  "schannel",
  "security-framework",
+]
+
+[[package]]
+name = "rustls-pemfile"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dce314e5fee3f39953d46bb63bb8a46d40c2f8fb7cc5a3b6cab2bde9721d6e50"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]

@@ -32,13 +32,16 @@ fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn
         // Enable TCP keepalive
         .tcp_keepalive(Some(Duration::from_secs(120)));
 
+    // Add custom CA certificate if specified
+    // This certificate will be used for both proxy connections (if the proxy uses HTTPS)
+    // and for the final destination
     if let Some(ca_cert_path) = &config.ssl_ca_cert {
         let mut buf = Vec::new();   
         let mut cert_file = File::open(ca_cert_path)?;
         cert_file.read_to_end(&mut buf)?;
         let cert = reqwest::Certificate::from_pem(&buf)?;
         client = client.add_root_certificate(cert);
-        debug!("HTTP | Added root certificate from {}", ca_cert_path);
+        debug!("HTTP | Added root certificate from {} (will be used for proxy and destination)", ca_cert_path);
     }
 
     // Determine if we should use HTTP/1 or HTTP/2
@@ -60,8 +63,11 @@ fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn
 
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
     if let Some(https_uri) = &config.proxy_https {
+        debug!("HTTP | Configuring HTTPS proxy: {}", https_uri);
         let proxy = reqwest::Proxy::https(https_uri.clone())?;
-        Ok(client.proxy(proxy).build()?)
+        let built_client = client.proxy(proxy).build()?;
+        debug!("HTTP | HTTPS proxy configured successfully");
+        Ok(built_client)
     } else {
         Ok(client.build()?)
     }
