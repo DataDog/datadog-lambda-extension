@@ -476,14 +476,34 @@ integration-cleanup-stacks:
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    - apt-get install -y nodejs
-    - cd integration-tests
-    - npm ci
   {{ end }}
   script:
     - echo "Destroying CDK stacks with identifier ${IDENTIFIER}..."
-    - npx cdk destroy "integ-$IDENTIFIER-*" --force || echo "Failed to destroy some stacks, but continuing..."
+    - |
+      # Find all stacks matching the pattern using CloudFormation API
+      STACKS=$(aws cloudformation list-stacks \
+        --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE \
+        --query "StackSummaries[?starts_with(StackName, 'integ-${IDENTIFIER}-')].StackName" \
+        --output text --region us-east-1)
+
+      if [ -z "$STACKS" ]; then
+        echo "No stacks found matching pattern integ-${IDENTIFIER}-*"
+      else
+        echo "Found stacks to delete: ${STACKS}"
+        for STACK in $STACKS; do
+          echo "Deleting stack ${STACK}..."
+          aws cloudformation delete-stack --stack-name "${STACK}" --region us-east-1 || echo "Failed to delete ${STACK}, continuing..."
+        done
+
+        # Wait for all deletions to complete
+        echo "Waiting for stack deletions to complete..."
+        for STACK in $STACKS; do
+          echo "Waiting for ${STACK}..."
+          aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region us-east-1 || echo "Stack ${STACK} deletion did not complete cleanly, continuing..."
+        done
+
+        echo "All stacks deleted successfully"
+      fi
 
 # Integration Tests - Cleanup layer
 integration-cleanup-layer:
@@ -504,7 +524,7 @@ integration-cleanup-layer:
   script:
     - echo "Deleting integration test layer with identifier ${IDENTIFIER}..."
     - |
-      LAYER_NAME="Datadog-Extension-${IDENTIFIER}"
+      LAYER_NAME="Datadog-Extension-ARM-${IDENTIFIER}"
       echo "Looking for layer: ${LAYER_NAME}"
 
       # Get all versions of the layer
