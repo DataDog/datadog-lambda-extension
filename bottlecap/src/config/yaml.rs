@@ -749,6 +749,7 @@ proxy:
   https: "https://proxy.example.com"
   no_proxy: ["localhost", "127.0.0.1"]
 dd_url: "https://metrics.datadoghq.com"
+http_protocol: "http1"
 ssl_ca_cert: "/opt/ca-cert.pem"
 
 # Endpoints

@@ -227,27 +227,23 @@ impl ServerlessTraceFlusher {
             ensure_crypto_provider_initialized();
 
             // Load the custom certificate
-            debug!("TRACES | Loading custom certificate from {}", ca_cert_path);
             let cert_file = File::open(ca_cert_path)?;
             let mut reader = BufReader::new(cert_file);
             let certs: Vec<CertificateDer> = rustls_pemfile::certs(&mut reader)
                 .collect::<Result<Vec<_>, _>>()?;
 
             // Create a root certificate store and add custom certs
-            debug!("TRACES | Creating root certificate store");
             let mut root_store = RootCertStore::empty();
             for cert in certs {
                 root_store.add(cert)?;
             }
 
             // Build the TLS config with custom root certificates
-            debug!("TRACES | Building TLS config");
             let tls_config = rustls::ClientConfig::builder()
                 .with_root_certificates(root_store)
                 .with_no_client_auth();
 
             // Build the HTTPS connector with custom config
-            debug!("TRACES | Building HTTPS connector");
             let https_connector = HttpsConnectorBuilder::new()
                 .with_tls_config(tls_config)
                 .https_or_http()
@@ -257,7 +253,6 @@ impl ServerlessTraceFlusher {
             debug!("TRACES | Added root certificate from {}", ca_cert_path);
 
             // Construct the Connector::Https variant directly
-            debug!("TRACES | Constructing Connector::Https variant");
             libdd_common::connector::Connector::Https(https_connector)
         } else {
             // Use default connector
@@ -271,16 +266,14 @@ impl ServerlessTraceFlusher {
                 connector,
                 proxy,
             )?;
-            debug!("TRACES | Proxy connector created with proxy: {:?}", proxy_https);
             // Force HTTP/1.1 when using a proxy - many proxies don't support HTTP/2 CONNECT
             let client = hyper_migration::client_builder()
-                .http2_only(false)  // Disable HTTP/2-only mode to allow HTTP/1.1
+                // .http2_only(false)  // Disable HTTP/2-only mode to allow HTTP/1.1
                 .build(proxy_connector);
-            debug!("TRACES | Client configured to allow HTTP/1.1 for proxy compatibility");
+            debug!("TRACES | Proxy connector created with proxy: {:?}", proxy_https);
             Ok(client)
         } else {
             let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
-            debug!("TRACES | Proxy connector created without proxy");
             Ok(hyper_migration::client_builder().build(proxy_connector))
         }
     }
