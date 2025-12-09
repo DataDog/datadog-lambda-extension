@@ -324,6 +324,49 @@ signed layer bundle:
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
 
+# Integration Tests - Build Java Lambda function
+build java lambda:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/base-java/target/
+  script:
+    - cd integration-tests/lambda/base-java
+    - docker run --rm --platform linux/arm64
+        -v "$(pwd)":/workspace
+        -w /workspace
+        maven:3.9-eclipse-temurin-21-alpine
+        mvn clean package
+
+# Integration Tests - Build .NET Lambda function
+build dotnet lambda:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/base-dotnet/bin/
+  script:
+    - cd integration-tests/lambda/base-dotnet
+    - docker run --rm --platform linux/arm64
+        -v "$(pwd)":/workspace
+        -w /workspace
+        mcr.microsoft.com/dotnet/sdk:8.0-alpine
+        sh -c "apk add --no-cache zip &&
+               dotnet tool install -g Amazon.Lambda.Tools || true &&
+               export PATH=\"\$PATH:/root/.dotnet/tools\" &&
+               dotnet lambda package -o bin/function.zip --function-architecture arm64"
+
 # Integration Tests - Publish arm64 layer with integration test prefix
 publish integration layer (arm64):
   stage: integration-tests
@@ -362,6 +405,11 @@ integration-deploy:
     - when: on_success
   needs:
     - publish integration layer (arm64)
+    - build java lambda
+    - build dotnet lambda
+  dependencies:
+    - build java lambda
+    - build dotnet lambda
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1
@@ -418,35 +466,55 @@ integration-cleanup-stacks:
   stage: integration-tests
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  when: always
   rules:
     - when: always
   needs:
-    - integration-test
+    - job: integration-test
+      optional: false
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    - apt-get install -y nodejs
-    - cd integration-tests
-    - npm ci
   {{ end }}
   script:
     - echo "Destroying CDK stacks with identifier ${IDENTIFIER}..."
-    - npx cdk destroy "integ-$IDENTIFIER-*" --force || echo "Failed to destroy some stacks, but continuing..."
+    - |
+      # Find all stacks matching the pattern using CloudFormation API
+      STACKS=$(aws cloudformation list-stacks \
+        --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE \
+        --query "StackSummaries[?starts_with(StackName, 'integ-${IDENTIFIER}-')].StackName" \
+        --output text --region us-east-1)
+
+      if [ -z "$STACKS" ]; then
+        echo "No stacks found matching pattern integ-${IDENTIFIER}-*"
+      else
+        echo "Found stacks to delete: ${STACKS}"
+        for STACK in $STACKS; do
+          echo "Deleting stack ${STACK}..."
+          aws cloudformation delete-stack --stack-name "${STACK}" --region us-east-1 || echo "Failed to delete ${STACK}, continuing..."
+        done
+
+        # Wait for all deletions to complete
+        echo "Waiting for stack deletions to complete..."
+        for STACK in $STACKS; do
+          echo "Waiting for ${STACK}..."
+          aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region us-east-1 || echo "Stack ${STACK} deletion did not complete cleanly, continuing..."
+        done
+
+        echo "All stacks deleted successfully"
+      fi
 
 # Integration Tests - Cleanup layer
 integration-cleanup-layer:
   stage: integration-tests
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  when: always
   rules:
     - when: always
   needs:
-    - integration-cleanup-stacks
+    - job: integration-cleanup-stacks
+      optional: false
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
   {{ with $environment := (ds "environments").environments.sandbox }}
@@ -456,7 +524,7 @@ integration-cleanup-layer:
   script:
     - echo "Deleting integration test layer with identifier ${IDENTIFIER}..."
     - |
-      LAYER_NAME="Datadog-Extension-${IDENTIFIER}"
+      LAYER_NAME="Datadog-Extension-ARM-${IDENTIFIER}"
       echo "Looking for layer: ${LAYER_NAME}"
 
       # Get all versions of the layer
