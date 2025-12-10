@@ -252,6 +252,7 @@ pub struct Config {
     pub proxy_https: Option<String>,
     pub proxy_no_proxy: Vec<String>,
     pub http_protocol: Option<String>,
+    pub tls_cert_file: Option<String>,
 
     // Endpoints
     pub dd_url: String,
@@ -366,6 +367,7 @@ impl Default for Config {
             proxy_https: None,
             proxy_no_proxy: vec![],
             http_protocol: None,
+            tls_cert_file: None,
 
             // Endpoints
             dd_url: String::default(),

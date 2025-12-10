@@ -102,9 +102,10 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let start = std::time::Instant::now();
 
-        let Ok(http_client) =
-            ServerlessTraceFlusher::get_http_client(self.config.proxy_https.as_ref())
-        else {
+        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(
+            self.config.proxy_https.as_ref(),
+            self.config.tls_cert_file.as_ref(),
+        ) else {
             error!("STATS_FLUSHER | Failed to create HTTP client");
             return;
         };

@@ -4,15 +4,21 @@
 use async_trait::async_trait;
 use dogstatsd::api_key::ApiKeyFactory;
 use hyper_http_proxy;
+use hyper_rustls::HttpsConnectorBuilder;
 use libdd_common::{Endpoint, GenericHttpClient, hyper_migration};
 use libdd_trace_utils::{
     config_utils::trace_intake_url_prefixed,
     send_data::SendDataBuilder,
     trace_utils::{self, SendData},
 };
+use rustls::RootCertStore;
+use rustls_pki_types::CertificateDer;
 use std::error::Error;
+use std::fs::File;
+use std::io::BufReader;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::LazyLock;
 use tokio::task::JoinSet;
 use tracing::{debug, error};
 
@@ -35,6 +41,7 @@ pub trait TraceFlusher {
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
         proxy_https: &Option<String>,
+        tls_cert_file: &Option<String>,
     ) -> Option<Vec<SendData>>;
 
     /// Flushes traces by getting every available batch on the aggregator.
@@ -104,7 +111,13 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     "TRACES | Retrying to send {} previously failed batches",
                     traces.len()
                 );
-                let retry_result = Self::send(traces, None, &self.config.proxy_https).await;
+                let retry_result = Self::send(
+                    traces,
+                    None,
+                    &self.config.proxy_https,
+                    &self.config.tls_cert_file,
+                )
+                .await;
                 if retry_result.is_some() {
                     // Still failed, return to retry later
                     return retry_result;
@@ -131,13 +144,17 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
-            batch_tasks.spawn(async move { Self::send(traces_clone, None, &proxy_https).await });
+            let tls_cert_file = self.config.tls_cert_file.clone();
+            batch_tasks.spawn(async move {
+                Self::send(traces_clone, None, &proxy_https, &tls_cert_file).await
+            });
 
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
                 let proxy_https = self.config.proxy_https.clone();
+                let tls_cert_file = self.config.tls_cert_file.clone();
                 batch_tasks.spawn(async move {
-                    Self::send(traces_clone, Some(&endpoint), &proxy_https).await
+                    Self::send(traces_clone, Some(&endpoint), &proxy_https, &tls_cert_file).await
                 });
             }
         }
@@ -158,6 +175,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
         proxy_https: &Option<String>,
+        tls_cert_file: &Option<String>,
     ) -> Option<Vec<SendData>> {
         if traces.is_empty() {
             return None;
@@ -167,7 +185,9 @@ impl TraceFlusher for ServerlessTraceFlusher {
         tokio::task::yield_now().await;
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
-        let Ok(http_client) = ServerlessTraceFlusher::get_http_client(proxy_https.as_ref()) else {
+        let Ok(http_client) =
+            ServerlessTraceFlusher::get_http_client(proxy_https.as_ref(), tls_cert_file.as_ref())
+        else {
             error!("TRACES | Failed to create HTTP client");
             return None;
         };
@@ -192,25 +212,79 @@ impl TraceFlusher for ServerlessTraceFlusher {
     }
 }
 
+// Initialize the crypto provider needed for setting custom root certificates
+fn ensure_crypto_provider_initialized() {
+    static INIT_CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
+        #[cfg(unix)]
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install default CryptoProvider");
+    });
+
+    let () = &*INIT_CRYPTO_PROVIDER;
+}
+
 impl ServerlessTraceFlusher {
     pub fn get_http_client(
         proxy_https: Option<&String>,
+        tls_cert_file: Option<&String>,
     ) -> Result<
         GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>,
         Box<dyn Error>,
     > {
+        // Create the base connector with optional custom TLS config
+        let connector = if let Some(ca_cert_path) = tls_cert_file {
+            // Ensure crypto provider is initialized before creating TLS config
+            ensure_crypto_provider_initialized();
+
+            // Load the custom certificate
+            let cert_file = File::open(ca_cert_path)?;
+            let mut reader = BufReader::new(cert_file);
+            let certs: Vec<CertificateDer> =
+                rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
+
+            // Create a root certificate store and add custom certs
+            let mut root_store = RootCertStore::empty();
+            for cert in certs {
+                root_store.add(cert)?;
+            }
+
+            // Build the TLS config with custom root certificates
+            let tls_config = rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+
+            // Build the HTTPS connector with custom config
+            let https_connector = HttpsConnectorBuilder::new()
+                .with_tls_config(tls_config)
+                .https_or_http()
+                .enable_http1()
+                .build();
+
+            debug!(
+                "TRACES | GET_HTTP_CLIENT | Added root certificate from {}",
+                ca_cert_path
+            );
+
+            // Construct the Connector::Https variant directly
+            libdd_common::connector::Connector::Https(https_connector)
+        } else {
+            // Use default connector
+            libdd_common::connector::Connector::default()
+        };
+
         if let Some(proxy) = proxy_https {
             let proxy =
                 hyper_http_proxy::Proxy::new(hyper_http_proxy::Intercept::Https, proxy.parse()?);
-            let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(
-                libdd_common::connector::Connector::default(),
-                proxy,
-            )?;
-            Ok(hyper_migration::client_builder().build(proxy_connector))
+            let proxy_connector = hyper_http_proxy::ProxyConnector::from_proxy(connector, proxy)?;
+            let client = hyper_migration::client_builder().build(proxy_connector);
+            debug!(
+                "TRACES | GET_HTTP_CLIENT | Proxy connector created with proxy: {:?}",
+                proxy_https
+            );
+            Ok(client)
         } else {
-            let proxy_connector = hyper_http_proxy::ProxyConnector::new(
-                libdd_common::connector::Connector::default(),
-            )?;
+            let proxy_connector = hyper_http_proxy::ProxyConnector::new(connector)?;
             Ok(hyper_migration::client_builder().build(proxy_connector))
         }
     }
