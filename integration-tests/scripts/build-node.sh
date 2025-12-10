@@ -62,13 +62,16 @@ build_node_lambda() {
         NPM_CACHE_DIR="$HOME/.npm"
     fi
 
+    # Determine Node image (use AWS ECR Public to avoid Docker Hub rate limits)
+    NODE_IMAGE="public.ecr.aws/docker/library/node:20-alpine"
+
     # Install dependencies with Docker using ARM64 platform
     # Mount npm cache for faster package downloads
     docker run --rm --platform linux/arm64 \
       -v "$LAMBDA_DIR":/workspace \
       -v "$NPM_CACHE_DIR":/root/.npm \
       -w /workspace \
-      node:20-alpine \
+      "$NODE_IMAGE" \
       npm ci --production
 
     if [ -d "$LAMBDA_DIR/node_modules" ] && [ "$(ls -A "$LAMBDA_DIR/node_modules")" ]; then

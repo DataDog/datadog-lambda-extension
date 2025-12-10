@@ -48,13 +48,16 @@ build_java_lambda() {
         MAVEN_CACHE_DIR="$HOME/.m2"
     fi
 
+    # Determine Maven image (use AWS ECR Public to avoid Docker Hub rate limits)
+    MAVEN_IMAGE="public.ecr.aws/docker/library/maven:3.9-eclipse-temurin-21-alpine"
+
     # Build with Docker using ARM64 platform
     # Mount Maven cache for faster dependency downloads
     docker run --rm --platform linux/arm64 \
       -v "$LAMBDA_DIR":/workspace \
       -v "$MAVEN_CACHE_DIR":/root/.m2 \
       -w /workspace \
-      maven:3.9-eclipse-temurin-21-alpine \
+      "$MAVEN_IMAGE" \
       mvn clean package
 
     if [ -f "$LAMBDA_DIR/target/function.jar" ]; then
