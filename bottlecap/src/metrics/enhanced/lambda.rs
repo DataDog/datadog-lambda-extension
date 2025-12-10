@@ -284,7 +284,7 @@ impl Lambda {
                 }
             }
         } else {
-            debug!("Could not find data to generate network enhanced metrics");
+            debug!("Could not find network offset data to generate network enhanced metrics");
         }
     }
 
@@ -370,6 +370,15 @@ impl Lambda {
         let uptime = uptime_data_end - uptime_data_offset;
         let total_idle_time = cpu_data_end.total_idle_time_ms - cpu_data_offset.total_idle_time_ms;
 
+        // Validation: uptime should be positive and meaningful
+        if uptime <= 0.0 {
+            debug!(
+                "Invalid uptime delta: {}, skipping CPU utilization metrics",
+                uptime
+            );
+            return;
+        }
+
         let mut max_idle_time = 0.0;
         let mut min_idle_time = f64::MAX;
         let now = std::time::UNIX_EPOCH
@@ -383,6 +392,9 @@ impl Lambda {
                 cpu_data_offset.individual_cpu_idle_times.get(cpu_name)
             {
                 let idle_time = cpu_idle_time - cpu_idle_time_offset;
+                // Prevent negative values but allow overflow
+                let idle_time = idle_time.max(0.0);
+
                 if idle_time < min_idle_time {
                     min_idle_time = idle_time;
                 }
@@ -394,15 +406,18 @@ impl Lambda {
 
         // Maximally utilized CPU is the one with the least time spent in the idle process
         // Multiply by 100 to report as percentage
-        let cpu_max_utilization = ((uptime - min_idle_time) / uptime) * 100.0;
+        // Prevent negative values but allow overflow
+        let cpu_max_utilization = (((uptime - min_idle_time) / uptime) * 100.0).max(0.0);
 
         // Minimally utilized CPU is the one with the most time spent in the idle process
         // Multiply by 100 to report as percentage
-        let cpu_min_utilization = ((uptime - max_idle_time) / uptime) * 100.0;
+        // Prevent negative values but allow overflow
+        let cpu_min_utilization = (((uptime - max_idle_time) / uptime) * 100.0).max(0.0);
 
         // CPU total utilization is the proportion of total non-idle time to the total uptime across all cores
+        // Prevent negative values but allow overflow
         let cpu_total_utilization_decimal =
-            ((uptime * num_cores) - total_idle_time) / (uptime * num_cores);
+            (((uptime * num_cores) - total_idle_time) / (uptime * num_cores)).max(0.0);
         // Multiply by 100 to report as percentage
         let cpu_total_utilization_pct = cpu_total_utilization_decimal * 100.0;
         // Multiply by num_cores to report in terms of cores
@@ -498,51 +513,67 @@ impl Lambda {
         }
         let metric = metric::Metric::new(
             constants::DURATION_METRIC.into(),
-            MetricValue::distribution(metrics.duration_ms * constants::MS_TO_SEC),
+            MetricValue::distribution(metrics.duration_ms() * constants::MS_TO_SEC),
             self.get_dynamic_value_tags(),
             Some(timestamp),
         );
         if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
             error!("failed to insert duration metric: {}", e);
         }
-        let metric = metric::Metric::new(
-            constants::BILLED_DURATION_METRIC.into(),
-            MetricValue::distribution(metrics.billed_duration_ms as f64 * constants::MS_TO_SEC),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert billed duration metric: {}", e);
-        }
-        let metric = metric::Metric::new(
-            constants::MAX_MEMORY_USED_METRIC.into(),
-            MetricValue::distribution(metrics.max_memory_used_mb as f64),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert max memory used metric: {}", e);
-        }
-        let metric = metric::Metric::new(
-            constants::MEMORY_SIZE_METRIC.into(),
-            MetricValue::distribution(metrics.memory_size_mb as f64),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert memory size metric: {}", e);
-        }
 
-        let cost_usd =
-            Self::calculate_estimated_cost_usd(metrics.billed_duration_ms, metrics.memory_size_mb);
-        let metric = metric::Metric::new(
-            constants::ESTIMATED_COST_METRIC.into(),
-            MetricValue::distribution(cost_usd),
-            self.get_dynamic_value_tags(),
-            Some(timestamp),
-        );
-        if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-            error!("failed to insert estimated cost metric: {}", e);
+        match metrics {
+            ReportMetrics::ManagedInstance(_) => {
+                // In Managed Instance mode, we can't track these metrics for a given lambda invocation
+                // - billed duration
+                // - max memory used
+                // - memory size
+                // - estimated cost
+            }
+            ReportMetrics::OnDemand(metrics) => {
+                let metric = metric::Metric::new(
+                    constants::BILLED_DURATION_METRIC.into(),
+                    MetricValue::distribution(
+                        metrics.billed_duration_ms as f64 * constants::MS_TO_SEC,
+                    ),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert billed duration metric: {}", e);
+                }
+                let metric = metric::Metric::new(
+                    constants::MAX_MEMORY_USED_METRIC.into(),
+                    MetricValue::distribution(metrics.max_memory_used_mb as f64),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert max memory used metric: {}", e);
+                }
+                let metric = metric::Metric::new(
+                    constants::MEMORY_SIZE_METRIC.into(),
+                    MetricValue::distribution(metrics.memory_size_mb as f64),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert memory size metric: {}", e);
+                }
+
+                let cost_usd = Self::calculate_estimated_cost_usd(
+                    metrics.billed_duration_ms,
+                    metrics.memory_size_mb,
+                );
+                let metric = metric::Metric::new(
+                    constants::ESTIMATED_COST_METRIC.into(),
+                    MetricValue::distribution(cost_usd),
+                    self.get_dynamic_value_tags(),
+                    Some(timestamp),
+                );
+                if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
+                    error!("failed to insert estimated cost metric: {}", e);
+                }
+            }
         }
     }
 
@@ -585,7 +616,8 @@ impl Lambda {
         });
     }
 
-    pub fn resume_usage_metrics_monitoring(&self) {
+    // Reset metrics and resume monitoring for the next invocation
+    pub fn restart_usage_metrics_monitoring(&self) {
         if !self.config.enhanced_metrics {
             return;
         }
@@ -596,6 +628,25 @@ impl Lambda {
         }
 
         self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Resume monitoring without resetting metrics. Used in managed instance mode to resume monitoring between invocations.
+    pub fn resume_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        debug!("Starting sandbox-level usage metrics monitoring (managed instance mode)");
+        self.enhanced_metrics_handle.resume_monitoring();
+    }
+
+    /// Pause monitoring without emitting metrics. Used in managed instance mode to pause between invocations.
+    pub fn pause_usage_metrics_monitoring(&self) {
+        if !self.config.enhanced_metrics {
+            return;
+        }
+
+        self.enhanced_metrics_handle.pause_monitoring();
     }
 
     pub fn set_usage_enhanced_metrics(&self) {
@@ -619,6 +670,7 @@ impl Lambda {
                         .try_into()
                         .unwrap_or_default();
 
+                    // Set all tmp metrics - need tmp_max and tmp_used to calculate tmp_free
                     if metrics.tmp_used > 0.0 {
                         let metric = Metric::new(
                             constants::TMP_USED_METRIC.into(),
@@ -629,8 +681,32 @@ impl Lambda {
                         if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
                             error!("Failed to insert tmp_used metric: {}", e);
                         }
+
+                        if let Ok(tmp_max) = statfs::get_tmp_max() {
+                            let metric = Metric::new(
+                                constants::TMP_MAX_METRIC.into(),
+                                MetricValue::distribution(tmp_max),
+                                tags.clone(),
+                                Some(now),
+                            );
+                            if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                                error!("Failed to insert tmp_max metric: {}", e);
+                            }
+
+                            let tmp_free = tmp_max - metrics.tmp_used;
+                            let metric = Metric::new(
+                                constants::TMP_FREE_METRIC.into(),
+                                MetricValue::distribution(tmp_free),
+                                tags.clone(),
+                                Some(now),
+                            );
+                            if let Err(e) = aggr_handle.insert_batch(vec![metric]) {
+                                error!("Failed to insert tmp_free metric: {}", e);
+                            }
+                        }
                     }
 
+                    // Set file descriptor use
                     if metrics.fd_use > 0.0 {
                         let metric = Metric::new(
                             constants::FD_USE_METRIC.into(),
@@ -643,6 +719,7 @@ impl Lambda {
                         }
                     }
 
+                    // Set threads use
                     if metrics.threads_use > 0.0 {
                         let metric = Metric::new(
                             constants::THREADS_USE_METRIC.into(),
@@ -667,8 +744,6 @@ impl Lambda {
             return;
         }
 
-        let tmp_max = statfs::get_tmp_max().ok();
-
         let pids = proc::get_pid_list();
         let fd_max = proc::get_fd_max_data(&pids);
         let threads_max = proc::get_threads_max_data(&pids);
@@ -681,18 +756,6 @@ impl Lambda {
             .unwrap_or_default();
 
         let tags = self.get_dynamic_value_tags();
-
-        if let Some(tmp_max) = tmp_max {
-            let metric = Metric::new(
-                constants::TMP_MAX_METRIC.into(),
-                MetricValue::distribution(tmp_max),
-                tags.clone(),
-                Some(now),
-            );
-            if let Err(e) = self.aggr_handle.insert_batch(vec![metric]) {
-                error!("Failed to insert tmp_max metric: {}", e);
-            }
-        }
 
         let metric = Metric::new(
             constants::FD_MAX_METRIC.into(),
@@ -738,6 +801,7 @@ mod tests {
 
     use super::*;
     use crate::config;
+    use crate::extension::telemetry::events::{OnDemandReportMetrics, ReportMetrics};
     use dogstatsd::aggregator_service::AggregatorService;
     use dogstatsd::metric::EMPTY_TAGS;
     const PRECISION: f64 = 0.000_000_01;
@@ -844,14 +908,14 @@ mod tests {
         );
         lambda.set_post_runtime_duration_metric(100.0, now);
         lambda.set_report_log_metrics(
-            &ReportMetrics {
+            &ReportMetrics::OnDemand(OnDemandReportMetrics {
                 duration_ms: 100.0,
                 billed_duration_ms: 100,
                 max_memory_used_mb: 128,
                 memory_size_mb: 256,
                 init_duration_ms: Some(50.0),
                 restore_duration_ms: None,
-            },
+            }),
             now,
         );
         assert!(
@@ -1100,14 +1164,14 @@ mod tests {
     async fn test_set_report_log_metrics() {
         let (metrics_aggr, my_config) = setup();
         let lambda = Lambda::new(metrics_aggr.clone(), my_config);
-        let report_metrics = ReportMetrics {
+        let report_metrics = ReportMetrics::OnDemand(OnDemandReportMetrics {
             duration_ms: 100.0,
             billed_duration_ms: 100,
             max_memory_used_mb: 128,
             memory_size_mb: 256,
             init_duration_ms: Some(50.0),
             restore_duration_ms: None,
-        };
+        });
         let now: i64 = std::time::UNIX_EPOCH
             .elapsed()
             .expect("unable to poll clock, unrecoverable")
@@ -1317,5 +1381,377 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn test_cpu_utilization_with_negative_uptime() {
+        let (metrics_aggr, my_config) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let mut individual_cpu_idle_times = HashMap::new();
+        individual_cpu_idle_times.insert("cpu0".to_string(), 10.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 50.0,
+            total_system_time_ms: 10.0,
+            total_idle_time_ms: 10.0,
+            individual_cpu_idle_times: individual_cpu_idle_times.clone(),
+        };
+        let cpu_data = CPUData {
+            total_user_time_ms: 100.0,
+            total_system_time_ms: 20.0,
+            total_idle_time_ms: 20.0,
+            individual_cpu_idle_times,
+        };
+
+        // Negative uptime (end < offset) - should skip metrics
+        let uptime_offset = 1000.0;
+        let uptime_data = 500.0;
+
+        Lambda::generate_cpu_utilization_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            uptime_offset,
+            uptime_data,
+            &metrics_aggr,
+            None,
+        );
+
+        // No metrics should be created
+        assert!(
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cpu_utilization_with_zero_uptime() {
+        let (metrics_aggr, my_config) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let mut individual_cpu_idle_times = HashMap::new();
+        individual_cpu_idle_times.insert("cpu0".to_string(), 10.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 50.0,
+            total_system_time_ms: 10.0,
+            total_idle_time_ms: 10.0,
+            individual_cpu_idle_times: individual_cpu_idle_times.clone(),
+        };
+        let cpu_data = CPUData {
+            total_user_time_ms: 100.0,
+            total_system_time_ms: 20.0,
+            total_idle_time_ms: 20.0,
+            individual_cpu_idle_times,
+        };
+
+        // Zero uptime - should skip metrics
+        let uptime_offset = 1000.0;
+        let uptime_data = 1000.0;
+
+        Lambda::generate_cpu_utilization_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            uptime_offset,
+            uptime_data,
+            &metrics_aggr,
+            None,
+        );
+
+        // No metrics should be created
+        assert!(
+            metrics_aggr
+                .get_entry_by_id(constants::CPU_MAX_UTILIZATION_METRIC.into(), None, now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_cpu_utilization_with_excessive_idle_time() {
+        let (metrics_aggr, my_config) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        let mut individual_cpu_idle_time_offsets = HashMap::new();
+        individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
+        individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 20.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 50.0,
+            total_system_time_ms: 10.0,
+            total_idle_time_ms: 30.0,
+            individual_cpu_idle_times: individual_cpu_idle_time_offsets,
+        };
+
+        // Per-CPU idle times that exceed uptime but get clamped
+        // cpu0: 1010 - 10 = 1000 (exceeds uptime of 800, will be clamped to 800)
+        // cpu1: 1020 - 20 = 1000 (exceeds uptime of 800, will be clamped to 800)
+        let mut individual_cpu_idle_times_end = HashMap::new();
+        individual_cpu_idle_times_end.insert("cpu0".to_string(), 1010.0);
+        individual_cpu_idle_times_end.insert("cpu1".to_string(), 1020.0);
+        let cpu_data = CPUData {
+            total_user_time_ms: 200.0,
+            total_system_time_ms: 100.0,
+            total_idle_time_ms: 2030.0, // delta = 2000
+            individual_cpu_idle_times: individual_cpu_idle_times_end,
+        };
+
+        let uptime_offset = 1_000_000.0;
+        let uptime_data = 1_000_800.0; // delta = 800
+
+        Lambda::generate_cpu_utilization_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            uptime_offset,
+            uptime_data,
+            &metrics_aggr,
+            None,
+        );
+
+        // Metrics should be created with clamped idle times
+        // Both CPUs have idle time clamped to 800 (the uptime)
+        // cpu_max_utilization = ((800 - 800) / 800) * 100 = 0%
+        // cpu_min_utilization = ((800 - 800) / 800) * 100 = 0%
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MAX_UTILIZATION_METRIC,
+            0.0,
+            now,
+        )
+        .await;
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MIN_UTILIZATION_METRIC,
+            0.0,
+            now,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cpu_utilization_with_idle_time_exceeding_uptime() {
+        let (metrics_aggr, my_config) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        // This test simulates the bug scenario where per-CPU idle time > uptime
+        // The fix should clamp idle_time to [0, uptime] and produce valid metrics
+        let mut individual_cpu_idle_time_offsets = HashMap::new();
+        individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 10.0);
+        individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 20.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 50.0,
+            total_system_time_ms: 10.0,
+            total_idle_time_ms: 30.0,
+            individual_cpu_idle_times: individual_cpu_idle_time_offsets,
+        };
+
+        // Per-CPU idle times that would exceed uptime without clamping
+        // cpu0: 1010 - 10 = 1000 (which equals uptime, ok)
+        // cpu1: 1050 - 20 = 1030 (which exceeds uptime of 1000, will be clamped)
+        let mut individual_cpu_idle_times_end = HashMap::new();
+        individual_cpu_idle_times_end.insert("cpu0".to_string(), 1010.0);
+        individual_cpu_idle_times_end.insert("cpu1".to_string(), 1050.0);
+        let cpu_data = CPUData {
+            total_user_time_ms: 200.0,
+            total_system_time_ms: 100.0,
+            total_idle_time_ms: 1100.0, // delta = 1070, within tolerance for 2 cores
+            individual_cpu_idle_times: individual_cpu_idle_times_end,
+        };
+
+        let uptime_offset = 1_000_000.0;
+        let uptime_data = 1_001_000.0; // delta = 1000
+
+        Lambda::generate_cpu_utilization_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            uptime_offset,
+            uptime_data,
+            &metrics_aggr,
+            None,
+        );
+
+        // Metrics should be created with clamped values
+        // cpu1 idle time is clamped to 1000, so:
+        // min_idle_time = 1000 (cpu0)
+        // max_idle_time = 1000 (cpu1, clamped from 1030)
+        // cpu_max_utilization = ((1000 - 1000) / 1000) * 100 = 0%
+        // cpu_min_utilization = ((1000 - 1000) / 1000) * 100 = 0%
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MAX_UTILIZATION_METRIC,
+            0.0,
+            now,
+        )
+        .await;
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MIN_UTILIZATION_METRIC,
+            0.0,
+            now,
+        )
+        .await;
+
+        // Total utilization should also be valid (clamped to [0, 100])
+        let total_util_entry = metrics_aggr
+            .get_entry_by_id(
+                constants::CPU_TOTAL_UTILIZATION_PCT_METRIC.into(),
+                None,
+                (now / 10) * 10,
+            )
+            .await
+            .unwrap();
+        assert!(total_util_entry.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_cpu_utilization_with_negative_idle_time() {
+        let (metrics_aggr, my_config) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        // Test case where idle time decreases (negative delta)
+        // This can happen due to measurement timing issues
+        let mut individual_cpu_idle_time_offsets = HashMap::new();
+        individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 1000.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 50.0,
+            total_system_time_ms: 10.0,
+            total_idle_time_ms: 1000.0,
+            individual_cpu_idle_times: individual_cpu_idle_time_offsets,
+        };
+
+        // Idle time decreased - should be clamped to 0
+        let mut individual_cpu_idle_times_end = HashMap::new();
+        individual_cpu_idle_times_end.insert("cpu0".to_string(), 900.0);
+        let cpu_data = CPUData {
+            total_user_time_ms: 100.0,
+            total_system_time_ms: 20.0,
+            total_idle_time_ms: 900.0,
+            individual_cpu_idle_times: individual_cpu_idle_times_end,
+        };
+
+        let uptime_offset = 1_000_000.0;
+        let uptime_data = 1_000_500.0; // delta = 500
+
+        Lambda::generate_cpu_utilization_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            uptime_offset,
+            uptime_data,
+            &metrics_aggr,
+            None,
+        );
+
+        // Metrics should be created with idle_time clamped to 0
+        // This results in 100% utilization
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MAX_UTILIZATION_METRIC,
+            100.0,
+            now,
+        )
+        .await;
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MIN_UTILIZATION_METRIC,
+            100.0,
+            now,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_cpu_utilization_boundary_values() {
+        let (metrics_aggr, my_config) = setup();
+        let _lambda = Lambda::new(metrics_aggr.clone(), my_config);
+        let now: i64 = std::time::UNIX_EPOCH
+            .elapsed()
+            .expect("unable to poll clock, unrecoverable")
+            .as_secs()
+            .try_into()
+            .unwrap_or_default();
+
+        // Test with very small uptime delta (edge case for fast invocations)
+        let mut individual_cpu_idle_time_offsets = HashMap::new();
+        individual_cpu_idle_time_offsets.insert("cpu0".to_string(), 0.0);
+        individual_cpu_idle_time_offsets.insert("cpu1".to_string(), 0.0);
+        let cpu_offset = CPUData {
+            total_user_time_ms: 0.0,
+            total_system_time_ms: 0.0,
+            total_idle_time_ms: 0.0,
+            individual_cpu_idle_times: individual_cpu_idle_time_offsets,
+        };
+
+        // Small but valid uptime delta
+        let mut individual_cpu_idle_times_end = HashMap::new();
+        individual_cpu_idle_times_end.insert("cpu0".to_string(), 0.5);
+        individual_cpu_idle_times_end.insert("cpu1".to_string(), 0.8);
+        let cpu_data = CPUData {
+            total_user_time_ms: 0.2,
+            total_system_time_ms: 0.1,
+            total_idle_time_ms: 1.3,
+            individual_cpu_idle_times: individual_cpu_idle_times_end,
+        };
+
+        let uptime_offset = 1_000_000.0;
+        let uptime_data = 1_000_001.0; // delta = 1.0 ms
+
+        Lambda::generate_cpu_utilization_enhanced_metrics(
+            &cpu_offset,
+            &cpu_data,
+            uptime_offset,
+            uptime_data,
+            &metrics_aggr,
+            None,
+        );
+
+        // Should produce valid metrics
+        // min_idle = 0.5, max_idle = 0.8
+        // max_util = (1.0 - 0.5) / 1.0 * 100 = 50%
+        // min_util = (1.0 - 0.8) / 1.0 * 100 = 20%
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MAX_UTILIZATION_METRIC,
+            50.0,
+            now,
+        )
+        .await;
+        assert_sketch(
+            &metrics_aggr,
+            constants::CPU_MIN_UTILIZATION_METRIC,
+            20.0,
+            now,
+        )
+        .await;
     }
 }

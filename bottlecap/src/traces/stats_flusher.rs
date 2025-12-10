@@ -10,10 +10,11 @@ use tokio::sync::OnceCell;
 use crate::config;
 use crate::lifecycle::invocation::processor::S_TO_MS;
 use crate::traces::stats_aggregator::StatsAggregator;
-use datadog_trace_protobuf::pb;
-use datadog_trace_utils::{config_utils::trace_stats_url, stats_utils};
-use ddcommon::Endpoint;
+use crate::traces::trace_flusher::ServerlessTraceFlusher;
 use dogstatsd::api_key::ApiKeyFactory;
+use libdd_common::Endpoint;
+use libdd_trace_protobuf::pb;
+use libdd_trace_utils::{config_utils::trace_stats_url, stats_utils};
 use tracing::{debug, error};
 
 #[async_trait]
@@ -101,9 +102,20 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let start = std::time::Instant::now();
 
-        let resp =
-            stats_utils::send_stats_payload(serialized_stats_payload, endpoint, api_key.as_str())
-                .await;
+        let Ok(http_client) =
+            ServerlessTraceFlusher::get_http_client(self.config.proxy_https.as_ref())
+        else {
+            error!("STATS_FLUSHER | Failed to create HTTP client");
+            return;
+        };
+
+        let resp = stats_utils::send_stats_payload_with_client(
+            serialized_stats_payload,
+            endpoint,
+            api_key.as_str(),
+            Some(&http_client),
+        )
+        .await;
         let elapsed = start.elapsed();
         debug!(
             "Stats request to {} took {} ms",

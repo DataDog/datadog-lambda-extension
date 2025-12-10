@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::fmt::Display;
 
+use crate::config::aws::LAMBDA_MANAGED_INSTANCES_INIT_TYPE;
+
 /// Payload received from the Telemetry API
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct TelemetryEvent {
@@ -12,6 +14,14 @@ pub struct TelemetryEvent {
     /// Telemetry record entry
     #[serde(flatten)] // TODO: Figure out if this is ideal for our use case.
     pub record: TelemetryRecord,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct TelemetrySpan {
+    pub name: String,
+    pub start: DateTime<Utc>,
+    #[serde(rename = "durationMs")]
+    pub duration_ms: f64,
 }
 
 /// Record in a `LambdaTelemetry` entry
@@ -92,6 +102,7 @@ pub enum TelemetryRecord {
         /// When unsuccessful, the `error_type` describes what kind of error occurred
         error_type: Option<String>,
         metrics: ReportMetrics,
+        spans: Option<Vec<TelemetrySpan>>,
     },
 
     /// Extension-specific record
@@ -164,6 +175,9 @@ pub enum InitType {
     ProvisionedConcurrency,
     /// `SnapStart`
     SnapStart,
+    /// Managed Instance mode
+    #[serde(rename = "lambda-managed-instances")]
+    ManagedInstance,
 }
 
 impl Display for InitType {
@@ -172,6 +186,7 @@ impl Display for InitType {
             InitType::OnDemand => "on-demand",
             InitType::ProvisionedConcurrency => "provisioned-concurrency",
             InitType::SnapStart => "SnapStart",
+            InitType::ManagedInstance => LAMBDA_MANAGED_INSTANCES_INIT_TYPE,
         };
         write!(f, "{style}")
     }
@@ -225,8 +240,25 @@ pub struct RuntimeDoneMetrics {
 
 /// Report metrics
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum ReportMetrics {
+    OnDemand(OnDemandReportMetrics),
+    ManagedInstance(ManagedInstanceReportMetrics),
+}
+
+impl ReportMetrics {
+    #[must_use]
+    pub fn duration_ms(&self) -> f64 {
+        match self {
+            ReportMetrics::OnDemand(metrics) => metrics.duration_ms,
+            ReportMetrics::ManagedInstance(metrics) => metrics.duration_ms,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct ReportMetrics {
+pub struct OnDemandReportMetrics {
     /// Total duration in milliseconds, includes Extension
     /// and Lambda execution time.
     pub duration_ms: f64,
@@ -244,9 +276,16 @@ pub struct ReportMetrics {
     pub restore_duration_ms: Option<f64>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedInstanceReportMetrics {
+    pub duration_ms: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{TimeZone, Timelike};
 
     macro_rules! deserialize_tests {
         ($($name:ident: $value:expr,)*) => {
@@ -363,21 +402,53 @@ mod tests {
             },
         ),
 
-        // platform.report
-        platform_report: (
+        // platform.report - on demand
+        platform_report_on_demand: (
             r#"{"time":"2022-10-21T14:05:05.766Z","type":"platform.report","record":{"requestId":"459921b5-681c-4a96-beb0-81e0aa586026","metrics":{"durationMs":2599.4,"billedDurationMs":2600,"memorySizeMB":128,"maxMemoryUsedMB":94,"initDurationMs":549.04},"tracing":{"spanId":"24cd7d670fa455f0","type":"X-Amzn-Trace-Id","value":"Root=1-6352a70e-1e2c502e358361800241fd45;Parent=35465b3a9e2f7c6a;Sampled=1"},"status":"success"}}"#,
             TelemetryRecord::PlatformReport {
                 request_id: "459921b5-681c-4a96-beb0-81e0aa586026".to_string(),
                 status: Status::Success,
                 error_type: None,
-                metrics: ReportMetrics {
+                metrics: ReportMetrics::OnDemand(OnDemandReportMetrics {
                     duration_ms: 2599.4,
                     billed_duration_ms: 2600,
                     memory_size_mb:128,
                     max_memory_used_mb:94,
                     init_duration_ms: Some(549.04),
                     restore_duration_ms: None,
-                },
+                }),
+                spans: None,
+            },
+        ),
+
+        // platform.report - managed_instance
+        platform_report_managed_instance: (
+            r#"{"time":"2025-09-19T19:36:50.881Z","type":"platform.report","record":{"requestId":"13d1305b-a2f5-440c-bfbe-686ccff3d3e0","status":"success","metrics":{"durationMs":1.148},"spans":[{"name":"responseLatency","start":"2025-09-19T19:36:50.880Z","durationMs":0.847},{"name":"responseDuration","start":"2025-09-19T19:36:50.880Z","durationMs":0.127}]}}"#,
+            TelemetryRecord::PlatformReport {
+                request_id: "13d1305b-a2f5-440c-bfbe-686ccff3d3e0".to_string(),
+                status: Status::Success,
+                error_type: None,
+                metrics: ReportMetrics::ManagedInstance(ManagedInstanceReportMetrics { duration_ms: 1.148 }),
+                spans: Some(vec![
+                    TelemetrySpan {
+                        name: "responseLatency".to_string(),
+                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50)
+                            .single()
+                            .expect("test date should be valid")
+                            .with_nanosecond(880_000_000)
+                            .expect("test nanosecond should be valid"),
+                        duration_ms: 0.847,
+                    },
+                    TelemetrySpan {
+                        name: "responseDuration".to_string(),
+                        start: chrono::Utc.with_ymd_and_hms(2025, 9, 19, 19, 36, 50)
+                            .single()
+                            .expect("test date should be valid")
+                            .with_nanosecond(880_000_000)
+                            .expect("test nanosecond should be valid"),
+                        duration_ms: 0.127,
+                    },
+                ]),
             },
         ),
 

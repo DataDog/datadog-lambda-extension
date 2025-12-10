@@ -24,7 +24,7 @@ use bottlecap::{
     config::{
         self, Config,
         aws::{AwsConfig, build_lambda_function_arn},
-        flush_strategy::FlushStrategy,
+        flush_strategy::{FlushStrategy, PeriodicStrategy},
         log_level::LogLevel,
     },
     event_bus::{Event, EventBus},
@@ -39,7 +39,7 @@ use bottlecap::{
     },
     fips::{log_fips_status, prepare_client_provider},
     lifecycle::{
-        flush_control::{FlushControl, FlushDecision},
+        flush_control::{DEFAULT_CONTINUOUS_FLUSH_INTERVAL, FlushControl, FlushDecision},
         invocation::processor_service::{InvocationProcessorHandle, InvocationProcessorService},
         listener::Listener as LifecycleListener,
     },
@@ -62,6 +62,7 @@ use bottlecap::{
         propagation::DatadogCompositePropagator,
         proxy_aggregator,
         proxy_flusher::Flusher as ProxyFlusher,
+        span_dedup_service,
         stats_aggregator::StatsAggregator,
         stats_concentrator_service::{StatsConcentratorHandle, StatsConcentratorService},
         stats_flusher::{self, StatsFlusher},
@@ -78,7 +79,6 @@ use bottlecap::{
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
 use datadog_trace_obfuscation::obfuscation_config;
-use datadog_trace_utils::send_data::SendData;
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator_service::AggregatorHandle as MetricsAggregatorHandle,
@@ -93,12 +93,13 @@ use dogstatsd::{
     flusher::{Flusher as MetricsFlusher, FlusherConfig as MetricsFlusherConfig},
     metric::{EMPTY_TAGS, SortedTags},
 };
+use libdd_trace_utils::send_data::SendData;
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::{Duration, Instant};
 use tokio::{sync::Mutex as TokioMutex, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use tracing_subscriber::EnvFilter;
 use ustr::Ustr;
 
@@ -133,6 +134,70 @@ impl PendingFlushHandles {
         let proxy_pending = self.proxy_flush_handles.iter().any(|h| !h.is_finished());
 
         trace_pending || log_pending || metric_pending || proxy_pending
+    }
+
+    #[allow(clippy::too_many_lines)]
+    /// Spawns non-blocking flush tasks for all flushers (logs, traces, metrics, stats, proxy).
+    async fn spawn_non_blocking_flushes(
+        &mut self,
+        logs_flusher: &LogsFlusher,
+        trace_flusher: &Arc<ServerlessTraceFlusher>,
+        metrics_flushers: &Arc<TokioMutex<Vec<MetricsFlusher>>>,
+        stats_flusher: &Arc<impl StatsFlusher + Send + Sync + 'static>,
+        proxy_flusher: &Arc<ProxyFlusher>,
+        metrics_aggr_handle: &MetricsAggregatorHandle,
+    ) {
+        // Spawn logs flush
+        let lf = logs_flusher.clone();
+        self.log_flush_handles
+            .push(tokio::spawn(async move { lf.flush(None).await }));
+
+        // Spawn traces flush
+        let tf = trace_flusher.clone();
+        self.trace_flush_handles.push(tokio::spawn(async move {
+            tf.flush(None).await.unwrap_or_default()
+        }));
+
+        // Spawn metrics flush
+        let (metrics_flushers_copy, series, sketches) = {
+            let locked_metrics = metrics_flushers.lock().await;
+            let flush_response = metrics_aggr_handle
+                .clone()
+                .flush()
+                .await
+                .expect("can't flush metrics handle");
+            (
+                locked_metrics.clone(),
+                flush_response.series,
+                flush_response.distributions,
+            )
+        };
+
+        for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate() {
+            let series_clone = series.clone();
+            let sketches_clone = sketches.clone();
+            let handle = tokio::spawn(async move {
+                let (retry_series, retry_sketches) = flusher
+                    .flush_metrics(series_clone, sketches_clone)
+                    .await
+                    .unwrap_or_default();
+                MetricsRetryBatch {
+                    flusher_id: idx,
+                    series: retry_series,
+                    sketches: retry_sketches,
+                }
+            });
+            self.metric_flush_handles.push(handle);
+        }
+
+        // Stats flush (fire and forget, not tracked)
+        let () = stats_flusher.flush(false).await;
+
+        // Spawn proxy flush
+        let pf = proxy_flusher.clone();
+        self.proxy_flush_handles.push(tokio::spawn(async move {
+            pf.flush(None).await.unwrap_or_default()
+        }));
     }
 
     #[allow(clippy::too_many_lines)]
@@ -282,8 +347,15 @@ async fn main() -> anyhow::Result<()> {
 
     let cloned_client = client.clone();
     let runtime_api = aws_config.runtime_api.clone();
+    let managed_instance_mode = aws_config.is_managed_instance_mode();
     let response = tokio::task::spawn(async move {
-        extension::register(&cloned_client, &runtime_api, extension::EXTENSION_NAME).await
+        extension::register(
+            &cloned_client,
+            &runtime_api,
+            extension::EXTENSION_NAME,
+            managed_instance_mode,
+        )
+        .await
     });
     // First load the AWS configuration
     let lambda_directory: String =
@@ -356,6 +428,37 @@ fn enable_logging_subsystem() {
     debug!("Logging subsystem enabled");
 }
 
+/// Returns the appropriate flush strategy for the given mode.
+/// In managed instance mode, continuous flush strategy is required for optimal performance.
+/// If a different strategy is configured, this function will override it and log an info message.
+fn get_flush_strategy_for_mode(
+    aws_config: &AwsConfig,
+    configured_strategy: FlushStrategy,
+) -> FlushStrategy {
+    if !aws_config.is_managed_instance_mode() {
+        return configured_strategy;
+    }
+
+    // Check if flush strategy needs to be enforced and log if so
+    if let FlushStrategy::Continuously(_) = configured_strategy {
+        configured_strategy
+    } else {
+        // Only log if the user explicitly configured a non-default strategy
+        if !matches!(configured_strategy, FlushStrategy::Default) {
+            warn!(
+                "Managed Instance mode detected. Flush strategy '{}' is not compatible with managed instance mode. \
+                Enforcing continuous flush strategy with {}ms interval for optimal performance.",
+                configured_strategy.name(),
+                DEFAULT_CONTINUOUS_FLUSH_INTERVAL
+            );
+        }
+
+        FlushStrategy::Continuously(PeriodicStrategy {
+            interval: DEFAULT_CONTINUOUS_FLUSH_INTERVAL,
+        })
+    }
+}
+
 fn create_api_key_factory(config: &Arc<Config>, aws_config: &Arc<AwsConfig>) -> Arc<ApiKeyFactory> {
     let config = Arc::clone(config);
     let aws_config = Arc::clone(aws_config);
@@ -414,6 +517,7 @@ async fn extension_loop_active(
             Arc::clone(&api_key_factory),
             &tags_provider,
             event_bus_tx.clone(),
+            aws_config.is_managed_instance_mode(),
         );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
@@ -487,6 +591,7 @@ async fn extension_loop_active(
         logs_agent_channel,
         event_bus_tx.clone(),
         config.serverless_logs_enabled,
+        aws_config.is_managed_instance_mode(),
     )
     .await?;
 
@@ -498,16 +603,256 @@ async fn extension_loop_active(
         stats_concentrator.clone(),
     );
 
-    let mut flush_control =
-        FlushControl::new(config.serverless_flush_strategy, config.flush_timeout);
-
-    let mut race_flush_interval = flush_control.get_flush_interval();
-    race_flush_interval.tick().await; // discard first tick, which is instantaneous
+    // Validate and get the appropriate flush strategy for the current mode
+    let flush_strategy = get_flush_strategy_for_mode(&aws_config, config.serverless_flush_strategy);
+    let mut flush_control = FlushControl::new(flush_strategy, config.flush_timeout);
 
     debug!(
         "Datadog Next-Gen Extension ready in {:}ms",
         start_time.elapsed().as_millis().to_string()
     );
+
+    if aws_config.is_managed_instance_mode() {
+        // Clone Arc references for the background flusher task
+        let logs_flusher_clone = logs_flusher.clone();
+        let metrics_flushers_clone = Arc::clone(&metrics_flushers);
+        let trace_flusher_clone = Arc::clone(&trace_flusher);
+        let stats_flusher_clone = Arc::clone(&stats_flusher);
+        let proxy_flusher_clone = proxy_flusher.clone();
+        let metrics_aggr_handle_clone = metrics_aggregator_handle.clone();
+
+        // In Managed Instance mode, create a separate interval for the background flusher task.
+        // We don't reuse race_flush_interval because we need to configure the missed tick
+        // behavior before discarding the first tick. While creating a new interval may seem
+        // redundant, it keeps Managed Instance and OnDemand mode flush intervals properly isolated,
+        // making the code easier to maintain and less error-prone.
+        //
+        // Use Skip behavior to prevent accumulating missed ticks if flushes take longer
+        // than the interval. This ensures we maintain a steady flush cadence without
+        // bursts of catch-up ticks, which is important since flushes are non-blocking.
+        let mut managed_instance_mode_flush_interval = flush_control.get_flush_interval();
+        managed_instance_mode_flush_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        managed_instance_mode_flush_interval.tick().await; // discard first tick
+        let cancel_token_clone = telemetry_listener_cancel_token.clone();
+
+        // Spawn a background task for continuous periodic flushing in Managed Instance mode.
+        // A background task continuously flushes metrics, logs,
+        // traces, and stats at regular intervals (configured by flush_control). This ensures
+        // data is sent to Datadog even while concurrent invocations are being processed.
+        // The flushing happens independently of invocation lifecycle events.
+        // This background task runs until shutdown is signaled via cancel_token_clone.
+        let flush_task_handle = tokio::spawn(async move {
+            let mut pending_flush_handles = PendingFlushHandles::new();
+
+            loop {
+                tokio::select! {
+                    _ = managed_instance_mode_flush_interval.tick() => {
+                        if !pending_flush_handles.has_pending_handles() {
+                            // Only spawn new flush if no pending flushes to prevent resource buildup
+                            pending_flush_handles.spawn_non_blocking_flushes(
+                                &logs_flusher_clone,
+                                &trace_flusher_clone,
+                                &metrics_flushers_clone,
+                                &stats_flusher_clone,
+                                &proxy_flusher_clone,
+                                &metrics_aggr_handle_clone,
+                            ).await;
+                        }
+                    }
+                   () = cancel_token_clone.cancelled() => {
+                        debug!("Managed Instance mode: periodic flusher task cancelled, waiting for pending flushes");
+                        // Wait for any pending flushes before exiting
+                        pending_flush_handles.await_flush_handles(
+                            &logs_flusher_clone,
+                            &trace_flusher_clone,
+                            &metrics_flushers_clone,
+                            &proxy_flusher_clone,
+                        ).await;
+                        break;
+                    }
+                }
+            }
+        });
+
+        // Spawn a separate task to handle the SHUTDOWN event from /next endpoint.
+        // This task waits for the Lambda runtime to signal shutdown via the Extensions API.
+        // When shutdown is received, it cancels the background flusher and signals the main
+        // event loop to begin graceful shutdown.
+        let shutdown_cancel_token = CancellationToken::new();
+        let shutdown_cancel_token_clone = shutdown_cancel_token.clone();
+        let invocation_processor_handle_clone = invocation_processor_handle.clone();
+        let runtime_api_clone = aws_config.runtime_api.clone();
+        let extension_id_clone = r.extension_id.clone();
+        let client_clone = client.clone();
+
+        // Main event loop for Managed Instance mode: process telemetry events until shutdown
+        //
+        // the extension registers for SHUTDOWN events ONLY (not INVOKE events),
+        //   1. A separate task waits for the SHUTDOWN event from next_event()
+        //   2. This loop processes telemetry events from event_bus
+        //   3. When SHUTDOWN is received (detected via cancel token), break the loop
+        //   4. Invocation lifecycle events (START, REPORT, etc.) come via Telemetry API,
+        //      not via next_event() responses
+        //
+        // This allows Managed Instance mode to handle concurrent invocations while OnDemand mode
+        // processes invocations sequentially, one at a time.
+        tokio::spawn(async move {
+            // In Managed Instance mode, the only event we can subscribe to is SHUTDOWN, meaning that
+            // this call will block until the shutdown event is received.
+            // We can use this to signal other tasks to shutdown and wait for them to complete.
+            // Therefore, we need to have it in a separate task to avoid blocking the main loop.
+            debug!("Managed Instance mode: waiting for shutdown event");
+
+            loop {
+                let next_response =
+                    extension::next_event(&client_clone, &runtime_api_clone, &extension_id_clone)
+                        .await;
+
+                match next_response {
+                    Ok(NextEventResponse::Shutdown { .. }) => {
+                        debug!("Shutdown event received, stopping extension loop");
+                        // Notify the invocation processor about shutdown
+                        if let Err(e) = invocation_processor_handle_clone.on_shutdown_event().await
+                        {
+                            error!("Failed to send shutdown event to processor: {}", e);
+                        }
+                        // Signal all other tasks to shutdown
+                        shutdown_cancel_token_clone.cancel();
+                        break;
+                    }
+                    Ok(NextEventResponse::Invoke { .. }) => {
+                        error!(
+                            "Received unexpected Invoke event in Managed Instance mode - this should not happen. \
+                            Managed Instance mode should only subscribe to SHUTDOWN events."
+                        );
+                        shutdown_cancel_token_clone.cancel();
+                        break;
+                    }
+                    Err(ExtensionError::HttpError(e)) if e.is_timeout() || e.is_connect() => {
+                        debug!(
+                            "Transient network error waiting for shutdown event: {}. Retrying...",
+                            e
+                        );
+                        continue;
+                    }
+                    Err(e) => {
+                        error!(
+                            "Unrecoverable error waiting for shutdown event: {:?}. \
+                            Initiating emergency shutdown.",
+                            e
+                        );
+                        shutdown_cancel_token_clone.cancel();
+                        break;
+                    }
+                }
+            }
+
+            debug!("Shutdown task completed");
+        });
+
+        'managed_instance_event_loop: loop {
+            tokio::select! {
+              biased;
+                // Process telemetry events (platform.start, platform.report, etc.) sent from
+                // the Telemetry API listener. These events provide invocation lifecycle information
+                // without requiring next_event() calls. The biased ordering ensures we prioritize
+                // processing telemetry events before checking for shutdown.
+                Some(event) = event_bus.rx.recv() => {
+                      handle_event_bus_event(event,
+                          invocation_processor_handle.clone(),
+                          appsec_processor.clone(),
+                          tags_provider.clone(),
+                          trace_processor.clone(),
+                          trace_agent_channel.clone(),
+                        stats_concentrator.clone()).
+                      await;
+                    }
+                // Detect when shutdown has been signaled by the shutdown task.
+                // This happens when the /next endpoint returns a SHUTDOWN event.
+                () = shutdown_cancel_token.cancelled() => {
+                    debug!("Shutdown signal received, exiting event loop");
+                    break 'managed_instance_event_loop;
+                }
+            }
+        }
+
+        // Shutdown sequence
+        debug!("Initiating shutdown sequence");
+
+        // Wait for tombstone event from telemetry listener to ensure all events are processed
+        // This is the result of code refactoring which is shared by OnDemand mode as well.
+        wait_for_tombstone_event(
+            &mut event_bus,
+            &invocation_processor_handle,
+            appsec_processor.clone(),
+            tags_provider.clone(),
+            trace_processor.clone(),
+            trace_agent_channel.clone(),
+            stats_concentrator.clone(),
+            300,
+        )
+        .await;
+
+        // Cancel background tasks
+        cancel_background_services(
+            api_runtime_proxy_shutdown_signal.as_ref(),
+            otlp_cancel_token.as_ref(),
+            &trace_agent_shutdown_token,
+            &dogstatsd_cancel_token,
+            &telemetry_listener_cancel_token,
+            &lifecycle_listener_shutdown_token,
+        );
+
+        // Wait for background flusher to complete gracefully
+        if let Err(e) = flush_task_handle.await {
+            error!("Error waiting for background flush task: {e:?}");
+        }
+
+        // Final flush to send any remaining observability data before shutdown.
+        //
+        // Managed Instance Mode vs OnDemand Mode Final Flush:
+        //
+        // While both modes perform a final flush during shutdown, the context differs:
+        //
+        // - **Managed Instance Mode (this code)**: Throughout the execution environment's lifetime,
+        //   a background task has been continuously flushing data at regular intervals
+        //   (see flush_task_handle above). This final flush captures any data that was
+        //   generated after the last periodic flush and before shutdown was signaled.
+        //   Since concurrent invocations may have completed just before shutdown, this
+        //   ensures we don't lose their metrics, logs, and traces.
+        //
+        // - **OnDemand Mode**: Flushing is tied to invocation lifecycle, so data is typically
+        //   flushed at the end of each invocation. The final flush captures any remaining
+        //   data from the last invocation that may not have been sent yet.
+        //
+        // In both modes, we pass `force_flush_trace_stats=true` to ensure trace statistics
+        // are flushed regardless of timing constraints, as this is our last opportunity to
+        // send data before the Lambda execution environment terminates.
+        //
+        // Final flush without interval reset. We pass None for race_flush_interval since
+        // this is the final operation before shutdown and resetting the interval timing
+        // serves no purpose. This avoids creating an unnecessary interval object.
+        let mut locked_metrics = metrics_flushers.lock().await;
+        blocking_flush_all(
+            &logs_flusher,
+            &mut locked_metrics,
+            &*trace_flusher,
+            &*stats_flusher,
+            &proxy_flusher,
+            None,
+            &metrics_aggregator_handle.clone(),
+            true, // force_flush_trace_stats
+        )
+        .await;
+
+        return Ok(());
+    }
+
+    // Below is for On-Demand mode only
+    let mut race_flush_interval = flush_control.get_flush_interval();
+    race_flush_interval.tick().await; // discard first tick, which is instantaneous
+
     let next_lambda_response =
         extension::next_event(client, &aws_config.runtime_api, &r.extension_id).await;
     // first invoke we must call next
@@ -541,7 +886,7 @@ async fn extension_loop_active(
                                 &*trace_flusher,
                                 &*stats_flusher,
                                 &proxy_flusher,
-                                &mut race_flush_interval,
+                                Some(&mut race_flush_interval),
                                 &metrics_aggregator_handle.clone(),
                                 false,
                             )
@@ -557,7 +902,7 @@ async fn extension_loop_active(
                     &*trace_flusher,
                     &*stats_flusher,
                     &proxy_flusher,
-                    &mut race_flush_interval,
+                    Some(&mut race_flush_interval),
                     &metrics_aggregator_handle.clone(),
                     false,
                 )
@@ -627,7 +972,7 @@ async fn extension_loop_active(
                             &*trace_flusher,
                             &*stats_flusher,
                             &proxy_flusher,
-                            &mut race_flush_interval,
+                            Some(&mut race_flush_interval),
                             &metrics_aggregator_handle,
                             false, // force_flush_trace_stats
                         )
@@ -665,7 +1010,7 @@ async fn extension_loop_active(
                                     &*trace_flusher,
                                     &*stats_flusher,
                                     &proxy_flusher,
-                                    &mut race_flush_interval,
+                                    Some(&mut race_flush_interval),
                                     &metrics_aggregator_handle,
                                     false, // force_flush_trace_stats
                                 )
@@ -700,45 +1045,27 @@ async fn extension_loop_active(
                 )
                 .await;
             // Wait for tombstone event from telemetry listener to ensure all events are processed
-            'shutdown: loop {
-                tokio::select! {
-                    Some(event) = event_bus.rx.recv() => {
-                        if let Event::Tombstone = event {
-                            debug!("Received tombstone event, draining remaining events");
-                            // Drain without waiting
-                            loop {
-                                match event_bus.rx.try_recv() {
-                                    Ok(event) => {
-                                        handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
-                                    },
-                                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => break 'shutdown,
-                                    // Empty signals there are still outstanding senders
-                                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
-                                        debug!("No more events to process but still have senders, continuing to drain...");
-                                    },
-                                }
-                            }
-                        } else {
-                            handle_event_bus_event(event, invocation_processor_handle.clone(), appsec_processor.clone(), tags_provider.clone(), trace_processor.clone(), trace_agent_channel.clone(), stats_concentrator.clone()).await;
-                        }
-                    }
-                    // Add timeout to prevent hanging indefinitely
-                    () = tokio::time::sleep(tokio::time::Duration::from_millis(300)) => {
-                        debug!("Timeout waiting for teardown, proceeding with shutdown");
-                        break 'shutdown;
-                    }
-                }
-            }
+            wait_for_tombstone_event(
+                &mut event_bus,
+                &invocation_processor_handle,
+                appsec_processor.clone(),
+                tags_provider.clone(),
+                trace_processor.clone(),
+                trace_agent_channel.clone(),
+                stats_concentrator.clone(),
+                300,
+            )
+            .await;
 
-            if let Some(api_runtime_proxy_cancel_token) = api_runtime_proxy_shutdown_signal {
-                api_runtime_proxy_cancel_token.cancel();
-            }
-            if let Some(otlp_cancel_token) = otlp_cancel_token {
-                otlp_cancel_token.cancel();
-            }
-            trace_agent_shutdown_token.cancel();
-            dogstatsd_cancel_token.cancel();
-            lifecycle_listener_shutdown_token.cancel();
+            // Cancel background services
+            cancel_background_services(
+                api_runtime_proxy_shutdown_signal.as_ref(),
+                otlp_cancel_token.as_ref(),
+                &trace_agent_shutdown_token,
+                &dogstatsd_cancel_token,
+                &telemetry_listener_cancel_token,
+                &lifecycle_listener_shutdown_token,
+            );
 
             // gotta lock here
             let mut locked_metrics = metrics_flushers.lock().await;
@@ -748,7 +1075,7 @@ async fn extension_loop_active(
                 &*trace_flusher,
                 &*stats_flusher,
                 &proxy_flusher,
-                &mut race_flush_interval,
+                Some(&mut race_flush_interval),
                 &metrics_aggregator_handle,
                 true, // force_flush_trace_stats
             )
@@ -774,7 +1101,7 @@ async fn blocking_flush_all(
     trace_flusher: &impl TraceFlusher,
     stats_flusher: &impl StatsFlusher,
     proxy_flusher: &ProxyFlusher,
-    race_flush_interval: &mut tokio::time::Interval,
+    race_flush_interval: Option<&mut tokio::time::Interval>,
     metrics_aggr_handle: &MetricsAggregatorHandle,
     force_flush_trace_stats: bool,
 ) {
@@ -799,10 +1126,70 @@ async fn blocking_flush_all(
         stats_flusher.flush(force_flush_trace_stats),
         proxy_flusher.flush(None),
     );
-    race_flush_interval.reset();
+    if let Some(interval) = race_flush_interval {
+        interval.reset();
+    }
 }
 
+/// Wait for the `Tombstone` event from telemetry listener to ensure all events are processed.
+/// This function will timeout after the specified duration to prevent hanging indefinitely.
 #[allow(clippy::too_many_arguments)]
+async fn wait_for_tombstone_event(
+    event_bus: &mut EventBus,
+    invocation_processor_handle: &InvocationProcessorHandle,
+    appsec_processor: Option<Arc<TokioMutex<AppSecProcessor>>>,
+    tags_provider: Arc<TagProvider>,
+    trace_processor: Arc<trace_processor::ServerlessTraceProcessor>,
+    trace_agent_channel: Sender<SendDataBuilderInfo>,
+    stats_concentrator: StatsConcentratorHandle,
+    timeout_ms: u64,
+) {
+    'shutdown: loop {
+        tokio::select! {
+            Some(event) = event_bus.rx.recv() => {
+                if let Event::Tombstone = event {
+                    debug!("Received tombstone event, proceeding with shutdown");
+                    break 'shutdown;
+                }
+                handle_event_bus_event(
+                    event,
+                    invocation_processor_handle.clone(),
+                    appsec_processor.clone(),
+                    tags_provider.clone(),
+                    trace_processor.clone(),
+                    trace_agent_channel.clone(),
+                    stats_concentrator.clone(),
+                ).await;
+            }
+            () = tokio::time::sleep(tokio::time::Duration::from_millis(timeout_ms)) => {
+                debug!("Timeout waiting for tombstone event, proceeding with shutdown");
+                break 'shutdown;
+            }
+        }
+    }
+}
+
+/// Cancel all background service tasks in preparation for shutdown.
+fn cancel_background_services(
+    api_runtime_proxy_shutdown_signal: Option<&CancellationToken>,
+    otlp_cancel_token: Option<&CancellationToken>,
+    trace_agent_shutdown_token: &CancellationToken,
+    dogstatsd_cancel_token: &CancellationToken,
+    telemetry_listener_cancel_token: &CancellationToken,
+    lifecycle_listener_shutdown_token: &CancellationToken,
+) {
+    if let Some(token) = api_runtime_proxy_shutdown_signal {
+        token.cancel();
+    }
+    if let Some(token) = otlp_cancel_token {
+        token.cancel();
+    }
+    trace_agent_shutdown_token.cancel();
+    dogstatsd_cancel_token.cancel();
+    telemetry_listener_cancel_token.cancel();
+    lifecycle_listener_shutdown_token.cancel();
+}
+
 #[allow(clippy::too_many_lines)]
 async fn handle_event_bus_event(
     event: Event,
@@ -912,13 +1299,31 @@ async fn handle_event_bus_event(
                 TelemetryRecord::PlatformReport {
                     ref request_id,
                     metrics,
-                    ..
+                    status,
+                    ref error_type,
+                    ref spans,
                 } => {
                     if let Err(e) = invocation_processor_handle
-                        .on_platform_report(request_id.clone(), metrics, event.time.timestamp())
+                        .on_platform_report(
+                            request_id,
+                            metrics,
+                            event.time.timestamp(),
+                            status,
+                            error_type,
+                            spans,
+                            tags_provider.clone(),
+                            Arc::new(SendingTraceProcessor {
+                                appsec: appsec_processor.clone(),
+                                processor: trace_processor.clone(),
+                                trace_tx: trace_agent_channel.clone(),
+                                stats_generator: Arc::new(StatsGenerator::new(
+                                    stats_concentrator.clone(),
+                                )),
+                            }),
+                        )
                         .await
                     {
-                        error!("Failed to send platform report to processor: {}", e);
+                        error!("Failed to send platform runtime report to processor: {}", e);
                     }
                     return Some(event);
                 }
@@ -999,6 +1404,7 @@ fn start_logs_agent(
     api_key_factory: Arc<ApiKeyFactory>,
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
+    is_managed_instance_mode: bool,
 ) -> (
     Sender<TelemetryEvent>,
     LogsFlusher,
@@ -1016,6 +1422,7 @@ fn start_logs_agent(
         Arc::clone(config),
         event_bus,
         aggregator_handle.clone(),
+        is_managed_instance_mode,
     );
     let cancel_token = agent.cancel_token();
     // Start logs agent in background
@@ -1085,6 +1492,9 @@ fn start_trace_agent(
         obfuscation_config: Arc::new(obfuscation_config),
     });
 
+    let (span_dedup_service, span_dedup_handle) = span_dedup_service::DedupService::new();
+    tokio::spawn(span_dedup_service.run());
+
     // Proxy
     let proxy_aggregator = Arc::new(TokioMutex::new(proxy_aggregator::Aggregator::default()));
     let proxy_flusher = Arc::new(ProxyFlusher::new(
@@ -1105,6 +1515,7 @@ fn start_trace_agent(
         appsec_processor,
         Arc::clone(tags_provider),
         stats_concentrator_handle.clone(),
+        span_dedup_handle,
     );
     let trace_agent_channel = trace_agent.get_sender_copy();
     let shutdown_token = trace_agent.shutdown_token();
@@ -1256,6 +1667,7 @@ async fn setup_telemetry_client(
     logs_tx: Sender<TelemetryEvent>,
     event_bus_tx: Sender<Event>,
     logs_enabled: bool,
+    managed_instance_mode: bool,
 ) -> anyhow::Result<CancellationToken> {
     let listener = TelemetryListener::new(EXTENSION_HOST_IP, TELEMETRY_PORT, logs_tx, event_bus_tx);
 
@@ -1276,6 +1688,7 @@ async fn setup_telemetry_client(
         extension_id,
         TELEMETRY_PORT,
         logs_enabled,
+        managed_instance_mode,
     )
     .await
     .map_err(|e| anyhow::anyhow!("Failed to subscribe to telemetry: {e:?}"))?;

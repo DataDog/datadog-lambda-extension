@@ -33,6 +33,8 @@ use crate::{
     traces::{
         INVOCATION_SPAN_RESOURCE,
         proxy_aggregator::{self, ProxyRequest},
+        span_dedup::DedupKey,
+        span_dedup_service::DedupHandle,
         stats_aggregator,
         stats_generator::StatsGenerator,
         stats_processor,
@@ -41,9 +43,9 @@ use crate::{
         trace_processor,
     },
 };
-use datadog_trace_protobuf::pb;
-use datadog_trace_utils::trace_utils::{self};
-use ddcommon::hyper_migration;
+use libdd_common::hyper_migration;
+use libdd_trace_protobuf::pb;
+use libdd_trace_utils::trace_utils::{self};
 
 use crate::traces::stats_concentrator_service::StatsConcentratorHandle;
 
@@ -60,7 +62,9 @@ const LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2: &str =
     "/evp_proxy/v2/api/intake/llm-obs/v2/eval-metric";
 const LLM_OBS_SPANS_ENDPOINT_PATH: &str = "/evp_proxy/v2/api/v2/llmobs";
 const INFO_ENDPOINT_PATH: &str = "/info";
-const DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const V1_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v1/input";
+const V2_DEBUGGER_ENDPOINT_PATH: &str = "/debugger/v2/input";
+const DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH: &str = "/debugger/v1/diagnostics";
 const INSTRUMENTATION_ENDPOINT_PATH: &str = "/telemetry/proxy/api/v2/apmtelemetry";
 
 // Intake endpoints
@@ -69,7 +73,8 @@ const LLM_OBS_SPANS_INTAKE_PATH: &str = "/api/v2/llmobs";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH: &str = "/api/intake/llm-obs/v1/eval-metric";
 const LLM_OBS_EVAL_METRIC_INTAKE_PATH_V2: &str = "/api/intake/llm-obs/v2/eval-metric";
 const PROFILING_INTAKE_PATH: &str = "/api/v2/profile";
-const DEBUGGER_LOGS_INTAKE_PATH: &str = "/api/v2/logs";
+const V1_DEBUGGER_LOGS_INTAKE_PATH: &str = "/api/v2/logs";
+const V2_DEBUGGER_INTAKE_PATH: &str = "/api/v2/debugger";
 const INSTRUMENTATION_INTAKE_PATH: &str = "/api/v2/apmtelemetry";
 
 const TRACER_PAYLOAD_CHANNEL_BUFFER_SIZE: usize = 10;
@@ -85,6 +90,7 @@ pub struct TraceState {
     pub trace_sender: Arc<trace_processor::SendingTraceProcessor>,
     pub invocation_processor_handle: InvocationProcessorHandle,
     pub tags_provider: Arc<provider::Provider>,
+    pub span_deduper: DedupHandle,
 }
 
 #[derive(Clone)]
@@ -111,6 +117,7 @@ pub struct TraceAgent {
     shutdown_token: CancellationToken,
     tx: Sender<SendDataBuilderInfo>,
     stats_concentrator: StatsConcentratorHandle,
+    span_deduper: DedupHandle,
 }
 
 #[derive(Clone, Copy)]
@@ -133,6 +140,7 @@ impl TraceAgent {
         appsec_processor: Option<Arc<Mutex<AppSecProcessor>>>,
         tags_provider: Arc<provider::Provider>,
         stats_concentrator: StatsConcentratorHandle,
+        span_deduper: DedupHandle,
     ) -> TraceAgent {
         // Set up a channel to send processed traces to our trace aggregator. tx is passed through each
         // endpoint_handler to the trace processor, which uses it to send de-serialized
@@ -161,6 +169,7 @@ impl TraceAgent {
             tx: trace_tx,
             shutdown_token: CancellationToken::new(),
             stats_concentrator,
+            span_deduper,
         }
     }
 
@@ -215,6 +224,7 @@ impl TraceAgent {
             }),
             invocation_processor_handle: self.invocation_processor_handle.clone(),
             tags_provider: Arc::clone(&self.tags_provider),
+            span_deduper: self.span_deduper.clone(),
         };
 
         let stats_state = StatsState {
@@ -256,7 +266,12 @@ impl TraceAgent {
                 post(Self::llm_obs_eval_metric_proxy_v2),
             )
             .route(LLM_OBS_SPANS_ENDPOINT_PATH, post(Self::llm_obs_spans_proxy))
-            .route(DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
+            .route(V1_DEBUGGER_ENDPOINT_PATH, post(Self::debugger_logs_proxy))
+            .route(V2_DEBUGGER_ENDPOINT_PATH, post(Self::debugger_intake_proxy))
+            .route(
+                DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
+                post(Self::debugger_intake_proxy),
+            )
             .route(
                 INSTRUMENTATION_ENDPOINT_PATH,
                 post(Self::instrumentation_proxy),
@@ -288,6 +303,7 @@ impl TraceAgent {
             state.trace_sender,
             state.invocation_processor_handle,
             state.tags_provider,
+            state.span_deduper,
             ApiVersion::V04,
         )
         .await
@@ -300,6 +316,7 @@ impl TraceAgent {
             state.trace_sender,
             state.invocation_processor_handle,
             state.tags_provider,
+            state.span_deduper,
             ApiVersion::V05,
         )
         .await
@@ -385,14 +402,28 @@ impl TraceAgent {
         .await
     }
 
+    // Used for `/debugger/v1/input` in Exception Replay
     async fn debugger_logs_proxy(State(state): State<ProxyState>, request: Request) -> Response {
         Self::handle_proxy(
             state.config,
             state.proxy_aggregator,
             request,
             "http-intake.logs",
-            DEBUGGER_LOGS_INTAKE_PATH,
+            V1_DEBUGGER_LOGS_INTAKE_PATH,
             "debugger_logs",
+        )
+        .await
+    }
+
+    // Used for `/debugger/v1/diagnostics` and `/debugger/v2/input` in Exception Replay
+    async fn debugger_intake_proxy(State(state): State<ProxyState>, request: Request) -> Response {
+        Self::handle_proxy(
+            state.config,
+            state.proxy_aggregator,
+            request,
+            "debugger-intake",
+            V2_DEBUGGER_INTAKE_PATH,
+            "debugger",
         )
         .await
     }
@@ -423,7 +454,9 @@ impl TraceAgent {
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH,
                     LLM_OBS_EVAL_METRIC_ENDPOINT_PATH_V2,
                     LLM_OBS_SPANS_ENDPOINT_PATH,
-                    DEBUGGER_ENDPOINT_PATH,
+                    V1_DEBUGGER_ENDPOINT_PATH,
+                    V2_DEBUGGER_ENDPOINT_PATH,
+                    DEBUGGER_DIAGNOSTICS_ENDPOINT_PATH,
                 ],
                 "client_drop_p0s": true,
             }
@@ -439,8 +472,10 @@ impl TraceAgent {
         trace_sender: Arc<SendingTraceProcessor>,
         invocation_processor_handle: InvocationProcessorHandle,
         tags_provider: Arc<provider::Provider>,
+        deduper: DedupHandle,
         version: ApiVersion,
     ) -> Response {
+        let start = Instant::now();
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
@@ -506,7 +541,30 @@ impl TraceAgent {
         };
 
         for chunk in &mut traces {
-            for span in chunk.iter_mut() {
+            let original_chunk = std::mem::take(chunk);
+            for mut span in original_chunk {
+                // Check for duplicates
+                let key = DedupKey::new(span.trace_id, span.span_id);
+                let should_keep = match deduper.check_and_add(key).await {
+                    Ok(should_keep) => {
+                        if !should_keep {
+                            debug!(
+                                "Dropping duplicate span with trace_id: {}, span_id: {}",
+                                span.trace_id, span.span_id
+                            );
+                        }
+                        should_keep
+                    }
+                    Err(e) => {
+                        error!("Failed to check span in deduper, keeping span: {e}");
+                        true
+                    }
+                };
+
+                if !should_keep {
+                    continue;
+                }
+
                 // If the aws.lambda.load span is found, we're in Python or Node.
                 // We need to update the trace ID of the cold start span, reparent the `aws.lambda.load`
                 // span to the cold start span, and eventually send the cold start span.
@@ -533,9 +591,15 @@ impl TraceAgent {
                         error!("Failed to add tracer span to processor: {}", e);
                     }
                 }
-                handle_reparenting(&mut reparenting_info, span);
+                handle_reparenting(&mut reparenting_info, &mut span);
+
+                // Keep the span
+                chunk.push(span);
             }
         }
+
+        // Remove empty chunks
+        traces.retain(|chunk| !chunk.is_empty());
 
         match invocation_processor_handle
             .update_reparenting(reparenting_info)
@@ -573,6 +637,11 @@ impl TraceAgent {
                 format!("Error sending traces to the trace aggregator: {err:?}"),
             );
         }
+
+        debug!(
+            "TRACE_AGENT | Processing traces took: {} ms",
+            start.elapsed().as_millis()
+        );
 
         success_response("Successfully buffered traces to be aggregated.")
     }

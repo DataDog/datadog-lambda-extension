@@ -1,0 +1,40 @@
+# CDK
+*.js
+!jest.config.js
+!lambda/**/*.js
+*.d.ts
+node_modules
+cdk.out
+.cdk.staging
+
+# Compiled output
+dist/
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Lambda artifacts
+response.json
+lambda-bundle.zip

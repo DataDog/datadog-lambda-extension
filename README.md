@@ -29,6 +29,46 @@ APM Tracing is supported for Python, NodeJS, Go, Java, and .NET runtimes.
 
 We'd love to hear your feedback on the next-generation Lambda Extension. You can open a GitHub issue here using the `version/next` tag, find us on the [Datadog Community Slack](https://chat.datadoghq.com/) in the #serverless channel, or reach out to me directly at aj@datadoghq.com.
 
+## Lambda Managed Instance Support
+
+The Datadog Lambda Extension (v90+) now supports **AWS Lambda Managed Instances**, a deployment mode where Lambda functions run on EC2 instances managed by AWS with multi-concurrent invocation handling. This is ideal for steady-state, high-volume workloads where optimizing costs with predictable capacity is desired.
+
+### What is Lambda Managed Instance Mode?
+
+Lambda Managed Instances run your functions on EC2 instances (managed by AWS) where one execution environment can handle multiple invocations simultaneously, unlike traditional Lambda's one-invocation-per-environment model. This requires setting up a **capacity provider** - a configuration that defines VPC settings, instance requirements, and scaling parameters.
+
+Learn more:
+- [Introducing AWS Lambda Managed Instances: Serverless simplicity with EC2 flexibility](https://aws.amazon.com/blogs/aws/introducing-aws-lambda-managed-instances-serverless-simplicity-with-ec2-flexibility/)
+- [Lambda Managed Instances - AWS Lambda Developer Guide](https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances.html)
+
+### How the Extension Supports Managed Instances
+
+The Datadog Extension automatically detects when running in Managed Instance mode (via the `AWS_LAMBDA_INITIALIZATION_TYPE` environment variable) and optimizes its behavior:
+
+- **Background Flushing**: A dedicated background task continuously flushes observability data at regular intervals (default: 30 seconds), completely independent of invocation processing
+- **Zero Per-Invocation Overhead**: All flush operations are non-blocking and run concurrently with your function invocations
+- **Optimized Event Handling**: The extension processes telemetry events directly from the Lambda Telemetry API without blocking on invocation lifecycle calls
+- **Enhanced Monitoring**: Generates managed-instance-specific metrics and statistics
+
+### Key Differences from Standard Lambda
+
+| Aspect | Managed Instance Mode | Standard (On-Demand) Mode |
+|--------|----------------------|---------------------------|
+| **Invocation Model** | Multi-concurrent invocations per environment | Single invocation per environment |
+| **Data Flushing** | Continuous background flushing (non-blocking) | Configurable flush strategies |
+| **Flush Overhead** | Zero overhead per invocation | Small overhead based on flush strategy |
+| **Configuration** | Always continuous (custom intervals respected) | Flush strategy is configurable |
+| **Use Case** | Steady-state, high-volume workloads | General serverless workloads |
+
+### Getting Started
+
+1. Set up your Lambda function with a [capacity provider](https://docs.aws.amazon.com/lambda/latest/dg/lambda-managed-instances.html)
+2. Install the Datadog Lambda Extension (v90+) as usual
+3. The extension will automatically detect Managed Instance mode and optimize its behavior
+4. Monitor your telemetry in Datadog as normal
+
+No additional configuration is required - the extension handles everything automatically when it detects the Managed Instance environment.
+
 ## Upgrading
 
 To upgrade, update the Datadog Extension version in your Lambda layer configurations or Dockerfile (for Lambda functions deployed as container images). View the latest [releases](https://github.com/DataDog/datadog-lambda-extension/releases) and corresponding changelogs before upgrading.

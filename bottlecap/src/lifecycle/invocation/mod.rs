@@ -1,5 +1,5 @@
 use base64::{DecodeError, Engine, engine::general_purpose};
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use rand::{Rng, RngCore, rngs::OsRng};
 use std::collections::HashMap;
 

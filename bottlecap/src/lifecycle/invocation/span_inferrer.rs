@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use tracing::debug;
 
@@ -542,6 +542,7 @@ mod tests {
             function_name: String::new(),
             sandbox_init_time: Instant::now(),
             exec_wrapper: None,
+            initialization_type: "on-demand".into(),
         });
 
         inferrer.infer_span(&payload, &aws_config);

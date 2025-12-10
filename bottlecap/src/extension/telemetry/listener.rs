@@ -115,7 +115,7 @@ impl TelemetryListener {
                 // Instead, log it and move on.
                 // This will result in a dropped payload, but may be from
                 // events we haven't added support for yet
-                debug!("Failed to parse telemetry events: {:?}", e);
+                debug!("Failed to parse telemetry events `{body}`, failed with: {e}");
                 return (StatusCode::OK, "Failed to parse telemetry events").into_response();
             }
         };

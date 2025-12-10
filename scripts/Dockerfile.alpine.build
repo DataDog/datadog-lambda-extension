@@ -54,8 +54,7 @@ RUN /usr/lib/go/bin/go tool nm datadog-agent | grep -w 'github.com/DataDog/datad
 FROM ubuntu:22.04 as compresser
 ARG CMD_PATH
 ARG DATADOG_WRAPPER=datadog_wrapper
-RUN apt-get update
-RUN apt-get install -y zip binutils
+RUN apt-get update && apt-get install -y zip binutils
 RUN mkdir /extensions
 WORKDIR /extensions
 COPY --from=builder /tmp/dd/datadog-agent/"${CMD_PATH}"/datadog-agent /extensions/datadog-agent

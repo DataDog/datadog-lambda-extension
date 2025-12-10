@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use datadog_trace_protobuf::pb::Span;
 use dogstatsd::aggregator_service::AggregatorHandle;
+use libdd_trace_protobuf::pb::Span;
 use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
@@ -10,7 +10,9 @@ use tracing::{debug, error};
 
 use crate::{
     config::{self, aws::AwsConfig},
-    extension::telemetry::events::{InitType, ReportMetrics, RuntimeDoneMetrics, Status},
+    extension::telemetry::events::{
+        InitType, ReportMetrics, RuntimeDoneMetrics, Status, TelemetrySpan,
+    },
     lifecycle::invocation::{
         context::{Context, ReparentingInfo},
         processor::Processor,
@@ -69,14 +71,22 @@ pub enum ProcessorCommand {
         request_id: String,
         metrics: ReportMetrics,
         timestamp: i64,
+        status: Status,
+        error_type: Option<String>,
+        spans: Option<Vec<TelemetrySpan>>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+        response: oneshot::Sender<()>,
     },
     UniversalInstrumentationStart {
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     },
     UniversalInstrumentationEnd {
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     },
     AddReparenting {
         request_id: String,
@@ -213,30 +223,49 @@ impl InvocationProcessorHandle {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn on_platform_report(
         &self,
-        request_id: String,
+        request_id: &str,
         metrics: ReportMetrics,
         timestamp: i64,
-    ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
+        status: Status,
+        error_type: &Option<String>,
+        spans: &Option<Vec<TelemetrySpan>>,
+        tags_provider: Arc<provider::Provider>,
+        trace_sender: Arc<SendingTraceProcessor>,
+    ) -> Result<(), ProcessorError> {
+        let (tx, rx) = oneshot::channel();
         self.sender
             .send(ProcessorCommand::PlatformReport {
-                request_id,
+                request_id: request_id.to_string(),
                 metrics,
                 timestamp,
+                status,
+                error_type: error_type.clone(),
+                spans: spans.clone(),
+                tags_provider,
+                trace_sender,
+                response: tx,
             })
             .await
+            .map_err(|e| ProcessorError::ChannelSend(e.to_string()))?;
+        rx.await
+            .map_err(|e| ProcessorError::ChannelReceive(e.to_string()))?;
+        Ok(())
     }
 
     pub async fn on_universal_instrumentation_start(
         &self,
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::UniversalInstrumentationStart {
                 headers,
                 payload_value,
+                request_id,
             })
             .await
     }
@@ -245,11 +274,13 @@ impl InvocationProcessorHandle {
         &self,
         headers: HashMap<String, String>,
         payload_value: Value,
+        request_id: Option<String>,
     ) -> Result<(), mpsc::error::SendError<ProcessorCommand>> {
         self.sender
             .send(ProcessorCommand::UniversalInstrumentationEnd {
                 headers,
                 payload_value,
+                request_id,
             })
             .await
     }
@@ -474,23 +505,54 @@ impl InvocationProcessorService {
                     request_id,
                     metrics,
                     timestamp,
+                    status,
+                    error_type,
+                    spans,
+                    tags_provider,
+                    trace_sender,
+                    response,
                 } => {
                     self.processor
-                        .on_platform_report(&request_id, metrics, timestamp);
+                        .on_platform_report(
+                            &request_id,
+                            metrics,
+                            timestamp,
+                            status,
+                            error_type,
+                            spans,
+                            tags_provider,
+                            trace_sender,
+                        )
+                        .await;
+
+                    // The necessity of having response.send():
+                    // Without it, the caller at line 187-188 (rx.await) would block forever waiting for a response
+                    //  - The async task would never complete
+                    //  - The entire extension could hang during shutdown
+                    // this change also mirrors the behavior of handling PlatformRuntimeDone in OD mode
+                    let _ = response.send(());
                 }
                 ProcessorCommand::UniversalInstrumentationStart {
                     headers,
                     payload_value,
+                    request_id,
                 } => {
-                    self.processor
-                        .on_universal_instrumentation_start(headers, payload_value);
+                    self.processor.on_universal_instrumentation_start(
+                        headers,
+                        payload_value,
+                        request_id,
+                    );
                 }
                 ProcessorCommand::UniversalInstrumentationEnd {
                     headers,
                     payload_value,
+                    request_id,
                 } => {
-                    self.processor
-                        .on_universal_instrumentation_end(headers, payload_value);
+                    self.processor.on_universal_instrumentation_end(
+                        headers,
+                        payload_value,
+                        request_id,
+                    );
                 }
                 ProcessorCommand::AddReparenting {
                     request_id,

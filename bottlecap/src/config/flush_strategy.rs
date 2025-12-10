@@ -21,6 +21,20 @@ pub enum FlushStrategy {
     Continuously(PeriodicStrategy),
 }
 
+impl FlushStrategy {
+    /// Returns the name of the flush strategy as a string slice.
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
+        match self {
+            FlushStrategy::Default => "default",
+            FlushStrategy::End => "end",
+            FlushStrategy::Periodically(_) => "periodically",
+            FlushStrategy::EndPeriodically(_) => "end-periodically",
+            FlushStrategy::Continuously(_) => "continuously",
+        }
+    }
+}
+
 // A restricted subset of `FlushStrategy`. The Default strategy is now allowed, which is required to be
 // translated into a concrete strategy.
 #[allow(clippy::module_name_repetitions)]
@@ -120,5 +134,35 @@ mod tests {
     fn deserialize_invalid_end_interval() {
         let flush_strategy: FlushStrategy = serde_json::from_str("\"end,invalid\"").unwrap();
         assert_eq!(flush_strategy, FlushStrategy::Default);
+    }
+
+    #[test]
+    fn test_flush_strategy_name_default() {
+        let strategy = FlushStrategy::Default;
+        assert_eq!(strategy.name(), "default");
+    }
+
+    #[test]
+    fn test_flush_strategy_name_end() {
+        let strategy = FlushStrategy::End;
+        assert_eq!(strategy.name(), "end");
+    }
+
+    #[test]
+    fn test_flush_strategy_name_periodically() {
+        let strategy = FlushStrategy::Periodically(PeriodicStrategy { interval: 1000 });
+        assert_eq!(strategy.name(), "periodically");
+    }
+
+    #[test]
+    fn test_flush_strategy_name_end_periodically() {
+        let strategy = FlushStrategy::EndPeriodically(PeriodicStrategy { interval: 2000 });
+        assert_eq!(strategy.name(), "end-periodically");
+    }
+
+    #[test]
+    fn test_flush_strategy_name_continuously() {
+        let strategy = FlushStrategy::Continuously(PeriodicStrategy { interval: 30000 });
+        assert_eq!(strategy.name(), "continuously");
     }
 }

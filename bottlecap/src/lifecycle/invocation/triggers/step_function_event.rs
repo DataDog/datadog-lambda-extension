@@ -114,7 +114,7 @@ impl Trigger for StepFunctionEvent {
 
     fn enrich_span(
         &self,
-        _span: &mut datadog_trace_protobuf::pb::Span,
+        _span: &mut libdd_trace_protobuf::pb::Span,
         _service_mapping: &HashMap<String, String>,
         _aws_service_representation_enabled: bool,
     ) {

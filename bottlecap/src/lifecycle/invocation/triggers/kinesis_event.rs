@@ -1,7 +1,7 @@
 #![allow(clippy::module_name_repetitions)]
 use base64::Engine;
 use base64::engine::general_purpose;
-use datadog_trace_protobuf::pb::Span;
+use libdd_trace_protobuf::pb::Span;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, from_slice};
 use std::collections::HashMap;
