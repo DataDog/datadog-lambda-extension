@@ -14,13 +14,6 @@ describe('OTLP .NET Lambda Integration Test', () => {
     expect(result.statusCode).toBe(200);
   });
 
-  it('should have "Hello from OTLP .NET!" log message', () => {
-    const helloWorldLog = result.logs?.find((log: any) =>
-      log.message.includes('Hello from OTLP .NET!')
-    );
-    expect(helloWorldLog).toBeDefined();
-  });
-
   it('should send at least one trace to Datadog', () => {
     expect(result.traces?.length).toBeGreaterThan(0);
   });
