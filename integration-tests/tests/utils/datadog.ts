@@ -165,7 +165,7 @@ export async function getLogs(
   try {
     let query = `service:${serviceName}`;
     if (requestId) {
-      query += ` ${requestId}`;
+      query += ` @lambda.request_id:${requestId}`;
     }
 
     console.log(`Searching for logs: ${query}`);
