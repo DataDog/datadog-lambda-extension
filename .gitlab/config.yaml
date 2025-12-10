@@ -15,6 +15,3 @@ datasources:
 
   regions:
     url: .gitlab/datasources/regions.yaml
-
-  lambda_functions:
-    url: .gitlab/datasources/lambda-functions.yaml

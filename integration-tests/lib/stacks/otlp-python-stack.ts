@@ -13,15 +13,7 @@ export class OtlpPythonStack extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_12,
       architecture: lambda.Architecture.ARM_64,
       handler: 'lambda_function.handler',
-      code: lambda.Code.fromAsset('./lambda/otlp-python', {
-        bundling: {
-          image: lambda.Runtime.PYTHON_3_12.bundlingImage,
-          command: [
-            'bash', '-c',
-            'pip install -r requirements.txt -t /asset-output && cp -au . /asset-output'
-          ],
-        },
-      }),
+      code: lambda.Code.fromAsset('./lambda/otlp-python/package'),
       functionName: pythonFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
