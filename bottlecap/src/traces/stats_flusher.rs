@@ -104,7 +104,7 @@ impl StatsFlusher for ServerlessStatsFlusher {
 
         let Ok(http_client) = ServerlessTraceFlusher::get_http_client(
             self.config.proxy_https.as_ref(),
-            self.config.ssl_ca_cert.as_ref(),
+            self.config.cls_ca_cert.as_ref(),
         ) else {
             error!("STATS_FLUSHER | Failed to create HTTP client");
             return;

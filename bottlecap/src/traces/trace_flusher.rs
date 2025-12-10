@@ -41,7 +41,7 @@ pub trait TraceFlusher {
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
         proxy_https: &Option<String>,
-        ssl_ca_cert: &Option<String>,
+        cls_ca_cert: &Option<String>,
     ) -> Option<Vec<SendData>>;
 
     /// Flushes traces by getting every available batch on the aggregator.
@@ -115,7 +115,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
                     traces,
                     None,
                     &self.config.proxy_https,
-                    &self.config.ssl_ca_cert,
+                    &self.config.cls_ca_cert,
                 )
                 .await;
                 if retry_result.is_some() {
@@ -144,17 +144,17 @@ impl TraceFlusher for ServerlessTraceFlusher {
 
             let traces_clone = traces.clone();
             let proxy_https = self.config.proxy_https.clone();
-            let ssl_ca_cert = self.config.ssl_ca_cert.clone();
+            let cls_ca_cert = self.config.cls_ca_cert.clone();
             batch_tasks.spawn(async move {
-                Self::send(traces_clone, None, &proxy_https, &ssl_ca_cert).await
+                Self::send(traces_clone, None, &proxy_https, &cls_ca_cert).await
             });
 
             for endpoint in self.additional_endpoints.clone() {
                 let traces_clone = traces.clone();
                 let proxy_https = self.config.proxy_https.clone();
-                let ssl_ca_cert = self.config.ssl_ca_cert.clone();
+                let cls_ca_cert = self.config.cls_ca_cert.clone();
                 batch_tasks.spawn(async move {
-                    Self::send(traces_clone, Some(&endpoint), &proxy_https, &ssl_ca_cert).await
+                    Self::send(traces_clone, Some(&endpoint), &proxy_https, &cls_ca_cert).await
                 });
             }
         }
@@ -175,7 +175,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         traces: Vec<SendData>,
         endpoint: Option<&Endpoint>,
         proxy_https: &Option<String>,
-        ssl_ca_cert: &Option<String>,
+        cls_ca_cert: &Option<String>,
     ) -> Option<Vec<SendData>> {
         if traces.is_empty() {
             return None;
@@ -186,7 +186,7 @@ impl TraceFlusher for ServerlessTraceFlusher {
         debug!("TRACES | Flushing {} traces", coalesced_traces.len());
 
         let Ok(http_client) =
-            ServerlessTraceFlusher::get_http_client(proxy_https.as_ref(), ssl_ca_cert.as_ref())
+            ServerlessTraceFlusher::get_http_client(proxy_https.as_ref(), cls_ca_cert.as_ref())
         else {
             error!("TRACES | Failed to create HTTP client");
             return None;
@@ -227,13 +227,13 @@ fn ensure_crypto_provider_initialized() {
 impl ServerlessTraceFlusher {
     pub fn get_http_client(
         proxy_https: Option<&String>,
-        ssl_ca_cert: Option<&String>,
+        cls_ca_cert: Option<&String>,
     ) -> Result<
         GenericHttpClient<hyper_http_proxy::ProxyConnector<libdd_common::connector::Connector>>,
         Box<dyn Error>,
     > {
         // Create the base connector with optional custom TLS config
-        let connector = if let Some(ca_cert_path) = ssl_ca_cert {
+        let connector = if let Some(ca_cert_path) = cls_ca_cert {
             // Ensure crypto provider is initialized before creating TLS config
             ensure_crypto_provider_initialized();
 
