@@ -471,7 +471,6 @@ dependencies = [
  "cookie",
  "datadog-fips",
  "datadog-protos",
- "datadog-trace-obfuscation",
  "ddsketch-agent",
  "dogstatsd",
  "figment",
@@ -490,6 +489,7 @@ dependencies = [
  "lazy_static",
  "libdd-common",
  "libdd-trace-normalization",
+ "libdd-trace-obfuscation",
  "libdd-trace-protobuf",
  "libdd-trace-stats",
  "libdd-trace-utils",
@@ -742,23 +742,6 @@ dependencies = [
  "protobuf-codegen",
  "tonic",
  "tonic-build",
-]
-
-[[package]]
-name = "datadog-trace-obfuscation"
-version = "24.0.1"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
-dependencies = [
- "anyhow",
- "libdd-common",
- "libdd-trace-protobuf",
- "libdd-trace-utils",
- "log",
- "percent-encoding",
- "regex",
- "serde",
- "serde_json",
- "url",
 ]
 
 [[package]]
@@ -1773,7 +1756,7 @@ checksum = "37c93d8daa9d8a012fd8ab92f088405fb202ea0b6ab73ee2482ae66af4f42091"
 [[package]]
 name = "libdd-common"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
 dependencies = [
  "anyhow",
  "cc",
@@ -1806,7 +1789,7 @@ dependencies = [
 [[package]]
 name = "libdd-ddsketch"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
 dependencies = [
  "prost",
 ]
@@ -1814,7 +1797,7 @@ dependencies = [
 [[package]]
 name = "libdd-tinybytes"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
 dependencies = [
  "serde",
 ]
@@ -1822,16 +1805,33 @@ dependencies = [
 [[package]]
 name = "libdd-trace-normalization"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
 dependencies = [
  "anyhow",
  "libdd-trace-protobuf",
 ]
 
 [[package]]
+name = "libdd-trace-obfuscation"
+version = "1.0.0"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
+dependencies = [
+ "anyhow",
+ "libdd-common",
+ "libdd-trace-protobuf",
+ "libdd-trace-utils",
+ "log",
+ "percent-encoding",
+ "regex",
+ "serde",
+ "serde_json",
+ "url",
+]
+
+[[package]]
 name = "libdd-trace-protobuf"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
 dependencies = [
  "prost",
  "serde",
@@ -1841,7 +1841,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-stats"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
 dependencies = [
  "hashbrown 0.15.5",
  "libdd-ddsketch",
@@ -1852,7 +1852,7 @@ dependencies = [
 [[package]]
 name = "libdd-trace-utils"
 version = "1.0.0"
-source = "git+https://github.com/DataDog/libdatadog?rev=7540423559548ce049c5424599d28ee1731378e8#7540423559548ce049c5424599d28ee1731378e8"
+source = "git+https://github.com/DataDog/libdatadog?rev=63324d60bd7a781bc8c60b51e2946694daca28f0#63324d60bd7a781bc8c60b51e2946694daca28f0"
 dependencies = [
  "anyhow",
  "bytes",

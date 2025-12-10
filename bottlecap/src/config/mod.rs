@@ -10,7 +10,7 @@ pub mod service_mapping;
 pub mod trace_propagation_style;
 pub mod yaml;
 
-use datadog_trace_obfuscation::replacer::ReplaceRule;
+use libdd_trace_obfuscation::replacer::ReplaceRule;
 use libdd_trace_utils::config_utils::{trace_intake_url, trace_intake_url_prefixed};
 
 use serde::{Deserialize, Deserializer};
@@ -770,7 +770,7 @@ pub fn deserialize_optional_duration_from_seconds_ignore_zero<'de, D: Deserializ
 #[cfg_attr(coverage_nightly, coverage(off))] // Test modules skew coverage metrics
 #[cfg(test)]
 pub mod tests {
-    use datadog_trace_obfuscation::replacer::parse_rules_from_string;
+    use libdd_trace_obfuscation::replacer::parse_rules_from_string;
 
     use super::*;
 

@@ -78,7 +78,7 @@ use bottlecap::{
 };
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use datadog_protos::metrics::SketchPayload;
-use datadog_trace_obfuscation::obfuscation_config;
+use libdd_trace_obfuscation::obfuscation_config;
 use decrypt::resolve_secrets;
 use dogstatsd::{
     aggregator_service::AggregatorHandle as MetricsAggregatorHandle,

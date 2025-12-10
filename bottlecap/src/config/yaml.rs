@@ -19,7 +19,7 @@ use crate::{
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
-use datadog_trace_obfuscation::replacer::ReplaceRule;
+use libdd_trace_obfuscation::replacer::ReplaceRule;
 use figment::{
     Figment,
     providers::{Format, Yaml},

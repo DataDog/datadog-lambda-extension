@@ -13,8 +13,8 @@ use crate::traces::{
     LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
 };
 use async_trait::async_trait;
-use datadog_trace_obfuscation::obfuscate::obfuscate_span;
-use datadog_trace_obfuscation::obfuscation_config;
+use libdd_trace_obfuscation::obfuscate::obfuscate_span;
+use libdd_trace_obfuscation::obfuscation_config;
 use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::Span;
@@ -479,7 +479,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+    use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
 
     use crate::{LAMBDA_RUNTIME_SLUG, config::Config, tags::provider::Provider};
 
@@ -785,7 +785,7 @@ mod tests {
     #[test]
     fn test_root_span_filtering_drops_entire_trace() {
         use crate::tags::provider::Provider;
-        use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
         use std::sync::Arc;
 
         let root_span = pb::Span {
@@ -869,7 +869,7 @@ mod tests {
     #[test]
     fn test_root_span_filtering_allows_trace_when_no_match() {
         use crate::tags::provider::Provider;
-        use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
         use std::sync::Arc;
 
         let root_span = pb::Span {
@@ -953,7 +953,7 @@ mod tests {
     #[test]
     fn test_root_span_filtering_allows_trace_when_no_filter_tags() {
         use crate::tags::provider::Provider;
-        use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+        use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
         use std::sync::Arc;
 
         let root_span = pb::Span {
