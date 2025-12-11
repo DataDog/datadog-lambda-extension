@@ -1184,10 +1184,21 @@ fn cancel_background_services(
     if let Some(token) = otlp_cancel_token {
         token.cancel();
     }
+    debug!("Calling trace_agent_shutdown_token.cancel()");
     trace_agent_shutdown_token.cancel();
+    debug!("Called trace_agent_shutdown_token.cancel()");
+
+    debug!("Calling dogstatsd_cancel_token.cancel()");
     dogstatsd_cancel_token.cancel();
+    debug!("Called dogstatsd_cancel_token.cancel()");
+
+    debug!("Calling telemetry_listener_cancel_token.cancel()");
     telemetry_listener_cancel_token.cancel();
+    debug!("Called telemetry_listener_cancel_token.cancel()");
+
+    debug!("Calling lifecycle_listener_shutdown_token.cancel()");
     lifecycle_listener_shutdown_token.cancel();
+    debug!("Called lifecycle_listener_shutdown_token.cancel()");
 }
 
 #[allow(clippy::too_many_lines)]

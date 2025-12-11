@@ -155,6 +155,7 @@ impl TraceAgent {
                     error!("TRACE_AGENT | Failed to insert payload into aggregator: {e}");
                 }
             }
+            debug!("TRACE_AGENT | Trace aggregator service shutting down");
         });
 
         TraceAgent {
@@ -190,6 +191,7 @@ impl TraceAgent {
                 let mut aggregator = stats_aggregator.lock().await;
                 aggregator.add(stats_payload);
             }
+            debug!("TRACE_AGENT | Stats aggregator service shutting down");
         });
 
         let router = self.make_router(stats_tx);
@@ -292,8 +294,10 @@ impl TraceAgent {
     }
 
     async fn graceful_shutdown(shutdown_token: CancellationToken) {
+        debug!("TRACE_AGENT | Entered graceful_shutdown()");
         shutdown_token.cancelled().await;
         debug!("TRACE_AGENT | Shutdown signal received, shutting down");
+        debug!("TRACE_AGENT | Leaving graceful_shutdown()");
     }
 
     async fn v04_traces(State(state): State<TraceState>, request: Request) -> Response {

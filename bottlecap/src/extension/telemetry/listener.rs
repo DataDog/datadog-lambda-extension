@@ -82,6 +82,7 @@ impl TelemetryListener {
         cancel_token: CancellationToken,
         event_bus_tx: Sender<event_bus::Event>,
     ) {
+        debug!("TELEMETRY LISTENER | Entered graceful_shutdown()");
         cancel_token.cancelled().await;
         debug!("TELEMETRY API | Shutdown signal received, sending tombstone event");
 
@@ -91,6 +92,7 @@ impl TelemetryListener {
         }
 
         debug!("TELEMETRY API | Shutting down");
+        debug!("TELEMETRY LISTENER | Leaving graceful_shutdown()");
     }
 
     async fn handle(State(logs_tx): State<Sender<TelemetryEvent>>, request: Request) -> Response {

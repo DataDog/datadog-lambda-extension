@@ -7,7 +7,7 @@ use libdd_trace_stats::span_concentrator::SpanConcentrator;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
-use tracing::error;
+use tracing::{debug, error};
 
 const S_TO_NS: u64 = 1_000_000_000;
 const BUCKET_DURATION_NS: u64 = 10 * S_TO_NS; // 10 seconds
@@ -142,6 +142,7 @@ impl StatsConcentratorService {
                 }
             }
         }
+        debug!("STATS_CONCENTRATOR_SERVICE | shutting down");
     }
 
     fn handle_flush(

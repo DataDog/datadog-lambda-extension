@@ -105,6 +105,7 @@ impl Listener {
     }
 
     async fn graceful_shutdown(tasks: Arc<Mutex<JoinSet<()>>>, shutdown_token: CancellationToken) {
+        debug!("Lifecycle API | Entered graceful_shutdown()");
         shutdown_token.cancelled().await;
         debug!("Lifecycle API | Shutdown signal received, shutting down");
 
@@ -114,6 +115,7 @@ impl Listener {
                 error!("Lifecycle API | Shutdown error: {e}");
             }
         }
+        debug!("Lifecycle API | Leaving graceful_shutdown()");
     }
 
     // TODO(duncanista): spawn task to handle start invocation request
