@@ -1,5 +1,4 @@
 use crate::{
-    event_bus,
     extension::telemetry::events::TelemetryEvent,
     http::{extract_request_body, handler_not_found},
 };
@@ -12,7 +11,7 @@ use axum::{
     routing::post,
 };
 use std::net::SocketAddr;
-use tokio::{net::TcpListener, sync::mpsc::Sender};
+use tokio::{net::TcpListener, sync::mpsc::Sender, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
@@ -23,24 +22,17 @@ pub struct TelemetryListener {
     port: u16,
     cancel_token: CancellationToken,
     logs_tx: Sender<TelemetryEvent>,
-    event_bus_tx: Sender<event_bus::Event>,
 }
 
 impl TelemetryListener {
     #[must_use]
-    pub fn new(
-        host: [u8; 4],
-        port: u16,
-        logs_tx: Sender<TelemetryEvent>,
-        event_bus_tx: Sender<event_bus::Event>,
-    ) -> Self {
+    pub fn new(host: [u8; 4], port: u16, logs_tx: Sender<TelemetryEvent>) -> Self {
         let cancel_token = CancellationToken::new();
         Self {
             host,
             port,
             cancel_token,
             logs_tx,
-            event_bus_tx,
         }
     }
 
@@ -49,24 +41,26 @@ impl TelemetryListener {
         self.cancel_token.clone()
     }
 
-    pub fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
+    /// Starts the telemetry listener HTTP server.
+    /// Returns a `JoinHandle` that completes when the server has fully shut down,
+    /// ensuring all in-flight HTTP requests have been processed.
+    #[must_use]
+    pub fn start(&self) -> JoinHandle<()> {
         let socket = SocketAddr::from((self.host, self.port));
         let router = self.make_router();
 
         let cancel_token_clone = self.cancel_token();
-        let event_bus_tx = self.event_bus_tx.clone();
         tokio::spawn(async move {
             let listener = TcpListener::bind(&socket)
                 .await
                 .expect("Failed to bind socket");
             debug!("TELEMETRY API | Starting listener on {}", socket);
             axum::serve(listener, router)
-                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone, event_bus_tx))
+                .with_graceful_shutdown(Self::graceful_shutdown(cancel_token_clone))
                 .await
                 .expect("Failed to start telemetry listener");
-        });
-
-        Ok(())
+            debug!("TELEMETRY API | HTTP server fully shut down");
+        })
     }
 
     fn make_router(&self) -> Router {
@@ -78,19 +72,13 @@ impl TelemetryListener {
             .with_state(logs_tx)
     }
 
-    async fn graceful_shutdown(
-        cancel_token: CancellationToken,
-        event_bus_tx: Sender<event_bus::Event>,
-    ) {
+    async fn graceful_shutdown(cancel_token: CancellationToken) {
         cancel_token.cancelled().await;
-        debug!("TELEMETRY API | Shutdown signal received, sending tombstone event");
-
-        // Send tombstone event to signal shutdown
-        if let Err(e) = event_bus_tx.send(event_bus::Event::Tombstone).await {
-            debug!("TELEMETRY API |Failed to send tombstone event: {:?}", e);
-        }
-
-        debug!("TELEMETRY API | Shutting down");
+        debug!(
+            "TELEMETRY API | Shutdown signal received, initiating graceful HTTP server shutdown"
+        );
+        // Note: Tombstone event is now sent by the main shutdown sequence
+        // after all telemetry messages have been processed
     }
 
     async fn handle(State(logs_tx): State<Sender<TelemetryEvent>>, request: Request) -> Response {
@@ -170,5 +158,77 @@ mod tests {
             runtime_version: Some("nodejs:20.v22".to_string()),
             runtime_version_arn: Some("arn:aws:lambda:us-east-1::runtime:da57c20c4b965d5b75540f6865a35fc8030358e33ec44ecfed33e90901a27a72".to_string()),
         });
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_start_returns_joinhandle() {
+        // Test that start() returns a JoinHandle that can be awaited
+        let (logs_tx, _logs_rx) = tokio::sync::mpsc::channel(10);
+        let listener = TelemetryListener::new([127, 0, 0, 1], 0, logs_tx);
+
+        let join_handle = listener.start();
+
+        // Cancel immediately and await completion
+        listener.cancel_token().cancel();
+
+        // The JoinHandle should complete without hanging
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), join_handle).await;
+
+        assert!(result.is_ok(), "JoinHandle should complete within timeout");
+        assert!(result.unwrap().is_ok(), "Server task should not panic");
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_graceful_shutdown_completes() {
+        // Test that graceful shutdown completes when cancel token is triggered
+        let (logs_tx, _logs_rx) = tokio::sync::mpsc::channel(10);
+        let listener = TelemetryListener::new([127, 0, 0, 1], 0, logs_tx);
+
+        let cancel_token = listener.cancel_token();
+        let join_handle = listener.start();
+
+        // Give the server a moment to start
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Cancel and verify shutdown completes
+        cancel_token.cancel();
+
+        // Wait for shutdown to complete (should not hang)
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), join_handle).await;
+
+        assert!(
+            result.is_ok(),
+            "Graceful shutdown should complete within timeout"
+        );
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn test_no_tombstone_sent_on_shutdown() {
+        // This test verifies that TelemetryListener no longer sends tombstone
+        // The tombstone is now sent by main.rs after all messages are processed
+        let (logs_tx, mut logs_rx) = tokio::sync::mpsc::channel(10);
+        let listener = TelemetryListener::new([127, 0, 0, 1], 0, logs_tx);
+
+        let cancel_token = listener.cancel_token();
+        let join_handle = listener.start();
+
+        // Give the server a moment to start
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // Cancel the listener
+        cancel_token.cancel();
+
+        // Wait for shutdown
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), join_handle).await;
+
+        // Verify no messages were sent to logs_rx (no tombstone)
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            logs_rx.try_recv().is_err(),
+            "No messages should be sent during shutdown (tombstone is sent by main.rs)"
+        );
     }
 }
