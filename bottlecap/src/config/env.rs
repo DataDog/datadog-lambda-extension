@@ -3,8 +3,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use libdd_trace_obfuscation::replacer::ReplaceRule;
 use dogstatsd::util::parse_metric_namespace;
+use libdd_trace_obfuscation::replacer::ReplaceRule;
 
 use crate::{
     config::{

@@ -13,9 +13,9 @@ use crate::traces::{
     LAMBDA_RUNTIME_URL_PREFIX, LAMBDA_STATSD_URL_PREFIX,
 };
 use async_trait::async_trait;
+use libdd_common::Endpoint;
 use libdd_trace_obfuscation::obfuscate::obfuscate_span;
 use libdd_trace_obfuscation::obfuscation_config;
-use libdd_common::Endpoint;
 use libdd_trace_protobuf::pb;
 use libdd_trace_protobuf::pb::Span;
 use libdd_trace_utils::send_data::{Compression, SendDataBuilder};

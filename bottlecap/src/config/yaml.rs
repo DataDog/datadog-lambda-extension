@@ -19,11 +19,11 @@ use crate::{
     },
     merge_hashmap, merge_option, merge_option_to_value, merge_string, merge_vec,
 };
-use libdd_trace_obfuscation::replacer::ReplaceRule;
 use figment::{
     Figment,
     providers::{Format, Yaml},
 };
+use libdd_trace_obfuscation::replacer::ReplaceRule;
 use serde::Deserialize;
 
 /// `YamlConfig` is a struct that represents some of the fields in the `datadog.yaml` file.
