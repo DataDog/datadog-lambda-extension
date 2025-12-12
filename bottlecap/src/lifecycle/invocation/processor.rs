@@ -1575,7 +1575,7 @@ mod tests {
             $(
                 #[tokio::test]
                 async fn $name() {
-                    use datadog_trace_obfuscation::obfuscation_config::ObfuscationConfig;
+                    use libdd_trace_obfuscation::obfuscation_config::ObfuscationConfig;
 
                     let (
                         request_id,

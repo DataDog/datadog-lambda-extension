@@ -3,8 +3,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use datadog_trace_obfuscation::replacer::ReplaceRule;
 use dogstatsd::util::parse_metric_namespace;
+use libdd_trace_obfuscation::replacer::ReplaceRule;
 
 use crate::{
     config::{
@@ -892,7 +892,7 @@ mod tests {
                 )]),
                 apm_dd_url: "https://apm.datadoghq.com".to_string(),
                 apm_replace_tags: Some(
-                    datadog_trace_obfuscation::replacer::parse_rules_from_string(
+                    libdd_trace_obfuscation::replacer::parse_rules_from_string(
                         r#"[{"name":"test-tag","pattern":"test-pattern","repl":"replacement"}]"#,
                     )
                     .expect("Failed to parse replace rules"),
