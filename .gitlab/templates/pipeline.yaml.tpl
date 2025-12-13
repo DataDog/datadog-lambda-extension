@@ -324,48 +324,83 @@ signed layer bundle:
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
 
-# Integration Tests - Build Java Lambda function
-build java lambda:
-  stage: integration-tests
-  image: registry.ddbuild.io/images/docker:27.3.1
-  tags: ["docker-in-docker:arm64"]
-  rules:
-    - when: on_success
-  needs: []
-  artifacts:
-    expire_in: 1 hour
-    paths:
-      - integration-tests/lambda/base-java/target/
-  script:
-    - cd integration-tests/lambda/base-java
-    - docker run --rm --platform linux/arm64
-        -v "$(pwd)":/workspace
-        -w /workspace
-        maven:3.9-eclipse-temurin-21-alpine
-        mvn clean package
+# Integration Tests - Build Lambda functions in parallel by runtime
 
-# Integration Tests - Build .NET Lambda function
-build dotnet lambda:
+build java lambdas:
   stage: integration-tests
   image: registry.ddbuild.io/images/docker:27.3.1
   tags: ["docker-in-docker:arm64"]
   rules:
     - when: on_success
   needs: []
+  cache:
+    key: maven-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/maven/
   artifacts:
     expire_in: 1 hour
     paths:
-      - integration-tests/lambda/base-dotnet/bin/
+      - integration-tests/lambda/*/target/
   script:
-    - cd integration-tests/lambda/base-dotnet
-    - docker run --rm --platform linux/arm64
-        -v "$(pwd)":/workspace
-        -w /workspace
-        mcr.microsoft.com/dotnet/sdk:8.0-alpine
-        sh -c "apk add --no-cache zip &&
-               dotnet tool install -g Amazon.Lambda.Tools || true &&
-               export PATH=\"\$PATH:/root/.dotnet/tools\" &&
-               dotnet lambda package -o bin/function.zip --function-architecture arm64"
+    - cd integration-tests
+    - ./scripts/build-java.sh
+
+build dotnet lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  cache:
+    key: nuget-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/nuget/
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/bin/
+  script:
+    - cd integration-tests
+    - ./scripts/build-dotnet.sh
+
+build python lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  cache:
+    key: pip-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/pip/
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/package/
+  script:
+    - cd integration-tests
+    - ./scripts/build-python.sh
+
+build node lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  cache:
+    key: npm-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/npm/
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/node_modules/
+  script:
+    - cd integration-tests
+    - ./scripts/build-node.sh
 
 # Integration Tests - Publish arm64 layer with integration test prefix
 publish integration layer (arm64):
@@ -405,11 +440,15 @@ integration-deploy:
     - when: on_success
   needs:
     - publish integration layer (arm64)
-    - build java lambda
-    - build dotnet lambda
+    - build java lambdas
+    - build dotnet lambdas
+    - build python lambdas
+    - build node lambdas
   dependencies:
-    - build java lambda
-    - build dotnet lambda
+    - build java lambdas
+    - build dotnet lambdas
+    - build python lambdas
+    - build node lambdas
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1
@@ -428,7 +467,7 @@ integration-deploy:
     - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
     - export CDK_DEFAULT_REGION=us-east-1
     - npm run build
-    - npx cdk deploy "integ-$IDENTIFIER-*" --require-approval never
+    - npx cdk deploy "integ-$IDENTIFIER-*" --require-approval never --concurrency 10
 
 # Integration Tests - Run Jest test suite
 integration-test:

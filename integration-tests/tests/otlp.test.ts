@@ -1,0 +1,94 @@
+import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
+import { getIdentifier } from './utils/config';
+
+describe('OTLP Integration Tests', () => {
+  const results: Record<string, LambdaInvocationDatadogData> = {};
+
+  beforeAll(async () => {
+    const identifier = getIdentifier();
+    const functions = {
+      node: `integ-${identifier}-otlp-node-lambda`,
+      python: `integ-${identifier}-otlp-python-lambda`,
+      java: `integ-${identifier}-otlp-java-lambda`,
+      dotnet: `integ-${identifier}-otlp-dotnet-lambda`,
+    };
+
+    console.log('Invoking all OTLP Lambda functions in parallel...');
+
+    // Invoke all Lambdas in parallel
+    const invocationResults = await Promise.all([
+      invokeLambdaAndGetDatadogData(functions.node, {}, true),
+      invokeLambdaAndGetDatadogData(functions.python, {}, true),
+      invokeLambdaAndGetDatadogData(functions.java, {}, true),
+      invokeLambdaAndGetDatadogData(functions.dotnet, {}, true),
+    ]);
+
+    // Store results
+    results.node = invocationResults[0];
+    results.python = invocationResults[1];
+    results.java = invocationResults[2];
+    results.dotnet = invocationResults[3];
+
+    console.log('All OTLP Lambda invocations and data fetching completed');
+  }, 700000); // 11.6 minute timeout
+
+  describe('Node.js Runtime', () => {
+    it('should invoke Node.js Lambda successfully', () => {
+      expect(results.node.statusCode).toBe(200);
+    });
+
+    it('should send at least one trace to Datadog', () => {
+      expect(results.node.traces?.length).toBeGreaterThan(0);
+    });
+
+    it('should have spans in the trace', () => {
+      const trace = results.node.traces![0];
+      expect(trace.spans.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Python Runtime', () => {
+    it('should invoke Python Lambda successfully', () => {
+      expect(results.python.statusCode).toBe(200);
+    });
+
+    it('should send at least one trace to Datadog', () => {
+      expect(results.python.traces?.length).toBeGreaterThan(0);
+    });
+
+    it('should have spans in the trace', () => {
+      const trace = results.python.traces![0];
+      expect(trace.spans.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Java Runtime', () => {
+    it('should invoke Java Lambda successfully', () => {
+      expect(results.java.statusCode).toBe(200);
+    });
+
+    it('should send at least one trace to Datadog', () => {
+      expect(results.java.traces?.length).toBeGreaterThan(0);
+    });
+
+    it('should have spans in the trace', () => {
+      const trace = results.java.traces![0];
+      expect(trace.spans.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('.NET Runtime', () => {
+    it('should invoke .NET Lambda successfully', () => {
+      expect(results.dotnet.statusCode).toBe(200);
+    });
+
+    it('should send at least one trace to Datadog', () => {
+      expect(results.dotnet.traces?.length).toBeGreaterThan(0);
+    });
+
+    it('should have spans in the trace', () => {
+      const trace = results.dotnet.traces![0];
+      expect(trace.spans.length).toBeGreaterThan(0);
+    });
+  });
+});

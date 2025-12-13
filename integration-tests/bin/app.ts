@@ -5,6 +5,10 @@ import {BaseNodeStack} from '../lib/stacks/base-node-stack';
 import {BasePythonStack} from '../lib/stacks/base-python-stack';
 import {BaseJavaStack} from '../lib/stacks/base-java-stack';
 import {BaseDotnetStack} from '../lib/stacks/base-dotnet-stack';
+import {OtlpNodeStack} from '../lib/stacks/otlp-node-stack';
+import {OtlpPythonStack} from '../lib/stacks/otlp-python-stack';
+import {OtlpJavaStack} from '../lib/stacks/otlp-java-stack';
+import {OtlpDotnetStack} from '../lib/stacks/otlp-dotnet-stack';
 import {getIdentifier} from '../tests/utils/config';
 
 const app = new cdk.App();
@@ -27,6 +31,18 @@ const stacks = [
         env,
     }),
     new BaseDotnetStack(app, `integ-${identifier}-base-dotnet`, {
+        env,
+    }),
+    new OtlpNodeStack(app, `integ-${identifier}-otlp-node`, {
+        env,
+    }),
+    new OtlpPythonStack(app, `integ-${identifier}-otlp-python`, {
+        env,
+    }),
+    new OtlpJavaStack(app, `integ-${identifier}-otlp-java`, {
+        env,
+    }),
+    new OtlpDotnetStack(app, `integ-${identifier}-otlp-dotnet`, {
         env,
     }),
 ]
