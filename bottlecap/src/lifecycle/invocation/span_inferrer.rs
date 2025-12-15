@@ -6,6 +6,7 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::config::Config;
+use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::span_pointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
@@ -37,6 +38,17 @@ pub struct SpanInferrer {
     trigger_tags: Option<HashMap<String, String>>,
     // Span pointers from S3 or DynamoDB streams
     pub span_pointers: Option<Vec<SpanPointer>>,
+}
+
+#[derive(Default)]
+struct ApiGatewayContext {
+    dd_resource_key: Option<String>,
+    aws_user: Option<String>,
+}
+
+enum ApiGatewayType {
+    Rest,
+    Http,
 }
 
 impl SpanInferrer {
@@ -209,6 +221,8 @@ impl SpanInferrer {
         };
 
         let identified_trigger = IdentifiedTrigger::from_value(payload_value);
+        let api_gateway_context =
+            Self::get_api_gateway_context(&identified_trigger, &aws_config.region);
         let should_enrich_span = Self::should_enrich_span(&identified_trigger);
         let should_skip_inferred_span = Self::should_skip_inferred_span(&identified_trigger);
         let wrapped_inferred_span =
@@ -225,6 +239,12 @@ impl SpanInferrer {
                     &self.config.service_mapping,
                     self.config.trace_aws_service_representation_enabled,
                 );
+            }
+
+            if let Some(dd_resource_key) = api_gateway_context.dd_resource_key {
+                inferred_span
+                    .meta
+                    .insert("dd_resource_key".to_string(), dd_resource_key);
             }
 
             self.wrapped_inferred_span = wrapped_inferred_span;
@@ -325,6 +345,51 @@ impl SpanInferrer {
     #[must_use]
     pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
         self.trigger_tags.clone()
+    }
+
+    fn get_api_gateway_context(
+        trigger: &IdentifiedTrigger,
+        region: &str,
+    ) -> ApiGatewayContext {
+        match trigger {
+            IdentifiedTrigger::APIGatewayRestEvent(event) => ApiGatewayContext {
+                dd_resource_key: Self::build_api_gateway_arn(
+                    &event.request_context.api_id,
+                    region,
+                    ApiGatewayType::Rest,
+                ),
+                aws_user: None,
+            },
+            IdentifiedTrigger::APIGatewayHttpEvent(event) => ApiGatewayContext {
+                dd_resource_key: Self::build_api_gateway_arn(
+                    &event.request_context.api_id,
+                    region,
+                    ApiGatewayType::Http,
+                ),
+                aws_user: None,
+            },
+            _ => ApiGatewayContext::default(),
+        }
+    }
+
+    fn build_api_gateway_arn(
+        api_id: &str,
+        region: &str,
+        api_type: ApiGatewayType,
+    ) -> Option<String> {
+        if api_id.is_empty() {
+            return None;
+        }
+
+        let partition = get_aws_partition_by_region(region);
+        let path = match api_type {
+            ApiGatewayType::Rest => "restapis",
+            ApiGatewayType::Http => "apis",
+        };
+
+        Some(format!(
+            "arn:{partition}:apigateway:{region}::/{path}/{api_id}",
+        ))
     }
 }
 
