@@ -104,7 +104,7 @@ impl Trigger for APIGatewayRestEvent {
         span.name = "aws.apigateway".to_string();
         span.service = service_name;
         span.resource = resource;
-        span.r#type = "http".to_string();
+        span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
             ("endpoint".to_string(), self.request_context.path.clone()),
@@ -327,7 +327,7 @@ mod tests {
         assert_eq!(span.name, "aws.apigateway");
         assert_eq!(span.service, "id.execute-api.us-east-1.amazonaws.com");
         assert_eq!(span.resource, "GET /my/path");
-        assert_eq!(span.r#type, "http");
+        assert_eq!(span.r#type, "web");
 
         assert_eq!(
             span.meta,
@@ -389,7 +389,7 @@ mod tests {
             "mcwkra0ya4.execute-api.sa-east-1.amazonaws.com"
         );
         assert_eq!(span.resource, "GET /dev/user/{user_id}/id/{id}");
-        assert_eq!(span.r#type, "http");
+        assert_eq!(span.r#type, "web");
         let expected = HashMap::from([
             ("endpoint".to_string(), "/dev/user/42/id/50".to_string()),
             (

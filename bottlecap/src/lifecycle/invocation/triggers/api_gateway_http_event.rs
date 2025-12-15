@@ -107,7 +107,7 @@ impl Trigger for APIGatewayHttpEvent {
         span.name = "aws.httpapi".to_string();
         span.service = service_name;
         span.resource.clone_from(&resource);
-        span.r#type = "http".to_string();
+        span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
             (
@@ -309,7 +309,7 @@ mod tests {
             "x02yirxc7a.execute-api.sa-east-1.amazonaws.com"
         );
         assert_eq!(span.resource, "GET /httpapi/get");
-        assert_eq!(span.r#type, "http");
+        assert_eq!(span.r#type, "web");
         assert_eq!(
             span.meta,
             HashMap::from([
@@ -373,7 +373,7 @@ mod tests {
             "9vj54we5ih.execute-api.sa-east-1.amazonaws.com"
         );
         assert_eq!(span.resource, "GET /user/{user_id}");
-        assert_eq!(span.r#type, "http");
+        assert_eq!(span.r#type, "web");
         assert_eq!(
             span.meta,
             HashMap::from([
