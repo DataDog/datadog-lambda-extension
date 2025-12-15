@@ -33,6 +33,36 @@ echo "Using extension layer: $EXTENSION_LAYER_ARN"
 FULL_STACK_NAME="integ-$IDENTIFIER-$STACK_NAME"
 echo "Deploying stack: $FULL_STACK_NAME"
 
-# Build and deploy
+# Get the directory of this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Build Lambda functions based on stack name
+echo ""
+echo "Building Lambda functions for $STACK_NAME..."
+case "$STACK_NAME" in
+  *java*)
+    "$SCRIPT_DIR/build-java.sh" lambda/base-java
+    "$SCRIPT_DIR/build-java.sh" lambda/otlp-java
+    ;;
+  *dotnet*)
+    "$SCRIPT_DIR/build-dotnet.sh" lambda/base-dotnet
+    "$SCRIPT_DIR/build-dotnet.sh" lambda/otlp-dotnet
+    ;;
+  *python*)
+    "$SCRIPT_DIR/build-python.sh" lambda/base-python
+    "$SCRIPT_DIR/build-python.sh" lambda/otlp-python
+    ;;
+  *node*)
+    "$SCRIPT_DIR/build-node.sh" lambda/base-node
+    "$SCRIPT_DIR/build-node.sh" lambda/otlp-node
+    ;;
+  *)
+    echo "Warning: Unknown stack type, skipping Lambda build"
+    ;;
+esac
+
+echo ""
+echo "Building CDK TypeScript and deploying..."
+# Build CDK TypeScript and deploy
 npm run build && aws-vault exec sso-serverless-sandbox-account-admin -- cdk deploy "$FULL_STACK_NAME" --require-approval never
 

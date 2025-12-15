@@ -9,7 +9,7 @@ outputFiles:
 datasources:
   flavors:
     url: .gitlab/datasources/flavors.yaml
-  
+
   environments:
     url: .gitlab/datasources/environments.yaml
 

@@ -1,16 +1,19 @@
 use axum::{
     Router,
     extract::{Request, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::post,
 };
 use libdd_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
-use serde_json::json;
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
+use prost::Message;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
+use tonic::Code;
+use tonic_types::Status;
 use tracing::{debug, error};
 
 use crate::{
@@ -141,35 +144,30 @@ impl Agent {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
-                return (
+                return create_otlp_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("OTLP | Failed to extract request body: {e}"),
-                )
-                    .into_response();
+                    Code::Internal,
+                    &format!("Failed to extract request body: {e}"),
+                );
             }
         };
 
         let traces = match processor.process(&body) {
             Ok(traces) => traces,
             Err(e) => {
-                error!("OTLP | Failed to process request: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to process request: {e}"),
-                )
-                    .into_response();
+                return create_otlp_error_response(
+                    StatusCode::BAD_REQUEST,
+                    Code::InvalidArgument,
+                    &format!("Failed to decode request: {e}"),
+                );
             }
         };
 
         let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
         let body_size = size_of_val(&traces);
         if body_size == 0 {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({ "message": "Not sending traces, processor returned empty data" })
-                    .to_string(),
-            )
-                .into_response();
+            debug!("OTLP | Not sending traces, processor returned empty data");
+            return create_otlp_success_response();
         }
 
         let compute_trace_stats_on_extension = config.compute_trace_stats_on_extension;
@@ -187,11 +185,11 @@ impl Agent {
                 debug!("OTLP | Successfully buffered traces to be aggregated.");
             }
             Err(err) => {
-                error!("OTLP | Error sending traces to the trace aggregator: {err}");
-                return (
+                return create_otlp_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({ "message": format!("Error sending traces to the trace aggregator: {err}") }).to_string()
-                ).into_response();
+                    Code::Internal,
+                    &format!("Trace aggregator unavailable: {err}"),
+                );
             }
         };
 
@@ -205,11 +203,57 @@ impl Agent {
             }
         }
 
-        (
+        create_otlp_success_response()
+    }
+}
+
+/// Creates an OTLP-compliant success response with protobuf encoding.
+/// Returns 200 OK with an empty ExportTraceServiceResponse.
+/// https://opentelemetry.io/docs/specs/otlp/
+fn create_otlp_success_response() -> Response {
+    let response = ExportTraceServiceResponse {
+        partial_success: None,
+    };
+    let mut buf = Vec::new();
+    match response.encode(&mut buf) {
+        Ok(()) => (
             StatusCode::OK,
-            json!({"rate_by_service":{"service:,env:":1}}).to_string(),
+            [(header::CONTENT_TYPE, "application/x-protobuf")],
+            buf,
         )
-            .into_response()
+            .into_response(),
+        Err(e) => {
+            error!("OTLP | Failed to encode success response: {}", e);
+            (StatusCode::OK, Vec::new()).into_response()
+        }
+    }
+}
+
+/// Creates an OTLP-compliant error response with google.rpc.Status protobuf encoding.
+/// Returns the specified HTTP status code with a google.rpc.Status message.
+/// https://opentelemetry.io/docs/specs/otlp/
+fn create_otlp_error_response(http_status: StatusCode, grpc_code: Code, message: &str) -> Response {
+    error!(
+        "OTLP | Error response: {} (gRPC code {:?}) - {}",
+        http_status, grpc_code, message
+    );
+    let status = Status {
+        code: grpc_code as i32,
+        message: message.to_string(),
+        details: Vec::new(),
+    };
+    let mut buf = Vec::new();
+    match status.encode(&mut buf) {
+        Ok(()) => (
+            http_status,
+            [(header::CONTENT_TYPE, "application/x-protobuf")],
+            buf,
+        )
+            .into_response(),
+        Err(e) => {
+            error!("OTLP | Failed to encode error response: {}", e);
+            (http_status, message.to_string()).into_response()
+        }
     }
 }
 
