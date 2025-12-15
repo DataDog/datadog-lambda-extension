@@ -13,7 +13,7 @@ use libdd_trace_protobuf::pb::Span;
 use libddwaf::object::{WafMap, WafOwned};
 use libddwaf::{Builder, Config as WafConfig, Handle};
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 use crate::appsec::processor::context::Context;
 use crate::appsec::processor::response::ExpectedResponseFormat;
@@ -131,7 +131,7 @@ impl Processor {
                 ctx.run(payload.as_ref());
             }
             Ok(None) => debug!("aap: no response payload available"),
-            Err(e) => warn!("aap: failed to parse invocation result payload: {e}"),
+            Err(e) => debug!("aap: failed to parse invocation result payload: {e}"),
         }
 
         let (method, route, status_code) = ctx.endpoint_info();
