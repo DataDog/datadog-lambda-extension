@@ -131,7 +131,6 @@ impl Trigger for APIGatewayHttpEvent {
                 "http.user_agent".to_string(),
                 self.request_context.http.user_agent.clone(),
             ),
-            ("operation_name".to_string(), "aws.httpapi".to_string()),
             (
                 "request_id".to_string(),
                 self.request_context.request_id.clone(),
@@ -323,7 +322,6 @@ mod tests {
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
                 ("http.source_ip".to_string(), "38.122.226.210".to_string()),
                 ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
-                ("operation_name".to_string(), "aws.httpapi".to_string()),
                 ("request_id".to_string(), "FaHnXjKCGjQEJ7A=".to_string()),
             ])
         );
@@ -386,7 +384,6 @@ mod tests {
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
                 ("http.source_ip".to_string(), "76.115.124.192".to_string()),
                 ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
-                ("operation_name".to_string(), "aws.httpapi".to_string()),
                 ("request_id".to_string(), "Ur2JtjEfGjQEPOg=".to_string()),
             ])
         );

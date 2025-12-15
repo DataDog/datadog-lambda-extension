@@ -125,7 +125,6 @@ impl Trigger for APIGatewayRestEvent {
                 "http.user_agent".to_string(),
                 self.request_context.identity.user_agent.clone(),
             ),
-            ("operation_name".to_string(), "aws.apigateway".to_string()),
             (
                 "request_id".to_string(),
                 self.request_context.request_id.clone(),
@@ -342,7 +341,6 @@ mod tests {
                 ("http.source_ip".to_string(), "IP".to_string()),
                 ("http.user_agent".to_string(), "user-agent".to_string()),
                 ("http.route".to_string(), "/path".to_string()),
-                ("operation_name".to_string(), "aws.apigateway".to_string()),
                 ("request_id".to_string(), "id=".to_string()),
             ])
         );
@@ -402,7 +400,6 @@ mod tests {
             ("http.source_ip".to_string(), "76.115.124.192".to_string()),
             ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
             ("http.route".to_string(), "/user/{id}".to_string()),
-            ("operation_name".to_string(), "aws.apigateway".to_string()),
             (
                 "request_id".to_string(),
                 "e16399f7-e984-463a-9931-745ba021a27f".to_string(),
