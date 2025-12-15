@@ -278,12 +278,15 @@ impl SpanInferrer {
                 invocation_span.service.clone(),
             );
             s.meta.insert("span.kind".to_string(), "server".to_string());
+            let appsec_enabled = self.config.serverless_appsec_enabled;
+            propagate_appsec(appsec_enabled, invocation_span, s);
 
             if let Some(ws) = &mut self.wrapped_inferred_span {
                 ws.trace_id = invocation_span.trace_id;
                 ws.error = invocation_span.error;
                 ws.meta
                     .insert(String::from("peer.service"), s.service.clone());
+                propagate_appsec(appsec_enabled, invocation_span, ws);
 
                 // The wrapper span should be the parent of the inferred span,
                 // therefore the `parent_id` of the inferred span should be the
@@ -322,6 +325,36 @@ impl SpanInferrer {
     #[must_use]
     pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
         self.trigger_tags.clone()
+    }
+}
+
+fn propagate_appsec(
+    serverless_appsec_enabled: bool,
+    invocation_span: &Span,
+    target_span: &mut Span,
+) {
+    let has_appsec = invocation_span
+        .metrics
+        .get("_dd.appsec.enabled")
+        .copied()
+        .or_else(|| {
+            if serverless_appsec_enabled {
+                Some(1.0)
+            } else {
+                None
+            }
+        });
+
+    if let Some(enabled) = has_appsec {
+        target_span
+            .metrics
+            .insert("_dd.appsec.enabled".to_string(), enabled);
+    }
+
+    if let Some(json) = invocation_span.meta.get("_dd.appsec.json") {
+        target_span
+            .meta
+            .insert("_dd.appsec.json".to_string(), json.clone());
     }
 }
 
