@@ -75,6 +75,11 @@ pub struct EnvConfig {
     /// The transport type to use for sending logs. Possible values are "auto" or "http1".
     #[serde(deserialize_with = "deserialize_optional_string")]
     pub http_protocol: Option<String>,
+    /// @env `DD_TLS_CERT_FILE`
+    /// The path to a file of concatenated CA certificates in PEM format.
+    /// Example: `/opt/ca-cert.pem`
+    #[serde(deserialize_with = "deserialize_optional_string")]
+    pub tls_cert_file: Option<String>,
 
     // Metrics
     /// @env `DD_DD_URL`
@@ -466,6 +471,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option!(config, env_config, proxy_https);
     merge_vec!(config, env_config, proxy_no_proxy);
     merge_option!(config, env_config, http_protocol);
+    merge_option!(config, env_config, tls_cert_file);
 
     // Endpoints
     merge_string!(config, env_config, dd_url);
@@ -695,6 +701,7 @@ mod tests {
             jail.set_env("DD_PROXY_HTTPS", "https://proxy.example.com");
             jail.set_env("DD_PROXY_NO_PROXY", "localhost,127.0.0.1");
             jail.set_env("DD_HTTP_PROTOCOL", "http1");
+            jail.set_env("DD_TLS_CERT_FILE", "/opt/ca-cert.pem");
 
             // Metrics
             jail.set_env("DD_DD_URL", "https://metrics.datadoghq.com");
@@ -850,6 +857,7 @@ mod tests {
                 proxy_https: Some("https://proxy.example.com".to_string()),
                 proxy_no_proxy: vec!["localhost".to_string(), "127.0.0.1".to_string()],
                 http_protocol: Some("http1".to_string()),
+                tls_cert_file: Some("/opt/ca-cert.pem".to_string()),
                 dd_url: "https://metrics.datadoghq.com".to_string(),
                 url: "https://app.datadoghq.com".to_string(),
                 additional_endpoints: HashMap::from([
