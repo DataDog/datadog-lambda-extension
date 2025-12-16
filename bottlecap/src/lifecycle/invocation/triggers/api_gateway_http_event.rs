@@ -219,6 +219,7 @@ impl ServiceNameResolver for APIGatewayHttpEvent {
         "lambda_api_gateway"
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

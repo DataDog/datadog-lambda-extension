@@ -40,17 +40,6 @@ pub struct SpanInferrer {
     pub span_pointers: Option<Vec<SpanPointer>>,
 }
 
-#[derive(Default)]
-struct ApiGatewayContext {
-    dd_resource_key: Option<String>,
-    aws_user: Option<String>,
-}
-
-enum ApiGatewayType {
-    Rest,
-    Http,
-}
-
 impl SpanInferrer {
     #[must_use]
     pub fn new(config: Arc<Config>) -> Self {
@@ -221,8 +210,8 @@ impl SpanInferrer {
         };
 
         let identified_trigger = IdentifiedTrigger::from_value(payload_value);
-        let api_gateway_context =
-            Self::get_api_gateway_context(&identified_trigger, &aws_config.region);
+        let dd_resource_key =
+            Self::get_api_gateway_resource_key(&identified_trigger, &aws_config.region);
         let should_enrich_span = Self::should_enrich_span(&identified_trigger);
         let should_skip_inferred_span = Self::should_skip_inferred_span(&identified_trigger);
         let wrapped_inferred_span =
@@ -241,7 +230,7 @@ impl SpanInferrer {
                 );
             }
 
-            if let Some(dd_resource_key) = api_gateway_context.dd_resource_key {
+            if let Some(dd_resource_key) = dd_resource_key {
                 inferred_span
                     .meta
                     .insert("dd_resource_key".to_string(), dd_resource_key);
@@ -347,45 +336,32 @@ impl SpanInferrer {
         self.trigger_tags.clone()
     }
 
-    fn get_api_gateway_context(
+    #[must_use]
+    fn get_api_gateway_resource_key(
         trigger: &IdentifiedTrigger,
         region: &str,
-    ) -> ApiGatewayContext {
+    ) -> Option<String> {
         match trigger {
-            IdentifiedTrigger::APIGatewayRestEvent(event) => ApiGatewayContext {
-                dd_resource_key: Self::build_api_gateway_arn(
-                    &event.request_context.api_id,
-                    region,
-                    ApiGatewayType::Rest,
-                ),
-                aws_user: None,
-            },
-            IdentifiedTrigger::APIGatewayHttpEvent(event) => ApiGatewayContext {
-                dd_resource_key: Self::build_api_gateway_arn(
-                    &event.request_context.api_id,
-                    region,
-                    ApiGatewayType::Http,
-                ),
-                aws_user: None,
-            },
-            _ => ApiGatewayContext::default(),
+            IdentifiedTrigger::APIGatewayRestEvent(event) => {
+                Self::build_api_gateway_arn(&event.request_context.api_id, region, "restapis")
+            }
+            IdentifiedTrigger::APIGatewayHttpEvent(event) => {
+                Self::build_api_gateway_arn(&event.request_context.api_id, region, "apis")
+            }
+            _ => None,
         }
     }
 
     fn build_api_gateway_arn(
         api_id: &str,
         region: &str,
-        api_type: ApiGatewayType,
+        path: &str,
     ) -> Option<String> {
         if api_id.is_empty() {
             return None;
         }
 
         let partition = get_aws_partition_by_region(region);
-        let path = match api_type {
-            ApiGatewayType::Rest => "restapis",
-            ApiGatewayType::Http => "apis",
-        };
 
         Some(format!(
             "arn:{partition}:apigateway:{region}::/{path}/{api_id}",
@@ -466,6 +442,7 @@ pub fn extract_generated_span_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
     use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
     use serde_json::json;
     use std::sync::Arc;
@@ -667,6 +644,134 @@ mod tests {
                 .expect("Should have event source"),
             "sqs",
             "Should have SQS as event source"
+        );
+    }
+
+    fn api_gateway_rest_payload() -> serde_json::Value {
+        let json = read_json_file("api_gateway_rest_event.json");
+        serde_json::from_str(&json).expect("Failed to deserialize API Gateway REST payload")
+    }
+
+    fn aws_config(region: &str) -> Arc<AwsConfig> {
+        Arc::new(AwsConfig {
+            region: region.to_string(),
+            aws_lwa_proxy_lambda_runtime_api: Some(String::new()),
+            runtime_api: String::new(),
+            function_name: String::new(),
+            sandbox_init_time: Instant::now(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        })
+    }
+
+    #[test]
+    fn test_api_gateway_sets_dd_resource_key_for_rest_event() {
+        let payload = api_gateway_rest_payload();
+        let aws_config = aws_config("us-east-1");
+        let mut inferrer = SpanInferrer::new(Arc::new(Config::default()));
+
+        inferrer.infer_span(&payload, &aws_config);
+
+        let inferred_span = inferrer
+            .inferred_span
+            .as_ref()
+            .expect("Should have inferred API Gateway span");
+
+        assert_eq!(
+            inferred_span
+                .meta
+                .get("dd_resource_key")
+                .cloned()
+                .unwrap_or_default(),
+            "arn:aws:apigateway:us-east-1::/restapis/id"
+        );
+    }
+
+    #[test]
+    fn test_complete_inferred_spans_propagates_appsec_from_invocation() {
+        let payload = api_gateway_rest_payload();
+        let aws_config = aws_config("us-east-1");
+        let mut inferrer = SpanInferrer::new(Arc::new(Config::default()));
+
+        inferrer.infer_span(&payload, &aws_config);
+
+        let mut invocation_span = Span::default();
+        invocation_span.trace_id = 42;
+        invocation_span.span_id = 100;
+        invocation_span.service = "lambda-service".to_string();
+        if let Some(inferred_span) = &inferrer.inferred_span {
+            invocation_span.start = inferred_span.start;
+        }
+        invocation_span.duration = 1;
+        invocation_span
+            .metrics
+            .insert("_dd.appsec.enabled".to_string(), 1.0);
+        invocation_span.meta.insert(
+            "_dd.appsec.json".to_string(),
+            r#"{"triggers":["rule"]}"#.to_string(),
+        );
+
+        inferrer.complete_inferred_spans(&invocation_span);
+
+        let inferred_span = inferrer
+            .inferred_span
+            .as_ref()
+            .expect("Inferred span should still be present");
+
+        assert_eq!(
+            inferred_span
+                .metrics
+                .get("_dd.appsec.enabled")
+                .copied()
+                .unwrap_or_default(),
+            1.0
+        );
+        assert_eq!(
+            inferred_span
+                .meta
+                .get("_dd.appsec.json")
+                .cloned()
+                .unwrap_or_default(),
+            r#"{"triggers":["rule"]}"#
+        );
+    }
+
+    #[test]
+    fn test_complete_inferred_spans_sets_appsec_when_enabled_in_config() {
+        let mut config = Config::default();
+        config.serverless_appsec_enabled = true;
+        let mut inferrer = SpanInferrer::new(Arc::new(config));
+
+        let payload = api_gateway_rest_payload();
+        let aws_config = aws_config("us-east-1");
+        inferrer.infer_span(&payload, &aws_config);
+
+        let mut invocation_span = Span::default();
+        invocation_span.trace_id = 7;
+        invocation_span.service = "lambda-service".to_string();
+        if let Some(inferred_span) = &inferrer.inferred_span {
+            invocation_span.start = inferred_span.start;
+        }
+        invocation_span.duration = 1;
+
+        inferrer.complete_inferred_spans(&invocation_span);
+
+        let inferred_span = inferrer
+            .inferred_span
+            .as_ref()
+            .expect("Inferred span should still be present");
+
+        assert_eq!(
+            inferred_span
+                .metrics
+                .get("_dd.appsec.enabled")
+                .copied()
+                .unwrap_or_default(),
+            1.0
+        );
+        assert!(
+            !inferred_span.meta.contains_key("_dd.appsec.json"),
+            "AppSec JSON should not be added when invocation span has none"
         );
     }
 }
