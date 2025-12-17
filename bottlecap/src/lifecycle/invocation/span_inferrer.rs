@@ -337,10 +337,7 @@ impl SpanInferrer {
     }
 
     #[must_use]
-    fn get_api_gateway_resource_key(
-        trigger: &IdentifiedTrigger,
-        region: &str,
-    ) -> Option<String> {
+    fn get_api_gateway_resource_key(trigger: &IdentifiedTrigger, region: &str) -> Option<String> {
         match trigger {
             IdentifiedTrigger::APIGatewayRestEvent(event) => {
                 Self::build_api_gateway_arn(&event.request_context.api_id, region, "restapis")
@@ -352,11 +349,8 @@ impl SpanInferrer {
         }
     }
 
-    fn build_api_gateway_arn(
-        api_id: &str,
-        region: &str,
-        path: &str,
-    ) -> Option<String> {
+    #[must_use]
+    fn build_api_gateway_arn(api_id: &str, region: &str, path: &str) -> Option<String> {
         if api_id.is_empty() {
             return None;
         }
@@ -378,12 +372,10 @@ fn propagate_appsec(
         .metrics
         .get("_dd.appsec.enabled")
         .copied()
-        .or_else(|| {
-            if serverless_appsec_enabled {
-                Some(1.0)
-            } else {
-                None
-            }
+        .or(if serverless_appsec_enabled {
+            Some(1.0)
+        } else {
+            None
         });
 
     if let Some(enabled) = has_appsec {
@@ -695,10 +687,12 @@ mod tests {
 
         inferrer.infer_span(&payload, &aws_config);
 
-        let mut invocation_span = Span::default();
-        invocation_span.trace_id = 42;
-        invocation_span.span_id = 100;
-        invocation_span.service = "lambda-service".to_string();
+        let mut invocation_span = Span {
+            trace_id: 42,
+            span_id: 100,
+            service: "lambda-service".to_string(),
+            ..Span::default()
+        };
         if let Some(inferred_span) = &inferrer.inferred_span {
             invocation_span.start = inferred_span.start;
         }
@@ -718,13 +712,14 @@ mod tests {
             .as_ref()
             .expect("Inferred span should still be present");
 
-        assert_eq!(
-            inferred_span
-                .metrics
-                .get("_dd.appsec.enabled")
-                .copied()
-                .unwrap_or_default(),
-            1.0
+        let appsec_enabled = inferred_span
+            .metrics
+            .get("_dd.appsec.enabled")
+            .copied()
+            .unwrap_or_default();
+        assert!(
+            (appsec_enabled - 1.0).abs() < f64::EPSILON,
+            "Expected appsec enabled metric to be 1.0"
         );
         assert_eq!(
             inferred_span
@@ -738,17 +733,21 @@ mod tests {
 
     #[test]
     fn test_complete_inferred_spans_sets_appsec_when_enabled_in_config() {
-        let mut config = Config::default();
-        config.serverless_appsec_enabled = true;
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
         let mut inferrer = SpanInferrer::new(Arc::new(config));
 
         let payload = api_gateway_rest_payload();
         let aws_config = aws_config("us-east-1");
         inferrer.infer_span(&payload, &aws_config);
 
-        let mut invocation_span = Span::default();
-        invocation_span.trace_id = 7;
-        invocation_span.service = "lambda-service".to_string();
+        let mut invocation_span = Span {
+            trace_id: 7,
+            service: "lambda-service".to_string(),
+            ..Span::default()
+        };
         if let Some(inferred_span) = &inferrer.inferred_span {
             invocation_span.start = inferred_span.start;
         }
@@ -761,13 +760,14 @@ mod tests {
             .as_ref()
             .expect("Inferred span should still be present");
 
-        assert_eq!(
-            inferred_span
-                .metrics
-                .get("_dd.appsec.enabled")
-                .copied()
-                .unwrap_or_default(),
-            1.0
+        let appsec_enabled = inferred_span
+            .metrics
+            .get("_dd.appsec.enabled")
+            .copied()
+            .unwrap_or_default();
+        assert!(
+            (appsec_enabled - 1.0).abs() < f64::EPSILON,
+            "Expected appsec enabled metric to be 1.0"
         );
         assert!(
             !inferred_span.meta.contains_key("_dd.appsec.json"),
