@@ -186,6 +186,20 @@ impl Trigger for APIGatewayRestEvent {
         )
     }
 
+    fn get_dd_resource_key(&self, region: &str) -> Option<String> {
+        if self.request_context.api_id.is_empty() {
+            return None;
+        }
+
+        let partition = get_aws_partition_by_region(region);
+        Some(format!(
+            "arn:{partition}:apigateway:{region}::/restapis/{api_id}",
+            partition = partition,
+            region = region,
+            api_id = self.request_context.api_id
+        ))
+    }
+
     fn is_async(&self) -> bool {
         self.headers
             .get("x-amz-invocation-type")

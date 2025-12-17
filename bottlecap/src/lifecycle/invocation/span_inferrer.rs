@@ -6,7 +6,6 @@ use serde_json::Value;
 use tracing::debug;
 
 use crate::config::Config;
-use crate::config::aws::get_aws_partition_by_region;
 use crate::lifecycle::invocation::triggers::IdentifiedTrigger;
 use crate::traces::span_pointers::SpanPointer;
 use crate::traces::{context::SpanContext, propagation::Propagator};
@@ -210,8 +209,6 @@ impl SpanInferrer {
         };
 
         let identified_trigger = IdentifiedTrigger::from_value(payload_value);
-        let dd_resource_key =
-            Self::get_api_gateway_resource_key(&identified_trigger, &aws_config.region);
         let should_enrich_span = Self::should_enrich_span(&identified_trigger);
         let should_skip_inferred_span = Self::should_skip_inferred_span(&identified_trigger);
         let wrapped_inferred_span =
@@ -230,7 +227,7 @@ impl SpanInferrer {
                 );
             }
 
-            if let Some(dd_resource_key) = dd_resource_key {
+            if let Some(dd_resource_key) = t.get_dd_resource_key(&aws_config.region) {
                 inferred_span
                     .meta
                     .insert("dd_resource_key".to_string(), dd_resource_key);
@@ -334,32 +331,6 @@ impl SpanInferrer {
     #[must_use]
     pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
         self.trigger_tags.clone()
-    }
-
-    #[must_use]
-    fn get_api_gateway_resource_key(trigger: &IdentifiedTrigger, region: &str) -> Option<String> {
-        match trigger {
-            IdentifiedTrigger::APIGatewayRestEvent(event) => {
-                Self::build_api_gateway_arn(&event.request_context.api_id, region, "restapis")
-            }
-            IdentifiedTrigger::APIGatewayHttpEvent(event) => {
-                Self::build_api_gateway_arn(&event.request_context.api_id, region, "apis")
-            }
-            _ => None,
-        }
-    }
-
-    #[must_use]
-    fn build_api_gateway_arn(api_id: &str, region: &str, path: &str) -> Option<String> {
-        if api_id.is_empty() {
-            return None;
-        }
-
-        let partition = get_aws_partition_by_region(region);
-
-        Some(format!(
-            "arn:{partition}:apigateway:{region}::/{path}/{api_id}",
-        ))
     }
 }
 
