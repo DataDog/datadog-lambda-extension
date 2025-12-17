@@ -442,6 +442,18 @@ mod tests {
     }
 
     #[test]
+    fn test_get_dd_resource_key() {
+        let json = read_json_file("api_gateway_http_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
+        assert_eq!(
+            event.get_dd_resource_key("sa-east-1"),
+            Some("arn:aws:apigateway:sa-east-1::/apis/x02yirxc7a".to_string())
+        );
+    }
+
+    #[test]
     fn test_resolve_service_name_with_representation_enabled() {
         let json = read_json_file("api_gateway_http_event.json");
         let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");

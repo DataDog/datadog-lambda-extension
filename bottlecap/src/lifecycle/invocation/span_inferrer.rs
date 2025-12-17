@@ -628,29 +628,6 @@ mod tests {
     }
 
     #[test]
-    fn test_api_gateway_sets_dd_resource_key_for_rest_event() {
-        let payload = api_gateway_rest_payload();
-        let aws_config = aws_config("us-east-1");
-        let mut inferrer = SpanInferrer::new(Arc::new(Config::default()));
-
-        inferrer.infer_span(&payload, &aws_config);
-
-        let inferred_span = inferrer
-            .inferred_span
-            .as_ref()
-            .expect("Should have inferred API Gateway span");
-
-        assert_eq!(
-            inferred_span
-                .meta
-                .get("dd_resource_key")
-                .cloned()
-                .unwrap_or_default(),
-            "arn:aws:apigateway:us-east-1::/restapis/id"
-        );
-    }
-
-    #[test]
     fn test_complete_inferred_spans_propagates_appsec_from_invocation() {
         let payload = api_gateway_rest_payload();
         let aws_config = aws_config("us-east-1");
