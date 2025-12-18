@@ -107,7 +107,7 @@ impl Trigger for APIGatewayHttpEvent {
         span.name = "aws.httpapi".to_string();
         span.service = service_name;
         span.resource.clone_from(&resource);
-        span.r#type = "http".to_string();
+        span.r#type = "web".to_string();
         span.start = start_time;
         span.meta.extend(HashMap::from([
             (
@@ -131,7 +131,6 @@ impl Trigger for APIGatewayHttpEvent {
                 "http.user_agent".to_string(),
                 self.request_context.http.user_agent.clone(),
             ),
-            ("operation_name".to_string(), "aws.httpapi".to_string()),
             (
                 "request_id".to_string(),
                 self.request_context.request_id.clone(),
@@ -200,6 +199,20 @@ impl Trigger for APIGatewayHttpEvent {
         )
     }
 
+    fn get_dd_resource_key(&self, region: &str) -> Option<String> {
+        if self.request_context.api_id.is_empty() {
+            return None;
+        }
+
+        let partition = get_aws_partition_by_region(region);
+        Some(format!(
+            "arn:{partition}:apigateway:{region}::/apis/{api_id}",
+            partition = partition,
+            region = region,
+            api_id = self.request_context.api_id
+        ))
+    }
+
     fn is_async(&self) -> bool {
         self.headers
             .get("x-amz-invocation-type")
@@ -220,6 +233,7 @@ impl ServiceNameResolver for APIGatewayHttpEvent {
         "lambda_api_gateway"
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,7 +323,7 @@ mod tests {
             "x02yirxc7a.execute-api.sa-east-1.amazonaws.com"
         );
         assert_eq!(span.resource, "GET /httpapi/get");
-        assert_eq!(span.r#type, "http");
+        assert_eq!(span.r#type, "web");
         assert_eq!(
             span.meta,
             HashMap::from([
@@ -323,7 +337,6 @@ mod tests {
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
                 ("http.source_ip".to_string(), "38.122.226.210".to_string()),
                 ("http.user_agent".to_string(), "curl/7.64.1".to_string()),
-                ("operation_name".to_string(), "aws.httpapi".to_string()),
                 ("request_id".to_string(), "FaHnXjKCGjQEJ7A=".to_string()),
             ])
         );
@@ -373,7 +386,7 @@ mod tests {
             "9vj54we5ih.execute-api.sa-east-1.amazonaws.com"
         );
         assert_eq!(span.resource, "GET /user/{user_id}");
-        assert_eq!(span.r#type, "http");
+        assert_eq!(span.r#type, "web");
         assert_eq!(
             span.meta,
             HashMap::from([
@@ -386,7 +399,6 @@ mod tests {
                 ("http.protocol".to_string(), "HTTP/1.1".to_string()),
                 ("http.source_ip".to_string(), "76.115.124.192".to_string()),
                 ("http.user_agent".to_string(), "curl/8.1.2".to_string()),
-                ("operation_name".to_string(), "aws.httpapi".to_string()),
                 ("request_id".to_string(), "Ur2JtjEfGjQEPOg=".to_string()),
             ])
         );
@@ -426,6 +438,18 @@ mod tests {
         assert_eq!(
             event.get_arn("sa-east-1"),
             "arn:aws:apigateway:sa-east-1::/restapis/x02yirxc7a/stages/$default"
+        );
+    }
+
+    #[test]
+    fn test_get_dd_resource_key() {
+        let json = read_json_file("api_gateway_http_event.json");
+        let payload = serde_json::from_str(&json).expect("Failed to deserialize into Value");
+        let event =
+            APIGatewayHttpEvent::new(payload).expect("Failed to deserialize APIGatewayHttpEvent");
+        assert_eq!(
+            event.get_dd_resource_key("sa-east-1"),
+            Some("arn:aws:apigateway:sa-east-1::/apis/x02yirxc7a".to_string())
         );
     }
 

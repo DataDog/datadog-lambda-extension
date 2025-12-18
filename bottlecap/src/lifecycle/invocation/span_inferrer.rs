@@ -227,6 +227,12 @@ impl SpanInferrer {
                 );
             }
 
+            if let Some(dd_resource_key) = t.get_dd_resource_key(&aws_config.region) {
+                inferred_span
+                    .meta
+                    .insert("dd_resource_key".to_string(), dd_resource_key);
+            }
+
             self.wrapped_inferred_span = wrapped_inferred_span;
             self.span_pointers = span_pointers;
 
@@ -278,12 +284,15 @@ impl SpanInferrer {
                 invocation_span.service.clone(),
             );
             s.meta.insert("span.kind".to_string(), "server".to_string());
+            let appsec_enabled = self.config.serverless_appsec_enabled;
+            propagate_appsec(appsec_enabled, invocation_span, s);
 
             if let Some(ws) = &mut self.wrapped_inferred_span {
                 ws.trace_id = invocation_span.trace_id;
                 ws.error = invocation_span.error;
                 ws.meta
                     .insert(String::from("peer.service"), s.service.clone());
+                propagate_appsec(appsec_enabled, invocation_span, ws);
 
                 // The wrapper span should be the parent of the inferred span,
                 // therefore the `parent_id` of the inferred span should be the
@@ -322,6 +331,34 @@ impl SpanInferrer {
     #[must_use]
     pub fn get_trigger_tags(&self) -> Option<HashMap<String, String>> {
         self.trigger_tags.clone()
+    }
+}
+
+fn propagate_appsec(
+    serverless_appsec_enabled: bool,
+    invocation_span: &Span,
+    target_span: &mut Span,
+) {
+    let has_appsec = invocation_span
+        .metrics
+        .get("_dd.appsec.enabled")
+        .copied()
+        .or(if serverless_appsec_enabled {
+            Some(1.0)
+        } else {
+            None
+        });
+
+    if let Some(enabled) = has_appsec {
+        target_span
+            .metrics
+            .insert("_dd.appsec.enabled".to_string(), enabled);
+    }
+
+    if let Some(json) = invocation_span.meta.get("_dd.appsec.json") {
+        target_span
+            .meta
+            .insert("_dd.appsec.json".to_string(), json.clone());
     }
 }
 
@@ -368,6 +405,7 @@ pub fn extract_generated_span_context(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lifecycle::invocation::triggers::test_utils::read_json_file;
     use crate::traces::propagation::text_map_propagator::DatadogHeaderPropagator;
     use serde_json::json;
     use std::sync::Arc;
@@ -569,6 +607,119 @@ mod tests {
                 .expect("Should have event source"),
             "sqs",
             "Should have SQS as event source"
+        );
+    }
+
+    fn api_gateway_rest_payload() -> serde_json::Value {
+        let json = read_json_file("api_gateway_rest_event.json");
+        serde_json::from_str(&json).expect("Failed to deserialize API Gateway REST payload")
+    }
+
+    fn aws_config(region: &str) -> Arc<AwsConfig> {
+        Arc::new(AwsConfig {
+            region: region.to_string(),
+            aws_lwa_proxy_lambda_runtime_api: Some(String::new()),
+            runtime_api: String::new(),
+            function_name: String::new(),
+            sandbox_init_time: Instant::now(),
+            exec_wrapper: None,
+            initialization_type: "on-demand".into(),
+        })
+    }
+
+    #[test]
+    fn test_complete_inferred_spans_propagates_appsec_from_invocation() {
+        let payload = api_gateway_rest_payload();
+        let aws_config = aws_config("us-east-1");
+        let mut inferrer = SpanInferrer::new(Arc::new(Config::default()));
+
+        inferrer.infer_span(&payload, &aws_config);
+
+        let mut invocation_span = Span {
+            trace_id: 42,
+            span_id: 100,
+            service: "lambda-service".to_string(),
+            ..Span::default()
+        };
+        if let Some(inferred_span) = &inferrer.inferred_span {
+            invocation_span.start = inferred_span.start;
+        }
+        invocation_span.duration = 1;
+        invocation_span
+            .metrics
+            .insert("_dd.appsec.enabled".to_string(), 1.0);
+        invocation_span.meta.insert(
+            "_dd.appsec.json".to_string(),
+            r#"{"triggers":["rule"]}"#.to_string(),
+        );
+
+        inferrer.complete_inferred_spans(&invocation_span);
+
+        let inferred_span = inferrer
+            .inferred_span
+            .as_ref()
+            .expect("Inferred span should still be present");
+
+        let appsec_enabled = inferred_span
+            .metrics
+            .get("_dd.appsec.enabled")
+            .copied()
+            .unwrap_or_default();
+        assert!(
+            (appsec_enabled - 1.0).abs() < f64::EPSILON,
+            "Expected appsec enabled metric to be 1.0"
+        );
+        assert_eq!(
+            inferred_span
+                .meta
+                .get("_dd.appsec.json")
+                .cloned()
+                .unwrap_or_default(),
+            r#"{"triggers":["rule"]}"#
+        );
+    }
+
+    #[test]
+    fn test_complete_inferred_spans_sets_appsec_when_enabled_in_config() {
+        let config = Config {
+            serverless_appsec_enabled: true,
+            ..Config::default()
+        };
+        let mut inferrer = SpanInferrer::new(Arc::new(config));
+
+        let payload = api_gateway_rest_payload();
+        let aws_config = aws_config("us-east-1");
+        inferrer.infer_span(&payload, &aws_config);
+
+        let mut invocation_span = Span {
+            trace_id: 7,
+            service: "lambda-service".to_string(),
+            ..Span::default()
+        };
+        if let Some(inferred_span) = &inferrer.inferred_span {
+            invocation_span.start = inferred_span.start;
+        }
+        invocation_span.duration = 1;
+
+        inferrer.complete_inferred_spans(&invocation_span);
+
+        let inferred_span = inferrer
+            .inferred_span
+            .as_ref()
+            .expect("Inferred span should still be present");
+
+        let appsec_enabled = inferred_span
+            .metrics
+            .get("_dd.appsec.enabled")
+            .copied()
+            .unwrap_or_default();
+        assert!(
+            (appsec_enabled - 1.0).abs() < f64::EPSILON,
+            "Expected appsec enabled metric to be 1.0"
+        );
+        assert!(
+            !inferred_span.meta.contains_key("_dd.appsec.json"),
+            "AppSec JSON should not be added when invocation span has none"
         );
     }
 }

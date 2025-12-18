@@ -111,13 +111,11 @@ impl Trigger for APIGatewayWebSocketEvent {
                 self.request_context.route_key.clone(),
             ),
             ("http.url".to_string(), http_url),
-            ("operation_name".to_string(), "aws.apigateway".to_string()),
             (
                 "request_id".to_string(),
                 self.request_context.request_id.clone(),
             ),
             ("apiid".to_string(), self.request_context.api_id.clone()),
-            ("apiname".to_string(), self.request_context.api_id.clone()),
             ("stage".to_string(), self.request_context.stage.clone()),
             (
                 "connection_id".to_string(),
@@ -353,10 +351,8 @@ mod tests {
                     "http.url".to_string(),
                     "https://85fj5nw29d.execute-api.eu-west-1.amazonaws.comhello".to_string()
                 ),
-                ("operation_name".to_string(), "aws.apigateway".to_string()),
                 ("request_id".to_string(), "ahVmYGOMmjQFhyg=".to_string()),
                 ("apiid".to_string(), "85fj5nw29d".to_string()),
-                ("apiname".to_string(), "85fj5nw29d".to_string()),
                 ("stage".to_string(), "dev".to_string()),
                 ("connection_id".to_string(), "ahVWscZqmjQCI1w=".to_string()),
                 ("event_type".to_string(), "MESSAGE".to_string()),

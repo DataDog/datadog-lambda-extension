@@ -130,6 +130,10 @@ pub trait Trigger: ServiceNameResolver {
     fn get_carrier(&self) -> HashMap<String, String>;
     fn is_async(&self) -> bool;
 
+    fn get_dd_resource_key(&self, _region: &str) -> Option<String> {
+        None
+    }
+
     /// Default implementation for service name resolution
     fn resolve_service_name(
         &self,
