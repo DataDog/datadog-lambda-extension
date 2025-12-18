@@ -56,10 +56,11 @@ bottlecap ({{ $flavor.name }}):
   # Set a short timeout with retries to work around this.
   timeout: 10m
   retry:
-    max: 1
+    max: 3
     when:
       - stuck_or_timeout_failure
       - runner_system_failure
+      - script_failure
   artifacts:
     expire_in: 1 week
     paths:
@@ -324,48 +325,83 @@ signed layer bundle:
     - mkdir -p datadog_extension-signed-bundle-${CI_JOB_ID}
     - cp .layers/datadog_extension-*.zip datadog_extension-signed-bundle-${CI_JOB_ID}
 
-# Integration Tests - Build Java Lambda function
-build java lambda:
-  stage: integration-tests
-  image: registry.ddbuild.io/images/docker:27.3.1
-  tags: ["docker-in-docker:arm64"]
-  rules:
-    - when: on_success
-  needs: []
-  artifacts:
-    expire_in: 1 hour
-    paths:
-      - integration-tests/lambda/base-java/target/
-  script:
-    - cd integration-tests/lambda/base-java
-    - docker run --rm --platform linux/arm64
-        -v "$(pwd)":/workspace
-        -w /workspace
-        maven:3.9-eclipse-temurin-21-alpine
-        mvn clean package
+# Integration Tests - Build Lambda functions in parallel by runtime
 
-# Integration Tests - Build .NET Lambda function
-build dotnet lambda:
+build java lambdas:
   stage: integration-tests
   image: registry.ddbuild.io/images/docker:27.3.1
   tags: ["docker-in-docker:arm64"]
   rules:
     - when: on_success
   needs: []
+  cache:
+    key: maven-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/maven/
   artifacts:
     expire_in: 1 hour
     paths:
-      - integration-tests/lambda/base-dotnet/bin/
+      - integration-tests/lambda/*/target/
   script:
-    - cd integration-tests/lambda/base-dotnet
-    - docker run --rm --platform linux/arm64
-        -v "$(pwd)":/workspace
-        -w /workspace
-        mcr.microsoft.com/dotnet/sdk:8.0-alpine
-        sh -c "apk add --no-cache zip &&
-               dotnet tool install -g Amazon.Lambda.Tools || true &&
-               export PATH=\"\$PATH:/root/.dotnet/tools\" &&
-               dotnet lambda package -o bin/function.zip --function-architecture arm64"
+    - cd integration-tests
+    - ./scripts/build-java.sh
+
+build dotnet lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  cache:
+    key: nuget-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/nuget/
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/bin/
+  script:
+    - cd integration-tests
+    - ./scripts/build-dotnet.sh
+
+build python lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  cache:
+    key: pip-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/pip/
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/package/
+  script:
+    - cd integration-tests
+    - ./scripts/build-python.sh
+
+build node lambdas:
+  stage: integration-tests
+  image: registry.ddbuild.io/images/docker:27.3.1
+  tags: ["docker-in-docker:arm64"]
+  rules:
+    - when: on_success
+  needs: []
+  cache:
+    key: npm-cache-${CI_COMMIT_REF_SLUG}
+    paths:
+      - integration-tests/.cache/npm/
+  artifacts:
+    expire_in: 1 hour
+    paths:
+      - integration-tests/lambda/*/node_modules/
+  script:
+    - cd integration-tests
+    - ./scripts/build-node.sh
 
 # Integration Tests - Publish arm64 layer with integration test prefix
 publish integration layer (arm64):
@@ -388,59 +424,67 @@ publish integration layer (arm64):
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - export PIPELINE_LAYER_SUFFIX="ARM-${CI_COMMIT_SHORT_SHA}"
-    - echo "Publishing layer with suffix - ${PIPELINE_LAYER_SUFFIX}"
+    - export PIPELINE_LAYER_SUFFIX="IntegTests-ARM"
+    - export LAYER_DESCRIPTION="${CI_COMMIT_SHORT_SHA}"
+    - echo "Publishing to layer Datadog-Extension-IntegTests-ARM with commit SHA ${LAYER_DESCRIPTION}"
   script:
     - .gitlab/scripts/publish_layers.sh
-    - LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-ARM-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
-    - echo "Published layer ARN - ${LAYER_ARN}"
+    - |
+      LAYER_NAME="Datadog-Extension-IntegTests-ARM"
+      COMMIT_SHA="${CI_COMMIT_SHORT_SHA}"
+      LAYER_INFO=$(aws lambda list-layer-versions \
+        --layer-name "${LAYER_NAME}" \
+        --region us-east-1 \
+        --query "LayerVersions[?Description=='${COMMIT_SHA}'].[Version, LayerVersionArn, Description] | [0]" \
+        --output json)
+      if [ "$LAYER_INFO" = "null" ] || [ -z "$LAYER_INFO" ]; then
+        echo "ERROR: Could not find layer version with commit SHA ${COMMIT_SHA}"
+        echo "Available versions:"
+        aws lambda list-layer-versions --layer-name "${LAYER_NAME}" --region us-east-1 --query 'LayerVersions[*].[Version, Description]' --output table
+        exit 1
+      fi
+
+      LAYER_VERSION=$(echo "$LAYER_INFO" | jq -r '.[0]')
+      LAYER_ARN=$(echo "$LAYER_INFO" | jq -r '.[1]')
+      LAYER_DESC=$(echo "$LAYER_INFO" | jq -r '.[2]')
+
+      echo "Found layer version ${LAYER_VERSION} with ARN ${LAYER_ARN}"
+      echo "Description: ${LAYER_DESC}"
+
+      echo "EXTENSION_LAYER_ARN=${LAYER_ARN}" >> layer.env
+      echo "LAYER_VERSION=${LAYER_VERSION}" >> layer.env
+      echo "COMMIT_SHA=${COMMIT_SHA}" >> layer.env
+  artifacts:
+    reports:
+      dotenv: layer.env
   {{ end }}
 
-# Integration Tests - Deploy CDK stacks with commit hash prefix
-integration-deploy:
+# Integration Tests - Deploy, test, and cleanup each suite independently (parallel by test suite)
+integration-suite:
   stage: integration-tests
   tags: ["arch:amd64"]
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
+  parallel:
+    matrix:
+      - TEST_SUITE: [base, otlp]
   rules:
     - when: on_success
   needs:
-    - publish integration layer (arm64)
-    - build java lambda
-    - build dotnet lambda
+    - job: publish integration layer (arm64)
+      artifacts: true
+    - build java lambdas
+    - build dotnet lambdas
+    - build python lambdas
+    - build node lambdas
   dependencies:
-    - build java lambda
-    - build dotnet lambda
+    - publish integration layer (arm64)
+    - build java lambdas
+    - build dotnet lambdas
+    - build python lambdas
+    - build node lambdas
   variables:
     IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     AWS_DEFAULT_REGION: us-east-1
-  {{ with $environment := (ds "environments").environments.sandbox }}
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-    - curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-    - apt-get install -y nodejs
-    - cd integration-tests
-    - npm ci
-  {{ end }}
-  script:
-    - echo "Deploying CDK stacks with identifier ${IDENTIFIER}..."
-    - export EXTENSION_LAYER_ARN=$(aws lambda list-layer-versions --layer-name "Datadog-Extension-ARM-${CI_COMMIT_SHORT_SHA}" --query 'LayerVersions[0].LayerVersionArn' --output text --region us-east-1)
-    - echo "Using integration test layer - ${EXTENSION_LAYER_ARN}"
-    - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
-    - export CDK_DEFAULT_REGION=us-east-1
-    - npm run build
-    - npx cdk deploy "integ-$IDENTIFIER-*" --require-approval never
-
-# Integration Tests - Run Jest test suite
-integration-test:
-  stage: integration-tests
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  rules:
-    - when: on_success
-  needs:
-    - integration-deploy
-  variables:
-    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
     DD_SITE: datadoghq.com
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
@@ -449,63 +493,58 @@ integration-test:
     - apt-get install -y nodejs
     - cd integration-tests
     - npm ci
+  {{ end }}
   script:
-    - echo "Running integration tests with identifier ${IDENTIFIER}..."
-    - npm run test:ci
+    - echo "Deploying ${TEST_SUITE} CDK stack with identifier ${IDENTIFIER}..."
+    - echo "Using integration test layer - ${EXTENSION_LAYER_ARN} (version ${LAYER_VERSION}, commit ${COMMIT_SHA})"
+    - |
+      if [ -z "$EXTENSION_LAYER_ARN" ]; then
+        echo "ERROR: EXTENSION_LAYER_ARN not set from publish job dotenv artifact"
+        echo "This indicates the publish job failed to export the layer ARN"
+        exit 1
+      fi
+    - export CDK_DEFAULT_ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+    - export CDK_DEFAULT_REGION=us-east-1
+    - npm run build
+    - npx cdk deploy "integ-${IDENTIFIER}-${TEST_SUITE}" --require-approval never
+    - echo "Running ${TEST_SUITE} integration tests with identifier ${IDENTIFIER}..."
+    - export TEST_SUITE=${TEST_SUITE}
+    - npx jest tests/${TEST_SUITE}.test.ts
+  {{ with $environment := (ds "environments").environments.sandbox }}
+  after_script:
+    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
+    - echo "Destroying ${TEST_SUITE} CDK stack with identifier ${IDENTIFIER}..."
+    - |
+      STACK_NAME="integ-${IDENTIFIER}-${TEST_SUITE}"
+
+      # Check if stack exists
+      STACK_STATUS=$(aws cloudformation describe-stacks \
+        --stack-name "${STACK_NAME}" \
+        --query 'Stacks[0].StackStatus' \
+        --output text --region us-east-1 2>/dev/null || echo "DOES_NOT_EXIST")
+
+      if [ "$STACK_STATUS" = "DOES_NOT_EXIST" ]; then
+        echo "Stack ${STACK_NAME} does not exist, nothing to clean up"
+      else
+        echo "Found stack ${STACK_NAME} with status ${STACK_STATUS}"
+        echo "Deleting stack ${STACK_NAME}..."
+        aws cloudformation delete-stack --stack-name "${STACK_NAME}" --region us-east-1 || echo "Failed to delete ${STACK_NAME}, continuing..."
+
+        echo "Waiting for stack deletion to complete..."
+        aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}" --region us-east-1 || echo "Stack ${STACK_NAME} deletion did not complete cleanly, continuing..."
+
+        echo "${TEST_SUITE} stack deleted successfully"
+      fi
   {{ end }}
   artifacts:
     when: always
     paths:
       - integration-tests/test-results/
     reports:
-      junit: integration-tests/test-results/junit.xml
+      junit: integration-tests/test-results/junit-*.xml
     expire_in: 30 days
 
-# Integration Tests - Cleanup stacks
-integration-cleanup-stacks:
-  stage: integration-tests
-  tags: ["arch:amd64"]
-  image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
-  rules:
-    - when: always
-  needs:
-    - job: integration-test
-      optional: false
-  variables:
-    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
-  {{ with $environment := (ds "environments").environments.sandbox }}
-  before_script:
-    - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
-  {{ end }}
-  script:
-    - echo "Destroying CDK stacks with identifier ${IDENTIFIER}..."
-    - |
-      # Find all stacks matching the pattern using CloudFormation API
-      STACKS=$(aws cloudformation list-stacks \
-        --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE UPDATE_ROLLBACK_COMPLETE \
-        --query "StackSummaries[?starts_with(StackName, 'integ-${IDENTIFIER}-')].StackName" \
-        --output text --region us-east-1)
-
-      if [ -z "$STACKS" ]; then
-        echo "No stacks found matching pattern integ-${IDENTIFIER}-*"
-      else
-        echo "Found stacks to delete: ${STACKS}"
-        for STACK in $STACKS; do
-          echo "Deleting stack ${STACK}..."
-          aws cloudformation delete-stack --stack-name "${STACK}" --region us-east-1 || echo "Failed to delete ${STACK}, continuing..."
-        done
-
-        # Wait for all deletions to complete
-        echo "Waiting for stack deletions to complete..."
-        for STACK in $STACKS; do
-          echo "Waiting for ${STACK}..."
-          aws cloudformation wait stack-delete-complete --stack-name "${STACK}" --region us-east-1 || echo "Stack ${STACK} deletion did not complete cleanly, continuing..."
-        done
-
-        echo "All stacks deleted successfully"
-      fi
-
-# Integration Tests - Cleanup layer
+# Integration Tests - Cleanup old layer versions
 integration-cleanup-layer:
   stage: integration-tests
   tags: ["arch:amd64"]
@@ -513,31 +552,49 @@ integration-cleanup-layer:
   rules:
     - when: always
   needs:
-    - job: integration-cleanup-stacks
-      optional: false
+    - job: integration-suite
   variables:
-    IDENTIFIER: ${CI_COMMIT_SHORT_SHA}
+    LAYER_NAME: "Datadog-Extension-IntegTests-ARM"
+    KEEP_VERSIONS: 500
   {{ with $environment := (ds "environments").environments.sandbox }}
   before_script:
     - EXTERNAL_ID_NAME={{ $environment.external_id }} ROLE_TO_ASSUME={{ $environment.role_to_assume }} AWS_ACCOUNT={{ $environment.account }} source .gitlab/scripts/get_secrets.sh
   {{ end }}
   script:
-    - echo "Deleting integration test layer with identifier ${IDENTIFIER}..."
+    - echo "Cleaning up old versions of ${LAYER_NAME}..."
     - |
-      LAYER_NAME="Datadog-Extension-ARM-${IDENTIFIER}"
-      echo "Looking for layer: ${LAYER_NAME}"
+      # Get all layer versions sorted by version number (newest first)
+      ALL_VERSIONS=$(aws lambda list-layer-versions \
+        --layer-name "${LAYER_NAME}" \
+        --query 'LayerVersions[*].Version' \
+        --output text \
+        --region us-east-1 2>/dev/null || echo "")
 
-      # Get all versions of the layer
-      VERSIONS=$(aws lambda list-layer-versions --layer-name "${LAYER_NAME}" --query 'LayerVersions[*].Version' --output text --region us-east-1 2>/dev/null || echo "")
-
-      if [ -z "$VERSIONS" ]; then
+      if [ -z "$ALL_VERSIONS" ]; then
         echo "No versions found for layer ${LAYER_NAME}"
-      else
-        echo "Found versions: ${VERSIONS}"
-        for VERSION in $VERSIONS; do
+        exit 0
+      fi
+
+      VERSION_ARRAY=($ALL_VERSIONS)
+      TOTAL_VERSIONS=${#VERSION_ARRAY[@]}
+
+      echo "Found ${TOTAL_VERSIONS} versions of ${LAYER_NAME}"
+      echo "Keeping the ${KEEP_VERSIONS} most recent versions"
+
+      # Delete old versions (keep only the most recent KEEP_VERSIONS)
+      if [ $TOTAL_VERSIONS -gt $KEEP_VERSIONS ]; then
+        VERSIONS_TO_DELETE=${VERSION_ARRAY[@]:$KEEP_VERSIONS}
+
+        for VERSION in $VERSIONS_TO_DELETE; do
           echo "Deleting ${LAYER_NAME} version ${VERSION}..."
-          aws lambda delete-layer-version --layer-name "${LAYER_NAME}" --version-number "${VERSION}" --region us-east-1 || echo "Failed to delete version ${VERSION}, continuing..."
+          aws lambda delete-layer-version \
+            --layer-name "${LAYER_NAME}" \
+            --version-number "${VERSION}" \
+            --region us-east-1 || echo "Failed to delete version ${VERSION}, continuing..."
         done
-        echo "Successfully deleted all versions of ${LAYER_NAME}"
+
+        echo "Successfully cleaned up old versions"
+      else
+        echo "Total versions (${TOTAL_VERSIONS}) <= keep versions (${KEEP_VERSIONS}), no cleanup needed"
       fi
 

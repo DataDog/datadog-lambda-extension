@@ -117,7 +117,6 @@ export async function getTraces(
     const traceMap = new Map<string, DatadogSpan[]>();
 
     for (const spanData of allSpans) {
-      console.log('Span data:', JSON.stringify(spanData, null, 2));
       const attrs = spanData.attributes || {};
 
       const span: DatadogSpan = {

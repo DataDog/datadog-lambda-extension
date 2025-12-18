@@ -2,24 +2,27 @@
 
 This directory contains integration tests for the Datadog Lambda Extension. 
 
+Each test suite has a cdk stack and an associated test file. Example, `base.ts` and `base.tests.ts`. Test suits are run in parallel in Gitlab CI/CD pipeline.
+
 The general flow is:
 1. Deploy test setup using CDK.
 2. Invoke lambda functions.
 3. Wait for data to propagate to Datadog.
 4. Call Datadog to get telemetry data and check the data based on test requirements.
 
-For simplicity, integration tests are setup to only test against ARM runtimes.
+For simplicity, integration tests are set up to only test against ARM runtimes and 4 runtimes (Python, Node, Java, and Dotnet).
+
 
 ## Test Suites
 
 ### Base Tests
 
-The base test suite provides basic functionality tests across all supported Lambda runtimes. Also serves as an example for other tests.
+The base test suite provides basic functionality tests across all supported Lambda runtimes. These tests verify core extension functionality without additional instrumentation.
 
-The base tests verify the extension can:
-- Collect and forward logs to Datadog
-- Generate and send traces with proper span structure
-- Detect cold starts
+**What it tests:**
+- Extension can collect and forward logs to Datadog
+- Extension generates and sends traces with proper span structure
+- Extension detects cold starts correctly
 
 **Test Coverage:**
 - Lambda invocation succeeds (200 status code)
@@ -27,21 +30,62 @@ The base tests verify the extension can:
 - One trace is sent to Datadog
 - `aws.lambda` span exists with correct properties including `cold_start: 'true'`
 - `aws.lambda.cold_start` span is created
-- `aws.lambda.load` spand is created for python and node.
+- `aws.lambda.load` span is created for Python and Node
 
-**Build Requirements:**
+### OTLP Tests
 
-For Java and .NET tests, Lambda functions must be built before deployment:
+The OTLP test suite verifies OpenTelemetry Protocol (OTLP) integration with the Datadog Lambda Extension. These tests use Lambda functions instrumented with OpenTelemetry SDKs to ensure telemetry data flows correctly through the extension to Datadog.
 
-```bash
-# Build Java Lambda (uses Docker)
-cd lambda/base-java && ./build.sh
+**What it tests:**
+- Lambda functions instrumented with OpenTelemetry SDKs can invoke successfully
+- Traces are properly sent to Datadog via OTLP
+- Spans contain correct structure and attributes
 
-# Build .NET Lambda (uses Docker)
-cd lambda/base-dotnet && ./build.sh
+**Test Coverage:**
+- Lambda invocation succeeds (200 status code)
+- At least one trace is sent to Datadog
+- Trace contains valid spans with proper structure
+
+## CI/CD Pipeline Structure
+
+
+### Pipeline Flow
+
+```
+                                    ┌→ deploy-base → test-base → cleanup-base ┐
+publish layer → build lambdas ─────┤                                          ├→ cleanup-layer
+                                    └→ deploy-otlp → test-otlp → cleanup-otlp ┘
 ```
 
-These builds use Docker to ensure cross-platform compatibility and do not require local Maven or .NET SDK installation.
+### Test Suite Lifecycle
+
+Each test suite (base, otlp, etc.) follows this lifecycle:
+
+1. **Deploy**: Deploys only the stacks for that suite
+   - Pattern: `cdk deploy "integ-${IDENTIFIER}-${TEST_SUITE}"`
+   - Example: `integ-abc123-base` deploys all base test stacks
+
+2. **Test**: Runs only the tests for that suite
+   - Command: `jest tests/${TEST_SUITE}.test.ts`
+   - Example: `jest tests/base.test.ts`
+
+3. **Cleanup**: Removes only the stacks for that suite
+   - Runs with `when: always` to ensure cleanup on failure
+   - Pattern: Deletes all stacks matching `integ-${IDENTIFIER}-${TEST_SUITE}`
+
+### Adding a New Test Suite
+
+To add a new test suite to the parallel execution:
+
+1. **Create test file**: `tests/<suite-name>.test.ts`
+2. **Create CDK stacks**: `lib/stacks/<suite-name>.ts`
+3. **Register stacks**: Add to `bin/app.ts`
+4. **Update pipeline**: Add suite name to `.gitlab/templates/pipeline.yaml.tpl`:
+   ```yaml
+   parallel:
+     matrix:
+       - TEST_SUITE: [base, otlp, <suite-name>]
+   ```
 
 ## Guidelines
 
@@ -56,48 +100,60 @@ These builds use Docker to ensure cross-platform compatibility and do not requir
 
 ## Local Development
 
-### Prerequisites Set env variables
+### Prerequisites
+
 **Datadog API Keys**: Set environment variables
-   ```bash
-   export DD_API_KEY="your-datadog-api-key"
-   export DD_APP_KEY="your-datadog-app-key"
-   export DATADOG_API_SECRET_ARN="arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:YOUR_SECRET"
-   ```
+```bash
+export DD_API_KEY="your-datadog-api-key"
+export DD_APP_KEY="your-datadog-app-key"
+export DATADOG_API_SECRET_ARN="arn:aws:secretsmanager:us-east-1:ACCOUNT_ID:secret:YOUR_SECRET"
+```
 
-### 1. Build and Deploy Extension Layer
+**Docker**: Required for building Lambda functions.
 
-First, publish your extension layer. 
+### Workflow
+
+#### 1. Build and Publish Extension Layer
+
+Publish your extension layer to AWS Lambda:
 
 ```bash
 ./scripts/local_publish.sh
 ```
 
-This will create and publish `Datadog-Extension-ARM-<your name>`.
+This creates and publishes `Datadog-Extension-ARM-<your-name>` with the latest version number.
 
-### 2. Deploy Test Stacks
+#### 2. Deploy Test Stacks
 
-Deploy the CDK stacks that create Lambda functions for testing.
+Deploy CDK stacks that create Lambda functions for testing:
 
 ```bash
-./scripts/local_deploy.sh <stack name> 
+./scripts/local_deploy.sh <stack-name>
 ```
 
-This will create `integ-<your name>-<stack name>`. The stacks will use the lambda extension created in the previous step.
+This creates `integ-<your-name>-<stack-name>` and automatically:
+- Builds required Lambda functions based on the stack name
+- Uses the extension layer created in step 1
+- Deploys the stack to AWS
 
-### 3. Run Integration Tests
+**Examples:**
+```bash
+# Deploy base test stack
+./scripts/local_deploy.sh base
+
+```
+
+#### 3. Run Integration Tests
 
 Run Jest tests that invoke Lambda functions and verify Datadog telemetry:
 
 ```bash
-# All tests
+# Run all tests
 npm test
 
-# Single test
-npm test -- <my test file>
+# Run specific test file
+npm test -- base.test.ts
+
 ```
 
-
-
-**Note**: Tests wait for a few minutes after Lambda invocation to allow telemetry to appear in Datadog. 
-
-
+**Note**: Tests wait several minutes after Lambda invocation to allow telemetry to propagate to Datadog.

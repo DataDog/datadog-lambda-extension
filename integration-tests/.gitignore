@@ -38,3 +38,13 @@ Thumbs.db
 # Lambda artifacts
 response.json
 lambda-bundle.zip
+
+# Lambda build outputs
+lambda/*/target/
+lambda/*/bin/
+lambda/*/obj/
+lambda/*/package/
+lambda/*/node_modules/
+
+# Build caches
+.cache/

@@ -17,16 +17,17 @@ module.exports = {
     'default', // Console output
     ['jest-junit', {
       outputDirectory: './test-results',
-      outputName: 'junit.xml',
+      outputName: process.env.TEST_SUITE ? `junit-${process.env.TEST_SUITE}.xml` : 'junit.xml',
       classNameTemplate: '{classname}',
       titleTemplate: '{title}',
       ancestorSeparator: ' › ',
       usePathForSuiteName: true,
+      suiteName: process.env.TEST_SUITE || 'all',
     }],
     ['jest-html-reporters', {
       publicPath: './test-results',
-      filename: 'test-report.html',
-      pageTitle: 'Datadog Lambda Extension Test Report',
+      filename: process.env.TEST_SUITE ? `test-report-${process.env.TEST_SUITE}.html` : 'test-report.html',
+      pageTitle: `Datadog Lambda Extension Test Report${process.env.TEST_SUITE ? ` - ${process.env.TEST_SUITE}` : ''}`,
       expand: true,
     }],
   ],
