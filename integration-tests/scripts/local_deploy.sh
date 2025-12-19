@@ -33,6 +33,21 @@ echo "Using extension layer: $EXTENSION_LAYER_ARN"
 FULL_STACK_NAME="integ-$IDENTIFIER-$STACK_NAME"
 echo "Deploying stack: $FULL_STACK_NAME"
 
-# Build and deploy
+# Get the directory of this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Build all Lambda functions in parallel
+echo ""
+echo "Building all Lambda functions in parallel..."
+"$SCRIPT_DIR/build-java.sh" &
+"$SCRIPT_DIR/build-dotnet.sh" &
+"$SCRIPT_DIR/build-python.sh" &
+"$SCRIPT_DIR/build-node.sh" &
+wait
+echo "All Lambda builds complete"
+
+echo ""
+echo "Building CDK TypeScript and deploying..."
+# Build CDK TypeScript and deploy
 npm run build && aws-vault exec sso-serverless-sandbox-account-admin -- cdk deploy "$FULL_STACK_NAME" --require-approval never
 

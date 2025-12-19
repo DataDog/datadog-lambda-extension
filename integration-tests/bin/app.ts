@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
-import {BaseNodeStack} from '../lib/stacks/base-node-stack';
-import {BasePythonStack} from '../lib/stacks/base-python-stack';
-import {BaseJavaStack} from '../lib/stacks/base-java-stack';
-import {BaseDotnetStack} from '../lib/stacks/base-dotnet-stack';
+import {Base} from '../lib/stacks/base';
+import {Otlp} from '../lib/stacks/otlp';
 import {getIdentifier} from '../tests/utils/config';
 
 const app = new cdk.App();
@@ -17,16 +15,10 @@ const env = {
 const identifier = getIdentifier();
 
 const stacks = [
-    new BaseNodeStack(app, `integ-${identifier}-base-node`, {
+    new Base(app, `integ-${identifier}-base`, {
         env,
     }),
-    new BasePythonStack(app, `integ-${identifier}-base-python`, {
-        env,
-    }),
-    new BaseJavaStack(app, `integ-${identifier}-base-java`, {
-        env,
-    }),
-    new BaseDotnetStack(app, `integ-${identifier}-base-dotnet`, {
+    new Otlp(app, `integ-${identifier}-otlp`, {
         env,
     }),
 ]

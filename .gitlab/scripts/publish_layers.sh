@@ -43,7 +43,7 @@ publish_layer() {
     compatible_architectures=$4
 
     version_nbr=$(aws lambda publish-layer-version --layer-name $layer \
-        --description "Datadog Lambda Extension" \
+        --description "${LAYER_DESCRIPTION:-Datadog Lambda Extension}" \
         --compatible-architectures $compatible_architectures \
         --zip-file "fileb://${file}" \
         --region $region \
