@@ -12,10 +12,8 @@ export class Otlp extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
-    // Get extension layer once for the entire stack
     const extensionLayer = getExtensionLayer(this);
 
-    // Node.js Lambda
     const nodeFunctionName = `${id}-node-lambda`;
     const nodeFunction = new lambda.Function(this, nodeFunctionName, {
       runtime: lambda.Runtime.NODEJS_20_X,
@@ -38,7 +36,26 @@ export class Otlp extends cdk.Stack {
     nodeFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     nodeFunction.addLayers(extensionLayer);
 
-    // Python Lambda
+    const validationFunctionName = `${id}-response-validation-lambda`;
+    const validationFunction = new lambda.Function(this, validationFunctionName, {
+      runtime: lambda.Runtime.NODEJS_20_X,
+      architecture: lambda.Architecture.ARM_64,
+      handler: 'validation.handler',
+      code: lambda.Code.fromAsset('./lambda/otlp-node'),
+      functionName: validationFunctionName,
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      environment: {
+        ...defaultDatadogEnvVariables,
+        DD_SERVICE: validationFunctionName,
+        OTEL_EXPORTER_OTLP_PROTOCOL: 'http/protobuf',
+        DD_OTLP_CONFIG_RECEIVER_PROTOCOLS_HTTP_ENDPOINT: 'localhost:4318',
+      },
+      logGroup: createLogGroup(this, validationFunctionName)
+    });
+    validationFunction.addToRolePolicy(defaultDatadogSecretPolicy);
+    validationFunction.addLayers(extensionLayer);
+
     const pythonFunctionName = `${id}-python-lambda`;
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -61,7 +78,6 @@ export class Otlp extends cdk.Stack {
     pythonFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     pythonFunction.addLayers(extensionLayer);
 
-    // Java Lambda
     const javaFunctionName = `${id}-java-lambda`;
     const javaFunction = new lambda.Function(this, javaFunctionName, {
       runtime: lambda.Runtime.JAVA_21,
@@ -84,7 +100,6 @@ export class Otlp extends cdk.Stack {
     javaFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     javaFunction.addLayers(extensionLayer);
 
-    // .NET Lambda
     const dotnetFunctionName = `${id}-dotnet-lambda`;
     const dotnetFunction = new lambda.Function(this, dotnetFunctionName, {
       runtime: lambda.Runtime.DOTNET_8,

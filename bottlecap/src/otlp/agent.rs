@@ -1,12 +1,17 @@
 use axum::{
     Router,
     extract::{Request, State},
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
     routing::post,
 };
 use libdd_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
-use serde_json::json;
+use opentelemetry_proto::tonic::collector::trace::v1::{
+    ExportTraceServiceResponse,
+    ExportTracePartialSuccess,
+};
+use prost::Message;
+use std::mem::size_of_val;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::mpsc::Sender};
@@ -132,6 +137,8 @@ impl Agent {
         debug!("OTLP | Shutdown signal received, shutting down");
     }
 
+
+
     async fn v1_traces(
         State((config, tags_provider, processor, trace_processor, trace_tx, stats_generator)): State<
             AgentState,
@@ -141,11 +148,11 @@ impl Agent {
         let (parts, body) = match extract_request_body(request).await {
             Ok(r) => r,
             Err(e) => {
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("OTLP | Failed to extract request body: {e}"),
-                )
-                    .into_response();
+                error!("OTLP | Failed to extract request body: {e}");
+                return Self::otlp_error_response(
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to extract request body: {e}"),
+                );
             }
         };
 
@@ -153,23 +160,21 @@ impl Agent {
             Ok(traces) => traces,
             Err(e) => {
                 error!("OTLP | Failed to process request: {:?}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
+                return Self::otlp_error_response(
+                    StatusCode::BAD_REQUEST,
                     format!("Failed to process request: {e}"),
-                )
-                    .into_response();
+                );
             }
         };
 
         let tracer_header_tags: DatadogTracerHeaderTags = (&parts.headers).into();
         let body_size = size_of_val(&traces);
         if body_size == 0 {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                json!({ "message": "Not sending traces, processor returned empty data" })
-                    .to_string(),
-            )
-                .into_response();
+            error!("OTLP | Not sending traces, processor returned empty data");
+            return Self::otlp_error_response(
+                StatusCode::BAD_REQUEST,
+                "Not sending traces, processor returned empty data".to_string(),
+            );
         }
 
         let compute_trace_stats_on_extension = config.compute_trace_stats_on_extension;
@@ -188,10 +193,10 @@ impl Agent {
             }
             Err(err) => {
                 error!("OTLP | Error sending traces to the trace aggregator: {err}");
-                return (
+                return Self::otlp_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    json!({ "message": format!("Error sending traces to the trace aggregator: {err}") }).to_string()
-                ).into_response();
+                    format!("Error sending traces to the trace aggregator: {err}"),
+                );
             }
         };
 
@@ -205,12 +210,59 @@ impl Agent {
             }
         }
 
+        Self::otlp_success_response()
+    }
+
+    fn otlp_error_response(status_code: StatusCode, message: String) -> Response {
+        let response = ExportTraceServiceResponse {
+            partial_success: Some(ExportTracePartialSuccess {
+                rejected_spans: 0,
+                error_message: message.clone(),
+            }),
+        };
+
+        let mut buf = Vec::new();
+        if let Err(e) = response.encode(&mut buf) {
+            error!("OTLP | Failed to encode error response: {e}");
+            return (
+                status_code,
+                [(header::CONTENT_TYPE, "text/plain")],
+                message,
+            )
+                .into_response();
+        }
+
         (
-            StatusCode::OK,
-            json!({"rate_by_service":{"service:,env:":1}}).to_string(),
+            status_code,
+            [(header::CONTENT_TYPE, "application/x-protobuf")],
+            buf,
         )
             .into_response()
     }
+
+    fn otlp_success_response() -> Response {
+        let response = ExportTraceServiceResponse {
+            partial_success: None,
+        };
+
+        let mut buf = Vec::new();
+        if let Err(e) = response.encode(&mut buf) {
+            error!("OTLP | Failed to encode success response: {e}");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to encode response".to_string(),
+            )
+                .into_response();
+        }
+
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/x-protobuf")],
+            buf,
+        )
+            .into_response()
+    }
+
 }
 
 #[cfg(test)]
