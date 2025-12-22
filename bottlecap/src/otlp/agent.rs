@@ -161,7 +161,7 @@ impl Agent {
             Err(e) => {
                 error!("OTLP | Failed to process request: {:?}", e);
                 return Self::otlp_error_response(
-                    StatusCode::BAD_REQUEST,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Failed to process request: {e}"),
                 );
             }
@@ -172,7 +172,7 @@ impl Agent {
         if body_size == 0 {
             error!("OTLP | Not sending traces, processor returned empty data");
             return Self::otlp_error_response(
-                StatusCode::BAD_REQUEST,
+                StatusCode::INTERNAL_SERVER_ERROR,
                 "Not sending traces, processor returned empty data".to_string(),
             );
         }

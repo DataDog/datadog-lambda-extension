@@ -3,7 +3,6 @@ const { BasicTracerProvider, InMemorySpanExporter } = require('@opentelemetry/sd
 const { createExportTraceServiceRequest } = require('@opentelemetry/otlp-transformer');
 const { trace, SpanKind, SpanStatusCode } = require('@opentelemetry/api');
 
-// Import the official OpenTelemetry protobuf definitions
 const root = require('@opentelemetry/otlp-transformer/build/esm/generated/root');
 const ExportTraceServiceRequest = root.opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest;
 const ExportTraceServiceResponse = root.opentelemetry.proto.collector.trace.v1.ExportTraceServiceResponse;

@@ -112,15 +112,12 @@ describe('OTLP Integration Tests', () => {
       expect(response.FunctionError).toBeUndefined();
 
       const payload = JSON.parse(Buffer.from(response.Payload!).toString());
-      console.log('Validation result:', JSON.stringify(payload, null, 2));
 
       const validationResult = JSON.parse(payload.body);
       expect(validationResult.success).toBe(true);
       expect(validationResult.statusCode).toBe(200);
       expect(validationResult.contentType).toBe('application/x-protobuf');
       expect(validationResult.message).toBe('OTLP response is properly formatted and decodable');
-
-      console.log('✅ OTLP response validation passed!');
-    }, 60000); // 1 minute timeout
+    }, 60000);
   });
 });

@@ -40,7 +40,7 @@ export class Otlp extends cdk.Stack {
     const validationFunction = new lambda.Function(this, validationFunctionName, {
       runtime: lambda.Runtime.NODEJS_20_X,
       architecture: lambda.Architecture.ARM_64,
-      handler: 'validation.handler',
+      handler: 'response-validation.handler',
       code: lambda.Code.fromAsset('./lambda/otlp-node'),
       functionName: validationFunctionName,
       timeout: cdk.Duration.seconds(30),
