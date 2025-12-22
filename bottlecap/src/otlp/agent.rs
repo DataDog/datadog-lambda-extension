@@ -6,16 +6,14 @@ use axum::{
     routing::post,
 };
 use libdd_trace_utils::trace_utils::TracerHeaderTags as DatadogTracerHeaderTags;
-use opentelemetry_proto::tonic::collector::trace::v1::{
-    ExportTraceServiceResponse,
-    ExportTracePartialSuccess,
-};
+use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
 use std::mem::size_of_val;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::{net::TcpListener, sync::mpsc::Sender};
 use tokio_util::sync::CancellationToken;
+use tonic_types::Status;
 use tracing::{debug, error};
 
 use crate::{
@@ -137,8 +135,6 @@ impl Agent {
         debug!("OTLP | Shutdown signal received, shutting down");
     }
 
-
-
     async fn v1_traces(
         State((config, tags_provider, processor, trace_processor, trace_tx, stats_generator)): State<
             AgentState,
@@ -214,22 +210,16 @@ impl Agent {
     }
 
     fn otlp_error_response(status_code: StatusCode, message: String) -> Response {
-        let response = ExportTraceServiceResponse {
-            partial_success: Some(ExportTracePartialSuccess {
-                rejected_spans: 0,
-                error_message: message.clone(),
-            }),
+        let status = Status {
+            code: i32::from(status_code.as_u16()),
+            message: message.clone(),
+            details: vec![],
         };
 
         let mut buf = Vec::new();
-        if let Err(e) = response.encode(&mut buf) {
+        if let Err(e) = status.encode(&mut buf) {
             error!("OTLP | Failed to encode error response: {e}");
-            return (
-                status_code,
-                [(header::CONTENT_TYPE, "text/plain")],
-                message,
-            )
-                .into_response();
+            return (status_code, [(header::CONTENT_TYPE, "text/plain")], message).into_response();
         }
 
         (
@@ -262,7 +252,6 @@ impl Agent {
         )
             .into_response()
     }
-
 }
 
 #[cfg(test)]

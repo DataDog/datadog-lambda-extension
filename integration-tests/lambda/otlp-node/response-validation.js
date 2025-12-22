@@ -60,17 +60,15 @@ async function validateOtlpResponse() {
       };
     }
 
+    // Verify that partial_success is not set (should be None for success)
     if (decodedResponse.partialSuccess) {
-      const rejectedSpans = decodedResponse.partialSuccess.rejectedSpans || 0;
-      if (rejectedSpans > 0) {
-        return {
-          success: false,
-          error: `Unexpected partial success with ${rejectedSpans} rejected spans`,
-          statusCode: response.status,
-          contentType,
-          partialSuccess: decodedResponse.partialSuccess,
-        };
-      }
+      return {
+        success: false,
+        error: 'Unexpected partial_success in response - should only be success or failure',
+        statusCode: response.status,
+        contentType,
+        partialSuccess: decodedResponse.partialSuccess,
+      };
     }
 
     return {
