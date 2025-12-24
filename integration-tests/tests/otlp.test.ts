@@ -1,5 +1,6 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
 import { getIdentifier } from './utils/config';
+import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 describe('OTLP Integration Tests', () => {
   const results: Record<string, LambdaInvocationDatadogData> = {};
@@ -90,5 +91,33 @@ describe('OTLP Integration Tests', () => {
       const trace = results.dotnet.traces![0];
       expect(trace.spans.length).toBeGreaterThan(0);
     });
+  });
+
+  describe('OTLP Response Validation', () => {
+    const lambdaClient = new LambdaClient({ region: 'us-east-1' });
+    const identifier = getIdentifier();
+    const functionName = `integ-${identifier}-otlp-response-validation-lambda`;
+
+    it('should return OTLP-compliant protobuf responses', async () => {
+      console.log(`Invoking ${functionName}...`);
+
+      const command = new InvokeCommand({
+        FunctionName: functionName,
+        Payload: Buffer.from(JSON.stringify({})),
+      });
+
+      const response = await lambdaClient.send(command);
+
+      expect(response.StatusCode).toBe(200);
+      expect(response.FunctionError).toBeUndefined();
+
+      const payload = JSON.parse(Buffer.from(response.Payload!).toString());
+
+      const validationResult = JSON.parse(payload.body);
+      expect(validationResult.success).toBe(true);
+      expect(validationResult.statusCode).toBe(200);
+      expect(validationResult.contentType).toBe('application/x-protobuf');
+      expect(validationResult.message).toBe('OTLP response is properly formatted and decodable');
+    }, 60000);
   });
 });

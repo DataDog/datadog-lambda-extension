@@ -43,6 +43,7 @@ rustls-pki-types = { version = "1.0", default-features = false }
 hyper-rustls = { version = "0.27.7", default-features = false }
 rand = { version = "0.8", default-features = false }
 prost = { version = "0.13", default-features = false }
+tonic-types = { version = "0.12", default-features = false }
 zstd = { version = "0.13.3", default-features = false }
 futures = { version = "0.3.31", default-features = false }
 serde-aux = { version = "4.7", default-features = false }
