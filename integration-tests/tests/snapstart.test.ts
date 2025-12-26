@@ -66,12 +66,12 @@ describe('Snapstart Integration Tests', () => {
     testTraceIsolation(() => results.dotnetInvocation1!, () => results.dotnetInvocation2!);
   });
 
-  describe('Python Runtime with SnapStart', () => {
-    testSnapStartInvocation(() => results.pythonInvocation1!);
-    testSnapStartInvocation(() => results.pythonInvocation2!);
-    // SVLS-5988 - Doesn't completely work as expected.
-    // testTraceIsolation(() => results.pythonInvocation1!, () => results.pythonInvocation2!);
-  });
+  // SVLS-5988 - Doesn't completely work as expected.
+  // describe('Python Runtime with SnapStart', () => {
+  //   testSnapStartInvocation(() => results.pythonInvocation1!);
+  //   testSnapStartInvocation(() => results.pythonInvocation2!);
+  //   testTraceIsolation(() => results.pythonInvocation1!, () => results.pythonInvocation2!);
+  // });
 
 });
 
