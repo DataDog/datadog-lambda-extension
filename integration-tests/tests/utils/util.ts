@@ -15,8 +15,11 @@ export async function invokeLambdaAndGetDatadogData(functionName: string, payloa
     console.log('Waiting for logs and traces to be indexed in Datadog...');
     await new Promise(resolve => setTimeout(resolve, 300000));
 
-    const traces = await getTraces(functionName, result.requestId);
-    const logs = await getLogs(functionName, result.requestId);
+    // Strip alias suffix (e.g., ":snapstart") for Datadog queries since service name doesn't include it
+    const baseFunctionName = functionName.split(':')[0];
+
+    const traces = await getTraces(baseFunctionName, result.requestId);
+    const logs = await getLogs(baseFunctionName, result.requestId);
 
     const lambdaInvocationData: LambdaInvocationDatadogData = {
         requestId: result.requestId,
