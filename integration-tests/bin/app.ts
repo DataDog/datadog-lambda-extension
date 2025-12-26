@@ -3,6 +3,7 @@ import 'source-map-support/register';
 import * as cdk from 'aws-cdk-lib';
 import {Base} from '../lib/stacks/base';
 import {Otlp} from '../lib/stacks/otlp';
+import {Snapstart} from '../lib/stacks/snapstart';
 import {getIdentifier} from '../tests/utils/config';
 
 const app = new cdk.App();
@@ -19,6 +20,9 @@ const stacks = [
         env,
     }),
     new Otlp(app, `integ-${identifier}-otlp`, {
+        env,
+    }),
+    new Snapstart(app, `integ-${identifier}-snapstart`, {
         env,
     }),
 ]
