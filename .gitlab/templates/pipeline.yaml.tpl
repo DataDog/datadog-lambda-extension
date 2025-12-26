@@ -466,7 +466,9 @@ integration-suite:
   image: ${CI_DOCKER_TARGET_IMAGE}:${CI_DOCKER_TARGET_VERSION}
   parallel:
     matrix:
-      - TEST_SUITE: [base, otlp]
+      - TEST_SUITE: {{ range (ds "test_suites").test_suites }}
+          - {{ .name }}
+        {{- end}}
   rules:
     - when: on_success
   needs:

@@ -9,9 +9,12 @@ outputFiles:
 datasources:
   flavors:
     url: .gitlab/datasources/flavors.yaml
-  
+
   environments:
     url: .gitlab/datasources/environments.yaml
 
   regions:
     url: .gitlab/datasources/regions.yaml
+
+  test_suites:
+    url: .gitlab/datasources/test-suites.yaml
