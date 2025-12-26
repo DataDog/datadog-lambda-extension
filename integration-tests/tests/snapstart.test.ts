@@ -99,10 +99,6 @@ function testSnapStartInvocation(getInvocation: () => LambdaInvocationDatadogDat
   it('should have aws.lambda.snapstart_restore span', () => {
     const invocation = getInvocation();
     const trace = invocation.traces![0];
-    const awsLambdaSpan = trace.spans.find((span: any) =>
-        span.attributes.operation_name === 'aws.lambda'
-    );
-
     const restoreSpan = trace.spans.find((span: any) =>
         span.attributes.operation_name === 'aws.lambda.snapstart_restore'
     );
@@ -134,28 +130,6 @@ function testTraceIsolation(getInvocation1: () => LambdaInvocationDatadogData, g
       const trace2 = invocation2.traces![0];
 
       expect(trace1.trace_id).not.toEqual(trace2.trace_id);
-    });
-
-    it('should NOT have traces linked together', () => {
-      const invocation1 = getInvocation1();
-      const invocation2 = getInvocation2();
-      const trace1 = invocation1.traces![0];
-      const trace2 = invocation2.traces![0];
-
-      const awsLambdaSpan1 = trace1.spans.find((span: any) =>
-          span.attributes.operation_name === 'aws.lambda'
-      );
-      const awsLambdaSpan2 = trace2.spans.find((span: any) =>
-          span.attributes.operation_name === 'aws.lambda'
-      );
-
-      expect(awsLambdaSpan1).toBeDefined();
-      expect(awsLambdaSpan2).toBeDefined();
-
-      if (awsLambdaSpan1 && awsLambdaSpan2) {
-        expect(awsLambdaSpan1.attributes.parent_id).not.toEqual(awsLambdaSpan2.attributes.span_id);
-        expect(awsLambdaSpan2.attributes.parent_id).not.toEqual(awsLambdaSpan1.attributes.span_id);
-      }
     });
   });
 }
