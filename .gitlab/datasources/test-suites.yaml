@@ -2,3 +2,4 @@ test_suites:
   - name: base
   - name: otlp
   - name: snapstart
+  - name: managed-instances
