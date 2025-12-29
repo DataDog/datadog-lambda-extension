@@ -89,7 +89,44 @@ impl LambdaProcessor {
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
         match event.record {
-            TelemetryRecord::Function(v) | TelemetryRecord::Extension(v) => {
+            TelemetryRecord::Function(v) => {
+                let (request_id, message) = match v {
+                    serde_json::Value::Object(obj) => {
+                        let request_id = if self.is_managed_instance_mode {
+                            obj.get("requestId")
+                                .or_else(|| obj.get("AWSRequestId"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        } else {
+                            None
+                        };
+                        let msg = Some(serde_json::to_string(&obj).unwrap_or_default());
+                        (request_id, msg)
+                    },
+                    serde_json::Value::String(s) => (None, Some(s)),
+                    _ => (None, None),
+                };
+
+                if let Some(message) = message {
+                    if is_oom_error(&message) {
+                        debug!("LOGS | Got a runtime-specific OOM error. Incrementing OOM metric.");
+                        if let Err(e) = self.event_bus.send(Event::OutOfMemory(event.time.timestamp())).await {
+                            error!("LOGS | Failed to send OOM event to the main event bus: {e}");
+                        }
+                    }
+
+                    return Ok(Message::new(
+                        message,
+                        request_id,
+                        self.function_arn.clone(),
+                        event.time.timestamp_millis(),
+                        None,
+                    ));
+                }
+
+                Err("Unable to parse log".into())
+            }
+            TelemetryRecord::Extension(v) => {
                 let message = match v {
                     serde_json::Value::Object(obj) => Some(serde_json::to_string(&obj).unwrap_or_default()),
                     serde_json::Value::String(s) => Some(s),
@@ -1494,5 +1531,90 @@ mod tests {
         // In managed instance mode, logs should not inherit request_id from context
         assert_eq!(log2.message.lambda.request_id, None);
         assert_eq!(processor.orphan_logs.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_lmi_extracts_request_id_from_function_json() {
+        let tags = HashMap::from([("test".to_string(), "tags".to_string())]);
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: tags.clone(),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _) = tokio::sync::mpsc::channel(2);
+
+        let mut processor = LambdaProcessor::new(
+            tags_provider,
+            Arc::new(config::Config {
+                service: Some("test-service".to_string()),
+                tags,
+                ..config::Config::default()
+            }),
+            tx.clone(),
+            true, // LMI mode
+        );
+
+        // Test with "requestId" field
+        let mut obj = serde_json::Map::new();
+        obj.insert("requestId".to_string(), Value::String("test-request-123".to_string()));
+        obj.insert("message".to_string(), Value::String("Hello World".to_string()));
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::Object(obj)),
+        };
+
+        let result = processor.get_message(event).await.unwrap();
+        assert_eq!(result.lambda.request_id, Some("test-request-123".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_regular_lambda_does_not_extract_request_id() {
+        let tags = HashMap::from([("test".to_string(), "tags".to_string())]);
+        let config = Arc::new(config::Config {
+            service: Some("test-service".to_string()),
+            tags: tags.clone(),
+            ..config::Config::default()
+        });
+
+        let tags_provider = Arc::new(provider::Provider::new(
+            Arc::clone(&config),
+            LAMBDA_RUNTIME_SLUG.to_string(),
+            &HashMap::from([("function_arn".to_string(), "test-arn".to_string())]),
+        ));
+
+        let (tx, _) = tokio::sync::mpsc::channel(2);
+
+        let mut processor = LambdaProcessor::new(
+            tags_provider,
+            Arc::new(config::Config {
+                service: Some("test-service".to_string()),
+                tags,
+                ..config::Config::default()
+            }),
+            tx.clone(),
+            false, // Regular Lambda mode (not LMI)
+        );
+
+        // Test that requestId is NOT extracted in regular Lambda mode
+        let mut obj = serde_json::Map::new();
+        obj.insert("requestId".to_string(), Value::String("test-request-789".to_string()));
+        obj.insert("message".to_string(), Value::String("Hello World".to_string()));
+
+        let event = TelemetryEvent {
+            time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
+            record: TelemetryRecord::Function(Value::Object(obj)),
+        };
+
+        let result = processor.get_message(event).await.unwrap();
+        // Should be None because we're not in LMI mode
+        assert_eq!(result.lambda.request_id, None);
     }
 }
