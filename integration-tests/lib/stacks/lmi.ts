@@ -13,7 +13,7 @@ import {
   getDotnet8Layer
 } from '../util';
 
-export class ManagedInstances extends cdk.Stack {
+export class LambdaManagedInstancesStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props);
 
@@ -25,7 +25,7 @@ export class ManagedInstances extends cdk.Stack {
       runtime: lambda.Runtime.NODEJS_24_X,
       architecture: lambda.Architecture.ARM_64,
       handler: '/opt/nodejs/node_modules/datadog-lambda-js/handler.handler',
-      code: lambda.Code.fromAsset('./lambda/managed-instances-node'),
+      code: lambda.Code.fromAsset('./lambda/lmi-node'),
       functionName: nodeFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -42,7 +42,7 @@ export class ManagedInstances extends cdk.Stack {
     nodeFunction.addLayers(extensionLayer);
     nodeFunction.addLayers(node24Layer);
     const nodeAlias = new lambda.Alias(this, `${nodeFunctionName}-alias`, {
-      aliasName: 'managed-instances',
+      aliasName: 'lmi',
       version: nodeFunction.currentVersion,
     });
 
@@ -51,7 +51,7 @@ export class ManagedInstances extends cdk.Stack {
       runtime: lambda.Runtime.PYTHON_3_13,
       architecture: lambda.Architecture.ARM_64,
       handler: 'datadog_lambda.handler.handler',
-      code: lambda.Code.fromAsset('./lambda/managed-instances-python'),
+      code: lambda.Code.fromAsset('./lambda/lmi-python'),
       functionName: pythonFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -69,7 +69,7 @@ export class ManagedInstances extends cdk.Stack {
     pythonFunction.addLayers(extensionLayer);
     pythonFunction.addLayers(getPython313Layer(this));
     const pythonAlias = new lambda.Alias(this, `${pythonFunctionName}-alias`, {
-      aliasName: 'managed-instances',
+      aliasName: 'lmi',
       version: pythonFunction.currentVersion,
     });
 
@@ -78,7 +78,7 @@ export class ManagedInstances extends cdk.Stack {
       runtime: lambda.Runtime.JAVA_21,
       architecture: lambda.Architecture.ARM_64,
       handler: 'example.Handler::handleRequest',
-      code: lambda.Code.fromAsset('./lambda/managed-instances-java/target/function.jar'),
+      code: lambda.Code.fromAsset('./lambda/lmi-java/target/function.jar'),
       functionName: javaFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -95,7 +95,7 @@ export class ManagedInstances extends cdk.Stack {
     javaFunction.addLayers(extensionLayer);
     javaFunction.addLayers(getJava21Layer(this));
     const javaAlias = new lambda.Alias(this, `${javaFunctionName}-alias`, {
-      aliasName: 'managed-instances',
+      aliasName: 'lmi',
       version: javaFunction.currentVersion,
     });
 
@@ -104,7 +104,7 @@ export class ManagedInstances extends cdk.Stack {
       runtime: lambda.Runtime.DOTNET_8,
       architecture: lambda.Architecture.ARM_64,
       handler: 'Function::Function.Handler::FunctionHandler',
-      code: lambda.Code.fromAsset('./lambda/managed-instances-dotnet/bin/function.zip'),
+      code: lambda.Code.fromAsset('./lambda/lmi-dotnet/bin/function.zip'),
       functionName: dotnetFunctionName,
       timeout: cdk.Duration.seconds(30),
       memorySize: 2048,
@@ -121,7 +121,7 @@ export class ManagedInstances extends cdk.Stack {
     dotnetFunction.addLayers(extensionLayer);
     dotnetFunction.addLayers(getDotnet8Layer(this));
     const dotnetAlias = new lambda.Alias(this, `${dotnetFunctionName}-alias`, {
-      aliasName: 'managed-instances',
+      aliasName: 'lmi',
       version: dotnetFunction.currentVersion,
     });
   }

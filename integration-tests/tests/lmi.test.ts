@@ -1,7 +1,7 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
 import { getIdentifier } from '../config';
 
-describe('Lambda Managed Instances Integration Tests', () => {
+describe('LMI Integration Tests', () => {
   const results: Record<string, LambdaInvocationDatadogData> = {};
 
   const runtimes = [
@@ -14,17 +14,17 @@ describe('Lambda Managed Instances Integration Tests', () => {
   beforeAll(async () => {
     const identifier = getIdentifier();
 
-    console.log('Invoking Lambda Managed Instances functions...');
+    console.log('Invoking LMI functions...');
 
     for (const runtime of runtimes) {
-      const functionName = `integ-${identifier}-lmi-${runtime.runtime}-lambda:managed-instances`;
+      const functionName = `integ-${identifier}-lmi-${runtime.runtime}-lambda:lmi`;
       results[runtime.runtime] = await invokeLambdaAndGetDatadogData(functionName, {}, false, false);
     }
 
-    console.log('Lambda Managed Instances invocation and data fetching completed');
+    console.log('LMI invocation and data fetching completed');
   }, 600000);
 
-  describe.each(runtimes)('$runtime Runtime with Lambda Managed Instances', ({runtime} ) => {
+  describe.each(runtimes)('$runtime Runtime with LMI', ({runtime} ) => {
     it('should invoke Lambda successfully', () => {
       expect(results[runtime].statusCode).toBe(200);
     });

@@ -4,7 +4,7 @@ import * as cdk from 'aws-cdk-lib';
 import {Base} from '../lib/stacks/base';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
-import {ManagedInstances} from '../lib/stacks/managed-instances';
+import {LambdaManagedInstancesStack} from '../lib/stacks/lmi';
 import {ACCOUNT, getIdentifier, REGION} from '../config';
 import {CapacityProviderStack} from "../lib/capacity-provider";
 
@@ -31,7 +31,7 @@ const stacks = [
     new Snapstart(app, `integ-${identifier}-snapstart`, {
         env,
     }),
-    new ManagedInstances(app, `integ-${identifier}-lmi`, {
+    new LambdaManagedInstancesStack(app, `integ-${identifier}-lmi`, {
         env,
     }),
 ]
