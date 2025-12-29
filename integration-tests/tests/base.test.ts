@@ -1,5 +1,5 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
-import { getIdentifier } from './utils/config';
+import { getIdentifier } from '../config';
 
 describe('Base Integration Tests', () => {
   const results: Record<string, LambdaInvocationDatadogData> = {};

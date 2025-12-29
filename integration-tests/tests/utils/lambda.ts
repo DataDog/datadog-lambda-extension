@@ -11,9 +11,10 @@ export interface LambdaInvocationResult {
 export async function invokeLambda(
   functionName: string,
   payload: any = {},
-  coldStart: boolean = false
+  coldStart: boolean = false,
+  useTailLogs: boolean = true
 ): Promise<LambdaInvocationResult> {
-  console.log(`Invoking Lambda: ${functionName}, coldStart: ${coldStart}, payload: ${JSON.stringify(payload)}`);
+  console.log(`Invoking Lambda: ${functionName}, coldStart: ${coldStart}, useTailLogs: ${useTailLogs}, payload: ${JSON.stringify(payload)}`);
 
   if (coldStart) {
     console.log('Forcing cold start...');
@@ -21,11 +22,17 @@ export async function invokeLambda(
     console.log('Cold start completed');
   }
 
-  const command = new InvokeCommand({
+  const invokeParams: any = {
     FunctionName: functionName,
     Payload: JSON.stringify(payload),
-    LogType: 'Tail',
-  });
+  };
+
+  // Lambda Managed Instances don't support tail logs
+  if (useTailLogs) {
+    invokeParams.LogType = 'Tail';
+  }
+
+  const command = new InvokeCommand(invokeParams);
 
   console.log('Sending Lambda invocation request...');
   let response;

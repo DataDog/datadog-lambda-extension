@@ -9,11 +9,11 @@ export interface LambdaInvocationDatadogData {
     logs?: DatadogLog[];
 }
 
-export async function invokeLambdaAndGetDatadogData(functionName: string, payload: any = {}, coldStart: boolean = false): Promise<LambdaInvocationDatadogData> {
-    const result = await invokeLambda(functionName, payload, coldStart);
+export async function invokeLambdaAndGetDatadogData(functionName: string, payload: any = {}, coldStart: boolean = false, useTailLogs: boolean = true): Promise<LambdaInvocationDatadogData> {
+    const result = await invokeLambda(functionName, payload, coldStart, useTailLogs);
 
     console.log('Waiting for logs and traces to be indexed in Datadog...');
-    await new Promise(resolve => setTimeout(resolve, 300000));
+    await new Promise(resolve => setTimeout(resolve, 60_000));
 
     // Strip alias suffix (e.g., ":snapstart") for Datadog queries since service name doesn't include it
     const baseFunctionName = functionName.split(':')[0];

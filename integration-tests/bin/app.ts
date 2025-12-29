@@ -4,16 +4,22 @@ import * as cdk from 'aws-cdk-lib';
 import {Base} from '../lib/stacks/base';
 import {Otlp} from '../lib/stacks/otlp';
 import {Snapstart} from '../lib/stacks/snapstart';
-import {getIdentifier} from '../tests/utils/config';
+import {ManagedInstances} from '../lib/stacks/managed-instances';
+import {ACCOUNT, getIdentifier, REGION} from '../config';
+import {CapacityProviderStack} from "../lib/capacity-provider";
 
 const app = new cdk.App();
 
 const env = {
-    account: process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID,
-    region: process.env.CDK_DEFAULT_REGION || process.env.AWS_REGION || 'us-east-1',
+    account: ACCOUNT,
+    region: REGION,
 };
 
 const identifier = getIdentifier();
+
+// Use the same Lambda Managed Instance Capacity Provider for all LMI functions.
+// It is slow to create/destroy the related resources.
+new CapacityProviderStack(app, `integ-default-capacity-provider`, {env});
 
 const stacks = [
     new Base(app, `integ-${identifier}-base`, {
@@ -23,6 +29,9 @@ const stacks = [
         env,
     }),
     new Snapstart(app, `integ-${identifier}-snapstart`, {
+        env,
+    }),
+    new ManagedInstances(app, `integ-${identifier}-lmi`, {
         env,
     }),
 ]

@@ -26,5 +26,7 @@ local_tests/serverless-init/logs.txt
 bottlecap/target
 bottlecap/proptest-regressions
 
+integration-tests/cdk.context.json
+
 .gitlab/pipeline*
 /CLAUDE.md
