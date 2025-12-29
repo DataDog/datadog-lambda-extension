@@ -1,5 +1,9 @@
 import * as os from 'os';
 
+export const ACCOUNT = process.env.CDK_DEFAULT_ACCOUNT || process.env.AWS_ACCOUNT_ID;
+export const REGION = process.env.CDK_DEFAULT_REGION || process.env.AWS_REGION || 'us-east-1';
+
+
 export function getIdentifier(): string {
   if (process.env.IDENTIFIER) {
     return process.env.IDENTIFIER;

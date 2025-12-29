@@ -1,5 +1,5 @@
 import { invokeLambdaAndGetDatadogData, LambdaInvocationDatadogData } from './utils/util';
-import { getIdentifier } from './utils/config';
+import { getIdentifier } from '../config';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 describe('OTLP Integration Tests', () => {

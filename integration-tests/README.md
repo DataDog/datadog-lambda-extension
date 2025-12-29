@@ -13,89 +13,22 @@ The general flow is:
 For simplicity, integration tests are set up to only test against ARM runtimes and 4 runtimes (Python, Node, Java, and Dotnet).
 
 
+
 ## Test Suites
-
-### Base Tests
-
-The base test suite provides basic functionality tests across all supported Lambda runtimes. These tests verify core extension functionality without additional instrumentation.
-
-**What it tests:**
-- Extension can collect and forward logs to Datadog
-- Extension generates and sends traces with proper span structure
-- Extension detects cold starts correctly
-
-**Test Coverage:**
-- Lambda invocation succeeds (200 status code)
-- "Hello world!" log message is sent to Datadog
-- One trace is sent to Datadog
-- `aws.lambda` span exists with correct properties including `cold_start: 'true'`
-- `aws.lambda.cold_start` span is created
-- `aws.lambda.load` span is created for Python and Node
-
-### OTLP Tests
-
-The OTLP test suite verifies OpenTelemetry Protocol (OTLP) integration with the Datadog Lambda Extension. These tests use Lambda functions instrumented with OpenTelemetry SDKs to ensure telemetry data flows correctly through the extension to Datadog.
-
-**What it tests:**
-- Lambda functions instrumented with OpenTelemetry SDKs can invoke successfully
-- Traces are properly sent to Datadog via OTLP
-- Spans contain correct structure and attributes
-
-**Test Coverage:**
-- Lambda invocation succeeds (200 status code)
-- At least one trace is sent to Datadog
-- Trace contains valid spans with proper structure
-
-## CI/CD Pipeline Structure
-
-
-### Pipeline Flow
-
-```
-                                    ┌→ deploy-base → test-base → cleanup-base ┐
-publish layer → build lambdas ─────┤                                          ├→ cleanup-layer
-                                    └→ deploy-otlp → test-otlp → cleanup-otlp ┘
-```
-
-### Test Suite Lifecycle
-
-Each test suite (base, otlp, etc.) follows this lifecycle:
-
-1. **Deploy**: Deploys only the stacks for that suite
-   - Pattern: `cdk deploy "integ-${IDENTIFIER}-${TEST_SUITE}"`
-   - Example: `integ-abc123-base` deploys all base test stacks
-
-2. **Test**: Runs only the tests for that suite
-   - Command: `jest tests/${TEST_SUITE}.test.ts`
-   - Example: `jest tests/base.test.ts`
-
-3. **Cleanup**: Removes only the stacks for that suite
-   - Runs with `when: always` to ensure cleanup on failure
-   - Pattern: Deletes all stacks matching `integ-${IDENTIFIER}-${TEST_SUITE}`
+### Overview
+* Gitlab runs test suites in parallel.
+* For each test suite, Gitlab will:
+  * Deploy the associated stack
+  * Run the test suite
+  * Destroy the associated stack
+* You can download the test suite run from the Gitlab page. 
 
 ### Adding a New Test Suite
-
-To add a new test suite to the parallel execution:
 
 1. **Create test file**: `tests/<suite-name>.test.ts`
 2. **Create CDK stacks**: `lib/stacks/<suite-name>.ts`
 3. **Register stacks**: Add to `bin/app.ts`
-4. **Update pipeline**: Add suite name to `.gitlab/templates/pipeline.yaml.tpl`:
-   ```yaml
-   parallel:
-     matrix:
-       - TEST_SUITE: [base, otlp, <suite-name>]
-   ```
-
-## Guidelines
-
-### Naming
-* An `identifier` is used to differentiate the different stacks. For local development, the identifier is automatically set using the command `whoami` and parses the user's first name. For gitlab pipelines, the identifier is the git commit short sha.
-* Stacks should be named `integ-<identifier>-<stack name>`
-* Lambda functions should be named `<stack-id>-<function name>`
-
-### Stacks
-* Stacks automatically get destroyed at the end of the gitlab integration tests step. Stack should be setup to not retain resources. A helper function `createLogGroup` exists with `removalPolicy: cdk.RemovalPolicy.DESTROY`. 
+4. **Update pipeline**: Add suite name to `.gitlab/datasources/test-suites.yaml`:
 
 
 ## Local Development
@@ -140,7 +73,6 @@ This creates `integ-<your-name>-<stack-name>` and automatically:
 ```bash
 # Deploy base test stack
 ./scripts/local_deploy.sh base
-
 ```
 
 #### 3. Run Integration Tests
@@ -153,7 +85,19 @@ npm test
 
 # Run specific test file
 npm test -- base.test.ts
-
 ```
 
 **Note**: Tests wait several minutes after Lambda invocation to allow telemetry to propagate to Datadog.
+
+
+## Guidelines
+
+### Naming
+* An `identifier` is used to differentiate the different stacks. For local development, the identifier is automatically set using the command `whoami` and parses the user's first name. For gitlab pipelines, the identifier is the git commit short sha.
+* Stacks should be named `integ-<identifier>-<stack name>`
+* Lambda functions should be named `<stack-id>-<function name>`
+
+### Stacks
+* Stacks automatically get destroyed at the end of the gitlab integration tests step.
+* Stacks should be setup to not retain resources. A helper function `createLogGroup` exists with `removalPolicy: cdk.RemovalPolicy.DESTROY`. 
+* Stacks should include the tag `extension_integration_test: true`. This gets added in `app.ts`. This lets us easily run scripts to clean up old stacks in case the cleanup step was missed.
