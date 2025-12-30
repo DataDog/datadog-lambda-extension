@@ -96,7 +96,7 @@ impl LambdaProcessor {
                             obj.get("requestId")
                                 .or_else(|| obj.get("AWSRequestId"))
                                 .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
+                                .map(ToString::to_string)
                         } else {
                             None
                         };
@@ -1563,8 +1563,14 @@ mod tests {
 
         // Test with "requestId" field
         let mut obj = serde_json::Map::new();
-        obj.insert("requestId".to_string(), Value::String("test-request-123".to_string()));
-        obj.insert("message".to_string(), Value::String("Hello World".to_string()));
+        obj.insert(
+            "requestId".to_string(),
+            Value::String("test-request-123".to_string()),
+        );
+        obj.insert(
+            "message".to_string(),
+            Value::String("Hello World".to_string()),
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
@@ -1572,7 +1578,10 @@ mod tests {
         };
 
         let result = processor.get_message(event).await.unwrap();
-        assert_eq!(result.lambda.request_id, Some("test-request-123".to_string()));
+        assert_eq!(
+            result.lambda.request_id,
+            Some("test-request-123".to_string())
+        );
     }
 
     #[tokio::test]
@@ -1605,8 +1614,14 @@ mod tests {
 
         // Test that requestId is NOT extracted in regular Lambda mode
         let mut obj = serde_json::Map::new();
-        obj.insert("requestId".to_string(), Value::String("test-request-789".to_string()));
-        obj.insert("message".to_string(), Value::String("Hello World".to_string()));
+        obj.insert(
+            "requestId".to_string(),
+            Value::String("test-request-789".to_string()),
+        );
+        obj.insert(
+            "message".to_string(),
+            Value::String("Hello World".to_string()),
+        );
 
         let event = TelemetryEvent {
             time: Utc.with_ymd_and_hms(2023, 1, 7, 3, 23, 47).unwrap(),
