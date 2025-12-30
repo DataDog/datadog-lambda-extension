@@ -34,8 +34,7 @@ describe('LMI Integration Tests', () => {
       expect(results[runtime].logs!.length).toBeGreaterThan(0);
     });
 
-    // SVLS-8231
-    test.failing('should have "Hello World!" log message', () => {
+    it('should have "Hello World!" log message', () => {
       expect(results[runtime].logs).toBeDefined();
       const helloWorldLog = results[runtime].logs!.find((log: any) =>
         log.message && log.message.includes('Hello World!')
