@@ -605,6 +605,7 @@ async fn extension_loop_active(
 
     // Validate and get the appropriate flush strategy for the current mode
     let flush_strategy = get_flush_strategy_for_mode(&aws_config, config.serverless_flush_strategy);
+    debug!("Flush strategy: {:?}", flush_strategy);
     let mut flush_control = FlushControl::new(flush_strategy, config.flush_timeout);
 
     debug!(
