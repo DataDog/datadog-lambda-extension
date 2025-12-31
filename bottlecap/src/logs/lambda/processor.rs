@@ -88,6 +88,12 @@ impl LambdaProcessor {
     #[allow(clippy::too_many_lines)]
     async fn get_message(&mut self, event: TelemetryEvent) -> Result<Message, Box<dyn Error>> {
         let copy = event.clone();
+
+        // Log all non-Extension telemetry events to avoid infinite loop
+        if !matches!(event.record, TelemetryRecord::Extension(_)) {
+            debug!("LOGS | Incoming telemetry event: {:?}", event.record);
+        }
+
         match event.record {
             TelemetryRecord::Function(v) => {
                 let (request_id, message) = match v {
