@@ -109,6 +109,7 @@ struct PendingFlushHandles {
     log_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
     metric_flush_handles: Vec<JoinHandle<MetricsRetryBatch>>,
     proxy_flush_handles: Vec<JoinHandle<Vec<reqwest::RequestBuilder>>>,
+    stats_flush_handles: Vec<JoinHandle<()>>,
 }
 
 struct MetricsRetryBatch {
@@ -124,6 +125,7 @@ impl PendingFlushHandles {
             log_flush_handles: Vec::new(),
             metric_flush_handles: Vec::new(),
             proxy_flush_handles: Vec::new(),
+            stats_flush_handles: Vec::new(),
         }
     }
 
@@ -132,8 +134,9 @@ impl PendingFlushHandles {
         let log_pending = self.log_flush_handles.iter().any(|h| !h.is_finished());
         let metric_pending = self.metric_flush_handles.iter().any(|h| !h.is_finished());
         let proxy_pending = self.proxy_flush_handles.iter().any(|h| !h.is_finished());
+        let stats_pending = self.stats_flush_handles.iter().any(|h| !h.is_finished());
 
-        trace_pending || log_pending || metric_pending || proxy_pending
+        trace_pending || log_pending || metric_pending || proxy_pending || stats_pending
     }
 
     #[allow(clippy::too_many_lines)]
@@ -190,8 +193,10 @@ impl PendingFlushHandles {
             self.metric_flush_handles.push(handle);
         }
 
-        // Stats flush (fire and forget, not tracked)
-        let () = stats_flusher.flush(false).await;
+        // Spawn stats flush
+        let sf = Arc::clone(stats_flusher);
+        self.stats_flush_handles
+            .push(tokio::spawn(async move { sf.flush(false).await }));
 
         // Spawn proxy flush
         let pf = proxy_flusher.clone();
@@ -210,6 +215,13 @@ impl PendingFlushHandles {
     ) -> bool {
         let mut joinset = tokio::task::JoinSet::new();
         let mut flush_error = false;
+
+        for handle in self.stats_flush_handles.drain(..) {
+            if let Err(e) = handle.await {
+                error!("PENDING_FLUSH_HANDLES | stats flush error {e:?}");
+                flush_error = true;
+            }
+        }
 
         for handle in self.trace_flush_handles.drain(..) {
             match handle.await {
@@ -918,50 +930,16 @@ async fn extension_loop_active(
                     //Periodic flush scenario, flush at top of invocation
                     FlushDecision::Continuous => {
                         if !pending_flush_handles.has_pending_handles() {
-                            let lf = logs_flusher.clone();
                             pending_flush_handles
-                                .log_flush_handles
-                                .push(tokio::spawn(async move { lf.flush(None).await }));
-                            let tf = trace_flusher.clone();
-                            pending_flush_handles.trace_flush_handles.push(tokio::spawn(
-                                async move { tf.flush(None).await.unwrap_or_default() },
-                            ));
-                            let (metrics_flushers_copy, series, sketches) = {
-                                let locked_metrics = metrics_flushers.lock().await;
-                                let flush_response = metrics_aggregator_handle
-                                    .clone()
-                                    .flush()
-                                    .await
-                                    .expect("can't flush metrics handle");
-                                (
-                                    locked_metrics.clone(),
-                                    flush_response.series,
-                                    flush_response.distributions,
+                                .spawn_non_blocking_flushes(
+                                    &logs_flusher,
+                                    &trace_flusher,
+                                    &metrics_flushers,
+                                    &stats_flusher,
+                                    &proxy_flusher,
+                                    &metrics_aggregator_handle,
                                 )
-                            };
-                            for (idx, mut flusher) in metrics_flushers_copy.into_iter().enumerate()
-                            {
-                                let series_clone = series.clone();
-                                let sketches_clone = sketches.clone();
-                                let handle = tokio::spawn(async move {
-                                    let (retry_series, retry_sketches) = flusher
-                                        .flush_metrics(series_clone.clone(), sketches_clone.clone())
-                                        .await
-                                        .unwrap_or_default();
-                                    MetricsRetryBatch {
-                                        flusher_id: idx,
-                                        series: retry_series,
-                                        sketches: retry_sketches,
-                                    }
-                                });
-                                pending_flush_handles.metric_flush_handles.push(handle);
-                            }
-
-                            let pf = proxy_flusher.clone();
-                            pending_flush_handles.proxy_flush_handles.push(tokio::spawn(
-                                async move { pf.flush(None).await.unwrap_or_default() },
-                            ));
-
+                                .await;
                             race_flush_interval.reset();
                         }
                     }
@@ -1746,4 +1724,25 @@ fn start_api_runtime_proxy(
         propagator,
     )
     .ok()
+}
+
+#[cfg(test)]
+mod pending_flush_handles_tests {
+    use super::*;
+    use tokio::time::{Duration, sleep};
+
+    #[tokio::test]
+    async fn stats_handle_is_tracked_until_completion() {
+        let mut pending = PendingFlushHandles::new();
+        let handle = tokio::spawn(async {
+            sleep(Duration::from_millis(5)).await;
+        });
+        pending.stats_flush_handles.push(handle);
+
+        assert!(pending.has_pending_handles());
+
+        sleep(Duration::from_millis(10)).await;
+
+        assert!(!pending.has_pending_handles());
+    }
 }
