@@ -21,7 +21,7 @@ if [ -n "$USERNAME" ]; then
 fi
 
 echo "Getting latest version of Datadog-Extension-ARM-$IDENTIFIER layer..."
-export EXTENSION_LAYER_ARN=$(aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda list-layer-versions --layer-name Datadog-Extension-ARM-$IDENTIFIER --query 'LayerVersions[0].LayerVersionArn' --output text)
+export EXTENSION_LAYER_ARN=$(aws-vault exec sso-serverless-sandbox-account-admin -- aws lambda list-layer-versions --layer-name Datadog-Extension-ARM-$IDENTIFIER --query 'LayerVersions[0].LayerVersionArn' --output text | head -n 1)
 
 if [ -z "$EXTENSION_LAYER_ARN" ]; then
   echo "Error: Failed to retrieve extension layer ARN"

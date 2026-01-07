@@ -6,9 +6,12 @@ import {
   defaultDatadogEnvVariables,
   defaultDatadogSecretPolicy,
   getExtensionLayer,
-  getPython313Layer,
-  getJava21Layer,
-  getDotnet8Layer
+  getDefaultPythonLayer,
+  getDefaultJavaLayer,
+  getDefaultDotnetLayer,
+  defaultPythonRuntime,
+  defaultJavaRuntime,
+  defaultDotnetRuntime
 } from '../util';
 
 export class Snapstart extends cdk.Stack {
@@ -16,13 +19,13 @@ export class Snapstart extends cdk.Stack {
     super(scope, id, props);
 
     const extensionLayer = getExtensionLayer(this);
-    const python313Layer = getPython313Layer(this);
-    const java21Layer = getJava21Layer(this);
-    const dotnet8Layer = getDotnet8Layer(this);
+    const pythonLayer = getDefaultPythonLayer(this);
+    const javaLayer = getDefaultJavaLayer(this);
+    const dotnetLayer = getDefaultDotnetLayer(this);
 
     const javaFunctionName = `${id}-java-lambda`;
     const javaFunction = new lambda.Function(this, javaFunctionName, {
-      runtime: lambda.Runtime.JAVA_21,
+      runtime: defaultJavaRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'example.SnapstartHandler::handleRequest',
       code: lambda.Code.fromAsset('./lambda/snapstart-java/target/function.jar'),
@@ -40,7 +43,7 @@ export class Snapstart extends cdk.Stack {
     });
     javaFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     javaFunction.addLayers(extensionLayer);
-    javaFunction.addLayers(java21Layer);
+    javaFunction.addLayers(javaLayer);
     const javaVersion = javaFunction.currentVersion;
     const javaAlias = new lambda.Alias(this, `${javaFunctionName}-snapstart-alias`, {
       aliasName: 'snapstart',
@@ -49,7 +52,7 @@ export class Snapstart extends cdk.Stack {
 
     const pythonFunctionName = `${id}-python-lambda`;
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
-      runtime: lambda.Runtime.PYTHON_3_13,
+      runtime: defaultPythonRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'datadog_lambda.handler.handler',
       code: lambda.Code.fromAsset('./lambda/snapstart-python'),
@@ -70,7 +73,7 @@ export class Snapstart extends cdk.Stack {
     });
     pythonFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     pythonFunction.addLayers(extensionLayer);
-    pythonFunction.addLayers(python313Layer);
+    pythonFunction.addLayers(pythonLayer);
     const pythonVersion = pythonFunction.currentVersion;
     const pythonAlias = new lambda.Alias(this, `${pythonFunctionName}-snapstart-alias`, {
       aliasName: 'snapstart',
@@ -79,7 +82,7 @@ export class Snapstart extends cdk.Stack {
 
     const dotnetFunctionName = `${id}-dotnet-lambda`;
     const dotnetFunction = new lambda.Function(this, dotnetFunctionName, {
-      runtime: lambda.Runtime.DOTNET_8,
+      runtime: defaultDotnetRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'Function::Function.SnapstartHandler::FunctionHandler',
       code: lambda.Code.fromAsset('./lambda/snapstart-dotnet/bin/function.zip'),
@@ -96,7 +99,7 @@ export class Snapstart extends cdk.Stack {
     });
     dotnetFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     dotnetFunction.addLayers(extensionLayer);
-    dotnetFunction.addLayers(dotnet8Layer);
+    dotnetFunction.addLayers(dotnetLayer);
     const dotnetVersion = dotnetFunction.currentVersion;
     const dotnetAlias = new lambda.Alias(this, `${dotnetFunctionName}-snapstart-alias`, {
       aliasName: 'snapstart',

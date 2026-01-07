@@ -9,12 +9,15 @@ import {ACCOUNT, REGION} from "../config";
 export const datadogSecretArn = process.env.DATADOG_API_SECRET_ARN!;
 export const extensionLayerArn = process.env.EXTENSION_LAYER_ARN!;
 
+export const defaultNodeRuntime = lambda.Runtime.NODEJS_24_X;
+export const defaultPythonRuntime = lambda.Runtime.PYTHON_3_13;
+export const defaultJavaRuntime = lambda.Runtime.JAVA_21;
+export const defaultDotnetRuntime = lambda.Runtime.DOTNET_8;
 
-export const node20LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node20-x:130';
-export const node24LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:132';
-export const python313LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python313-ARM:117';
-export const java21LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-java:25';
-export const dotnet8LayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-dotnet-ARM:23';
+export const defaultNodeLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Node24-x:132';
+export const defaultPythonLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:Datadog-Python313-ARM:117';
+export const defaultJavaLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-java:25';
+export const defaultDotnetLayerArn = 'arn:aws:lambda:us-east-1:464622532012:layer:dd-trace-dotnet-ARM:23';
 
 export const defaultDatadogEnvVariables = {
     DD_API_KEY_SECRET_ARN: datadogSecretArn,
@@ -52,43 +55,35 @@ export const getExtensionLayer = (scope: Construct) => {
   );
 };
 
-export const getNode20Layer = (scope: Construct) => {
+export const getDefaultNodeLayer = (scope: Construct) => {
   return LayerVersion.fromLayerVersionArn(
     scope,
-    'DatadogNode20Layer',
-    node20LayerArn
+    'DatadogNodeLayer',
+    defaultNodeLayerArn
   );
 };
 
-export const getNode24Layer = (scope: Construct) => {
+export const getDefaultPythonLayer = (scope: Construct) => {
   return LayerVersion.fromLayerVersionArn(
     scope,
-    'DatadogNode24Layer',
-    node24LayerArn
+    'DatadogPythonLayer',
+    defaultPythonLayerArn
   );
 };
 
-export const getPython313Layer = (scope: Construct) => {
+export const getDefaultJavaLayer = (scope: Construct) => {
   return LayerVersion.fromLayerVersionArn(
     scope,
-    'DatadogPython313Layer',
-    python313LayerArn
+    'DatadogJavaLayer',
+    defaultJavaLayerArn
   );
 };
 
-export const getJava21Layer = (scope: Construct) => {
+export const getDefaultDotnetLayer = (scope: Construct) => {
   return LayerVersion.fromLayerVersionArn(
     scope,
-    'DatadogJava21Layer',
-    java21LayerArn
-  );
-};
-
-export const getDotnet8Layer = (scope: Construct) => {
-  return LayerVersion.fromLayerVersionArn(
-    scope,
-    'DatadogDotnet8Layer',
-    dotnet8LayerArn
+    'DatadogDotnetLayer',
+    defaultDotnetLayerArn
   );
 };
 
@@ -102,7 +97,7 @@ export function setCapacityProvider(lambdaFunction: lambda.Function) {
         }
     });
     cfnFunction.addPropertyOverride('FunctionScalingConfig', {
-        MinExecutionEnvironments: 3,
-        MaxExecutionEnvironments: 3
+        MinExecutionEnvironments: 1,
+        MaxExecutionEnvironments: 1
     });
 }
