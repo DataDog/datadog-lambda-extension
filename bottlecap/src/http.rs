@@ -90,12 +90,10 @@ fn load_custom_cert(cert_path: &str) -> Result<Vec<reqwest::Certificate>, Box<dy
     }
 
     // Convert all certificates found in the file
-    let mut reqwest_certs = Vec::new();
-    for cert in certs {
-        reqwest_certs.push(reqwest::Certificate::from_der(&cert)?);
-    }
-
-    Ok(reqwest_certs)
+    certs
+        .into_iter()
+        .map(|cert| reqwest::Certificate::from_der(&cert).map_err(Into::into))
+        .collect()
 }
 
 pub async fn handler_not_found() -> Response {
