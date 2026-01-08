@@ -8,8 +8,8 @@ use bytes::Bytes;
 use core::time::Duration;
 use datadog_fips::reqwest_adapter::create_reqwest_client_builder;
 use std::sync::Arc;
-use std::{collections::HashMap, error::Error};
-use tracing::error;
+use std::{collections::HashMap, error::Error, fs::File, io::BufReader};
+use tracing::{debug, error};
 
 #[must_use]
 pub fn get_client(config: &Arc<config::Config>) -> reqwest::Client {
@@ -47,6 +47,28 @@ fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn
             .http2_keep_alive_timeout(Duration::from_secs(1000));
     }
 
+    // Load custom TLS certificate if configured
+    if let Some(cert_path) = &config.tls_cert_file {
+        match load_custom_cert(cert_path) {
+            Ok(certs) => {
+                let cert_count = certs.len();
+                for cert in certs {
+                    client = client.add_root_certificate(cert);
+                }
+                debug!(
+                    "HTTP | Added {} root certificate(s) from {}",
+                    cert_count, cert_path
+                );
+            }
+            Err(e) => {
+                error!(
+                    "Failed to load TLS certificate from {}: {}, continuing without custom cert",
+                    cert_path, e
+                );
+            }
+        }
+    }
+
     // This covers DD_PROXY_HTTPS and HTTPS_PROXY
     if let Some(https_uri) = &config.proxy_https {
         let proxy = reqwest::Proxy::https(https_uri.clone())?;
@@ -54,6 +76,24 @@ fn build_client(config: &Arc<config::Config>) -> Result<reqwest::Client, Box<dyn
     } else {
         Ok(client.build()?)
     }
+}
+
+fn load_custom_cert(cert_path: &str) -> Result<Vec<reqwest::Certificate>, Box<dyn Error>> {
+    let file = File::open(cert_path)?;
+    let mut reader = BufReader::new(file);
+
+    // Parse PEM certificates
+    let certs = rustls_pemfile::certs(&mut reader).collect::<Result<Vec<_>, _>>()?;
+
+    if certs.is_empty() {
+        return Err("No certificates found in file".into());
+    }
+
+    // Convert all certificates found in the file
+    certs
+        .into_iter()
+        .map(|cert| reqwest::Certificate::from_der(&cert).map_err(Into::into))
+        .collect()
 }
 
 pub async fn handler_not_found() -> Response {
