@@ -106,3 +106,35 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest${{ matrix.arrays.tagSuffix }}
           provenance: false
           platforms: linux/amd64,linux/arm64
+
+  replicate-rc-to-registry-datadoghq:
+    runs-on: ubuntu-22.04
+    needs: release-serverless-init
+    if: ${{ github.event.inputs.latestTag == 'no' }}
+    strategy:
+      matrix:
+        variant: [
+          {tagSuffix: "", name: "standard"},
+          {tagSuffix: "-alpine", name: "alpine"}
+        ]
+    name: "Replicate RC to registry.datadoghq.com (${{ matrix.variant.name }})"
+    steps:
+      - name: Trigger public-images pipeline for RC
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+        run: |
+          curl --fail --request POST \
+            --header "PRIVATE-TOKEN: ${GITLAB_TOKEN}" \
+            --header "Content-Type: application/json" \
+            --data '{
+              "ref": "main",
+              "variables": [
+                {"key": "IMG_SOURCES", "value": "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.tag }}${{ matrix.variant.tagSuffix }}"},
+                {"key": "IMG_DESTINATIONS", "value": "serverless-init-dev:${{ github.event.inputs.tag }}${{ matrix.variant.tagSuffix }}"},
+                {"key": "IMG_REGISTRIES", "value": "prod"},
+                {"key": "IMG_SIGNING", "value": "false"}
+              ]
+            }' \
+            "https://gitlab.ddbuild.io/api/v4/projects/DataDog%2Fpublic-images/pipeline"
+
+          echo "✅ Triggered public-images pipeline for serverless-init-dev:${{ github.event.inputs.tag }}${{ matrix.variant.tagSuffix }}"
