@@ -6,10 +6,14 @@ import {
   defaultDatadogEnvVariables,
   defaultDatadogSecretPolicy,
   getExtensionLayer,
-  getNode20Layer,
-  getPython313Layer,
-  getJava21Layer,
-  getDotnet8Layer
+  getDefaultNodeLayer,
+  getDefaultPythonLayer,
+  getDefaultJavaLayer,
+  getDefaultDotnetLayer,
+  defaultNodeRuntime,
+  defaultPythonRuntime,
+  defaultJavaRuntime,
+  defaultDotnetRuntime
 } from '../util';
 
 export class Base extends cdk.Stack {
@@ -18,15 +22,15 @@ export class Base extends cdk.Stack {
 
     // Get layers once for the entire stack
     const extensionLayer = getExtensionLayer(this);
-    const node20Layer = getNode20Layer(this);
-    const python313Layer = getPython313Layer(this);
-    const java21Layer = getJava21Layer(this);
-    const dotnet8Layer = getDotnet8Layer(this);
+    const nodeLayer = getDefaultNodeLayer(this);
+    const pythonLayer = getDefaultPythonLayer(this);
+    const javaLayer = getDefaultJavaLayer(this);
+    const dotnetLayer = getDefaultDotnetLayer(this);
 
     // Node.js Lambda
     const nodeFunctionName = `${id}-node-lambda`;
     const nodeFunction = new lambda.Function(this, nodeFunctionName, {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: defaultNodeRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: '/opt/nodejs/node_modules/datadog-lambda-js/handler.handler',
       code: lambda.Code.fromAsset('./lambda/base-node'),
@@ -43,12 +47,12 @@ export class Base extends cdk.Stack {
     });
     nodeFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     nodeFunction.addLayers(extensionLayer);
-    nodeFunction.addLayers(node20Layer);
+    nodeFunction.addLayers(nodeLayer);
 
     // Python Lambda
     const pythonFunctionName = `${id}-python-lambda`;
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
-      runtime: lambda.Runtime.PYTHON_3_13,
+      runtime: defaultPythonRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'datadog_lambda.handler.handler',
       code: lambda.Code.fromAsset('./lambda/base-python'),
@@ -68,12 +72,12 @@ export class Base extends cdk.Stack {
     });
     pythonFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     pythonFunction.addLayers(extensionLayer);
-    pythonFunction.addLayers(python313Layer);
+    pythonFunction.addLayers(pythonLayer);
 
     // Java Lambda
     const javaFunctionName = `${id}-java-lambda`;
     const javaFunction = new lambda.Function(this, javaFunctionName, {
-      runtime: lambda.Runtime.JAVA_21,
+      runtime: defaultJavaRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'example.Handler::handleRequest',
       code: lambda.Code.fromAsset('./lambda/base-java/target/function.jar'),
@@ -90,12 +94,12 @@ export class Base extends cdk.Stack {
     });
     javaFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     javaFunction.addLayers(extensionLayer);
-    javaFunction.addLayers(java21Layer);
+    javaFunction.addLayers(javaLayer);
 
     // .NET Lambda
     const dotnetFunctionName = `${id}-dotnet-lambda`;
     const dotnetFunction = new lambda.Function(this, dotnetFunctionName, {
-      runtime: lambda.Runtime.DOTNET_8,
+      runtime: defaultDotnetRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'Function::Function.Handler::FunctionHandler',
       code: lambda.Code.fromAsset('./lambda/base-dotnet/bin/function.zip'),
@@ -111,6 +115,6 @@ export class Base extends cdk.Stack {
     });
     dotnetFunction.addToRolePolicy(defaultDatadogSecretPolicy);
     dotnetFunction.addLayers(extensionLayer);
-    dotnetFunction.addLayers(dotnet8Layer);
+    dotnetFunction.addLayers(dotnetLayer);
   }
 }

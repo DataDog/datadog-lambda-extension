@@ -5,7 +5,11 @@ import {
   createLogGroup,
   defaultDatadogEnvVariables,
   defaultDatadogSecretPolicy,
-  getExtensionLayer
+  getExtensionLayer,
+  defaultNodeRuntime,
+  defaultPythonRuntime,
+  defaultJavaRuntime,
+  defaultDotnetRuntime
 } from '../util';
 
 export class Otlp extends cdk.Stack {
@@ -16,7 +20,7 @@ export class Otlp extends cdk.Stack {
 
     const nodeFunctionName = `${id}-node-lambda`;
     const nodeFunction = new lambda.Function(this, nodeFunctionName, {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: defaultNodeRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'index.handler',
       code: lambda.Code.fromAsset('./lambda/otlp-node'),
@@ -38,7 +42,7 @@ export class Otlp extends cdk.Stack {
 
     const validationFunctionName = `${id}-response-validation-lambda`;
     const validationFunction = new lambda.Function(this, validationFunctionName, {
-      runtime: lambda.Runtime.NODEJS_20_X,
+      runtime: defaultNodeRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'response-validation.handler',
       code: lambda.Code.fromAsset('./lambda/otlp-node'),
@@ -58,7 +62,7 @@ export class Otlp extends cdk.Stack {
 
     const pythonFunctionName = `${id}-python-lambda`;
     const pythonFunction = new lambda.Function(this, pythonFunctionName, {
-      runtime: lambda.Runtime.PYTHON_3_12,
+      runtime: defaultPythonRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'lambda_function.handler',
       code: lambda.Code.fromAsset('./lambda/otlp-python/package'),
@@ -80,7 +84,7 @@ export class Otlp extends cdk.Stack {
 
     const javaFunctionName = `${id}-java-lambda`;
     const javaFunction = new lambda.Function(this, javaFunctionName, {
-      runtime: lambda.Runtime.JAVA_21,
+      runtime: defaultJavaRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'example.Handler::handleRequest',
       code: lambda.Code.fromAsset('./lambda/otlp-java/target/function.jar'),
@@ -102,7 +106,7 @@ export class Otlp extends cdk.Stack {
 
     const dotnetFunctionName = `${id}-dotnet-lambda`;
     const dotnetFunction = new lambda.Function(this, dotnetFunctionName, {
-      runtime: lambda.Runtime.DOTNET_8,
+      runtime: defaultDotnetRuntime,
       architecture: lambda.Architecture.ARM_64,
       handler: 'Function::Function.Handler::FunctionHandler',
       code: lambda.Code.fromAsset('./lambda/otlp-dotnet/bin/function.zip'),
