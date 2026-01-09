@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use tokio::sync::{mpsc, oneshot};
-use tracing::error;
+use tokio::time::Duration;
+use tracing::warn;
 
 use crate::traces::span_dedup::{DedupKey, Deduper};
 
@@ -12,6 +13,8 @@ pub enum DedupError {
     SendError(mpsc::error::SendError<DedupCommand>),
     #[error("Failed to receive response from deduper: {0}")]
     RecvError(oneshot::error::RecvError),
+    #[error("Timeout waiting for response from deduper")]
+    Timeout,
 }
 
 pub enum DedupCommand {
@@ -34,14 +37,18 @@ impl DedupHandle {
     ///
     /// # Errors
     ///
-    /// Returns an error if the command cannot be sent to the deduper service
-    /// or if the response cannot be received.
+    /// Returns an error if the command cannot be sent to the deduper service,
+    /// if the response cannot be received, or if the operation times out after 5 seconds.
     pub async fn check_and_add(&self, key: DedupKey) -> Result<bool, DedupError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(DedupCommand::CheckAndAdd(key, response_tx))
             .map_err(DedupError::SendError)?;
-        response_rx.await.map_err(DedupError::RecvError)
+
+        tokio::time::timeout(Duration::from_secs(5), response_rx)
+            .await
+            .map_err(|_| DedupError::Timeout)?
+            .map_err(DedupError::RecvError)
     }
 }
 
@@ -77,7 +84,7 @@ impl DedupService {
                 DedupCommand::CheckAndAdd(key, response_tx) => {
                     let was_added = self.deduper.check_and_add(key);
                     if let Err(e) = response_tx.send(was_added) {
-                        error!("Failed to send check_and_add response: {e:?}");
+                        warn!("Failed to send check_and_add response: {e:?}");
                     }
                 }
             }
