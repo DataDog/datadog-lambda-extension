@@ -5,6 +5,7 @@ pub mod env;
 pub mod flush_strategy;
 pub mod log_level;
 pub mod logs_additional_endpoints;
+pub mod policy_provider;
 pub mod processing_rule;
 pub mod service_mapping;
 pub mod trace_propagation_style;
@@ -28,6 +29,7 @@ use crate::config::{
     flush_strategy::FlushStrategy,
     log_level::LogLevel,
     logs_additional_endpoints::LogsAdditionalEndpoint,
+    policy_provider::PolicyProviderConfig,
     processing_rule::{ProcessingRule, deserialize_processing_rules},
     trace_propagation_style::TracePropagationStyle,
     yaml::YamlConfigSource,
@@ -353,6 +355,10 @@ pub struct Config {
     pub appsec_waf_timeout: Duration,
     pub api_security_enabled: bool,
     pub api_security_sample_delay: Duration,
+
+    // Policy
+    pub policy_enabled: bool,
+    pub policy_providers: Option<Vec<PolicyProviderConfig>>,
 }
 
 impl Default for Config {
@@ -458,6 +464,10 @@ impl Default for Config {
             appsec_waf_timeout: Duration::from_millis(5),
             api_security_enabled: true,
             api_security_sample_delay: Duration::from_secs(30),
+
+            // Policy
+            policy_enabled: false,
+            policy_providers: None,
         }
     }
 }

@@ -52,6 +52,7 @@ use bottlecap::{
         flusher::LogsFlusher,
     },
     otlp::{agent::Agent as OtlpAgent, should_enable_otlp_agent},
+    policy::PolicyEvaluator,
     proxy::{interceptor, should_start_proxy},
     secrets::decrypt,
     tags::{
@@ -94,6 +95,7 @@ use dogstatsd::{
 };
 use libdd_trace_obfuscation::obfuscation_config;
 use libdd_trace_utils::send_data::SendData;
+use policy_rs::{PolicyRegistry, config::register_providers};
 use reqwest::Client;
 use std::{collections::hash_map, env, path::Path, str::FromStr, sync::Arc};
 use tokio::time::{Duration, Instant};
@@ -511,6 +513,26 @@ async fn extension_loop_active(
         .to_string();
     let tags_provider = setup_tag_provider(&Arc::clone(&aws_config), config, &account_id);
 
+    // Initialize policy evaluator if enabled
+    let policy_evaluator: Option<Arc<PolicyEvaluator>> = if config.policy_enabled {
+        let registry = Arc::new(PolicyRegistry::new());
+
+        // Register all configured providers
+        if let Some(providers) = &config.policy_providers {
+            let policy_rs_configs: Vec<_> =
+                providers.iter().map(|p| p.to_policy_rs_config()).collect();
+            if let Err(e) = register_providers(&policy_rs_configs, &registry) {
+                error!("POLICY | Failed to register policy providers: {}", e);
+            } else {
+                debug!("POLICY | Registered {} policy providers", providers.len());
+            }
+        }
+
+        Some(Arc::new(PolicyEvaluator::new(registry)))
+    } else {
+        None
+    };
+
     let (logs_agent_channel, logs_flusher, logs_agent_cancel_token, logs_aggregator_handle) =
         start_logs_agent(
             config,
@@ -518,6 +540,7 @@ async fn extension_loop_active(
             &tags_provider,
             event_bus_tx.clone(),
             aws_config.is_managed_instance_mode(),
+            policy_evaluator.clone(),
         );
 
     let (metrics_flushers, metrics_aggregator_handle, dogstatsd_cancel_token) =
@@ -1406,6 +1429,7 @@ fn start_logs_agent(
     tags_provider: &Arc<TagProvider>,
     event_bus: Sender<Event>,
     is_managed_instance_mode: bool,
+    policy_evaluator: Option<Arc<PolicyEvaluator>>,
 ) -> (
     Sender<TelemetryEvent>,
     LogsFlusher,
@@ -1424,6 +1448,7 @@ fn start_logs_agent(
         event_bus,
         aggregator_handle.clone(),
         is_managed_instance_mode,
+        policy_evaluator,
     );
     let cancel_token = agent.cancel_token();
     // Start logs agent in background

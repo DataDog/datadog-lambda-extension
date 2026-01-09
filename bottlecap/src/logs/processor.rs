@@ -9,6 +9,7 @@ use crate::event_bus::Event;
 use crate::extension::telemetry::events::TelemetryEvent;
 use crate::logs::aggregator_service::AggregatorHandle;
 use crate::logs::lambda::processor::LambdaProcessor;
+use crate::policy::PolicyEvaluator;
 use crate::tags;
 
 impl LogsProcessor {
@@ -19,6 +20,7 @@ impl LogsProcessor {
         event_bus: Sender<Event>,
         runtime: String,
         is_managed_instance_mode: bool,
+        policy_evaluator: Option<Arc<PolicyEvaluator>>,
     ) -> Self {
         match runtime.as_str() {
             LAMBDA_RUNTIME_SLUG => {
@@ -27,6 +29,7 @@ impl LogsProcessor {
                     config,
                     event_bus,
                     is_managed_instance_mode,
+                    policy_evaluator,
                 );
                 LogsProcessor::Lambda(lambda_processor)
             }
@@ -44,7 +47,7 @@ impl LogsProcessor {
 }
 
 #[allow(clippy::module_name_repetitions)]
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum LogsProcessor {
     Lambda(LambdaProcessor),
 }

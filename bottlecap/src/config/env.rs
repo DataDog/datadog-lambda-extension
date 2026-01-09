@@ -22,6 +22,7 @@ use crate::{
         logs_additional_endpoints::{
             LogsAdditionalEndpoint, deserialize_logs_additional_endpoints,
         },
+        policy_provider::{PolicyProviderConfig, deserialize_policy_providers},
         processing_rule::{ProcessingRule, deserialize_processing_rules},
         service_mapping::deserialize_service_mapping,
         trace_propagation_style::{TracePropagationStyle, deserialize_trace_propagation_style},
@@ -451,6 +452,19 @@ pub struct EnvConfig {
     /// The delay between two samples of the API Security schema collection, in seconds.
     #[serde(deserialize_with = "deserialize_optional_duration_from_seconds")]
     pub api_security_sample_delay: Option<Duration>,
+
+    // Policy
+    /// @env `DD_POLICY_ENABLED`
+    ///
+    /// Enable policy-based filtering of telemetry. Default is `false`.
+    #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
+    pub policy_enabled: Option<bool>,
+    /// @env `DD_POLICY_PROVIDERS`
+    ///
+    /// JSON array of policy provider configurations.
+    /// Example: `[{"id":"local","type":"file","path":"policies.json"}]`
+    #[serde(deserialize_with = "deserialize_policy_providers")]
+    pub policy_providers: Option<Vec<PolicyProviderConfig>>,
 }
 
 #[allow(clippy::too_many_lines)]
@@ -646,6 +660,10 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, appsec_waf_timeout);
     merge_option_to_value!(config, env_config, api_security_enabled);
     merge_option_to_value!(config, env_config, api_security_sample_delay);
+
+    // Policy
+    merge_option_to_value!(config, env_config, policy_enabled);
+    merge_option!(config, env_config, policy_providers);
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -994,6 +1012,8 @@ mod tests {
                 appsec_waf_timeout: Duration::from_secs(1),
                 api_security_enabled: false,
                 api_security_sample_delay: Duration::from_secs(60),
+                policy_enabled: false,
+                policy_providers: None,
             };
 
             assert_eq!(config, expected_config);
