@@ -52,6 +52,7 @@ async fn test_enhanced_metrics() {
         metrics_intake_url_prefix: MetricsIntakeUrlPrefix::new(None, Some(metrics_site_override))
             .expect("can't parse metrics intake URL from site"),
         https_proxy: None,
+        ca_cert_path: None,
         timeout: std::time::Duration::from_secs(5),
         retry_strategy: dogstatsd::datadog::RetryStrategy::Immediate(1),
         compression_level: 6,

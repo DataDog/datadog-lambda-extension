@@ -727,7 +727,7 @@ dependencies = [
 [[package]]
 name = "datadog-fips"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=fd8b7a9bcec2f19b305bb74b7195ca3910538e5b#fd8b7a9bcec2f19b305bb74b7195ca3910538e5b"
+source = "git+https://github.com/DataDog/serverless-components?rev=18b49baba8bfef97060d7edd8b830584d0da3373#18b49baba8bfef97060d7edd8b830584d0da3373"
 dependencies = [
  "reqwest",
  "rustls",
@@ -836,7 +836,7 @@ dependencies = [
 [[package]]
 name = "dogstatsd"
 version = "0.1.0"
-source = "git+https://github.com/DataDog/serverless-components?rev=fd8b7a9bcec2f19b305bb74b7195ca3910538e5b#fd8b7a9bcec2f19b305bb74b7195ca3910538e5b"
+source = "git+https://github.com/DataDog/serverless-components?rev=18b49baba8bfef97060d7edd8b830584d0da3373#18b49baba8bfef97060d7edd8b830584d0da3373"
 dependencies = [
  "datadog-fips",
  "datadog-protos",
@@ -847,6 +847,7 @@ dependencies = [
  "protobuf",
  "regex",
  "reqwest",
+ "rustls-pemfile",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
