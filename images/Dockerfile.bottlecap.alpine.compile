@@ -4,9 +4,11 @@ ARG PLATFORM
 ARG FIPS
 
 # Install dependencies
+# Note: vectorscan-rs-sys requires cmake, patch, and a C++ compiler
+# The crate vendors its own Boost headers, but we install boost-dev for safety
 RUN apk add --no-cache bash build-base clang clang-libclang compiler-rt cmake \
                        curl go linux-headers perl unzip \
-                       pkgconfig openssl-dev patch boost-dev
+                       pkgconfig openssl-dev patch boost-dev sqlite-dev libpcap-dev
 
 SHELL ["/bin/bash", "-c"]
 

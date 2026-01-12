@@ -5,13 +5,21 @@ ARG FIPS
 ARG DEBUG
 
 # Install dependencies
+# Note: vectorscan-rs-sys requires cmake >= 3.18.4, patch, and a C++ compiler
+# The crate vendors its own Boost headers, but we install boost-devel for safety
 RUN --mount=type=cache,target=/var/cache/yum \
-    yum install -y clang cmake3 compiler-rt curl go make perl unzip \
-    pkgconfig openssl-devel patch boost-devel
+    yum install -y clang compiler-rt curl go make perl unzip tar gzip \
+    pkgconfig openssl-devel patch boost-devel sqlite-devel libpcap-devel
+
+# Install CMake >= 3.18.4 (AL2's cmake3 is too old at 3.17.5)
+ARG CMAKE_VERSION=3.28.3
+RUN curl -sSL https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-$(uname -m).tar.gz \
+    | tar -xz -C /usr/local --strip-components=1
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
+# Also installs well-known types (google/protobuf/*.proto) to /usr/local/include
 COPY ./scripts/install-protoc.sh /
-RUN chmod +x /install-protoc.sh && /install-protoc.sh
+RUN chmod +x /install-protoc.sh && /install-protoc.sh && ls -la /usr/local/include/google/protobuf/ | head -5
 
 # Install Rust Toolchain
 RUN curl https://sh.rustup.rs -sSf | \
@@ -22,16 +30,32 @@ RUN curl https://sh.rustup.rs -sSf | \
              -y
 ENV PATH="${PATH}:/root/.cargo/bin"
 
+# Download Boost headers for vectorscan (AL2's boost is too old or cmake can't find it)
+ARG BOOST_VERSION=1.83.0
+RUN BOOST_VERSION_UNDERSCORE=$(echo ${BOOST_VERSION} | tr '.' '_') && \
+    curl -L -o /tmp/boost.tar.gz "https://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION}/boost_${BOOST_VERSION_UNDERSCORE}.tar.gz/download" && \
+    cd /tmp && tar -xzf boost.tar.gz && \
+    mkdir -p /usr/local/include && \
+    cp -r /tmp/boost_${BOOST_VERSION_UNDERSCORE}/boost /usr/local/include/ && \
+    rm -rf /tmp/boost_${BOOST_VERSION_UNDERSCORE} /tmp/boost.tar.gz
+
 # Build the binary
 ENV RUSTFLAGS="-Cpanic=abort"
 ENV AWS_LC_FIPS_SYS_CC=clang
 ENV AWS_LC_FIPS_SYS_CXX=clang++
+# Use clang/clang++ for C/C++ compilation (g++ on AL2 is too old for C++17)
+ENV CC=clang
+ENV CXX=clang++
+# Tell cmake where to find Boost headers
+ENV BOOST_ROOT=/usr/local
+ENV BOOST_INCLUDEDIR=/usr/local/include
+# Tell prost-build where to find protobuf well-known types
+ENV PROTOC_INCLUDE=/usr/local/include
 
 WORKDIR /tmp/dd/bottlecap
 RUN --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=bind,source=.,target=/tmp/dd,rw \
-    --mount=type=cache,target=/tmp/dd/bottlecap/target \
     if [ "${FIPS}" = "1" ]; then \
         export FEATURES=fips; \
     else \
