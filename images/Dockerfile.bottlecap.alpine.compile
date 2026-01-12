@@ -5,7 +5,8 @@ ARG FIPS
 
 # Install dependencies
 RUN apk add --no-cache bash build-base clang clang-libclang compiler-rt cmake \
-                       curl go linux-headers perl unzip
+                       curl go linux-headers perl unzip \
+                       pkgconfig openssl-dev
 
 SHELL ["/bin/bash", "-c"]
 
@@ -57,4 +58,3 @@ RUN --mount=type=cache,target=/root/.cargo/git \
 FROM scratch
 COPY --from=compiler /tmp/out/bottlecap /
 ENTRYPOINT ["/bottlecap"]
-

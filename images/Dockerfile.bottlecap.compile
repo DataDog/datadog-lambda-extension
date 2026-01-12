@@ -6,7 +6,8 @@ ARG DEBUG
 
 # Install dependencies
 RUN --mount=type=cache,target=/var/cache/yum \
-    yum install -y clang cmake3 compiler-rt curl go make perl unzip
+    yum install -y clang cmake3 compiler-rt curl go make perl unzip \
+    pkgconfig openssl-devel
 
 # Install Protocol Buffers compiler by hand, since AL2 does not have a recent enough version.
 COPY ./scripts/install-protoc.sh /
@@ -53,4 +54,3 @@ RUN --mount=type=cache,target=/usr/local/cargo/git \
 FROM scratch
 COPY --from=compiler /tmp/out/bottlecap /
 ENTRYPOINT ["/bottlecap"]
-
