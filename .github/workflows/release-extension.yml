@@ -10,11 +10,6 @@ on:
         description: "Version number (e.g., 100). If not provided, auto-increments from latest."
         required: false
         type: string
-      layer_suffix:
-        description: "Layer name suffix (e.g., '-MyFork'). Differentiates from official Datadog layers."
-        required: false
-        default: ""
-        type: string
       regions:
         description: "Comma-separated AWS regions to publish to (e.g., 'us-east-1,us-west-2')"
         required: false
@@ -29,11 +24,6 @@ on:
           - "amd64"
           - "arm64"
           - "amd64,arm64"
-      fips:
-        description: "Include FIPS builds"
-        required: false
-        default: false
-        type: boolean
       dry_run:
         description: "Dry run - build but don't publish to AWS"
         required: false
@@ -50,7 +40,6 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.version.outputs.version }}
-      layer_suffix: ${{ steps.vars.outputs.layer_suffix }}
       regions_json: ${{ steps.vars.outputs.regions_json }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
       publish_matrix: ${{ steps.matrix.outputs.publish_matrix }}
@@ -61,7 +50,9 @@ jobs:
         id: version
         run: |
           if [ -n "${{ inputs.version }}" ]; then
-            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+            # Strip 'v' prefix if present and extract number
+            VERSION=$(echo "${{ inputs.version }}" | sed 's/^v//')
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
           elif [[ "${{ github.ref }}" =~ ^refs/tags/v([0-9]+)$ ]]; then
             echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
           else
@@ -72,8 +63,6 @@ jobs:
       - name: Set variables
         id: vars
         run: |
-          echo "layer_suffix=${{ inputs.layer_suffix || '' }}" >> $GITHUB_OUTPUT
-
           # Convert regions to JSON array (compact, single line)
           REGIONS="${{ inputs.regions || 'us-east-1' }}"
           REGIONS_JSON=$(echo "$REGIONS" | jq -c -R 'split(",") | map(gsub("^\\s+|\\s+$";""))')
@@ -84,51 +73,38 @@ jobs:
         id: matrix
         run: |
           ARCHS="${{ inputs.architectures || 'amd64,arm64' }}"
-          INCLUDE_FIPS="${{ inputs.fips || 'false' }}"
           REGIONS="${{ inputs.regions || 'us-east-1' }}"
 
-          # Build matrix for build job (arch + fips combinations)
+          # Build matrix for build job
           BUILD_MATRIX='{"include":['
           FIRST=true
 
           for arch in ${ARCHS//,/ }; do
-            # Standard build
             if [ "$FIRST" = true ]; then
               FIRST=false
             else
               BUILD_MATRIX="$BUILD_MATRIX,"
             fi
-            BUILD_MATRIX="$BUILD_MATRIX{\"arch\":\"$arch\",\"fips\":\"0\"}"
-
-            # FIPS build
-            if [ "$INCLUDE_FIPS" = "true" ]; then
-              BUILD_MATRIX="$BUILD_MATRIX,{\"arch\":\"$arch\",\"fips\":\"1\"}"
-            fi
+            BUILD_MATRIX="$BUILD_MATRIX{\"arch\":\"$arch\"}"
           done
 
           BUILD_MATRIX="$BUILD_MATRIX]}"
           echo "build_matrix=$BUILD_MATRIX" >> $GITHUB_OUTPUT
           echo "Build matrix: $BUILD_MATRIX"
 
-          # Publish matrix: arch x fips x region combinations
+          # Publish matrix: arch x region combinations
           PUBLISH_MATRIX='{"include":['
           FIRST=true
 
           for region in ${REGIONS//,/ }; do
             region=$(echo "$region" | xargs)  # trim whitespace
             for arch in ${ARCHS//,/ }; do
-              # Standard build
               if [ "$FIRST" = true ]; then
                 FIRST=false
               else
                 PUBLISH_MATRIX="$PUBLISH_MATRIX,"
               fi
-              PUBLISH_MATRIX="$PUBLISH_MATRIX{\"arch\":\"$arch\",\"fips\":\"0\",\"region\":\"$region\"}"
-
-              # FIPS build
-              if [ "$INCLUDE_FIPS" = "true" ]; then
-                PUBLISH_MATRIX="$PUBLISH_MATRIX,{\"arch\":\"$arch\",\"fips\":\"1\",\"region\":\"$region\"}"
-              fi
+              PUBLISH_MATRIX="$PUBLISH_MATRIX{\"arch\":\"$arch\",\"region\":\"$region\"}"
             done
           done
 
@@ -137,7 +113,7 @@ jobs:
           echo "Publish matrix: $PUBLISH_MATRIX"
 
   build:
-    name: Build ${{ matrix.arch }}${{ matrix.fips == '1' && '-fips' || '' }}
+    name: Build ${{ matrix.arch }}
     runs-on: ubuntu-22.04
     needs: prepare
     strategy:
@@ -162,12 +138,7 @@ jobs:
           else
             echo "platform=aarch64" >> $GITHUB_OUTPUT
           fi
-
-          SUFFIX="${{ matrix.arch }}"
-          if [ "${{ matrix.fips }}" == "1" ]; then
-            SUFFIX="${SUFFIX}-fips"
-          fi
-          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
+          echo "suffix=${{ matrix.arch }}" >> $GITHUB_OUTPUT
 
       - name: Build Bottlecap binary
         run: |
@@ -177,7 +148,7 @@ jobs:
             -t datadog/compile-bottlecap \
             -f ./images/Dockerfile.bottlecap.compile \
             --build-arg PLATFORM=${{ steps.vars.outputs.platform }} \
-            --build-arg FIPS=${{ matrix.fips }} \
+            --build-arg FIPS=0 \
             --build-arg DEBUG=0 \
             --output type=local,dest=.binaries/compiled-bottlecap-${{ steps.vars.outputs.suffix }} \
             .
@@ -217,7 +188,7 @@ jobs:
           retention-days: 30
 
   publish:
-    name: Publish ${{ matrix.arch }}${{ matrix.fips == '1' && '-fips' || '' }} to ${{ matrix.region }}
+    name: Publish ${{ matrix.arch }} to ${{ matrix.region }}
     runs-on: ubuntu-22.04
     needs: [prepare, build]
     if: ${{ inputs.dry_run != true }}
@@ -237,9 +208,6 @@ jobs:
       - name: Set variables
         id: vars
         run: |
-          SUFFIX="${{ matrix.arch }}"
-          LAYER_SUFFIX="${{ needs.prepare.outputs.layer_suffix }}"
-
           if [ "${{ matrix.arch }}" == "amd64" ]; then
             ARCH_SUFFIX=""
             COMPATIBLE_ARCH="x86_64"
@@ -248,15 +216,10 @@ jobs:
             COMPATIBLE_ARCH="arm64"
           fi
 
-          if [ "${{ matrix.fips }}" == "1" ]; then
-            SUFFIX="${SUFFIX}-fips"
-            ARCH_SUFFIX="${ARCH_SUFFIX}-FIPS"
-          fi
+          # Layer name: Datadog-Extension[-ARM]-Tero
+          LAYER_NAME="Datadog-Extension${ARCH_SUFFIX}-Tero"
 
-          # Layer name: Datadog-Extension[-ARM][-FIPS][<custom-suffix>]
-          LAYER_NAME="Datadog-Extension${ARCH_SUFFIX}${LAYER_SUFFIX}"
-
-          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
+          echo "suffix=${{ matrix.arch }}" >> $GITHUB_OUTPUT
           echo "layer_name=$LAYER_NAME" >> $GITHUB_OUTPUT
           echo "compatible_arch=$COMPATIBLE_ARCH" >> $GITHUB_OUTPUT
 
