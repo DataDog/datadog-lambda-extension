@@ -1,0 +1,127 @@
+name: Build Lambda Extension
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "jacob/**"
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Build with debug symbols"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  PB_VERSION: 25.3
+  PB_URL: https://github.com/protocolbuffers/protobuf/releases/download
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}${{ matrix.fips == '1' && '-fips' || '' }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        fips: ["0", "1"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set build variables
+        id: vars
+        run: |
+          if [ "${{ matrix.arch }}" == "amd64" ]; then
+            echo "platform=x86_64" >> $GITHUB_OUTPUT
+          else
+            echo "platform=aarch64" >> $GITHUB_OUTPUT
+          fi
+
+          SUFFIX="${{ matrix.arch }}"
+          if [ "${{ matrix.fips }}" == "1" ]; then
+            SUFFIX="${SUFFIX}-fips"
+          fi
+          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
+
+          if [ "${{ inputs.debug }}" == "true" ]; then
+            echo "debug=1" >> $GITHUB_OUTPUT
+          else
+            echo "debug=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Bottlecap binary
+        run: |
+          docker buildx build --platform linux/${{ matrix.arch }} \
+            --progress plain \
+            -t datadog/compile-bottlecap \
+            -f ./images/Dockerfile.bottlecap.compile \
+            --build-arg PLATFORM=${{ steps.vars.outputs.platform }} \
+            --build-arg FIPS=${{ matrix.fips }} \
+            --build-arg DEBUG=${{ steps.vars.outputs.debug }} \
+            --output type=local,dest=.binaries/compiled-bottlecap-${{ steps.vars.outputs.suffix }} \
+            .
+
+          mkdir -p .binaries
+          cp .binaries/compiled-bottlecap-${{ steps.vars.outputs.suffix }}/bottlecap .binaries/bottlecap-${{ steps.vars.outputs.suffix }}
+
+      - name: Create Lambda layer zip
+        run: |
+          mkdir -p .layers/datadog_extension-${{ steps.vars.outputs.suffix }}
+
+          # Create extensions directory structure
+          mkdir -p .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/extensions
+
+          # Copy binary
+          cp .binaries/bottlecap-${{ steps.vars.outputs.suffix }} .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/extensions/datadog-agent
+          chmod +x .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/extensions/datadog-agent
+
+          # Copy wrapper script
+          cp ./scripts/datadog_wrapper .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/datadog_wrapper
+          chmod +x .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/datadog_wrapper
+
+          # Create zip
+          cd .layers/datadog_extension-${{ steps.vars.outputs.suffix }}
+          zip -r ../datadog_extension-${{ steps.vars.outputs.suffix }}.zip extensions datadog_wrapper
+          cd ../..
+
+      - name: Upload layer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: datadog_extension-${{ steps.vars.outputs.suffix }}
+          path: .layers/datadog_extension-${{ steps.vars.outputs.suffix }}.zip
+          retention-days: 30
+
+  combine-artifacts:
+    name: Combine all artifacts
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find artifacts -type f -name "*.zip" | while read f; do
+            echo "  $f ($(du -h "$f" | cut -f1))"
+          done
+
+      - name: Upload combined artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-lambda-layers
+          path: artifacts/**/*.zip
+          retention-days: 30

@@ -1,0 +1,373 @@
+name: Release Lambda Extension
+
+on:
+  push:
+    tags:
+      - "v[0-9]+"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number (e.g., 100). If not provided, auto-increments from latest."
+        required: false
+        type: string
+      layer_suffix:
+        description: "Layer name suffix (e.g., '-MyFork'). Differentiates from official Datadog layers."
+        required: false
+        default: ""
+        type: string
+      regions:
+        description: "Comma-separated AWS regions to publish to (e.g., 'us-east-1,us-west-2')"
+        required: false
+        default: "us-east-1"
+        type: string
+      architectures:
+        description: "Architectures to build and publish"
+        required: false
+        default: "amd64,arm64"
+        type: choice
+        options:
+          - "amd64"
+          - "arm64"
+          - "amd64,arm64"
+      fips:
+        description: "Include FIPS builds"
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "Dry run - build but don't publish to AWS"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      layer_suffix: ${{ steps.vars.outputs.layer_suffix }}
+      regions_json: ${{ steps.vars.outputs.regions_json }}
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      publish_matrix: ${{ steps.matrix.outputs.publish_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            echo "version=${{ inputs.version }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" =~ ^refs/tags/v([0-9]+)$ ]]; then
+            echo "version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+          else
+            # Auto-increment will happen at publish time per-region
+            echo "version=auto" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set variables
+        id: vars
+        run: |
+          echo "layer_suffix=${{ inputs.layer_suffix || '' }}" >> $GITHUB_OUTPUT
+
+          # Convert regions to JSON array
+          REGIONS="${{ inputs.regions || 'us-east-1' }}"
+          REGIONS_JSON=$(echo "$REGIONS" | jq -R 'split(",") | map(gsub("^\\s+|\\s+$";""))')
+          echo "regions_json=$REGIONS_JSON" >> $GITHUB_OUTPUT
+          echo "Regions: $REGIONS_JSON"
+
+      - name: Build matrices
+        id: matrix
+        run: |
+          ARCHS="${{ inputs.architectures || 'amd64,arm64' }}"
+          INCLUDE_FIPS="${{ inputs.fips || 'false' }}"
+          REGIONS="${{ inputs.regions || 'us-east-1' }}"
+
+          # Build matrix for build job (arch + fips combinations)
+          BUILD_MATRIX='{"include":['
+          FIRST=true
+
+          for arch in ${ARCHS//,/ }; do
+            # Standard build
+            if [ "$FIRST" = true ]; then
+              FIRST=false
+            else
+              BUILD_MATRIX="$BUILD_MATRIX,"
+            fi
+            BUILD_MATRIX="$BUILD_MATRIX{\"arch\":\"$arch\",\"fips\":\"0\"}"
+
+            # FIPS build
+            if [ "$INCLUDE_FIPS" = "true" ]; then
+              BUILD_MATRIX="$BUILD_MATRIX,{\"arch\":\"$arch\",\"fips\":\"1\"}"
+            fi
+          done
+
+          BUILD_MATRIX="$BUILD_MATRIX]}"
+          echo "build_matrix=$BUILD_MATRIX" >> $GITHUB_OUTPUT
+          echo "Build matrix: $BUILD_MATRIX"
+
+          # Publish matrix: arch x fips x region combinations
+          PUBLISH_MATRIX='{"include":['
+          FIRST=true
+
+          for region in ${REGIONS//,/ }; do
+            region=$(echo "$region" | xargs)  # trim whitespace
+            for arch in ${ARCHS//,/ }; do
+              # Standard build
+              if [ "$FIRST" = true ]; then
+                FIRST=false
+              else
+                PUBLISH_MATRIX="$PUBLISH_MATRIX,"
+              fi
+              PUBLISH_MATRIX="$PUBLISH_MATRIX{\"arch\":\"$arch\",\"fips\":\"0\",\"region\":\"$region\"}"
+
+              # FIPS build
+              if [ "$INCLUDE_FIPS" = "true" ]; then
+                PUBLISH_MATRIX="$PUBLISH_MATRIX,{\"arch\":\"$arch\",\"fips\":\"1\",\"region\":\"$region\"}"
+              fi
+            done
+          done
+
+          PUBLISH_MATRIX="$PUBLISH_MATRIX]}"
+          echo "publish_matrix=$PUBLISH_MATRIX" >> $GITHUB_OUTPUT
+          echo "Publish matrix: $PUBLISH_MATRIX"
+
+  build:
+    name: Build ${{ matrix.arch }}${{ matrix.fips == '1' && '-fips' || '' }}
+    runs-on: ubuntu-22.04
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.build_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Set build variables
+        id: vars
+        run: |
+          if [ "${{ matrix.arch }}" == "amd64" ]; then
+            echo "platform=x86_64" >> $GITHUB_OUTPUT
+          else
+            echo "platform=aarch64" >> $GITHUB_OUTPUT
+          fi
+
+          SUFFIX="${{ matrix.arch }}"
+          if [ "${{ matrix.fips }}" == "1" ]; then
+            SUFFIX="${SUFFIX}-fips"
+          fi
+          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
+
+      - name: Build Bottlecap binary
+        run: |
+          docker buildx build --platform linux/${{ matrix.arch }} \
+            --progress plain \
+            -t datadog/compile-bottlecap \
+            -f ./images/Dockerfile.bottlecap.compile \
+            --build-arg PLATFORM=${{ steps.vars.outputs.platform }} \
+            --build-arg FIPS=${{ matrix.fips }} \
+            --build-arg DEBUG=0 \
+            --output type=local,dest=.binaries/compiled-bottlecap-${{ steps.vars.outputs.suffix }} \
+            .
+
+          mkdir -p .binaries
+          cp .binaries/compiled-bottlecap-${{ steps.vars.outputs.suffix }}/bottlecap .binaries/bottlecap-${{ steps.vars.outputs.suffix }}
+
+      - name: Create Lambda layer zip
+        run: |
+          mkdir -p .layers/datadog_extension-${{ steps.vars.outputs.suffix }}
+
+          # Create extensions directory structure
+          mkdir -p .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/extensions
+
+          # Copy binary
+          cp .binaries/bottlecap-${{ steps.vars.outputs.suffix }} .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/extensions/datadog-agent
+          chmod +x .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/extensions/datadog-agent
+
+          # Copy wrapper script
+          cp ./scripts/datadog_wrapper .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/datadog_wrapper
+          chmod +x .layers/datadog_extension-${{ steps.vars.outputs.suffix }}/datadog_wrapper
+
+          # Create zip
+          cd .layers/datadog_extension-${{ steps.vars.outputs.suffix }}
+          zip -r ../datadog_extension-${{ steps.vars.outputs.suffix }}.zip extensions datadog_wrapper
+          cd ../..
+
+          # Show size
+          echo "Layer size:"
+          ls -lh .layers/*.zip
+
+      - name: Upload layer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: datadog_extension-${{ steps.vars.outputs.suffix }}
+          path: .layers/datadog_extension-${{ steps.vars.outputs.suffix }}.zip
+          retention-days: 30
+
+  publish:
+    name: Publish ${{ matrix.arch }}${{ matrix.fips == '1' && '-fips' || '' }} to ${{ matrix.region }}
+    runs-on: ubuntu-22.04
+    needs: [prepare, build]
+    if: ${{ inputs.dry_run != true }}
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix: ${{ fromJson(needs.prepare.outputs.publish_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ matrix.region }}
+
+      - name: Set variables
+        id: vars
+        run: |
+          SUFFIX="${{ matrix.arch }}"
+          LAYER_SUFFIX="${{ needs.prepare.outputs.layer_suffix }}"
+
+          if [ "${{ matrix.arch }}" == "amd64" ]; then
+            ARCH_SUFFIX=""
+            COMPATIBLE_ARCH="x86_64"
+          else
+            ARCH_SUFFIX="-ARM"
+            COMPATIBLE_ARCH="arm64"
+          fi
+
+          if [ "${{ matrix.fips }}" == "1" ]; then
+            SUFFIX="${SUFFIX}-fips"
+            ARCH_SUFFIX="${ARCH_SUFFIX}-FIPS"
+          fi
+
+          # Layer name: Datadog-Extension[-ARM][-FIPS][<custom-suffix>]
+          LAYER_NAME="Datadog-Extension${ARCH_SUFFIX}${LAYER_SUFFIX}"
+
+          echo "suffix=$SUFFIX" >> $GITHUB_OUTPUT
+          echo "layer_name=$LAYER_NAME" >> $GITHUB_OUTPUT
+          echo "compatible_arch=$COMPATIBLE_ARCH" >> $GITHUB_OUTPUT
+
+      - name: Download layer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: datadog_extension-${{ steps.vars.outputs.suffix }}
+          path: .layers
+
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          LAYER_NAME="${{ steps.vars.outputs.layer_name }}"
+
+          if [ "$VERSION" = "auto" ]; then
+            # Get latest version and increment
+            LATEST=$(aws lambda list-layer-versions \
+              --layer-name "$LAYER_NAME" \
+              --query 'LayerVersions[0].Version || `0`' \
+              --output text 2>/dev/null || echo "0")
+            VERSION=$((LATEST + 1))
+            echo "Auto-incremented version to $VERSION (latest was $LATEST)"
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Publish Lambda layer
+        id: publish
+        run: |
+          LAYER_NAME="${{ steps.vars.outputs.layer_name }}"
+          VERSION="${{ steps.version.outputs.version }}"
+          LAYER_FILE=".layers/datadog_extension-${{ steps.vars.outputs.suffix }}.zip"
+          COMPATIBLE_ARCH="${{ steps.vars.outputs.compatible_arch }}"
+
+          echo "Publishing $LAYER_NAME version $VERSION to ${{ matrix.region }}..."
+
+          # Check if version already exists
+          LATEST=$(aws lambda list-layer-versions \
+            --layer-name "$LAYER_NAME" \
+            --query 'LayerVersions[0].Version || `0`' \
+            --output text 2>/dev/null || echo "0")
+
+          if [ "$LATEST" -ge "$VERSION" ]; then
+            echo "::warning::Layer $LAYER_NAME version $VERSION already exists (latest: $LATEST), skipping"
+            echo "skipped=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Publish missing versions up to target
+          while [ "$LATEST" -lt "$VERSION" ]; do
+            PUBLISHED_VERSION=$(aws lambda publish-layer-version \
+              --layer-name "$LAYER_NAME" \
+              --description "Datadog Lambda Extension (fork)" \
+              --compatible-architectures "$COMPATIBLE_ARCH" \
+              --zip-file "fileb://${LAYER_FILE}" \
+              --query 'Version' \
+              --output text)
+
+            echo "Published version $PUBLISHED_VERSION"
+            LATEST=$PUBLISHED_VERSION
+          done
+
+          echo "skipped=false" >> $GITHUB_OUTPUT
+          echo "published_version=$LATEST" >> $GITHUB_OUTPUT
+
+          # Output the layer ARN for reference
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          LAYER_ARN="arn:aws:lambda:${{ matrix.region }}:${ACCOUNT_ID}:layer:${LAYER_NAME}:${LATEST}"
+          echo "Layer ARN: $LAYER_ARN"
+          echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
+
+      - name: Summary
+        if: steps.publish.outputs.skipped != 'true'
+        run: |
+          echo "### Published Layer" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Layer Name:** ${{ steps.vars.outputs.layer_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version:** ${{ steps.publish.outputs.published_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Region:** ${{ matrix.region }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Architecture:** ${{ steps.vars.outputs.compatible_arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Layer ARN:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.publish.outputs.layer_arn }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+  release-summary:
+    name: Release Summary
+    runs-on: ubuntu-22.04
+    needs: [prepare, build, publish]
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate summary
+        run: |
+          echo "## Release Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Build Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          find artifacts -name "*.zip" -type f | while read f; do
+            NAME=$(basename "$f")
+            SIZE=$(du -h "$f" | cut -f1)
+            echo "| $NAME | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "### Dry Run Mode" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Layers were built but not published to AWS." >> $GITHUB_STEP_SUMMARY
+          fi
