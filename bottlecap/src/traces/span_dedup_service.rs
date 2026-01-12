@@ -39,19 +39,27 @@ impl DedupHandle {
     ///
     /// Returns an error if the command cannot be sent to the deduper service,
     /// if the response cannot be received, or if the operation times out after 5 seconds.
-    pub async fn check_and_add(&self, key: DedupKey) -> Result<bool, DedupError> {
+    pub async fn check_and_add(
+        &self,
+        key: DedupKey,
+        timeout: Option<Duration>,
+    ) -> Result<bool, DedupError> {
         let (response_tx, response_rx) = oneshot::channel();
         self.tx
             .send(DedupCommand::CheckAndAdd(key, response_tx))
             .map_err(DedupError::SendError)?;
 
         // Sometimes the dedup service fails to send a response for unknown reasons, so we
-        // timeout after 5 seconds to avoid blocking the caller forever. We may remove the
+        // add a timeout to avoid blocking the caller forever. We may remove the
         // timeout if we can figure out and fix the root cause.
-        tokio::time::timeout(Duration::from_secs(5), response_rx)
-            .await
-            .map_err(|_| DedupError::Timeout)?
-            .map_err(DedupError::RecvError)
+        if let Some(timeout) = timeout {
+            tokio::time::timeout(timeout, response_rx)
+                .await
+                .map_err(|_| DedupError::Timeout)?
+                .map_err(DedupError::RecvError)
+        } else {
+            response_rx.await.map_err(DedupError::RecvError)
+        }
     }
 }
 

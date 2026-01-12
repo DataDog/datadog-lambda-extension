@@ -545,7 +545,7 @@ impl TraceAgent {
             for mut span in original_chunk {
                 // Check for duplicates
                 let key = DedupKey::new(span.trace_id, span.span_id);
-                let should_keep = match deduper.check_and_add(key).await {
+                let should_keep = match deduper.check_and_add(key, config.span_dedup_timeout).await {
                     Ok(should_keep) => {
                         if !should_keep {
                             debug!(

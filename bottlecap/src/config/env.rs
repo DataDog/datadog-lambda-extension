@@ -417,6 +417,13 @@ pub struct EnvConfig {
     /// Default is `false`.
     #[serde(deserialize_with = "deserialize_optional_bool_from_anything")]
     pub compute_trace_stats_on_extension: Option<bool>,
+    /// @env `DD_SPAN_DEDUP_TIMEOUT`
+    ///
+    /// The timeout for the span deduplication service to check if a span key exists, in seconds.
+    /// For now, this is a temporary field added to debug the failure of `check_and_add()` in span dedup service.
+    /// Do not use this field extensively in production.
+    #[serde(deserialize_with = "deserialize_optional_duration_from_seconds_ignore_zero")]
+    pub span_dedup_timeout: Option<Duration>,
     /// @env `DD_API_KEY_SECRET_RELOAD_INTERVAL`
     ///
     /// The interval at which the Datadog API key is reloaded, in seconds.
@@ -640,6 +647,7 @@ fn merge_config(config: &mut Config, env_config: &EnvConfig) {
     merge_option_to_value!(config, env_config, capture_lambda_payload);
     merge_option_to_value!(config, env_config, capture_lambda_payload_max_depth);
     merge_option_to_value!(config, env_config, compute_trace_stats_on_extension);
+    merge_option!(config, env_config, span_dedup_timeout);
     merge_option!(config, env_config, api_key_secret_reload_interval);
     merge_option_to_value!(config, env_config, serverless_appsec_enabled);
     merge_option!(config, env_config, appsec_rules);
@@ -835,6 +843,7 @@ mod tests {
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD", "true");
             jail.set_env("DD_CAPTURE_LAMBDA_PAYLOAD_MAX_DEPTH", "5");
             jail.set_env("DD_COMPUTE_TRACE_STATS_ON_EXTENSION", "true");
+            jail.set_env("DD_SPAN_DEDUP_TIMEOUT", "5");
             jail.set_env("DD_API_KEY_SECRET_RELOAD_INTERVAL", "10");
             jail.set_env("DD_SERVERLESS_APPSEC_ENABLED", "true");
             jail.set_env("DD_APPSEC_RULES", "/path/to/rules.json");
@@ -988,6 +997,7 @@ mod tests {
                 capture_lambda_payload: true,
                 capture_lambda_payload_max_depth: 5,
                 compute_trace_stats_on_extension: true,
+                span_dedup_timeout: Some(Duration::from_secs(5)),
                 api_key_secret_reload_interval: Some(Duration::from_secs(10)),
                 serverless_appsec_enabled: true,
                 appsec_rules: Some("/path/to/rules.json".to_string()),
